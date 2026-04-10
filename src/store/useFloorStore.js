@@ -40,21 +40,31 @@ export const useFloorStore = create((set, get) => ({
     const imageUrl = URL.createObjectURL(file)
     const name = `${get().floors.length + 1}F`
     const floor = {
-      id,
-      name,
-      imageUrl,
-      imageWidth,
-      imageHeight,
-      opacity: 1,
-      rotation: 0,
-      scale: null,
-      offsetX: 0,
-      offsetY: 0,
+      id, name, imageUrl, imageWidth, imageHeight,
+      opacity: 1, rotation: 0, scale: null, offsetX: 0, offsetY: 0,
     }
     set((state) => ({
       floors: [...state.floors, floor],
       activeFloorId: id,
     }))
     return floor
+  },
+
+  // 批次匯入多個頁面（PDF 多頁用）
+  importMultipleFloors: (pages) => {
+    const baseIndex = get().floors.length
+    const newFloors = pages.map((page, i) => ({
+      id: generateId('floor'),
+      name: `${baseIndex + i + 1}F`,
+      imageUrl: URL.createObjectURL(page.blob),
+      imageWidth: page.width,
+      imageHeight: page.height,
+      opacity: 1, rotation: 0, scale: null, offsetX: 0, offsetY: 0,
+    }))
+    set((state) => ({
+      floors: [...state.floors, ...newFloors],
+      activeFloorId: newFloors[0].id,
+    }))
+    return newFloors
   },
 }))
