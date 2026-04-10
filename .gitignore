@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.nuxt/
+.output/
+.svelte-kit/
+.parcel-cache/
+
+# Vite / tooling cache
+.vite/
+.turbo/
+.cache/
+
+# Environment & secrets (keep .env.example committed if you use one)
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test & coverage
+coverage/
+.nyc_output/
+
+# TypeScript
+*.tsbuildinfo
+
+# Optional: local IDE (uncomment if you don't want to share team settings)
+# .vscode/
+# !.vscode/extensions.json
+# !.vscode/settings.json
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Windows
+$RECYCLE.BIN/
+*.lnk
+
+# Misc
+*.local
+.vercel
+.netlify
