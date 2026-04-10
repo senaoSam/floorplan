@@ -4,6 +4,7 @@ import { create } from 'zustand'
 export const EDITOR_MODE = {
   SELECT: 'select',
   PAN: 'pan',
+  DRAW_SCALE: 'draw_scale',
   DRAW_WALL: 'draw_wall',
   PLACE_AP: 'place_ap',
   DRAW_SCOPE: 'draw_scope',

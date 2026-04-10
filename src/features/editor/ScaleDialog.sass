@@ -1,0 +1,88 @@
+@use '@/styles/variables' as *
+
+.scale-dialog-overlay
+  position: absolute
+  inset: 0
+  z-index: 100
+  display: flex
+  align-items: center
+  justify-content: center
+  background: rgba(0, 0, 0, 0.45)
+
+.scale-dialog
+  background: $bg-secondary
+  border: 1px solid $border-color
+  border-radius: 10px
+  padding: 20px 24px
+  min-width: 260px
+  display: flex
+  flex-direction: column
+  gap: 12px
+
+  &__title
+    font-size: 15px
+    font-weight: 600
+    color: $text-primary
+
+  &__px
+    font-size: 12px
+    color: $text-secondary
+
+  &__row
+    display: flex
+    align-items: center
+    gap: 8px
+
+  &__input
+    flex: 1
+    background: rgba(255, 255, 255, 0.07)
+    border: 1px solid $border-color
+    border-radius: 6px
+    color: $text-primary
+    font-size: 14px
+    padding: 6px 10px
+    outline: none
+
+    &:focus
+      border-color: $accent
+
+  &__unit
+    font-size: 13px
+    color: $text-secondary
+    white-space: nowrap
+
+  &__result
+    font-size: 12px
+    color: #f1c40f
+
+  &__actions
+    display: flex
+    gap: 8px
+    justify-content: flex-end
+    margin-top: 4px
+
+  &__btn
+    padding: 6px 16px
+    border-radius: 6px
+    border: none
+    font-size: 13px
+    cursor: pointer
+    transition: opacity 0.15s
+
+    &:disabled
+      opacity: 0.4
+      cursor: default
+
+    &--cancel
+      background: rgba(255, 255, 255, 0.08)
+      color: $text-secondary
+
+      &:hover:not(:disabled)
+        background: rgba(255, 255, 255, 0.12)
+
+    &--confirm
+      background: $accent
+      color: #fff
+
+      &:hover:not(:disabled)
+        opacity: 0.85

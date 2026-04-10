@@ -3,11 +3,12 @@ import { useEditorStore, EDITOR_MODE, VIEW_MODE } from '@/store/useEditorStore'
 import './Toolbar.sass'
 
 const TOOLS = [
-  { mode: EDITOR_MODE.SELECT,    label: '選取',    icon: '↖' },
-  { mode: EDITOR_MODE.PAN,       label: '平移',    icon: '✋' },
-  { mode: EDITOR_MODE.DRAW_WALL, label: '畫牆',    icon: '▬' },
-  { mode: EDITOR_MODE.PLACE_AP,  label: '放置 AP', icon: '📡' },
-  { mode: EDITOR_MODE.DRAW_SCOPE,label: '範圍',    icon: '⬡' },
+  { mode: EDITOR_MODE.SELECT,     label: '選取',   icon: '↖' },
+  { mode: EDITOR_MODE.PAN,        label: '平移',   icon: '✋' },
+  { mode: EDITOR_MODE.DRAW_SCALE, label: '比例尺', icon: '📏' },
+  { mode: EDITOR_MODE.DRAW_WALL,  label: '畫牆',   icon: '▬' },
+  { mode: EDITOR_MODE.PLACE_AP,   label: '放置 AP',icon: '📡' },
+  { mode: EDITOR_MODE.DRAW_SCOPE, label: '範圍',   icon: '⬡' },
 ]
 
 function Toolbar() {
