@@ -3,10 +3,12 @@ import { Stage, Layer, Rect } from 'react-konva'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
+import { useAPStore } from '@/store/useAPStore'
 import { MATERIALS } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 import FloorImageLayer from './layers/FloorImageLayer'
 import WallLayer from './layers/WallLayer'
+import APLayer from './layers/APLayer'
 import ScaleLayer from './layers/ScaleLayer'
 import ScaleDialog from './ScaleDialog'
 import DropZone from '@/features/importer/DropZone'
@@ -32,10 +34,11 @@ function Editor2D() {
   // ── 牆體繪製狀態 ───────────────────────────────────────
   const [wallDrawStart, setWallDrawStart] = useState(null)
 
-  const { editorMode, setEditorMode, selectedId, setSelected, clearSelected } = useEditorStore()
+  const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected } = useEditorStore()
   const isPanMode   = editorMode === EDITOR_MODE.PAN
   const isScaleMode = editorMode === EDITOR_MODE.DRAW_SCALE
   const isWallMode  = editorMode === EDITOR_MODE.DRAW_WALL
+  const isAPMode    = editorMode === EDITOR_MODE.PLACE_AP
 
   const floors         = useFloorStore((s) => s.floors)
   const activeFloorId  = useFloorStore((s) => s.activeFloorId)
@@ -44,6 +47,9 @@ function Editor2D() {
   const activeFloor    = getActiveFloor()
 
   const addWall = useWallStore((s) => s.addWall)
+
+  const addAP   = useAPStore((s) => s.addAP)
+  const apCount = useAPStore((s) => (s.apsByFloor[activeFloorId] ?? []).length)
 
   // ── 座標轉換 ───────────────────────────────────────────
   const toCanvasPos = useCallback((screenPos) => ({
@@ -75,16 +81,35 @@ function Editor2D() {
     })
   }, [activeFloorId])
 
-  // ── ESC：取消當前繪製 ──────────────────────────────────
+  // ── 鍵盤事件 ───────────────────────────────────────────
+  const removeWall = useWallStore((s) => s.removeWall)
+  const removeAP   = useAPStore((s) => s.removeAP)
+
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key !== 'Escape') return
-      setWallDrawStart(null)
-      resetScale()
+      // ESC：取消繪製
+      if (e.key === 'Escape') {
+        setWallDrawStart(null)
+        resetScale()
+        return
+      }
+      // Delete / Backspace：刪除選取物件（input/textarea 中不觸發）
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const tag = e.target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return
+        if (selectedId && selectedType === 'wall') {
+          removeWall(activeFloorId, selectedId)
+          clearSelected()
+        }
+        if (selectedId && selectedType === 'ap') {
+          removeAP(activeFloorId, selectedId)
+          clearSelected()
+        }
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [selectedId, selectedType, activeFloorId, removeWall, removeAP, clearSelected])
 
   // ── 切換模式時清除繪製狀態 ────────────────────────────
   useEffect(() => {
@@ -164,12 +189,29 @@ function Editor2D() {
       return
     }
 
+    // AP 放置
+    if (isAPMode) {
+      addAP(activeFloorId, {
+        id: generateId('ap'),
+        x: pos.x, y: pos.y,
+        z: 2.4,
+        txPower: 20,
+        frequency: 5,
+        antennaMode: 'omni',
+        mountType: 'ceiling',
+        name: `AP-${String(apCount + 1).padStart(2, '0')}`,
+        color: '#4fc3f7',
+      })
+      return
+    }
+
     // 其他模式點擊空白 → 取消選取
     clearSelected()
   }, [
     isScaleMode, showScaleDialog, scalePt1,
     isWallMode, wallDrawStart, activeFloorId,
-    toCanvasPos, addWall, clearSelected,
+    isAPMode, apCount,
+    toCanvasPos, addWall, addAP, clearSelected,
   ])
 
   // ── 右鍵：停止牆體繪製 ─────────────────────────────────
@@ -231,6 +273,14 @@ function Editor2D() {
               mousePos={mousePos}
               selectedWallId={selectedId}
               onWallClick={(id) => setSelected(id, 'wall')}
+            />
+          )}
+
+          {activeFloorId && (
+            <APLayer
+              floorId={activeFloorId}
+              selectedAPId={selectedType === 'ap' ? selectedId : null}
+              onAPClick={(id) => setSelected(id, 'ap')}
             />
           )}
 

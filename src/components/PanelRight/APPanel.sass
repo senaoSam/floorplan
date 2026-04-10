@@ -1,0 +1,103 @@
+@use '@/styles/variables' as *
+
+.ap-panel
+  display: flex
+  flex-direction: column
+  gap: 0
+  height: 100%
+
+  &__header
+    display: flex
+    align-items: center
+    justify-content: space-between
+    padding: 12px 14px 10px
+    border-bottom: 1px solid $border-color
+
+  &__title
+    font-size: 13px
+    font-weight: 600
+    color: $text-primary
+
+  &__dot
+    width: 10px
+    height: 10px
+    border-radius: 50%
+    flex-shrink: 0
+
+  &__section
+    padding: 10px 14px
+    border-bottom: 1px solid $border-color
+
+  &__label
+    font-size: 11px
+    font-weight: 600
+    color: $text-secondary
+    text-transform: uppercase
+    letter-spacing: 0.4px
+    margin-bottom: 6px
+
+  &__input
+    width: 100%
+    background: rgba(255, 255, 255, 0.07)
+    border: 1px solid $border-color
+    border-radius: 6px
+    color: $text-primary
+    font-size: 13px
+    padding: 5px 8px
+    outline: none
+    box-sizing: border-box
+
+    &:focus
+      border-color: $accent
+
+    &--number
+      width: auto
+      flex: 1
+
+  &__number-row
+    display: flex
+    align-items: center
+    gap: 8px
+
+  &__unit
+    font-size: 12px
+    color: $text-secondary
+    white-space: nowrap
+
+  // 切換按鈕組
+  &__btn-group
+    display: flex
+    gap: 4px
+
+  &__btn
+    flex: 1
+    padding: 5px 4px
+    border: 1px solid rgba(255, 255, 255, 0.15)
+    border-radius: 6px
+    background: transparent
+    color: $text-secondary
+    font-size: 11px
+    cursor: pointer
+    transition: background 0.12s, border-color 0.12s, color 0.12s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.06)
+      color: $text-primary
+
+    &--active
+      background: rgba(255, 255, 255, 0.1)
+      color: $text-primary
+
+  &__delete
+    margin: 12px 14px
+    padding: 7px
+    border: 1px solid rgba(231, 76, 60, 0.4)
+    border-radius: 6px
+    background: transparent
+    color: #e74c3c
+    font-size: 12px
+    cursor: pointer
+    transition: background 0.15s
+
+    &:hover
+      background: rgba(231, 76, 60, 0.1)
