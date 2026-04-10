@@ -8,7 +8,8 @@
       "Bash(timeout 10 pnpm dev)",
       "Bash(pnpm view:*)",
       "Bash(python3 -c \"import json,sys; versions=json.load\\(sys.stdin\\); print\\([v for v in versions if v.startswith\\('1.'\\) or v.startswith\\('2.'\\)]\\)\")",
-      "Bash(python3 -c \"import json,sys; v=json.load\\(sys.stdin\\); print\\([x for x in v if x.startswith\\('7.'\\)][-5:]\\)\")"
+      "Bash(python3 -c \"import json,sys; v=json.load\\(sys.stdin\\); print\\([x for x in v if x.startswith\\('7.'\\)][-5:]\\)\")",
+      "Bash(timeout 12 pnpm dev)"
     ]
   }
 }
