@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { generateId } from '@/utils/id'
 
 export const useFloorStore = create((set, get) => ({
   // 樓層列表
@@ -31,5 +32,29 @@ export const useFloorStore = create((set, get) => ({
   getActiveFloor: () => {
     const { floors, activeFloorId } = get()
     return floors.find((f) => f.id === activeFloorId) ?? null
+  },
+
+  // 從圖片檔案建立新樓層並設為 active
+  importImageFloor: (file, imageWidth, imageHeight) => {
+    const id = generateId('floor')
+    const imageUrl = URL.createObjectURL(file)
+    const name = `${get().floors.length + 1}F`
+    const floor = {
+      id,
+      name,
+      imageUrl,
+      imageWidth,
+      imageHeight,
+      opacity: 1,
+      rotation: 0,
+      scale: null,
+      offsetX: 0,
+      offsetY: 0,
+    }
+    set((state) => ({
+      floors: [...state.floors, floor],
+      activeFloorId: id,
+    }))
+    return floor
   },
 }))
