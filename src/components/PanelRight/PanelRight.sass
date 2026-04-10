@@ -1,0 +1,13 @@
+@use '@/styles/variables' as *
+
+.panel-right
+  width: 0
+  height: 100%
+  background: $bg-secondary
+  border-left: 1px solid $border-color
+  overflow: hidden
+  flex-shrink: 0
+  transition: width 0.2s ease
+
+  &--open
+    width: $panel-width

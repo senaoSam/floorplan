@@ -3,8 +3,7 @@ import { Layer, Line, Circle } from 'react-konva'
 import { useWallStore } from '@/store/useWallStore'
 
 function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick }) {
-  const getWalls = useWallStore((s) => s.getWalls)
-  const walls = getWalls(floorId)
+  const walls = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
 
   return (
     <Layer>
