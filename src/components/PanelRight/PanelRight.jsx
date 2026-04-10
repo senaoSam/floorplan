@@ -3,6 +3,7 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import WallPanel from './WallPanel'
 import APPanel from './APPanel'
+import ScopePanel from './ScopePanel'
 import './PanelRight.sass'
 
 function PanelRight() {
@@ -19,6 +20,9 @@ function PanelRight() {
       )}
       {selectedType === 'ap' && activeFloorId && (
         <APPanel floorId={activeFloorId} apId={selectedId} />
+      )}
+      {selectedType === 'scope' && activeFloorId && (
+        <ScopePanel floorId={activeFloorId} zoneId={selectedId} />
       )}
     </aside>
   )

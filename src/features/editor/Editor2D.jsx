@@ -4,20 +4,23 @@ import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
+import { useScopeStore } from '@/store/useScopeStore'
 import { MATERIALS } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 import FloorImageLayer from './layers/FloorImageLayer'
 import WallLayer from './layers/WallLayer'
 import APLayer from './layers/APLayer'
+import ScopeLayer from './layers/ScopeLayer'
 import ScaleLayer from './layers/ScaleLayer'
 import ScaleDialog from './ScaleDialog'
 import DropZone from '@/features/importer/DropZone'
 import './Editor2D.sass'
 
-const SCALE_BY  = 1.08
-const SCALE_MIN = 0.05
-const SCALE_MAX = 20
+const SCALE_BY    = 1.08
+const SCALE_MIN   = 0.05
+const SCALE_MAX   = 20
 const FIT_PADDING = 0.85
+const SNAP_PX     = 12   // screen pixels for first-point snap
 
 function Editor2D() {
   const containerRef = useRef(null)
@@ -27,18 +30,22 @@ function Editor2D() {
   const [mousePos, setMousePos] = useState(null)
 
   // ── 比例尺狀態 ─────────────────────────────────────────
-  const [scalePt1, setScalePt1]           = useState(null)
-  const [scalePt2, setScalePt2]           = useState(null)
+  const [scalePt1, setScalePt1]               = useState(null)
+  const [scalePt2, setScalePt2]               = useState(null)
   const [showScaleDialog, setShowScaleDialog] = useState(false)
 
   // ── 牆體繪製狀態 ───────────────────────────────────────
   const [wallDrawStart, setWallDrawStart] = useState(null)
+
+  // ── 範圍區域繪製狀態 ───────────────────────────────────
+  const [scopePoints, setScopePoints] = useState([])  // [{x,y}, ...]
 
   const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected } = useEditorStore()
   const isPanMode   = editorMode === EDITOR_MODE.PAN
   const isScaleMode = editorMode === EDITOR_MODE.DRAW_SCALE
   const isWallMode  = editorMode === EDITOR_MODE.DRAW_WALL
   const isAPMode    = editorMode === EDITOR_MODE.PLACE_AP
+  const isScopeMode = editorMode === EDITOR_MODE.DRAW_SCOPE
 
   const floors         = useFloorStore((s) => s.floors)
   const activeFloorId  = useFloorStore((s) => s.activeFloorId)
@@ -50,6 +57,8 @@ function Editor2D() {
 
   const addAP   = useAPStore((s) => s.addAP)
   const apCount = useAPStore((s) => (s.apsByFloor[activeFloorId] ?? []).length)
+
+  const addScope = useScopeStore((s) => s.addScope)
 
   // ── 座標轉換 ───────────────────────────────────────────
   const toCanvasPos = useCallback((screenPos) => ({
@@ -82,18 +91,18 @@ function Editor2D() {
   }, [activeFloorId])
 
   // ── 鍵盤事件 ───────────────────────────────────────────
-  const removeWall = useWallStore((s) => s.removeWall)
-  const removeAP   = useAPStore((s) => s.removeAP)
+  const removeWall  = useWallStore((s) => s.removeWall)
+  const removeAP    = useAPStore((s) => s.removeAP)
+  const removeScope = useScopeStore((s) => s.removeScope)
 
   useEffect(() => {
     const onKey = (e) => {
-      // ESC：取消繪製
       if (e.key === 'Escape') {
         setWallDrawStart(null)
+        setScopePoints([])
         resetScale()
         return
       }
-      // Delete / Backspace：刪除選取物件（input/textarea 中不觸發）
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const tag = e.target.tagName
         if (tag === 'INPUT' || tag === 'TEXTAREA') return
@@ -105,15 +114,20 @@ function Editor2D() {
           removeAP(activeFloorId, selectedId)
           clearSelected()
         }
+        if (selectedId && selectedType === 'scope') {
+          removeScope(activeFloorId, selectedId)
+          clearSelected()
+        }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, selectedType, activeFloorId, removeWall, removeAP, clearSelected])
+  }, [selectedId, selectedType, activeFloorId, removeWall, removeAP, removeScope, clearSelected])
 
   // ── 切換模式時清除繪製狀態 ────────────────────────────
   useEffect(() => {
     setWallDrawStart(null)
+    setScopePoints([])
     if (!isScaleMode) resetScale()
   }, [editorMode])
 
@@ -184,7 +198,7 @@ function Editor2D() {
           topHeight: 3.0,
           bottomHeight: 0,
         })
-        setWallDrawStart(pos)   // 連續繪製：終點成為下一段起點
+        setWallDrawStart(pos)
       }
       return
     }
@@ -205,20 +219,44 @@ function Editor2D() {
       return
     }
 
+    // 範圍區域
+    if (isScopeMode) {
+      setScopePoints((prev) => {
+        // 吸附第一點：距離 < SNAP_PX / scale → 閉合多邊形
+        if (prev.length >= 3) {
+          const snapDist = SNAP_PX / viewport.scale
+          const dx = pos.x - prev[0].x
+          const dy = pos.y - prev[0].y
+          if (Math.hypot(dx, dy) < snapDist) {
+            addScope(activeFloorId, {
+              id: generateId('scope'),
+              points: prev.flatMap((p) => [p.x, p.y]),
+              type: 'in',
+            })
+            return []
+          }
+        }
+        return [...prev, pos]
+      })
+      return
+    }
+
     // 其他模式點擊空白 → 取消選取
     clearSelected()
   }, [
     isScaleMode, showScaleDialog, scalePt1,
     isWallMode, wallDrawStart, activeFloorId,
     isAPMode, apCount,
+    isScopeMode, viewport.scale, addScope,
     toCanvasPos, addWall, addAP, clearSelected,
   ])
 
-  // ── 右鍵：停止牆體繪製 ─────────────────────────────────
+  // ── 右鍵：停止繪製 ─────────────────────────────────────
   const handleContextMenu = useCallback((e) => {
     e.evt.preventDefault()
     if (isWallMode) setWallDrawStart(null)
-  }, [isWallMode])
+    if (isScopeMode) setScopePoints([])
+  }, [isWallMode, isScopeMode])
 
   // ── 比例尺 helpers ─────────────────────────────────────
   const resetScale = () => {
@@ -238,8 +276,8 @@ function Editor2D() {
     ? Math.round(Math.hypot(scalePt2.x - scalePt1.x, scalePt2.y - scalePt1.y)) : 0
 
   const stageCursor =
-    isScaleMode || isWallMode ? 'crosshair' :
-    isPanMode                 ? 'grab'      : 'default'
+    isScaleMode || isWallMode || isScopeMode ? 'crosshair' :
+    isPanMode                                ? 'grab'      : 'default'
 
   return (
     <div ref={containerRef} className="editor-2d" style={{ cursor: stageCursor }}>
@@ -267,11 +305,22 @@ function Editor2D() {
           {activeFloor && <FloorImageLayer floor={activeFloor} />}
 
           {activeFloorId && (
+            <ScopeLayer
+              floorId={activeFloorId}
+              drawingPoints={isScopeMode ? scopePoints : []}
+              mousePos={mousePos}
+              snapRadius={SNAP_PX / viewport.scale}
+              selectedScopeId={selectedType === 'scope' ? selectedId : null}
+              onScopeClick={(id) => setSelected(id, 'scope')}
+            />
+          )}
+
+          {activeFloorId && (
             <WallLayer
               floorId={activeFloorId}
               drawStart={isWallMode ? wallDrawStart : null}
               mousePos={mousePos}
-              selectedWallId={selectedId}
+              selectedWallId={selectedType === 'wall' ? selectedId : null}
               onWallClick={(id) => setSelected(id, 'wall')}
             />
           )}
