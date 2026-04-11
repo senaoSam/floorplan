@@ -5,12 +5,14 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
+import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { MATERIALS } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 import FloorImageLayer from './layers/FloorImageLayer'
 import WallLayer from './layers/WallLayer'
 import APLayer from './layers/APLayer'
 import ScopeLayer from './layers/ScopeLayer'
+import FloorHoleLayer from './layers/FloorHoleLayer'
 import ScaleLayer from './layers/ScaleLayer'
 import ScaleDialog from './ScaleDialog'
 import DropZone from '@/features/importer/DropZone'
@@ -40,12 +42,16 @@ function Editor2D() {
   // ── 範圍區域繪製狀態 ───────────────────────────────────
   const [scopePoints, setScopePoints] = useState([])  // [{x,y}, ...]
 
+  // ── Floor Hole 繪製狀態 ────────────────────────────────
+  const [floorHolePoints, setFloorHolePoints] = useState([])  // [{x,y}, ...]
+
   const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected } = useEditorStore()
   const isPanMode   = editorMode === EDITOR_MODE.PAN
   const isScaleMode = editorMode === EDITOR_MODE.DRAW_SCALE
   const isWallMode  = editorMode === EDITOR_MODE.DRAW_WALL
   const isAPMode    = editorMode === EDITOR_MODE.PLACE_AP
-  const isScopeMode = editorMode === EDITOR_MODE.DRAW_SCOPE
+  const isScopeMode     = editorMode === EDITOR_MODE.DRAW_SCOPE
+  const isFloorHoleMode = editorMode === EDITOR_MODE.DRAW_FLOOR_HOLE
 
   const floors         = useFloorStore((s) => s.floors)
   const activeFloorId  = useFloorStore((s) => s.activeFloorId)
@@ -59,6 +65,8 @@ function Editor2D() {
   const apCount = useAPStore((s) => (s.apsByFloor[activeFloorId] ?? []).length)
 
   const addScope = useScopeStore((s) => s.addScope)
+
+  const addFloorHole = useFloorHoleStore((s) => s.addFloorHole)
 
   // ── 座標轉換 ───────────────────────────────────────────
   const toCanvasPos = useCallback((screenPos) => ({
@@ -93,13 +101,15 @@ function Editor2D() {
   // ── 鍵盤事件 ───────────────────────────────────────────
   const removeWall  = useWallStore((s) => s.removeWall)
   const removeAP    = useAPStore((s) => s.removeAP)
-  const removeScope = useScopeStore((s) => s.removeScope)
+  const removeScope     = useScopeStore((s) => s.removeScope)
+  const removeFloorHole = useFloorHoleStore((s) => s.removeFloorHole)
 
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') {
         setWallDrawStart(null)
         setScopePoints([])
+        setFloorHolePoints([])
         resetScale()
         return
       }
@@ -118,16 +128,21 @@ function Editor2D() {
           removeScope(activeFloorId, selectedId)
           clearSelected()
         }
+        if (selectedId && selectedType === 'floor_hole') {
+          removeFloorHole(activeFloorId, selectedId)
+          clearSelected()
+        }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, selectedType, activeFloorId, removeWall, removeAP, removeScope, clearSelected])
+  }, [selectedId, selectedType, activeFloorId, removeWall, removeAP, removeScope, removeFloorHole, clearSelected])
 
   // ── 切換模式時清除繪製狀態 ────────────────────────────
   useEffect(() => {
     setWallDrawStart(null)
     setScopePoints([])
+    setFloorHolePoints([])
     if (!isScaleMode) resetScale()
   }, [editorMode])
 
@@ -241,6 +256,26 @@ function Editor2D() {
       return
     }
 
+    // Floor Hole
+    if (isFloorHoleMode) {
+      setFloorHolePoints((prev) => {
+        if (prev.length >= 3) {
+          const snapDist = SNAP_PX / viewport.scale
+          const dx = pos.x - prev[0].x
+          const dy = pos.y - prev[0].y
+          if (Math.hypot(dx, dy) < snapDist) {
+            addFloorHole(activeFloorId, {
+              id: generateId('hole'),
+              points: prev.flatMap((p) => [p.x, p.y]),
+            })
+            return []
+          }
+        }
+        return [...prev, pos]
+      })
+      return
+    }
+
     // 其他模式點擊空白 → 取消選取
     clearSelected()
   }, [
@@ -248,6 +283,7 @@ function Editor2D() {
     isWallMode, wallDrawStart, activeFloorId,
     isAPMode, apCount,
     isScopeMode, viewport.scale, addScope,
+    isFloorHoleMode, addFloorHole,
     toCanvasPos, addWall, addAP, clearSelected,
   ])
 
@@ -256,7 +292,8 @@ function Editor2D() {
     e.evt.preventDefault()
     if (isWallMode) setWallDrawStart(null)
     if (isScopeMode) setScopePoints([])
-  }, [isWallMode, isScopeMode])
+    if (isFloorHoleMode) setFloorHolePoints([])
+  }, [isWallMode, isScopeMode, isFloorHoleMode])
 
   // ── 比例尺 helpers ─────────────────────────────────────
   const resetScale = () => {
@@ -276,8 +313,8 @@ function Editor2D() {
     ? Math.round(Math.hypot(scalePt2.x - scalePt1.x, scalePt2.y - scalePt1.y)) : 0
 
   const stageCursor =
-    isScaleMode || isWallMode || isScopeMode ? 'crosshair' :
-    isPanMode                                ? 'grab'      : 'default'
+    isScaleMode || isWallMode || isScopeMode || isFloorHoleMode ? 'crosshair' :
+    isPanMode                                                    ? 'grab'      : 'default'
 
   return (
     <div ref={containerRef} className="editor-2d" style={{ cursor: stageCursor }}>
@@ -312,6 +349,17 @@ function Editor2D() {
               snapRadius={SNAP_PX / viewport.scale}
               selectedScopeId={selectedType === 'scope' ? selectedId : null}
               onScopeClick={(id) => setSelected(id, 'scope')}
+            />
+          )}
+
+          {activeFloorId && (
+            <FloorHoleLayer
+              floorId={activeFloorId}
+              drawingPoints={isFloorHoleMode ? floorHolePoints : []}
+              mousePos={mousePos}
+              snapRadius={SNAP_PX / viewport.scale}
+              selectedHoleId={selectedType === 'floor_hole' ? selectedId : null}
+              onHoleClick={(id) => setSelected(id, 'floor_hole')}
             />
           )}
 

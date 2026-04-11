@@ -8,7 +8,8 @@ const TOOLS = [
   { mode: EDITOR_MODE.DRAW_SCALE, label: '比例尺', icon: '📏' },
   { mode: EDITOR_MODE.DRAW_WALL,  label: '畫牆',   icon: '▬' },
   { mode: EDITOR_MODE.PLACE_AP,   label: '放置 AP',icon: '📡' },
-  { mode: EDITOR_MODE.DRAW_SCOPE, label: '範圍',   icon: '⬡' },
+  { mode: EDITOR_MODE.DRAW_SCOPE,      label: '範圍',      icon: '⬡' },
+  { mode: EDITOR_MODE.DRAW_FLOOR_HOLE, label: 'Floor Hole', icon: '⬛' },
 ]
 
 function Toolbar() {
