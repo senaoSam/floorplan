@@ -21,10 +21,12 @@ export const useEditorStore = create((set) => ({
   editorMode: EDITOR_MODE.SELECT,
   viewMode: VIEW_MODE.TWO_D,
   selectedId: null,
-  selectedType: null, // 'wall' | 'ap' | null
+  selectedType: null, // 'wall' | 'ap' | 'scope' | 'floor_hole' | null
+  showHeatmap: false,
 
   setEditorMode: (mode) => set({ editorMode: mode, selectedId: null, selectedType: null }),
   setViewMode: (mode) => set({ viewMode: mode }),
   setSelected: (id, type) => set({ selectedId: id, selectedType: type }),
   clearSelected: () => set({ selectedId: null, selectedType: null }),
+  toggleHeatmap: () => set((s) => ({ showHeatmap: !s.showHeatmap })),
 }))

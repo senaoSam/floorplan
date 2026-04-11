@@ -1,6 +1,7 @@
 import React from 'react'
 import { Layer, Circle, Arc, Text, Group } from 'react-konva'
 import { useAPStore } from '@/store/useAPStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 
 // 依頻段給顏色
 const FREQ_COLOR = {
@@ -9,7 +10,7 @@ const FREQ_COLOR = {
   6:   '#a855f7',
 }
 
-function APMarker({ ap, isSelected, onClick }) {
+function APMarker({ ap, isSelected, isDraggable, onClick, onMoved, onDragMove }) {
   const color = FREQ_COLOR[ap.frequency] ?? '#4fc3f7'
   const ringColor = isSelected ? '#e74c3c' : color
 
@@ -17,7 +18,17 @@ function APMarker({ ap, isSelected, onClick }) {
     <Group
       x={ap.x}
       y={ap.y}
+      draggable={isDraggable}
       onClick={(e) => { e.cancelBubble = true; onClick(ap.id) }}
+      onDragStart={(e) => { e.cancelBubble = true }}
+      onDragMove={(e) => {
+        e.cancelBubble = true
+        onDragMove?.(ap.id, e.target.x(), e.target.y())
+      }}
+      onDragEnd={(e) => {
+        e.cancelBubble = true
+        onMoved(ap.id, e.target.x(), e.target.y())
+      }}
       hitFunc={(ctx, shape) => {
         ctx.beginPath()
         ctx.arc(0, 0, 20, 0, Math.PI * 2)
@@ -66,8 +77,16 @@ function APMarker({ ap, isSelected, onClick }) {
   )
 }
 
-function APLayer({ floorId, selectedAPId, onAPClick }) {
-  const aps = useAPStore((s) => s.apsByFloor[floorId] ?? [])
+function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd }) {
+  const aps        = useAPStore((s) => s.apsByFloor[floorId] ?? [])
+  const updateAP   = useAPStore((s) => s.updateAP)
+  const editorMode = useEditorStore((s) => s.editorMode)
+  const isSelectMode = editorMode === EDITOR_MODE.SELECT
+
+  const handleMoved = (id, x, y) => {
+    updateAP(floorId, id, { x, y })
+    onAPDragEnd?.()
+  }
 
   return (
     <Layer>
@@ -76,7 +95,10 @@ function APLayer({ floorId, selectedAPId, onAPClick }) {
           key={ap.id}
           ap={ap}
           isSelected={ap.id === selectedAPId}
+          isDraggable={isSelectMode}
           onClick={onAPClick}
+          onMoved={handleMoved}
+          onDragMove={onAPDragMove}
         />
       ))}
     </Layer>

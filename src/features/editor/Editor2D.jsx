@@ -14,6 +14,7 @@ import APLayer from './layers/APLayer'
 import ScopeLayer from './layers/ScopeLayer'
 import FloorHoleLayer from './layers/FloorHoleLayer'
 import ScaleLayer from './layers/ScaleLayer'
+import HeatmapCanvas from './HeatmapCanvas'
 import ScaleDialog from './ScaleDialog'
 import DropZone from '@/features/importer/DropZone'
 import './Editor2D.sass'
@@ -25,8 +26,9 @@ const FIT_PADDING = 0.85
 const SNAP_PX     = 12   // screen pixels for first-point snap
 
 function Editor2D() {
-  const containerRef = useRef(null)
-  const stageRef     = useRef(null)
+  const containerRef  = useRef(null)
+  const stageRef      = useRef(null)
+  const draggingAPRef = useRef(null)  // { id, x, y } AP 拖移中暫存位置
   const [size, setSize]         = useState({ width: 0, height: 0 })
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 })
   const [mousePos, setMousePos] = useState(null)
@@ -369,6 +371,8 @@ function Editor2D() {
               floorId={activeFloorId}
               selectedAPId={selectedType === 'ap' ? selectedId : null}
               onAPClick={(id) => setSelected(id, 'ap')}
+              onAPDragMove={(id, x, y) => { draggingAPRef.current = { id, x, y } }}
+              onAPDragEnd={() => { draggingAPRef.current = null }}
             />
           )}
 
@@ -377,6 +381,13 @@ function Editor2D() {
           )}
         </Stage>
       )}
+
+      <HeatmapCanvas
+        width={size.width}
+        height={size.height}
+        stageRef={stageRef}
+        draggingAPRef={draggingAPRef}
+      />
 
       {showScaleDialog && (
         <ScaleDialog

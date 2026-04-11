@@ -1,5 +1,6 @@
 import React from 'react'
 import { useEditorStore, EDITOR_MODE, VIEW_MODE } from '@/store/useEditorStore'
+import { useFloorStore } from '@/store/useFloorStore'
 import './Toolbar.sass'
 
 const TOOLS = [
@@ -13,7 +14,9 @@ const TOOLS = [
 ]
 
 function Toolbar() {
-  const { editorMode, viewMode, setEditorMode, setViewMode } = useEditorStore()
+  const { editorMode, viewMode, showHeatmap, setEditorMode, setViewMode, toggleHeatmap } = useEditorStore()
+  const floorScale = useFloorStore((s) => s.scale)
+  const hasScale = !!floorScale
 
   return (
     <header className="toolbar">
@@ -34,6 +37,15 @@ function Toolbar() {
       </div>
 
       <div className="toolbar__actions">
+        <button
+          className={`toolbar__heatmap-btn${showHeatmap ? ' toolbar__heatmap-btn--active' : ''}`}
+          onClick={toggleHeatmap}
+          title={hasScale ? '熱圖' : '請先設定比例尺才能顯示熱圖'}
+          disabled={!hasScale}
+        >
+          熱圖
+        </button>
+
         <button
           className={`toolbar__view-btn${viewMode === VIEW_MODE.TWO_D ? ' toolbar__view-btn--active' : ''}`}
           onClick={() => setViewMode(VIEW_MODE.TWO_D)}
