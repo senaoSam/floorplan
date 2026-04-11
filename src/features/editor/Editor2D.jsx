@@ -168,18 +168,10 @@ function Editor2D() {
     setViewport((prev) => ({ ...prev, x: s.x(), y: s.y() }))
   }, [])
 
-  // ── 中鍵平移 ───────────────────────────────────────────
+  // ── 中鍵：防止預設行為（開新分頁等）────────────────────
   const handleMouseDown = useCallback((e) => {
-    if (e.evt.button === 1) {
-      e.evt.preventDefault()
-      stageRef.current.draggable(true)
-    }
+    if (e.evt.button === 1) e.evt.preventDefault()
   }, [])
-
-  const handleMouseUp = useCallback((e) => {
-    if (e.evt.button === 1 && !isPanMode)
-      stageRef.current.draggable(false)
-  }, [isPanMode])
 
   // ── 滑鼠移動：更新 ghost 線 ────────────────────────────
   const handleMouseMove = useCallback(() => {
@@ -326,11 +318,10 @@ function Editor2D() {
           width={size.width}  height={size.height}
           x={viewport.x}      y={viewport.y}
           scaleX={viewport.scale} scaleY={viewport.scale}
-          draggable={isPanMode}
+          draggable
           onWheel={handleWheel}
           onDragEnd={handleDragEnd}
           onMouseDown={handleMouseDown}
-          onMouseUp={handleMouseUp}
           onMouseMove={handleMouseMove}
           onClick={handleStageClick}
           onContextMenu={handleContextMenu}
