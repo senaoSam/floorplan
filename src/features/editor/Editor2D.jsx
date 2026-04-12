@@ -28,7 +28,8 @@ const SNAP_PX     = 12   // screen pixels for first-point snap
 function Editor2D() {
   const containerRef  = useRef(null)
   const stageRef      = useRef(null)
-  const draggingAPRef = useRef(null)  // { id, x, y } AP 拖移中暫存位置
+  const draggingAPRef   = useRef(null)  // { id, x, y } AP 拖移中暫存位置
+  const draggingWallRef = useRef(null)  // { id, dx, dy } 牆體拖移中暫存偏移
   const [size, setSize]         = useState({ width: 0, height: 0 })
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 })
   const [mousePos, setMousePos] = useState(null)
@@ -365,6 +366,8 @@ function Editor2D() {
                 mousePos={mousePos}
                 selectedWallId={selectedType === 'wall' ? selectedId : null}
                 onWallClick={(id) => setSelected(id, 'wall')}
+                onWallDragMove={(id, dx, dy) => { draggingWallRef.current = { id, dx, dy } }}
+                onWallDragEnd={() => { draggingWallRef.current = null }}
               />
             )}
 
@@ -390,6 +393,7 @@ function Editor2D() {
         height={size.height}
         stageRef={stageRef}
         draggingAPRef={draggingAPRef}
+        draggingWallRef={draggingWallRef}
       />
 
       {showScaleDialog && (

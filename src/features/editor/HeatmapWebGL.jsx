@@ -163,7 +163,7 @@ function makeProgram(gl) {
 }
 
 // ── 主元件 ────────────────────────────────────────────────────────────
-function HeatmapWebGL({ width, height, stageRef, draggingAPRef }) {
+function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef }) {
   const canvasRef = useRef(null)
 
   const showHeatmap   = useEditorStore((s) => s.showHeatmap)
@@ -270,7 +270,16 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef }) {
         return
       }
 
-      const rawWalls = useWallStore.getState().wallsByFloor[floorId] ?? []
+      let rawWalls = useWallStore.getState().wallsByFloor[floorId] ?? []
+      const dragWall = draggingWallRef?.current
+      if (dragWall) {
+        rawWalls = rawWalls.map((wl) =>
+          wl.id === dragWall.id
+            ? { ...wl, startX: wl.startX + dragWall.dx, startY: wl.startY + dragWall.dy,
+                       endX:   wl.endX   + dragWall.dx, endY:   wl.endY   + dragWall.dy }
+            : wl
+        )
+      }
       const vp = { x: stage.x(), y: stage.y(), scale: stage.scaleX() }
 
       // 變化偵測，未變化直接跳過
@@ -332,7 +341,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef }) {
       gl.deleteBuffer(posBuf)
       gl.deleteProgram(prog)
     }
-  }, [stageRef, draggingAPRef])
+  }, [stageRef, draggingAPRef, draggingWallRef])
 
   return (
     <canvas

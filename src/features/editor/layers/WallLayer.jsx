@@ -1,7 +1,7 @@
 import React from 'react'
 import { Group, Line, Circle } from 'react-konva'
 import { useWallStore } from '@/store/useWallStore'
-function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick }) {
+function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, onWallDragMove, onWallDragEnd }) {
   const walls      = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
   const updateWall = useWallStore((s) => s.updateWall)
 
@@ -18,6 +18,10 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick }
               e.cancelBubble = true
               onWallClick?.(wall.id)
             }}
+            onDragMove={(e) => {
+              e.cancelBubble = true
+              onWallDragMove?.(wall.id, e.target.x(), e.target.y())
+            }}
             onDragEnd={(e) => {
               e.cancelBubble = true
               const dx = e.target.x()
@@ -29,6 +33,7 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick }
                 endY:   wall.endY   + dy,
               })
               e.target.position({ x: 0, y: 0 })
+              onWallDragEnd?.()
             }}
           >
             <Line
