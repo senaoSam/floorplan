@@ -14,7 +14,7 @@ import APLayer from './layers/APLayer'
 import ScopeLayer from './layers/ScopeLayer'
 import FloorHoleLayer from './layers/FloorHoleLayer'
 import ScaleLayer from './layers/ScaleLayer'
-import HeatmapCanvas from './HeatmapCanvas'
+import HeatmapWebGL from './HeatmapWebGL'
 import ScaleDialog from './ScaleDialog'
 import DropZone from '@/features/importer/DropZone'
 import './Editor2D.sass'
@@ -385,7 +385,7 @@ function Editor2D() {
         </Stage>
       )}
 
-      <HeatmapCanvas
+      <HeatmapWebGL
         width={size.width}
         height={size.height}
         stageRef={stageRef}

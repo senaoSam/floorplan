@@ -50,7 +50,7 @@ const TASKS = [
     items: [
       { id: '5-1', done: true,  text: '基礎 RSSI 計算（FSPL）' },
       { id: '5-2', done: true,  text: 'Ray-casting 牆體衰減（Web Worker）' },
-      { id: '5-3', done: false, text: 'WebGL Fragment Shader 即時渲染' },
+      { id: '5-3', done: true,  text: 'WebGL Fragment Shader 即時渲染' },
       { id: '5-4', done: false, text: 'Co-channel 干擾 SINR 熱圖' },
     ],
   },
