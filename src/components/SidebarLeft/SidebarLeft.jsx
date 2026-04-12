@@ -35,7 +35,7 @@ function SidebarLeft() {
           <span>圖層</span>
         </div>
         <ul className="sidebar-left__layer-list">
-          {['平面圖', '牆體', 'AP', 'Heatmap'].map((layer) => (
+          {['平面圖', '牆體', 'AP', '熱力圖'].map((layer) => (
             <li key={layer} className="sidebar-left__layer-item">
               <span className="sidebar-left__layer-eye">👁</span>
               <span>{layer}</span>

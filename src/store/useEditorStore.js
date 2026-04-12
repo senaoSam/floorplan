@@ -23,10 +23,12 @@ export const useEditorStore = create((set) => ({
   selectedId: null,
   selectedType: null, // 'wall' | 'ap' | 'scope' | 'floor_hole' | null
   showHeatmap: false,
+  panelCollapsed: false,
 
   setEditorMode: (mode) => set({ editorMode: mode, selectedId: null, selectedType: null }),
   setViewMode: (mode) => set({ viewMode: mode }),
-  setSelected: (id, type) => set({ selectedId: id, selectedType: type }),
+  setSelected: (id, type) => set({ selectedId: id, selectedType: type, panelCollapsed: false }),
   clearSelected: () => set({ selectedId: null, selectedType: null }),
   toggleHeatmap: () => set((s) => ({ showHeatmap: !s.showHeatmap })),
+  togglePanelCollapsed: () => set((s) => ({ panelCollapsed: !s.panelCollapsed })),
 }))

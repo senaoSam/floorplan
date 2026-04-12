@@ -8,11 +8,12 @@ import FloorHolePanel from './FloorHolePanel'
 import './PanelRight.sass'
 
 function PanelRight() {
-  const selectedId   = useEditorStore((s) => s.selectedId)
-  const selectedType = useEditorStore((s) => s.selectedType)
-  const activeFloorId = useFloorStore((s) => s.activeFloorId)
+  const selectedId     = useEditorStore((s) => s.selectedId)
+  const selectedType   = useEditorStore((s) => s.selectedType)
+  const panelCollapsed = useEditorStore((s) => s.panelCollapsed)
+  const activeFloorId  = useFloorStore((s) => s.activeFloorId)
 
-  const isOpen = !!selectedId
+  const isOpen = !!selectedId && !panelCollapsed
 
   return (
     <aside className={`panel-right${isOpen ? ' panel-right--open' : ''}`}>

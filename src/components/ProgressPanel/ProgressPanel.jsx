@@ -6,9 +6,9 @@ const FEATURES = [
   { icon: '📐', text: '比例尺設定：在圖上點兩點並輸入實際距離，自動建立 px/m 換算' },
   { icon: '🧱', text: '牆體繪製：連續線段繪製，可設定材質（玻璃到混凝土）與高度' },
   { icon: '📍', text: 'AP 放置：點擊畫布放置，可拖曳移動，支援頻段、發射功率、天線模式設定' },
-  { icon: '🟩', text: 'Scope Zone：定義建築範圍（In-Scope / Out-of-Scope 多邊形）' },
-  { icon: '⬛', text: 'Floor Hole：標記中庭、挑高等信號可跨樓層穿透的區域' },
-  { icon: '🔥', text: 'RSSI 熱力圖：基於 FSPL 公式計算，含牆體衰減（Ray-casting + Web Worker）' },
+  { icon: '🟩', text: '範圍區域：繪製建築覆蓋範圍多邊形，區分涵蓋內／外區域' },
+  { icon: '⬛', text: '挑高區域：標記中庭、挑高等信號可跨樓層穿透的區域' },
+  { icon: '🔥', text: 'RSSI 熱力圖：基於 FSPL 公式計算，含牆體衰減，WebGL Fragment Shader 即時渲染' },
 ]
 
 const TASKS = [

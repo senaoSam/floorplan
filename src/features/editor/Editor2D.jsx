@@ -47,7 +47,7 @@ function Editor2D() {
   // ── Floor Hole 繪製狀態 ────────────────────────────────
   const [floorHolePoints, setFloorHolePoints] = useState([])  // [{x,y}, ...]
 
-  const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected } = useEditorStore()
+  const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected, togglePanelCollapsed } = useEditorStore()
   const isPanMode   = editorMode === EDITOR_MODE.PAN
   const isScaleMode = editorMode === EDITOR_MODE.DRAW_SCALE
   const isWallMode  = editorMode === EDITOR_MODE.DRAW_WALL
@@ -281,13 +281,14 @@ function Editor2D() {
     toCanvasPos, addWall, addAP, clearSelected,
   ])
 
-  // ── 右鍵：停止繪製 ─────────────────────────────────────
+  // ── 右鍵：有繪製進行中 → 停止繪製；否則 → 切換 Panel 收合 ──
   const handleContextMenu = useCallback((e) => {
     e.evt.preventDefault()
-    if (isWallMode) setWallDrawStart(null)
-    if (isScopeMode) setScopePoints([])
-    if (isFloorHoleMode) setFloorHolePoints([])
-  }, [isWallMode, isScopeMode, isFloorHoleMode])
+    if (isWallMode && wallDrawStart)           { setWallDrawStart(null); return }
+    if (isScopeMode && scopePoints.length > 0) { setScopePoints([]);     return }
+    if (isFloorHoleMode && floorHolePoints.length > 0) { setFloorHolePoints([]); return }
+    togglePanelCollapsed()
+  }, [isWallMode, wallDrawStart, isScopeMode, scopePoints, isFloorHoleMode, floorHolePoints, togglePanelCollapsed])
 
   // ── 比例尺 helpers ─────────────────────────────────────
   const resetScale = () => {
