@@ -65,7 +65,8 @@ function DrawingPreview({ points, mousePos, snapRadius }) {
 }
 
 function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScopeId, onScopeClick }) {
-  const zones = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
+  const zones       = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
+  const updateScope = useScopeStore((s) => s.updateScope)
 
   return (
     <Group>
@@ -74,17 +75,36 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
         const style = ZONE_STYLE[zone.type] ?? ZONE_STYLE.in
         const isSelected = zone.id === selectedScopeId
         return (
-          <Line
+          <Group
             key={zone.id}
-            points={zone.points}
-            closed
-            fill={style.fill}
-            stroke={isSelected ? '#e74c3c' : style.stroke}
-            strokeWidth={isSelected ? 3 : 2}
-            dash={zone.type === 'out' ? [8, 4] : undefined}
-            hitStrokeWidth={10}
-            onClick={(e) => { e.cancelBubble = true; onScopeClick?.(zone.id) }}
-          />
+            draggable
+            onDragStart={(e) => {
+              e.cancelBubble = true
+              onScopeClick?.(zone.id)
+            }}
+            onDragEnd={(e) => {
+              e.cancelBubble = true
+              const dx = e.target.x()
+              const dy = e.target.y()
+              e.target.position({ x: 0, y: 0 })
+              const newPoints = []
+              for (let i = 0; i < zone.points.length; i += 2) {
+                newPoints.push(zone.points[i] + dx, zone.points[i + 1] + dy)
+              }
+              updateScope(floorId, zone.id, { points: newPoints })
+            }}
+          >
+            <Line
+              points={zone.points}
+              closed
+              fill={style.fill}
+              stroke={isSelected ? '#e74c3c' : style.stroke}
+              strokeWidth={isSelected ? 3 : 2}
+              dash={zone.type === 'out' ? [8, 4] : undefined}
+              hitStrokeWidth={10}
+              onClick={(e) => { e.cancelBubble = true; onScopeClick?.(zone.id) }}
+            />
+          </Group>
         )
       })}
 

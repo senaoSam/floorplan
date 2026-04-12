@@ -1,7 +1,6 @@
 import React from 'react'
 import { Group, Circle, Arc, Text } from 'react-konva'
 import { useAPStore } from '@/store/useAPStore'
-import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 
 // 依頻段給顏色
 const FREQ_COLOR = {
@@ -20,7 +19,7 @@ function APMarker({ ap, isSelected, isDraggable, onClick, onMoved, onDragMove })
       y={ap.y}
       draggable={isDraggable}
       onClick={(e) => { e.cancelBubble = true; onClick(ap.id) }}
-      onDragStart={(e) => { e.cancelBubble = true }}
+      onDragStart={(e) => { e.cancelBubble = true; onClick(ap.id) }}
       onDragMove={(e) => {
         e.cancelBubble = true
         onDragMove?.(ap.id, e.target.x(), e.target.y())
@@ -80,8 +79,6 @@ function APMarker({ ap, isSelected, isDraggable, onClick, onMoved, onDragMove })
 function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd }) {
   const aps        = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   const updateAP   = useAPStore((s) => s.updateAP)
-  const editorMode = useEditorStore((s) => s.editorMode)
-  const isSelectMode = editorMode === EDITOR_MODE.SELECT
 
   const handleMoved = (id, x, y) => {
     updateAP(floorId, id, { x, y })
@@ -95,7 +92,7 @@ function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd }
           key={ap.id}
           ap={ap}
           isSelected={ap.id === selectedAPId}
-          isDraggable={isSelectMode}
+          isDraggable
           onClick={onAPClick}
           onMoved={handleMoved}
           onDragMove={onAPDragMove}

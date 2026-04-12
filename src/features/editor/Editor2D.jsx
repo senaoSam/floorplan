@@ -230,43 +230,41 @@ function Editor2D() {
 
     // 範圍區域
     if (isScopeMode) {
-      setScopePoints((prev) => {
-        // 吸附第一點：距離 < SNAP_PX / scale → 閉合多邊形
-        if (prev.length >= 3) {
-          const snapDist = SNAP_PX / viewport.scale
-          const dx = pos.x - prev[0].x
-          const dy = pos.y - prev[0].y
-          if (Math.hypot(dx, dy) < snapDist) {
-            addScope(activeFloorId, {
-              id: generateId('scope'),
-              points: prev.flatMap((p) => [p.x, p.y]),
-              type: 'in',
-            })
-            return []
-          }
+      // 吸附第一點：距離 < SNAP_PX / scale → 閉合多邊形
+      if (scopePoints.length >= 3) {
+        const snapDist = SNAP_PX / viewport.scale
+        const dx = pos.x - scopePoints[0].x
+        const dy = pos.y - scopePoints[0].y
+        if (Math.hypot(dx, dy) < snapDist) {
+          addScope(activeFloorId, {
+            id: generateId('scope'),
+            points: scopePoints.flatMap((p) => [p.x, p.y]),
+            type: 'in',
+          })
+          setScopePoints([])
+          return
         }
-        return [...prev, pos]
-      })
+      }
+      setScopePoints((prev) => [...prev, pos])
       return
     }
 
     // Floor Hole
     if (isFloorHoleMode) {
-      setFloorHolePoints((prev) => {
-        if (prev.length >= 3) {
-          const snapDist = SNAP_PX / viewport.scale
-          const dx = pos.x - prev[0].x
-          const dy = pos.y - prev[0].y
-          if (Math.hypot(dx, dy) < snapDist) {
-            addFloorHole(activeFloorId, {
-              id: generateId('hole'),
-              points: prev.flatMap((p) => [p.x, p.y]),
-            })
-            return []
-          }
+      if (floorHolePoints.length >= 3) {
+        const snapDist = SNAP_PX / viewport.scale
+        const dx = pos.x - floorHolePoints[0].x
+        const dy = pos.y - floorHolePoints[0].y
+        if (Math.hypot(dx, dy) < snapDist) {
+          addFloorHole(activeFloorId, {
+            id: generateId('hole'),
+            points: floorHolePoints.flatMap((p) => [p.x, p.y]),
+          })
+          setFloorHolePoints([])
+          return
         }
-        return [...prev, pos]
-      })
+      }
+      setFloorHolePoints((prev) => [...prev, pos])
       return
     }
 
@@ -276,8 +274,8 @@ function Editor2D() {
     isScaleMode, showScaleDialog, scalePt1,
     isWallMode, wallDrawStart, activeFloorId,
     isAPMode, apCount,
-    isScopeMode, viewport.scale, addScope,
-    isFloorHoleMode, addFloorHole,
+    isScopeMode, scopePoints, viewport.scale, addScope,
+    isFloorHoleMode, floorHolePoints, addFloorHole,
     toCanvasPos, addWall, addAP, clearSelected,
   ])
 

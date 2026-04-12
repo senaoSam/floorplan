@@ -77,7 +77,8 @@ function FloorHoleLayer({
   selectedHoleId,
   onHoleClick,
 }) {
-  const holes = useFloorHoleStore((s) => s.floorHolesByFloor[floorId] ?? [])
+  const holes           = useFloorHoleStore((s) => s.floorHolesByFloor[floorId] ?? [])
+  const updateFloorHole = useFloorHoleStore((s) => s.updateFloorHole)
 
   return (
     <Group>
@@ -85,20 +86,39 @@ function FloorHoleLayer({
       {holes.map((hole) => {
         const isSelected = hole.id === selectedHoleId
         return (
-          <Line
+          <Group
             key={hole.id}
-            points={hole.points}
-            closed
-            fill={HOLE_FILL}
-            stroke={isSelected ? '#e74c3c' : HOLE_STROKE}
-            strokeWidth={isSelected ? 3 : 2}
-            dash={[10, 4]}
-            hitStrokeWidth={10}
-            onClick={(e) => {
+            draggable
+            onDragStart={(e) => {
               e.cancelBubble = true
               onHoleClick?.(hole.id)
             }}
-          />
+            onDragEnd={(e) => {
+              e.cancelBubble = true
+              const dx = e.target.x()
+              const dy = e.target.y()
+              e.target.position({ x: 0, y: 0 })
+              const newPoints = []
+              for (let i = 0; i < hole.points.length; i += 2) {
+                newPoints.push(hole.points[i] + dx, hole.points[i + 1] + dy)
+              }
+              updateFloorHole(floorId, hole.id, { points: newPoints })
+            }}
+          >
+            <Line
+              points={hole.points}
+              closed
+              fill={HOLE_FILL}
+              stroke={isSelected ? '#e74c3c' : HOLE_STROKE}
+              strokeWidth={isSelected ? 3 : 2}
+              dash={[10, 4]}
+              hitStrokeWidth={10}
+              onClick={(e) => {
+                e.cancelBubble = true
+                onHoleClick?.(hole.id)
+              }}
+            />
+          </Group>
         )
       })}
 
