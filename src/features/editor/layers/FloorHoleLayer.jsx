@@ -76,6 +76,9 @@ function FloorHoleLayer({
   snapRadius,
   selectedHoleId,
   onHoleClick,
+  isSelectMode,
+  isDrawingActive,
+  onRightMouseDown,
 }) {
   const holes           = useFloorHoleStore((s) => s.floorHolesByFloor[floorId] ?? [])
   const updateFloorHole = useFloorHoleStore((s) => s.updateFloorHole)
@@ -89,6 +92,12 @@ function FloorHoleLayer({
           <Group
             key={hole.id}
             draggable
+            onMouseDown={(e) => {
+              if (e.evt.button === 2) {
+                e.cancelBubble = true
+                onRightMouseDown?.(e.currentTarget)
+              }
+            }}
             onDragStart={(e) => {
               e.cancelBubble = true
               onHoleClick?.(hole.id)
@@ -110,10 +119,20 @@ function FloorHoleLayer({
               closed
               fill={HOLE_FILL}
               stroke={isSelected ? '#e74c3c' : HOLE_STROKE}
-              strokeWidth={isSelected ? 3 : 2}
+              strokeWidth={isSelected ? 4 : 3}
               dash={[10, 4]}
+              shadowColor="rgba(0,0,0,0.6)"
+              shadowBlur={4}
+              shadowOffset={{ x: 0, y: 0 }}
               hitStrokeWidth={10}
               onClick={(e) => {
+                if (!isSelectMode) return
+                e.cancelBubble = true
+                onHoleClick?.(hole.id)
+              }}
+              onContextMenu={(e) => {
+                e.evt.preventDefault()
+                if (isDrawingActive) return
                 e.cancelBubble = true
                 onHoleClick?.(hole.id)
               }}

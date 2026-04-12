@@ -28,8 +28,11 @@ const SNAP_PX     = 12   // screen pixels for first-point snap
 function Editor2D() {
   const containerRef  = useRef(null)
   const stageRef      = useRef(null)
-  const draggingAPRef   = useRef(null)  // { id, x, y } AP 拖移中暫存位置
-  const draggingWallRef = useRef(null)  // { id, dx, dy } 牆體拖移中暫存偏移
+  const draggingAPRef          = useRef(null)   // { id, x, y } AP 拖移中暫存位置
+  const draggingWallRef        = useRef(null)   // { id, dx, dy } 牆體拖移中暫存偏移
+  const draggingScopeRef       = useRef(null)   // { id, dx, dy } Scope 拖移中暫存偏移
+  const rightDragPendingRef    = useRef(null)   // { node, startX, startY } 右鍵等待拖曳
+  const suppressContextMenuRef = useRef(false)  // 右鍵拖曳發生後略過下一次 contextMenu
   const [size, setSize]         = useState({ width: 0, height: 0 })
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 })
   const [mousePos, setMousePos] = useState(null)
@@ -49,10 +52,11 @@ function Editor2D() {
   const [floorHolePoints, setFloorHolePoints] = useState([])  // [{x,y}, ...]
 
   const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected, togglePanelCollapsed } = useEditorStore()
-  const isPanMode   = editorMode === EDITOR_MODE.PAN
-  const isScaleMode = editorMode === EDITOR_MODE.DRAW_SCALE
-  const isWallMode  = editorMode === EDITOR_MODE.DRAW_WALL
-  const isAPMode    = editorMode === EDITOR_MODE.PLACE_AP
+  const isSelectMode    = editorMode === EDITOR_MODE.SELECT
+  const isPanMode       = editorMode === EDITOR_MODE.PAN
+  const isScaleMode     = editorMode === EDITOR_MODE.DRAW_SCALE
+  const isWallMode      = editorMode === EDITOR_MODE.DRAW_WALL
+  const isAPMode        = editorMode === EDITOR_MODE.PLACE_AP
   const isScopeMode     = editorMode === EDITOR_MODE.DRAW_SCOPE
   const isFloorHoleMode = editorMode === EDITOR_MODE.DRAW_FLOOR_HOLE
 
@@ -77,15 +81,17 @@ function Editor2D() {
     y: (screenPos.y - viewport.y) / viewport.scale,
   }), [viewport])
 
-  // ── 容器尺寸監聽 ───────────────────────────────────────
+  // ── 容器尺寸監聽（rAF 批次，避免 Panel 動畫期間多次 resize 抖動）
   useEffect(() => {
     if (!containerRef.current) return
+    let rafId = null
     const observer = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect
-      setSize({ width, height })
+      if (rafId) cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(() => { setSize({ width, height }) })
     })
     observer.observe(containerRef.current)
-    return () => observer.disconnect()
+    return () => { observer.disconnect(); if (rafId) cancelAnimationFrame(rafId) }
   }, [])
 
   // ── 切換樓層 fit-to-screen ─────────────────────────────
@@ -176,6 +182,15 @@ function Editor2D() {
     if (e.evt.button === 1) e.evt.preventDefault()
   }, [])
 
+  const handleMouseUp = useCallback((e) => {
+    if (e.evt.button === 2) rightDragPendingRef.current = null
+  }, [])
+
+  const handleRightMouseDown = useCallback((node) => {
+    const pos = stageRef.current?.getPointerPosition()
+    if (pos) rightDragPendingRef.current = { node, startX: pos.x, startY: pos.y }
+  }, [])
+
   // ── 牆體端點吸附 ──────────────────────────────────────
   const snapToWallEndpoint = useCallback((pos) => {
     const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
@@ -188,10 +203,22 @@ function Editor2D() {
     return pos
   }, [activeFloorId, viewport.scale])
 
-  // ── 滑鼠移動：更新 ghost 線 ────────────────────────────
+  // ── 滑鼠移動：右鍵拖曳閾值判斷 / 更新 ghost 線 ─────────
   const handleMouseMove = useCallback(() => {
     const pos = stageRef.current?.getPointerPosition()
     if (!pos) return
+
+    // 右鍵按住：超過 5px 才啟動拖曳
+    if (rightDragPendingRef.current) {
+      const { node, startX, startY } = rightDragPendingRef.current
+      if (Math.hypot(pos.x - startX, pos.y - startY) > 5) {
+        suppressContextMenuRef.current = true
+        rightDragPendingRef.current = null
+        node.startDrag()
+      }
+      return
+    }
+
     const canvasPos = toCanvasPos(pos)
     setMousePos(isWallMode ? snapToWallEndpoint(canvasPos) : canvasPos)
   }, [toCanvasPos, isWallMode, snapToWallEndpoint])
@@ -299,6 +326,7 @@ function Editor2D() {
   // ── 右鍵：有繪製進行中 → 停止繪製；否則 → 切換 Panel 收合 ──
   const handleContextMenu = useCallback((e) => {
     e.evt.preventDefault()
+    if (suppressContextMenuRef.current) { suppressContextMenuRef.current = false; return }
     if (isWallMode && wallDrawStart)           { setWallDrawStart(null); return }
     if (isScopeMode && scopePoints.length > 0) { setScopePoints([]);     return }
     if (isFloorHoleMode && floorHolePoints.length > 0) { setFloorHolePoints([]); return }
@@ -341,6 +369,7 @@ function Editor2D() {
           onDragEnd={handleDragEnd}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
           onClick={handleStageClick}
           onContextMenu={handleContextMenu}
         >
@@ -360,6 +389,11 @@ function Editor2D() {
                 snapRadius={SNAP_PX / viewport.scale}
                 selectedScopeId={selectedType === 'scope' ? selectedId : null}
                 onScopeClick={(id) => setSelected(id, 'scope')}
+                isSelectMode={isSelectMode}
+                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode}
+                onScopeDragMove={(id, dx, dy) => { draggingScopeRef.current = { id, dx, dy } }}
+                onScopeDragEnd={() => { draggingScopeRef.current = null }}
+                onRightMouseDown={handleRightMouseDown}
               />
             )}
 
@@ -371,6 +405,9 @@ function Editor2D() {
                 snapRadius={SNAP_PX / viewport.scale}
                 selectedHoleId={selectedType === 'floor_hole' ? selectedId : null}
                 onHoleClick={(id) => setSelected(id, 'floor_hole')}
+                isSelectMode={isSelectMode}
+                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode}
+                onRightMouseDown={handleRightMouseDown}
               />
             )}
 
@@ -384,7 +421,9 @@ function Editor2D() {
                 onWallDragMove={(id, dx, dy) => { draggingWallRef.current = { id, dx, dy } }}
                 onWallDragEnd={() => { draggingWallRef.current = null }}
                 isDrawMode={isWallMode}
+                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode}
                 snapRadius={SNAP_PX / viewport.scale}
+                onRightMouseDown={handleRightMouseDown}
               />
             )}
 
@@ -395,6 +434,8 @@ function Editor2D() {
                 onAPClick={(id) => setSelected(id, 'ap')}
                 onAPDragMove={(id, x, y) => { draggingAPRef.current = { id, x, y } }}
                 onAPDragEnd={() => { draggingAPRef.current = null }}
+                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode}
+                onRightMouseDown={handleRightMouseDown}
               />
             )}
 
@@ -411,6 +452,7 @@ function Editor2D() {
         stageRef={stageRef}
         draggingAPRef={draggingAPRef}
         draggingWallRef={draggingWallRef}
+        draggingScopeRef={draggingScopeRef}
       />
 
       {showScaleDialog && (

@@ -9,7 +9,7 @@ const FREQ_COLOR = {
   6:   '#a855f7',
 }
 
-function APMarker({ ap, isSelected, isDraggable, onClick, onMoved, onDragMove }) {
+function APMarker({ ap, isSelected, isDraggable, onClick, onMoved, onDragMove, isDrawingActive, onRightMouseDown }) {
   const color = FREQ_COLOR[ap.frequency] ?? '#4fc3f7'
   const ringColor = isSelected ? '#e74c3c' : color
 
@@ -19,6 +19,18 @@ function APMarker({ ap, isSelected, isDraggable, onClick, onMoved, onDragMove })
       y={ap.y}
       draggable={isDraggable}
       onClick={(e) => { e.cancelBubble = true; onClick(ap.id) }}
+      onContextMenu={(e) => {
+        e.evt.preventDefault()
+        if (isDrawingActive) return
+        e.cancelBubble = true
+        onClick(ap.id)
+      }}
+      onMouseDown={(e) => {
+        if (e.evt.button === 2) {
+          e.cancelBubble = true
+          onRightMouseDown?.(e.currentTarget)
+        }
+      }}
       onDragStart={(e) => { e.cancelBubble = true; onClick(ap.id) }}
       onDragMove={(e) => {
         e.cancelBubble = true
@@ -76,7 +88,7 @@ function APMarker({ ap, isSelected, isDraggable, onClick, onMoved, onDragMove })
   )
 }
 
-function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd }) {
+function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd, isDrawingActive, onRightMouseDown }) {
   const aps        = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   const updateAP   = useAPStore((s) => s.updateAP)
 
@@ -96,6 +108,8 @@ function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd }
           onClick={onAPClick}
           onMoved={handleMoved}
           onDragMove={onAPDragMove}
+          isDrawingActive={isDrawingActive}
+          onRightMouseDown={onRightMouseDown}
         />
       ))}
     </Group>

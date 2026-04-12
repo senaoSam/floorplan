@@ -2,7 +2,7 @@ import React from 'react'
 import { Group, Line, Circle } from 'react-konva'
 import { useWallStore } from '@/store/useWallStore'
 
-function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, onWallDragMove, onWallDragEnd, isDrawMode, snapRadius }) {
+function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, onWallDragMove, onWallDragEnd, isDrawMode, isDrawingActive, snapRadius, onRightMouseDown }) {
   const walls      = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
   const updateWall = useWallStore((s) => s.updateWall)
 
@@ -29,6 +29,12 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
           <Group
             key={wall.id}
             draggable
+            onMouseDown={(e) => {
+              if (e.evt.button === 2) {
+                e.cancelBubble = true
+                onRightMouseDown?.(e.currentTarget)
+              }
+            }}
             onDragStart={(e) => {
               e.cancelBubble = true
               onWallClick?.(wall.id)
@@ -58,7 +64,13 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
               lineCap="round"
               hitStrokeWidth={12}
               onClick={(e) => {
-                if (isDrawMode) return  // 繪製模式：不攔截，讓事件冒泡到 Stage
+                if (isDrawMode) return
+                e.cancelBubble = true
+                onWallClick?.(wall.id)
+              }}
+              onContextMenu={(e) => {
+                e.evt.preventDefault()
+                if (isDrawingActive) return
                 e.cancelBubble = true
                 onWallClick?.(wall.id)
               }}

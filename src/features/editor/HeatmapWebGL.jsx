@@ -239,7 +239,7 @@ function HeatmapLegend() {
 }
 
 // ── 主元件 ────────────────────────────────────────────────────────────
-function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef }) {
+function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef, draggingScopeRef }) {
   const canvasRef = useRef(null)
 
   const showHeatmap   = useEditorStore((s) => s.showHeatmap)
@@ -360,16 +360,20 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef 
         )
       }
 
-      // Scope mask：取第一個 type:'in' 的範圍
+      // Scope mask：取第一個 type:'in' 的範圍（含拖移偏移）
       const scopes  = useScopeStore.getState().scopesByFloor[floorId] ?? []
       const inScope = scopes.find((s) => s.type === 'in')
       let scopePtCount = 0
       if (inScope) {
+        const dragScope = draggingScopeRef?.current
+        const isDragging = dragScope && dragScope.id === inScope.id
+        const dx = isDragging ? dragScope.dx : 0
+        const dy = isDragging ? dragScope.dy : 0
         const pts = inScope.points  // flat [x0,y0,x1,y1,...]
         scopePtCount = Math.min(pts.length / 2, MAX_SCOPE_PTS)
         for (let i = 0; i < scopePtCount; i++) {
-          scopePtsData[i * 2]     = pts[i * 2]
-          scopePtsData[i * 2 + 1] = pts[i * 2 + 1]
+          scopePtsData[i * 2]     = pts[i * 2]     + dx
+          scopePtsData[i * 2 + 1] = pts[i * 2 + 1] + dy
         }
       }
 
@@ -378,7 +382,10 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef 
       // 變化偵測
       const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0}`).join('|')
       const wallKey  = rawWalls.map((wl) => `${wl.startX},${wl.startY},${wl.endX},${wl.endY},${wl.material?.dbLoss}`).join('|')
-      const scopeKey = inScope ? inScope.id : 'none'
+      const dragScope = draggingScopeRef?.current
+      const scopeKey  = inScope
+        ? `${inScope.id},${dragScope?.id === inScope.id ? `${dragScope.dx.toFixed(1)},${dragScope.dy.toFixed(1)}` : '0,0'}`
+        : 'none'
       const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${apKey},${wallKey},${scopeKey}`
       if (key === prevKey) return
       prevKey = key
@@ -437,7 +444,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef 
       gl.deleteBuffer(posBuf)
       gl.deleteProgram(prog)
     }
-  }, [stageRef, draggingAPRef, draggingWallRef])
+  }, [stageRef, draggingAPRef, draggingWallRef, draggingScopeRef])
 
   return (
     <>

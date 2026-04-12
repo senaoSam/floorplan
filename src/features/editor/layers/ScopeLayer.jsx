@@ -3,8 +3,8 @@ import { Group, Line, Circle } from 'react-konva'
 import { useScopeStore } from '@/store/useScopeStore'
 
 const ZONE_STYLE = {
-  in:  { fill: 'rgba(46, 213, 115, 0.15)', stroke: '#2ed573' },
-  out: { fill: 'rgba(255, 71,  87,  0.15)', stroke: '#ff4757' },
+  in:  { fill: 'rgba(46, 213, 115, 0.18)', stroke: '#2ed573' },
+  out: { fill: 'rgba(255, 71,  87,  0.18)', stroke: '#ff4757' },
 }
 
 // 繪製中的 ghost 預覽
@@ -64,7 +64,7 @@ function DrawingPreview({ points, mousePos, snapRadius }) {
   )
 }
 
-function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScopeId, onScopeClick }) {
+function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScopeId, onScopeClick, isSelectMode, isDrawingActive, onScopeDragMove, onScopeDragEnd, onRightMouseDown }) {
   const zones       = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
   const updateScope = useScopeStore((s) => s.updateScope)
 
@@ -78,15 +78,26 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
           <Group
             key={zone.id}
             draggable
+            onMouseDown={(e) => {
+              if (e.evt.button === 2) {
+                e.cancelBubble = true
+                onRightMouseDown?.(e.currentTarget)
+              }
+            }}
             onDragStart={(e) => {
               e.cancelBubble = true
               onScopeClick?.(zone.id)
+            }}
+            onDragMove={(e) => {
+              e.cancelBubble = true
+              onScopeDragMove?.(zone.id, e.target.x(), e.target.y())
             }}
             onDragEnd={(e) => {
               e.cancelBubble = true
               const dx = e.target.x()
               const dy = e.target.y()
               e.target.position({ x: 0, y: 0 })
+              onScopeDragEnd?.()
               const newPoints = []
               for (let i = 0; i < zone.points.length; i += 2) {
                 newPoints.push(zone.points[i] + dx, zone.points[i + 1] + dy)
@@ -99,10 +110,23 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
               closed
               fill={style.fill}
               stroke={isSelected ? '#e74c3c' : style.stroke}
-              strokeWidth={isSelected ? 3 : 2}
+              strokeWidth={isSelected ? 4 : 3}
               dash={zone.type === 'out' ? [8, 4] : undefined}
+              shadowColor="rgba(0,0,0,0.6)"
+              shadowBlur={4}
+              shadowOffset={{ x: 0, y: 0 }}
               hitStrokeWidth={10}
-              onClick={(e) => { e.cancelBubble = true; onScopeClick?.(zone.id) }}
+              onClick={(e) => {
+                if (!isSelectMode) return
+                e.cancelBubble = true
+                onScopeClick?.(zone.id)
+              }}
+              onContextMenu={(e) => {
+                e.evt.preventDefault()
+                if (isDrawingActive) return
+                e.cancelBubble = true
+                onScopeClick?.(zone.id)
+              }}
             />
           </Group>
         )
