@@ -43,6 +43,7 @@ const TASKS = [
     items: [
       { id: '4-1', done: true,  text: 'AP 放置' },
       { id: '4-2', done: true,  text: 'AP 屬性面板' },
+      { id: '4-3', done: false, text: 'Select 模式拖曳牆體、Scope、Floor Hole、AP' },
     ],
   },
   {
