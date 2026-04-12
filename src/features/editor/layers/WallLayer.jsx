@@ -1,9 +1,24 @@
 import React from 'react'
 import { Group, Line, Circle } from 'react-konva'
 import { useWallStore } from '@/store/useWallStore'
-function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, onWallDragMove, onWallDragEnd }) {
+
+function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, onWallDragMove, onWallDragEnd, isDrawMode, snapRadius }) {
   const walls      = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
   const updateWall = useWallStore((s) => s.updateWall)
+
+  // 找出游標正在吸附的端點（draw 模式下才需要）
+  let snapEndpoint = null
+  if (isDrawMode && mousePos && snapRadius) {
+    for (const w of walls) {
+      for (const ep of [{ x: w.startX, y: w.startY }, { x: w.endX, y: w.endY }]) {
+        if (Math.hypot(mousePos.x - ep.x, mousePos.y - ep.y) < snapRadius) {
+          snapEndpoint = ep
+          break
+        }
+      }
+      if (snapEndpoint) break
+    }
+  }
 
   return (
     <Group>
@@ -42,13 +57,17 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
               strokeWidth={isSelected ? 5 : 3}
               lineCap="round"
               hitStrokeWidth={12}
-              onClick={(e) => { e.cancelBubble = true; onWallClick?.(wall.id) }}
+              onClick={(e) => {
+                if (isDrawMode) return  // 繪製模式：不攔截，讓事件冒泡到 Stage
+                e.cancelBubble = true
+                onWallClick?.(wall.id)
+              }}
             />
           </Group>
         )
       })}
 
-      {/* 繪製中的 ghost 線：黑色外框 + 亮色內線，確保在淺/深背景都清晰 */}
+      {/* 繪製中的 ghost 線 */}
       {drawStart && mousePos && (
         <>
           <Line
@@ -72,8 +91,16 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
       {/* 繪製中的起點 */}
       {drawStart && (
         <>
-          <Circle x={drawStart.x} y={drawStart.y} radius={7} fill="#000" opacity={0.4} />
-          <Circle x={drawStart.x} y={drawStart.y} radius={5} fill="#00e5ff" />
+          <Circle x={drawStart.x} y={drawStart.y} radius={7} fill="#000" opacity={0.4} listening={false} />
+          <Circle x={drawStart.x} y={drawStart.y} radius={5} fill="#00e5ff" listening={false} />
+        </>
+      )}
+
+      {/* 端點吸附高亮 */}
+      {snapEndpoint && (
+        <>
+          <Circle x={snapEndpoint.x} y={snapEndpoint.y} radius={9} fill="#000" opacity={0.4} listening={false} />
+          <Circle x={snapEndpoint.x} y={snapEndpoint.y} radius={7} stroke="#00e5ff" strokeWidth={2} fill="rgba(0,229,255,0.25)" listening={false} />
         </>
       )}
     </Group>

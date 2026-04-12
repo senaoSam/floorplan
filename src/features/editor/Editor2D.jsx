@@ -176,17 +176,32 @@ function Editor2D() {
     if (e.evt.button === 1) e.evt.preventDefault()
   }, [])
 
+  // ── 牆體端點吸附 ──────────────────────────────────────
+  const snapToWallEndpoint = useCallback((pos) => {
+    const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
+    const snapDist = SNAP_PX / viewport.scale
+    for (const w of walls) {
+      for (const ep of [{ x: w.startX, y: w.startY }, { x: w.endX, y: w.endY }]) {
+        if (Math.hypot(pos.x - ep.x, pos.y - ep.y) < snapDist) return ep
+      }
+    }
+    return pos
+  }, [activeFloorId, viewport.scale])
+
   // ── 滑鼠移動：更新 ghost 線 ────────────────────────────
   const handleMouseMove = useCallback(() => {
     const pos = stageRef.current?.getPointerPosition()
-    if (pos) setMousePos(toCanvasPos(pos))
-  }, [toCanvasPos])
+    if (!pos) return
+    const canvasPos = toCanvasPos(pos)
+    setMousePos(isWallMode ? snapToWallEndpoint(canvasPos) : canvasPos)
+  }, [toCanvasPos, isWallMode, snapToWallEndpoint])
 
   // ── 點擊：分流到各模式 ─────────────────────────────────
   const handleStageClick = useCallback((e) => {
     if (e.evt.button !== 0) return
 
-    const pos = toCanvasPos(stageRef.current.getPointerPosition())
+    const rawPos = toCanvasPos(stageRef.current.getPointerPosition())
+    const pos = isWallMode ? snapToWallEndpoint(rawPos) : rawPos
 
     // 比例尺
     if (isScaleMode && !showScaleDialog) {
@@ -274,7 +289,7 @@ function Editor2D() {
     clearSelected()
   }, [
     isScaleMode, showScaleDialog, scalePt1,
-    isWallMode, wallDrawStart, activeFloorId,
+    isWallMode, wallDrawStart, activeFloorId, snapToWallEndpoint,
     isAPMode, apCount,
     isScopeMode, scopePoints, viewport.scale, addScope,
     isFloorHoleMode, floorHolePoints, addFloorHole,
@@ -368,6 +383,8 @@ function Editor2D() {
                 onWallClick={(id) => setSelected(id, 'wall')}
                 onWallDragMove={(id, dx, dy) => { draggingWallRef.current = { id, dx, dy } }}
                 onWallDragEnd={() => { draggingWallRef.current = null }}
+                isDrawMode={isWallMode}
+                snapRadius={SNAP_PX / viewport.scale}
               />
             )}
 
