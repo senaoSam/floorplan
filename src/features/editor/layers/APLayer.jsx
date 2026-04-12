@@ -1,5 +1,5 @@
 import React from 'react'
-import { Layer, Circle, Arc, Text, Group } from 'react-konva'
+import { Group, Circle, Arc, Text } from 'react-konva'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 
@@ -89,7 +89,7 @@ function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd }
   }
 
   return (
-    <Layer>
+    <Group>
       {aps.map((ap) => (
         <APMarker
           key={ap.id}
@@ -101,7 +101,7 @@ function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd }
           onDragMove={onAPDragMove}
         />
       ))}
-    </Layer>
+    </Group>
   )
 }
 

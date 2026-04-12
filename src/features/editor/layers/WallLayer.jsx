@@ -1,12 +1,12 @@
 import React from 'react'
-import { Layer, Line, Circle } from 'react-konva'
+import { Group, Line, Circle } from 'react-konva'
 import { useWallStore } from '@/store/useWallStore'
 
 function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick }) {
   const walls = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
 
   return (
-    <Layer>
+    <Group>
       {/* 已完成的牆體 */}
       {walls.map((wall) => {
         const isSelected = wall.id === selectedWallId
@@ -51,7 +51,7 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick }
           <Circle x={drawStart.x} y={drawStart.y} radius={5} fill="#00e5ff" />
         </>
       )}
-    </Layer>
+    </Group>
   )
 }
 

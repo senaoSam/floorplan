@@ -57,7 +57,7 @@
 | #   | 狀態 | Task                                              |
 | --- | ---- | ------------------------------------------------- |
 | 5-1 | ✅   | 基礎 RSSI 計算（FSPL，不含牆體）+ Canvas 疊加顯示 |
-| 5-2 | ⬜   | Ray-casting 牆體衰減（Web Worker 背景計算）       |
+| 5-2 | ✅   | Ray-casting 牆體衰減（Web Worker 背景計算）       |
 | 5-3 | ⬜   | WebGL Fragment Shader 即時渲染（取代 CPU Canvas） |
 | 5-4 | ⬜   | Co-channel 干擾計算：AP 加入 channel 屬性，改以 SINR 顯示熱圖 |
 

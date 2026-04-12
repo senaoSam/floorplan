@@ -2,120 +2,80 @@ import React, { useRef, useEffect } from 'react'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
+import { useWallStore } from '@/store/useWallStore'
 
-// 頻段對應中心頻率 (MHz)
-const FREQ_MHZ = { 2.4: 2437, 5: 5500, 6: 6000 }
-
-// 取樣步長（每 N 個螢幕像素取一個樣本）
 const STEP = 4
 
-// RSSI 顏色區間（由強到弱）
-const COLOR_STOPS = [
-  { rssi: -45,  r: 0,   g: 230, b: 118, a: 190 },
-  { rssi: -60,  r: 118, g: 215, b: 40,  a: 175 },
-  { rssi: -70,  r: 255, g: 210, b: 0,   a: 165 },
-  { rssi: -80,  r: 255, g: 120, b: 0,   a: 155 },
-  { rssi: -90,  r: 220, g: 20,  b: 0,   a: 140 },
-  { rssi: -100, r: 150, g: 0,   b: 0,   a: 80  },
-]
-
-function rssiToRGBA(rssi) {
-  if (rssi >= COLOR_STOPS[0].rssi) {
-    const s = COLOR_STOPS[0]
-    return [s.r, s.g, s.b, s.a]
-  }
-  const last = COLOR_STOPS[COLOR_STOPS.length - 1]
-  if (rssi <= last.rssi) return null
-
-  for (let i = 0; i < COLOR_STOPS.length - 1; i++) {
-    const s1 = COLOR_STOPS[i]
-    const s2 = COLOR_STOPS[i + 1]
-    if (rssi >= s2.rssi) {
-      const t = (rssi - s1.rssi) / (s2.rssi - s1.rssi)
-      return [
-        Math.round(s1.r + (s2.r - s1.r) * t),
-        Math.round(s1.g + (s2.g - s1.g) * t),
-        Math.round(s1.b + (s2.b - s1.b) * t),
-        Math.round(s1.a + (s2.a - s1.a) * t),
-      ]
-    }
-  }
-  return null
-}
-
-// FSPL：RSSI = TxPower - 20·log10(d_m) - 20·log10(f_MHz) - 32.44
-function calcRSSI(ap, cx, cy, floorScale) {
-  const dx = cx - ap.x
-  const dy = cy - ap.y
-  const distPx = Math.sqrt(dx * dx + dy * dy)
-  if (distPx < 0.5) return ap.txPower
-  const distM = distPx / floorScale
-  const freqMHz = FREQ_MHZ[ap.frequency] ?? 5500
-  const fspl = 20 * Math.log10(distM) + 20 * Math.log10(freqMHz) + 32.44
-  return ap.txPower - fspl
-}
-
-function renderHeatmap(ctx, w, h, vp, aps, floorScale) {
-  const offW = Math.ceil(w / STEP)
-  const offH = Math.ceil(h / STEP)
-  const off = document.createElement('canvas')
-  off.width  = offW
-  off.height = offH
-  const offCtx  = off.getContext('2d')
-  const imgData = offCtx.createImageData(offW, offH)
-  const data    = imgData.data
-
-  const { x: vpX, y: vpY, scale: vpS } = vp
-
-  for (let iy = 0; iy < offH; iy++) {
-    const cy = (iy * STEP - vpY) / vpS
-    for (let ix = 0; ix < offW; ix++) {
-      const cx = (ix * STEP - vpX) / vpS
-      let maxRSSI = -Infinity
-      for (const ap of aps) {
-        const rssi = calcRSSI(ap, cx, cy, floorScale)
-        if (rssi > maxRSSI) maxRSSI = rssi
-      }
-      const color = rssiToRGBA(maxRSSI)
-      if (!color) continue
-      const idx = (iy * offW + ix) * 4
-      data[idx]     = color[0]
-      data[idx + 1] = color[1]
-      data[idx + 2] = color[2]
-      data[idx + 3] = color[3]
-    }
-  }
-
-  offCtx.putImageData(imgData, 0, 0)
-  ctx.clearRect(0, 0, w, h)
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(off, 0, 0, w, h)
-}
-
-// stageRef    — 直接讀 Konva Stage 位置，無需 React state 更新即可即時追蹤
-// draggingAPRef — { id, x, y } 拖移中的 AP 暫存位置，null 表示無拖移
+// stageRef      — 直接讀 Konva Stage 即時位置
+// draggingAPRef — { id, x, y } AP 拖移中的暫存座標
 function HeatmapCanvas({ width, height, stageRef, draggingAPRef }) {
   const canvasRef = useRef(null)
 
-  // 用 React hooks 訂閱 store，再同步到 ref 供 RAF loop 讀取
+  // React 訂閱（觸發 re-render 以更新 ref）
   const showHeatmap   = useEditorStore((s) => s.showHeatmap)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
   const floorScale    = useFloorStore((s) => s.scale)
 
+  // Ref 供 RAF loop 讀取，避免 stale closure
   const showHeatmapRef   = useRef(showHeatmap)
   const activeFloorIdRef = useRef(activeFloorId)
   const floorScaleRef    = useRef(floorScale)
 
-  useEffect(() => { showHeatmapRef.current = showHeatmap },   [showHeatmap])
+  useEffect(() => { showHeatmapRef.current = showHeatmap },     [showHeatmap])
   useEffect(() => { activeFloorIdRef.current = activeFloorId }, [activeFloorId])
-  useEffect(() => { floorScaleRef.current = floorScale },     [floorScale])
+  useEffect(() => { floorScaleRef.current = floorScale },       [floorScale])
 
-  // RAF loop：每幀直接讀 Stage 位置，只在有變化時重新渲染
+  // Worker + RAF loop：mount 時建立，unmount 時終止
   useEffect(() => {
-    let rafId
-    let prevKey = null
+    const worker = new Worker(
+      new URL('./heatmapWorker.js', import.meta.url),
+      { type: 'classic' }
+    )
 
+    let rafId
+    let prevKey      = null
+    let workerBusy   = false
+    let pendingReq   = null  // 計算中若有新請求，暫存於此
+
+    // ── Worker 回應：繪製結果 ────────────────────────────
+    worker.onerror = (e) => {
+      console.error('[HeatmapWorker] error:', e.message, e)
+    }
+
+    worker.onmessage = (e) => {
+      workerBusy = false
+      const canvas = canvasRef.current
+      if (!canvas) return
+
+      const { buffer, offW, offH, canvasW, canvasH } = e.data
+      // 若畫布尺寸已變動，丟棄過期結果
+      if (canvas.width !== canvasW || canvas.height !== canvasH) {
+        if (pendingReq) { worker.postMessage(pendingReq); workerBusy = true; pendingReq = null }
+        return
+      }
+
+      // 把低解析度 buffer 放大繪製到主 canvas
+      const pixels  = new Uint8ClampedArray(buffer)
+      const imgData = new ImageData(pixels, offW, offH)
+      const off     = document.createElement('canvas')
+      off.width  = offW
+      off.height = offH
+      off.getContext('2d').putImageData(imgData, 0, 0)
+
+      const ctx = canvas.getContext('2d')
+      ctx.clearRect(0, 0, canvasW, canvasH)
+      ctx.imageSmoothingEnabled = false   // 保留銳利邊界，讓牆體衰減邊界清晰可見
+      ctx.drawImage(off, 0, 0, canvasW, canvasH)
+
+      // 若有待送請求，立即發送
+      if (pendingReq) {
+        worker.postMessage(pendingReq)
+        workerBusy = true
+        pendingReq = null
+      }
+    }
+
+    // ── RAF loop：偵測變化，送任務給 Worker ──────────────
     const loop = () => {
       rafId = requestAnimationFrame(loop)
 
@@ -129,14 +89,22 @@ function HeatmapCanvas({ width, height, stageRef, draggingAPRef }) {
       const w = canvas.width
       const h = canvas.height
 
-      // 直接從 Zustand store 讀最新 AP 資料（不觸發訂閱/re-render）
+      // 直接讀最新 AP 資料（不觸發訂閱）
       let aps = useAPStore.getState().apsByFloor[floorId] ?? []
 
-      // 若有 AP 正在拖移，覆蓋其座標
+      // 若有 AP 正在拖移，覆蓋其座標（不更新 store，不觸發 re-render）
       const drag = draggingAPRef?.current
       if (drag) {
         aps = aps.map((ap) => ap.id === drag.id ? { ...ap, x: drag.x, y: drag.y } : ap)
       }
+
+      // 直接讀牆體資料
+      const rawWalls = useWallStore.getState().wallsByFloor[floorId] ?? []
+      const walls = rawWalls.map((w) => ({
+        startX: w.startX, startY: w.startY,
+        endX:   w.endX,   endY:   w.endY,
+        dbLoss: w.material?.dbLoss ?? 0,
+      }))
 
       if (!showH || aps.length === 0 || !floorS || w === 0 || h === 0) {
         if (prevKey !== null) {
@@ -146,22 +114,32 @@ function HeatmapCanvas({ width, height, stageRef, draggingAPRef }) {
         return
       }
 
-      // 直接讀 Stage 當前位置（支援 pan 即時更新）
+      // 直接讀 Stage 當前位置（支援 pan/zoom 即時更新）
       const vp = { x: stage.x(), y: stage.y(), scale: stage.scaleX() }
 
-      // 變化偵測：內容相同就跳過渲染
-      const apKey = aps.map((a) =>
-        `${a.id}:${Math.round(a.x)},${Math.round(a.y)},${a.txPower},${a.frequency}`
-      ).join('|')
-      const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${apKey}`
+      // 變化偵測：相同就跳過
+      const apKey   = aps.map((a) => `${a.id}:${Math.round(a.x)},${Math.round(a.y)},${a.txPower},${a.frequency}`).join('|')
+      const wallKey = walls.map((w) => `${Math.round(w.startX)},${Math.round(w.startY)},${Math.round(w.endX)},${Math.round(w.endY)},${w.dbLoss}`).join('|')
+      const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${apKey},${wallKey}`
       if (key === prevKey) return
       prevKey = key
 
-      renderHeatmap(canvas.getContext('2d'), w, h, vp, aps, floorS)
+      const req = { aps, walls, viewport: vp, floorScale: floorS, width: w, height: h, step: STEP }
+
+      if (workerBusy) {
+        pendingReq = req   // 暫存，等 Worker 回應後立即送
+      } else {
+        worker.postMessage(req)
+        workerBusy = true
+      }
     }
 
     rafId = requestAnimationFrame(loop)
-    return () => cancelAnimationFrame(rafId)
+
+    return () => {
+      cancelAnimationFrame(rafId)
+      worker.terminate()
+    }
   }, [stageRef, draggingAPRef])
 
   return (

@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from 'react'
+import React, { useRef, useState, useCallback, useEffect } from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
 import { renderPdfPageToBlob, renderAllPdfPages } from '@/utils/pdfUtils'
 import './DropZone.sass'
@@ -6,9 +6,15 @@ import './DropZone.sass'
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg']
 
 function DropZone() {
-  const fileInputRef = useRef(null)
+  const fileInputRef  = useRef(null)
+  const isMountedRef  = useRef(true)
   const [isDragging, setIsDragging] = useState(false)
   const [loadingMsg, setLoadingMsg] = useState(null)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => { isMountedRef.current = false }
+  }, [])
 
   const importImageFloor    = useFloorStore((s) => s.importImageFloor)
   const importMultipleFloors = useFloorStore((s) => s.importMultipleFloors)
@@ -22,7 +28,7 @@ function DropZone() {
         const img = new window.Image()
         img.onload = () => {
           importImageFloor(file, img.naturalWidth, img.naturalHeight)
-          setLoadingMsg(null)
+          if (isMountedRef.current) setLoadingMsg(null)
         }
         img.src = URL.createObjectURL(file)
 

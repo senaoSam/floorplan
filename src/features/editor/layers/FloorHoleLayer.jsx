@@ -1,5 +1,5 @@
 import React from 'react'
-import { Layer, Line, Circle } from 'react-konva'
+import { Group, Line, Circle } from 'react-konva'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 
 const HOLE_FILL   = 'rgba(124, 58, 237, 0.20)'
@@ -80,7 +80,7 @@ function FloorHoleLayer({
   const holes = useFloorHoleStore((s) => s.floorHolesByFloor[floorId] ?? [])
 
   return (
-    <Layer>
+    <Group>
       {/* 已完成的 Floor Hole 多邊形 */}
       {holes.map((hole) => {
         const isSelected = hole.id === selectedHoleId
@@ -104,7 +104,7 @@ function FloorHoleLayer({
 
       {/* 繪製中預覽 */}
       <DrawingPreview points={drawingPoints} mousePos={mousePos} snapRadius={snapRadius} />
-    </Layer>
+    </Group>
   )
 }
 

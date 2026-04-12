@@ -1,5 +1,5 @@
 import React from 'react'
-import { Layer, Line, Circle, Text, Rect } from 'react-konva'
+import { Group, Line, Circle, Text, Rect } from 'react-konva'
 
 const COLOR = '#f1c40f'
 
@@ -15,7 +15,7 @@ function ScaleLayer({ pt1, pt2, mousePos }) {
   const midY = pt1 && endPt ? (pt1.y + endPt.y) / 2 - 18 : 0
 
   return (
-    <Layer>
+    <Group>
       {/* 量測線：黑色外框 + 黃色內線 */}
       {pt1 && endPt && (
         <>
@@ -73,7 +73,7 @@ function ScaleLayer({ pt1, pt2, mousePos }) {
           />
         </>
       )}
-    </Layer>
+    </Group>
   )
 }
 

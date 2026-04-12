@@ -334,51 +334,54 @@ function Editor2D() {
 
           {activeFloor && <FloorImageLayer floor={activeFloor} />}
 
-          {activeFloorId && (
-            <ScopeLayer
-              floorId={activeFloorId}
-              drawingPoints={isScopeMode ? scopePoints : []}
-              mousePos={mousePos}
-              snapRadius={SNAP_PX / viewport.scale}
-              selectedScopeId={selectedType === 'scope' ? selectedId : null}
-              onScopeClick={(id) => setSelected(id, 'scope')}
-            />
-          )}
+          {/* 所有向量元素合併為單一 Layer，內部用 Group 區隔 */}
+          <Layer>
+            {activeFloorId && (
+              <ScopeLayer
+                floorId={activeFloorId}
+                drawingPoints={isScopeMode ? scopePoints : []}
+                mousePos={mousePos}
+                snapRadius={SNAP_PX / viewport.scale}
+                selectedScopeId={selectedType === 'scope' ? selectedId : null}
+                onScopeClick={(id) => setSelected(id, 'scope')}
+              />
+            )}
 
-          {activeFloorId && (
-            <FloorHoleLayer
-              floorId={activeFloorId}
-              drawingPoints={isFloorHoleMode ? floorHolePoints : []}
-              mousePos={mousePos}
-              snapRadius={SNAP_PX / viewport.scale}
-              selectedHoleId={selectedType === 'floor_hole' ? selectedId : null}
-              onHoleClick={(id) => setSelected(id, 'floor_hole')}
-            />
-          )}
+            {activeFloorId && (
+              <FloorHoleLayer
+                floorId={activeFloorId}
+                drawingPoints={isFloorHoleMode ? floorHolePoints : []}
+                mousePos={mousePos}
+                snapRadius={SNAP_PX / viewport.scale}
+                selectedHoleId={selectedType === 'floor_hole' ? selectedId : null}
+                onHoleClick={(id) => setSelected(id, 'floor_hole')}
+              />
+            )}
 
-          {activeFloorId && (
-            <WallLayer
-              floorId={activeFloorId}
-              drawStart={isWallMode ? wallDrawStart : null}
-              mousePos={mousePos}
-              selectedWallId={selectedType === 'wall' ? selectedId : null}
-              onWallClick={(id) => setSelected(id, 'wall')}
-            />
-          )}
+            {activeFloorId && (
+              <WallLayer
+                floorId={activeFloorId}
+                drawStart={isWallMode ? wallDrawStart : null}
+                mousePos={mousePos}
+                selectedWallId={selectedType === 'wall' ? selectedId : null}
+                onWallClick={(id) => setSelected(id, 'wall')}
+              />
+            )}
 
-          {activeFloorId && (
-            <APLayer
-              floorId={activeFloorId}
-              selectedAPId={selectedType === 'ap' ? selectedId : null}
-              onAPClick={(id) => setSelected(id, 'ap')}
-              onAPDragMove={(id, x, y) => { draggingAPRef.current = { id, x, y } }}
-              onAPDragEnd={() => { draggingAPRef.current = null }}
-            />
-          )}
+            {activeFloorId && (
+              <APLayer
+                floorId={activeFloorId}
+                selectedAPId={selectedType === 'ap' ? selectedId : null}
+                onAPClick={(id) => setSelected(id, 'ap')}
+                onAPDragMove={(id, x, y) => { draggingAPRef.current = { id, x, y } }}
+                onAPDragEnd={() => { draggingAPRef.current = null }}
+              />
+            )}
 
-          {isScaleMode && (
-            <ScaleLayer pt1={scalePt1} pt2={scalePt2} mousePos={mousePos} />
-          )}
+            {isScaleMode && (
+              <ScaleLayer pt1={scalePt1} pt2={scalePt2} mousePos={mousePos} />
+            )}
+          </Layer>
         </Stage>
       )}
 

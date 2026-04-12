@@ -1,5 +1,5 @@
 import React from 'react'
-import { Layer, Line, Circle, Group } from 'react-konva'
+import { Group, Line, Circle } from 'react-konva'
 import { useScopeStore } from '@/store/useScopeStore'
 
 const ZONE_STYLE = {
@@ -68,7 +68,7 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
   const zones = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
 
   return (
-    <Layer>
+    <Group>
       {/* 已完成的區域 */}
       {zones.map((zone) => {
         const style = ZONE_STYLE[zone.type] ?? ZONE_STYLE.in
@@ -90,7 +90,7 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
 
       {/* 繪製中預覽 */}
       <DrawingPreview points={drawingPoints} mousePos={mousePos} snapRadius={snapRadius} />
-    </Layer>
+    </Group>
   )
 }
 
