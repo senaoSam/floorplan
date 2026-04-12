@@ -1,0 +1,32 @@
+@use '@/styles/variables' as *
+
+.demo-loader
+  position: fixed
+  bottom: 60px
+  left: 16px
+  z-index: 500
+  display: flex
+  align-items: center
+  gap: 7px
+  height: 34px
+  padding: 0 14px
+  border: 1px solid rgba(255, 255, 255, 0.18)
+  border-radius: 17px
+  background: rgba(15, 52, 96, 0.85)
+  backdrop-filter: blur(6px)
+  color: $text-primary
+  font-size: 12px
+  cursor: pointer
+  white-space: nowrap
+  transition: border-color 0.2s, background 0.2s
+
+  &:hover:not(:disabled)
+    border-color: rgba(255, 255, 255, 0.4)
+    background: rgba(20, 65, 120, 0.9)
+
+  &:disabled
+    cursor: default
+
+  &--loaded
+    border-color: rgba(46, 213, 115, 0.4)
+    color: #2ed573

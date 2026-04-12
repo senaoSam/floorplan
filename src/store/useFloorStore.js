@@ -34,6 +34,21 @@ export const useFloorStore = create((set, get) => ({
     return floors.find((f) => f.id === activeFloorId) ?? null
   },
 
+  // 從靜態 URL 直接建立樓層（demo 用）
+  importFloorFromUrl: (imageUrl, imageWidth, imageHeight, name) => {
+    const id = generateId('floor')
+    const floorName = name ?? `${get().floors.length + 1}F`
+    const floor = {
+      id, name: floorName, imageUrl, imageWidth, imageHeight,
+      opacity: 1, rotation: 0, scale: null, offsetX: 0, offsetY: 0,
+    }
+    set((state) => ({
+      floors: [...state.floors, floor],
+      activeFloorId: id,
+    }))
+    return floor
+  },
+
   // 從圖片檔案建立新樓層並設為 active
   importImageFloor: (file, imageWidth, imageHeight) => {
     const id = generateId('floor')
