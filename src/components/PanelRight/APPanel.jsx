@@ -33,8 +33,6 @@ function APPanel({ floorId, apId }) {
   const removeAP    = useAPStore((s) => s.removeAP)
   const clearSelected = useEditorStore((s) => s.clearSelected)
 
-  if (!ap) return null
-
   const handleField = useCallback((field, value) => {
     if (field === 'frequency') {
       updateAP(floorId, apId, { frequency: value, channel: DEFAULT_CHANNEL[value] ?? 1 })
@@ -52,6 +50,8 @@ function APPanel({ floorId, apId }) {
     removeAP(floorId, apId)
     clearSelected()
   }
+
+  if (!ap) return null
 
   return (
     <div className="ap-panel">

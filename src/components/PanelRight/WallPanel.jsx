@@ -11,8 +11,6 @@ function WallPanel({ floorId, wallId }) {
   const removeWall = useWallStore((s) => s.removeWall)
   const clearSelected = useEditorStore((s) => s.clearSelected)
 
-  if (!wall) return null
-
   const handleMaterial = useCallback((mat) => {
     updateWall(floorId, wallId, { material: mat })
   }, [floorId, wallId, updateWall])
@@ -26,6 +24,8 @@ function WallPanel({ floorId, wallId }) {
     removeWall(floorId, wallId)
     clearSelected()
   }
+
+  if (!wall) return null
 
   const len = Math.hypot(wall.endX - wall.startX, wall.endY - wall.startY).toFixed(0)
 
