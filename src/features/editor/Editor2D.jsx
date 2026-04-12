@@ -220,6 +220,7 @@ function Editor2D() {
         z: 2.4,
         txPower: 20,
         frequency: 5,
+        channel: 36,
         antennaMode: 'omni',
         mountType: 'ceiling',
         name: `AP-${String(apCount + 1).padStart(2, '0')}`,

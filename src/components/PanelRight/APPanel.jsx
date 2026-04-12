@@ -9,6 +9,14 @@ const FREQ_OPTIONS = [
   { value: 6,   label: '6 GHz',   color: '#a855f7' },
 ]
 
+const CHANNEL_OPTIONS = {
+  2.4: [1, 6, 11],
+  5:   [36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144, 149, 153, 157, 161, 165],
+  6:   [1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49, 53, 57, 61, 65, 69, 73, 77, 81, 85, 89, 93],
+}
+
+const DEFAULT_CHANNEL = { 2.4: 1, 5: 36, 6: 1 }
+
 const ANTENNA_OPTIONS = [
   { value: 'omni',        label: '全向' },
   { value: 'directional', label: '定向' },
@@ -28,7 +36,11 @@ function APPanel({ floorId, apId }) {
   if (!ap) return null
 
   const handleField = useCallback((field, value) => {
-    updateAP(floorId, apId, { [field]: value })
+    if (field === 'frequency') {
+      updateAP(floorId, apId, { frequency: value, channel: DEFAULT_CHANNEL[value] ?? 1 })
+    } else {
+      updateAP(floorId, apId, { [field]: value })
+    }
   }, [floorId, apId, updateAP])
 
   const handleNumber = useCallback((field, raw) => {
@@ -74,6 +86,20 @@ function APPanel({ floorId, apId }) {
             </button>
           ))}
         </div>
+      </section>
+
+      {/* 頻道 */}
+      <section className="ap-panel__section">
+        <p className="ap-panel__label">頻道</p>
+        <select
+          className="ap-panel__input ap-panel__select"
+          value={ap.channel ?? DEFAULT_CHANNEL[ap.frequency] ?? 1}
+          onChange={(e) => handleField('channel', Number(e.target.value))}
+        >
+          {(CHANNEL_OPTIONS[ap.frequency] ?? []).map((ch) => (
+            <option key={ch} value={ch}>Ch {ch}</option>
+          ))}
+        </select>
       </section>
 
       {/* 發射功率 */}
