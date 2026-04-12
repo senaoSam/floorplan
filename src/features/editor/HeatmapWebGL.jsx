@@ -3,12 +3,14 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useWallStore } from '@/store/useWallStore'
+import { useScopeStore } from '@/store/useScopeStore'
 
-const MAX_APS   = 32
-const MAX_WALLS = 64
+const MAX_APS        = 32
+const MAX_WALLS      = 64
+const MAX_SCOPE_PTS  = 64
 
-const FREQ_MHZ      = { 2.4: 2437, 5: 5500, 6: 6000 }
-const DEFAULT_CHAN   = { 2.4: 1,    5: 36,   6: 1    }
+const FREQ_MHZ    = { 2.4: 2437, 5: 5500, 6: 6000 }
+const DEFAULT_CHAN = { 2.4: 1,    5: 36,   6: 1    }
 
 // ── Vertex Shader：全螢幕四邊形 ──────────────────────────────────────
 const VERT_SRC = `#version 300 es
@@ -17,12 +19,13 @@ void main() {
   gl_Position = vec4(a_pos, 0.0, 1.0);
 }`
 
-// ── Fragment Shader：逐像素 SINR（含同頻干擾 + 牆體衰減）───────────
+// ── Fragment Shader：逐像素 SINR（含同頻干擾 + 牆體衰減 + Scope mask）
 const FRAG_SRC = `#version 300 es
 precision highp float;
 
-#define MAX_APS   ${MAX_APS}
-#define MAX_WALLS ${MAX_WALLS}
+#define MAX_APS       ${MAX_APS}
+#define MAX_WALLS     ${MAX_WALLS}
+#define MAX_SCOPE_PTS ${MAX_SCOPE_PTS}
 
 uniform vec2  u_resolution;
 uniform float u_vpX;
@@ -31,10 +34,12 @@ uniform float u_vpScale;
 uniform float u_floorScale;
 uniform int   u_apCount;
 uniform int   u_wallCount;
-uniform vec4  u_aps[MAX_APS];         // xy=canvasPos, z=txPower, w=freqMHz
-uniform float u_apChannels[MAX_APS];  // channel number
+uniform vec4  u_aps[MAX_APS];
+uniform float u_apChannels[MAX_APS];
 uniform vec4  u_walls[MAX_WALLS];
 uniform float u_wallLoss[MAX_WALLS];
+uniform vec2  u_scopePts[MAX_SCOPE_PTS];
+uniform int   u_scopePtCount;
 
 out vec4 outColor;
 
@@ -61,8 +66,25 @@ float wallLoss(vec2 px, vec2 ap) {
   return loss;
 }
 
+// Ray-casting point-in-polygon（canvas 座標）
+bool pointInScope(vec2 p) {
+  bool inside = false;
+  int n = u_scopePtCount;
+  int j = n - 1;
+  for (int i = 0; i < MAX_SCOPE_PTS; i++) {
+    if (i >= n) break;
+    vec2 pi = u_scopePts[i];
+    vec2 pj = u_scopePts[j];
+    if ((pi.y > p.y) != (pj.y > p.y) &&
+        p.x < (pj.x - pi.x) * (p.y - pi.y) / (pj.y - pi.y) + pi.x) {
+      inside = !inside;
+    }
+    j = i;
+  }
+  return inside;
+}
+
 // SINR 色階（參考 Hamina 配色）
-// 25+ dB: 萊姆黃綠 → 20: 黃綠 → 15: 黃 → 10: 橘紅 → 5: 紅 → 0: 暗紅 → <0: 淡出
 vec4 sinrToColor(float v) {
   if (v >= 25.0) return vec4(0.659, 0.831, 0.000, 0.85);
   if (v <= -3.0) return vec4(0.0);
@@ -86,6 +108,12 @@ void main() {
 
   vec2 screen = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y);
   vec2 canvas = (screen - vec2(u_vpX, u_vpY)) / u_vpScale;
+
+  // Scope mask：有定義範圍時，範圍外不渲染
+  if (u_scopePtCount > 0 && !pointInScope(canvas)) {
+    outColor = vec4(0.0);
+    return;
+  }
 
   // Pass 1：計算每顆 AP 的 RSSI，找出最佳服務 AP
   float rssis[MAX_APS];
@@ -113,7 +141,7 @@ void main() {
 
   if (bestRSSI < -100.0) { outColor = vec4(0.0); return; }
 
-  // Pass 2：累積同頻干擾（相同 channel 且相同頻段）
+  // Pass 2：累積同頻干擾
   float servingChan = u_apChannels[bestIdx];
   float servingFreq = u_aps[bestIdx].w;
 
@@ -162,6 +190,54 @@ function makeProgram(gl) {
   return prog
 }
 
+// ── SINR Legend ───────────────────────────────────────────────────────
+const LEGEND_ITEMS = [
+  { label: '≥ 25 dB', color: 'rgba(168,212,0,0.85)' },
+  { label: '20 dB',   color: 'rgba(204,230,26,0.82)' },
+  { label: '15 dB',   color: 'rgba(255,209,0,0.80)'  },
+  { label: '10 dB',   color: 'rgba(255,107,0,0.80)'  },
+  { label: '5 dB',    color: 'rgba(230,26,13,0.78)'  },
+  { label: '0 dB',    color: 'rgba(153,0,0,0.70)'    },
+  { label: '無覆蓋',  color: 'transparent', noSignal: true },
+]
+
+function HeatmapLegend() {
+  return (
+    <div style={{
+      position: 'absolute',
+      bottom: 16,
+      right: 16,
+      zIndex: 400,
+      background: 'rgba(18,18,30,0.90)',
+      backdropFilter: 'blur(8px)',
+      border: '1px solid rgba(255,255,255,0.12)',
+      borderRadius: 8,
+      padding: '8px 12px',
+      minWidth: 110,
+      pointerEvents: 'none',
+    }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#4fc3f7', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 6 }}>
+        SINR
+      </div>
+      {LEGEND_ITEMS.map((item) => (
+        <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 }}>
+          <div style={{
+            width: 14,
+            height: 14,
+            borderRadius: 3,
+            background: item.noSignal ? 'transparent' : item.color,
+            border: item.noSignal ? '1px dashed rgba(255,255,255,0.3)' : 'none',
+            flexShrink: 0,
+          }} />
+          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.75)', fontFamily: 'monospace' }}>
+            {item.label}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── 主元件 ────────────────────────────────────────────────────────────
 function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef }) {
   const canvasRef = useRef(null)
@@ -190,7 +266,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef 
     const prog = makeProgram(gl)
     if (!prog) return
 
-    // 全螢幕四邊形（兩個三角形）
+    // 全螢幕四邊形
     const vao    = gl.createVertexArray()
     const posBuf = gl.createBuffer()
     gl.bindVertexArray(vao)
@@ -205,24 +281,27 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef 
 
     // Uniform locations
     const locs = {
-      resolution:  gl.getUniformLocation(prog, 'u_resolution'),
-      vpX:         gl.getUniformLocation(prog, 'u_vpX'),
-      vpY:         gl.getUniformLocation(prog, 'u_vpY'),
-      vpScale:     gl.getUniformLocation(prog, 'u_vpScale'),
-      floorScale:  gl.getUniformLocation(prog, 'u_floorScale'),
-      apCount:     gl.getUniformLocation(prog, 'u_apCount'),
-      wallCount:   gl.getUniformLocation(prog, 'u_wallCount'),
-      aps:         gl.getUniformLocation(prog, 'u_aps[0]'),
-      apChannels:  gl.getUniformLocation(prog, 'u_apChannels[0]'),
-      walls:       gl.getUniformLocation(prog, 'u_walls[0]'),
-      wallLoss:    gl.getUniformLocation(prog, 'u_wallLoss[0]'),
+      resolution:   gl.getUniformLocation(prog, 'u_resolution'),
+      vpX:          gl.getUniformLocation(prog, 'u_vpX'),
+      vpY:          gl.getUniformLocation(prog, 'u_vpY'),
+      vpScale:      gl.getUniformLocation(prog, 'u_vpScale'),
+      floorScale:   gl.getUniformLocation(prog, 'u_floorScale'),
+      apCount:      gl.getUniformLocation(prog, 'u_apCount'),
+      wallCount:    gl.getUniformLocation(prog, 'u_wallCount'),
+      aps:          gl.getUniformLocation(prog, 'u_aps[0]'),
+      apChannels:   gl.getUniformLocation(prog, 'u_apChannels[0]'),
+      walls:        gl.getUniformLocation(prog, 'u_walls[0]'),
+      wallLoss:     gl.getUniformLocation(prog, 'u_wallLoss[0]'),
+      scopePts:     gl.getUniformLocation(prog, 'u_scopePts[0]'),
+      scopePtCount: gl.getUniformLocation(prog, 'u_scopePtCount'),
     }
 
-    // 預分配 uniform 資料緩衝（避免每幀 GC）
-    const apData       = new Float32Array(MAX_APS   * 4)
+    // 預分配 uniform 資料緩衝
+    const apData       = new Float32Array(MAX_APS        * 4)
     const apChanData   = new Float32Array(MAX_APS)
-    const wallPosData  = new Float32Array(MAX_WALLS * 4)
+    const wallPosData  = new Float32Array(MAX_WALLS      * 4)
     const wallLossData = new Float32Array(MAX_WALLS)
+    const scopePtsData = new Float32Array(MAX_SCOPE_PTS  * 2)
 
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
@@ -244,7 +323,6 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef 
 
       if (!stage || w === 0 || h === 0) return
 
-      // 隱藏或無比例尺 → 清除
       if (!showH || !floorS) {
         if (prevKey !== null) {
           gl.viewport(0, 0, w, h)
@@ -255,7 +333,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef 
         return
       }
 
-      // 取得最新 AP 資料
+      // AP 資料（含拖移覆蓋）
       let aps = useAPStore.getState().apsByFloor[floorId] ?? []
       const drag = draggingAPRef?.current
       if (drag) aps = aps.map((a) => a.id === drag.id ? { ...a, x: drag.x, y: drag.y } : a)
@@ -270,6 +348,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef 
         return
       }
 
+      // 牆體資料（含拖移覆蓋）
       let rawWalls = useWallStore.getState().wallsByFloor[floorId] ?? []
       const dragWall = draggingWallRef?.current
       if (dragWall) {
@@ -280,16 +359,31 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef 
             : wl
         )
       }
+
+      // Scope mask：取第一個 type:'in' 的範圍
+      const scopes  = useScopeStore.getState().scopesByFloor[floorId] ?? []
+      const inScope = scopes.find((s) => s.type === 'in')
+      let scopePtCount = 0
+      if (inScope) {
+        const pts = inScope.points  // flat [x0,y0,x1,y1,...]
+        scopePtCount = Math.min(pts.length / 2, MAX_SCOPE_PTS)
+        for (let i = 0; i < scopePtCount; i++) {
+          scopePtsData[i * 2]     = pts[i * 2]
+          scopePtsData[i * 2 + 1] = pts[i * 2 + 1]
+        }
+      }
+
       const vp = { x: stage.x(), y: stage.y(), scale: stage.scaleX() }
 
-      // 變化偵測，未變化直接跳過
-      const apKey   = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0}`).join('|')
-      const wallKey = rawWalls.map((wl) => `${wl.startX},${wl.startY},${wl.endX},${wl.endY},${wl.material?.dbLoss}`).join('|')
-      const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${apKey},${wallKey}`
+      // 變化偵測
+      const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0}`).join('|')
+      const wallKey  = rawWalls.map((wl) => `${wl.startX},${wl.startY},${wl.endX},${wl.endY},${wl.material?.dbLoss}`).join('|')
+      const scopeKey = inScope ? inScope.id : 'none'
+      const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${apKey},${wallKey},${scopeKey}`
       if (key === prevKey) return
       prevKey = key
 
-      // 填充 AP uniform 資料
+      // 填充 AP uniform
       const apCount = Math.min(aps.length, MAX_APS)
       for (let i = 0; i < apCount; i++) {
         const a = aps[i]
@@ -300,7 +394,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef 
         apChanData[i] = a.channel ?? DEFAULT_CHAN[a.frequency] ?? 1
       }
 
-      // 填充 Wall uniform 資料
+      // 填充 Wall uniform
       const wallCount = Math.min(rawWalls.length, MAX_WALLS)
       for (let i = 0; i < wallCount; i++) {
         const wl = rawWalls[i]
@@ -316,17 +410,19 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef 
       gl.clearColor(0, 0, 0, 0)
       gl.clear(gl.COLOR_BUFFER_BIT)
 
-      gl.uniform2f(locs.resolution, w, h)
-      gl.uniform1f(locs.vpX,        vp.x)
-      gl.uniform1f(locs.vpY,        vp.y)
-      gl.uniform1f(locs.vpScale,    vp.scale)
-      gl.uniform1f(locs.floorScale, floorS)
-      gl.uniform1i(locs.apCount,    apCount)
-      gl.uniform1i(locs.wallCount,  wallCount)
-      gl.uniform4fv(locs.aps,       apData)
-      gl.uniform1fv(locs.apChannels, apChanData)
-      gl.uniform4fv(locs.walls,     wallPosData)
-      gl.uniform1fv(locs.wallLoss,  wallLossData)
+      gl.uniform2f(locs.resolution,   w, h)
+      gl.uniform1f(locs.vpX,          vp.x)
+      gl.uniform1f(locs.vpY,          vp.y)
+      gl.uniform1f(locs.vpScale,      vp.scale)
+      gl.uniform1f(locs.floorScale,   floorS)
+      gl.uniform1i(locs.apCount,      apCount)
+      gl.uniform1i(locs.wallCount,    wallCount)
+      gl.uniform4fv(locs.aps,         apData)
+      gl.uniform1fv(locs.apChannels,  apChanData)
+      gl.uniform4fv(locs.walls,       wallPosData)
+      gl.uniform1fv(locs.wallLoss,    wallLossData)
+      gl.uniform2fv(locs.scopePts,    scopePtsData)
+      gl.uniform1i(locs.scopePtCount, scopePtCount)
 
       gl.bindVertexArray(vao)
       gl.drawArrays(gl.TRIANGLES, 0, 6)
@@ -344,18 +440,21 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef 
   }, [stageRef, draggingAPRef, draggingWallRef])
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={width}
-      height={height}
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        pointerEvents: 'none',
-        display: showHeatmap ? 'block' : 'none',
-      }}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        width={width}
+        height={height}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          pointerEvents: 'none',
+          display: showHeatmap ? 'block' : 'none',
+        }}
+      />
+      {showHeatmap && <HeatmapLegend />}
+    </>
   )
 }
 
