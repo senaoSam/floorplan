@@ -108,11 +108,20 @@ Default wall material: `MATERIALS.CONCRETE`.
 
 ---
 
+## Session Start
+
+**At the beginning of every new conversation, always read `task.md`** to understand current progress before doing anything else.
+
+---
+
 ## Conventions
 
 - **Commit messages: English only**
 - **After each task: provide Chinese testing steps** for user to verify
-- **After user confirms "ok": update `task.md`** to mark completed tasks ✅
+- **After user confirms "ok": do all three of the following:**
+  1. Update `task.md` — mark completed tasks ✅
+  2. Update `src/components/ProgressPanel/ProgressPanel.jsx` — set `done: true` for the corresponding task item(s) in the `TASKS` array
+  3. Provide a short English commit message
 - No TypeScript, no JSDoc, no prop-types
 - No `.scss` files — only `.sass` (indented syntax)
 - SASS files use `@use '@/styles/variables' as *`

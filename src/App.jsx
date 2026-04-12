@@ -3,6 +3,7 @@ import Toolbar from '@/components/Toolbar/Toolbar'
 import SidebarLeft from '@/components/SidebarLeft/SidebarLeft'
 import CanvasArea from '@/components/CanvasArea/CanvasArea'
 import PanelRight from '@/components/PanelRight/PanelRight'
+import ProgressPanel from '@/components/ProgressPanel/ProgressPanel'
 import './styles/App.sass'
 
 function App() {
@@ -14,6 +15,7 @@ function App() {
         <CanvasArea />
         <PanelRight />
       </div>
+      <ProgressPanel />
     </div>
   )
 }

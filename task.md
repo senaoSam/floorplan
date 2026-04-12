@@ -7,6 +7,8 @@
 該筆 commit 我將不會直接上, 而是等整個 ok 之後並說 ok 後
 你一樣重複上方步驟
 
+測試方式, 回應方式都使用中文
+
 > ✅ 完成　 🔄 進行中　 ⬜ 待做
 
 ---
@@ -54,11 +56,11 @@
 
 ## Layer 5 — Heatmap
 
-| #   | 狀態 | Task                                              |
-| --- | ---- | ------------------------------------------------- |
-| 5-1 | ✅   | 基礎 RSSI 計算（FSPL，不含牆體）+ Canvas 疊加顯示 |
-| 5-2 | ✅   | Ray-casting 牆體衰減（Web Worker 背景計算）       |
-| 5-3 | ⬜   | WebGL Fragment Shader 即時渲染（取代 CPU Canvas） |
+| #   | 狀態 | Task                                                          |
+| --- | ---- | ------------------------------------------------------------- |
+| 5-1 | ✅   | 基礎 RSSI 計算（FSPL，不含牆體）+ Canvas 疊加顯示             |
+| 5-2 | ✅   | Ray-casting 牆體衰減（Web Worker 背景計算）                   |
+| 5-3 | ⬜   | WebGL Fragment Shader 即時渲染（取代 CPU Canvas）             |
 | 5-4 | ⬜   | Co-channel 干擾計算：AP 加入 channel 屬性，改以 SINR 顯示熱圖 |
 
 ---
