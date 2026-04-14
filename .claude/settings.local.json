@@ -1,4 +1,7 @@
 {
+  "env": {
+    "CLAUDE_CODE_EFFORT_LEVEL": "auto"
+  },
   "permissions": {
     "allow": [
       "Bash(pnpm install:*)",
@@ -15,7 +18,9 @@
       "Bash(npx vite:*)",
       "Bash(pnpm build:*)",
       "Bash(npm run:*)",
-      "Bash(node -e ':*)"
+      "Bash(node -e ':*)",
+      "Skill(update-config)",
+      "Skill(update-config:*)"
     ]
   }
 }
