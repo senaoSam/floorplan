@@ -39,7 +39,7 @@ export const useEditorStore = create((set) => ({
   editorMode: EDITOR_MODE.SELECT,
   viewMode: VIEW_MODE.TWO_D,
   selectedId: null,
-  selectedType: null, // 'wall' | 'ap' | 'scope' | 'floor_hole' | null
+  selectedType: null, // 'wall' | 'ap' | 'scope' | 'floor_hole' | 'floor_image' | null
   showHeatmap: false,
   heatmapMode: HEATMAP_MODE.SINR,
   pathLossExponent: 3.0, // 預設辦公室環境

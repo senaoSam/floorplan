@@ -5,6 +5,7 @@ import WallPanel from './WallPanel'
 import APPanel from './APPanel'
 import ScopePanel from './ScopePanel'
 import FloorHolePanel from './FloorHolePanel'
+import FloorImagePanel from './FloorImagePanel'
 import './PanelRight.sass'
 
 function PanelRight() {
@@ -28,6 +29,9 @@ function PanelRight() {
       )}
       {selectedType === 'floor_hole' && activeFloorId && (
         <FloorHolePanel floorId={activeFloorId} holeId={selectedId} />
+      )}
+      {selectedType === 'floor_image' && activeFloorId && (
+        <FloorImagePanel floorId={activeFloorId} />
       )}
     </aside>
   )

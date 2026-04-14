@@ -1,0 +1,161 @@
+@use '@/styles/variables' as *
+
+.floor-image-panel
+  display: flex
+  flex-direction: column
+  gap: 0
+  height: 100%
+
+  &__header
+    display: flex
+    align-items: center
+    justify-content: space-between
+    padding: 12px 14px 10px
+    border-bottom: 1px solid $border-color
+
+  &__title
+    font-size: 13px
+    font-weight: 600
+    color: $text-primary
+
+  &__meta
+    font-size: 11px
+    color: $text-secondary
+
+  &__section
+    padding: 12px 14px
+    border-bottom: 1px solid $border-color
+
+  &__label
+    font-size: 11px
+    font-weight: 600
+    color: $text-secondary
+    text-transform: uppercase
+    letter-spacing: 0.4px
+    margin-bottom: 8px
+
+  // 90° 快速旋轉按鈕
+  &__rotate-buttons
+    display: flex
+    gap: 6px
+    margin-bottom: 10px
+
+  &__rotate-btn
+    flex: 1
+    padding: 7px 0
+    border: 1px solid $border-color
+    border-radius: 6px
+    background: rgba(255, 255, 255, 0.05)
+    color: $text-primary
+    font-size: 12px
+    cursor: pointer
+    transition: background 0.12s, border-color 0.12s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.1)
+      border-color: rgba(255, 255, 255, 0.2)
+
+    &:active
+      background: rgba($accent, 0.15)
+      border-color: rgba($accent, 0.4)
+
+  // 角度輸入行
+  &__angle-row
+    display: flex
+    align-items: center
+    gap: 6px
+    margin-bottom: 10px
+
+  &__angle-input
+    width: 60px
+    background: rgba(255, 255, 255, 0.07)
+    border: 1px solid $border-color
+    border-radius: 6px
+    color: $text-primary
+    font-size: 13px
+    padding: 5px 8px
+    outline: none
+    text-align: center
+
+    &:focus
+      border-color: $accent
+
+    // 隱藏 spinner
+    &::-webkit-inner-spin-button,
+    &::-webkit-outer-spin-button
+      -webkit-appearance: none
+      margin: 0
+
+  &__angle-unit
+    font-size: 13px
+    color: $text-secondary
+    flex-shrink: 0
+
+  &__angle-slider
+    flex: 1
+    height: 4px
+    -webkit-appearance: none
+    appearance: none
+    background: rgba(255, 255, 255, 0.12)
+    border-radius: 2px
+    outline: none
+    cursor: pointer
+
+    &::-webkit-slider-thumb
+      -webkit-appearance: none
+      appearance: none
+      width: 14px
+      height: 14px
+      border-radius: 50%
+      background: $accent
+      cursor: pointer
+      border: 2px solid $bg-secondary
+
+    &::-moz-range-thumb
+      width: 14px
+      height: 14px
+      border-radius: 50%
+      background: $accent
+      cursor: pointer
+      border: 2px solid $bg-secondary
+
+  // 預設角度按鈕
+  &__presets
+    display: flex
+    gap: 4px
+
+  &__preset-btn
+    flex: 1
+    padding: 5px 0
+    border: 1px solid transparent
+    border-radius: 6px
+    background: rgba(255, 255, 255, 0.05)
+    color: $text-secondary
+    font-size: 11px
+    cursor: pointer
+    transition: background 0.12s, border-color 0.12s, color 0.12s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.08)
+      color: $text-primary
+
+    &--active
+      background: rgba($accent, 0.1)
+      border-color: rgba($accent, 0.4)
+      color: $text-primary
+
+  // 關閉按鈕
+  &__close
+    margin: 12px 14px
+    padding: 7px
+    border: 1px solid $border-color
+    border-radius: 6px
+    background: transparent
+    color: $text-secondary
+    font-size: 12px
+    cursor: pointer
+    transition: background 0.15s, color 0.15s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.06)
+      color: $text-primary

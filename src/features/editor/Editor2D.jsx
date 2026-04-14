@@ -473,7 +473,13 @@ function Editor2D() {
             <Rect x={-50000} y={-50000} width={100000} height={100000} fill="#1e1e2e" />
           </Layer>
 
-          {activeFloor && showFloorImage && <FloorImageLayer floor={activeFloor} />}
+          {activeFloor && showFloorImage && (
+            <FloorImageLayer
+              floor={activeFloor}
+              isSelectMode={isSelectMode}
+              onFloorImageClick={() => setSelected(activeFloorId, 'floor_image')}
+            />
+          )}
 
           {/* 所有向量元素合併為單一 Layer，內部用 Group 區隔 */}
           <Layer>

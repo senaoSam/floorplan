@@ -70,7 +70,7 @@ const PHASES = [
       {
         layer: 'Layer 6 — 平面圖操作',
         items: [
-          { id: '6-1', done: false, text: '平面圖旋轉' },
+          { id: '6-1', done: true, text: '平面圖旋轉' },
           { id: '6-2', done: false, text: '平面圖透明度調整' },
           { id: '6-3', done: false, text: '平面圖裁切' },
           { id: '6-4', done: false, text: '平面圖去色（灰階模式）' },
