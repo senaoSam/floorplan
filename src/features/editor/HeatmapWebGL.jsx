@@ -104,99 +104,85 @@ bool pointInScope(vec2 p) {
   return inside;
 }
 
-// ── 柔和色階函式 ─────────────────────────────────────────────────
+// ── Cisco 風格色階（紅=強、藍=弱）──────────────────────────────────
 
-// RSSI 色階（柔和 Ekahau 風格）
+// RSSI 色階（Cisco 風格 — 紅→橘→黃→綠→青→藍）
 vec4 rssiColor(float v) {
-  if (v >= -30.0) return vec4(0.13, 0.55, 0.37, 0.80);   // 深綠
-  if (v < -95.0)  return vec4(0.0);
-  // 12 段柔和漸變
-  vec4 c0  = vec4(0.13, 0.55, 0.37, 0.80);  // -30  深綠
-  vec4 c1  = vec4(0.28, 0.69, 0.47, 0.78);  // -40  青綠
-  vec4 c2  = vec4(0.45, 0.73, 0.45, 0.75);  // -50  淺綠
-  vec4 c3  = vec4(0.62, 0.78, 0.35, 0.72);  // -58  黃綠
-  vec4 c4  = vec4(0.76, 0.80, 0.28, 0.70);  // -64  淡黃綠
-  vec4 c5  = vec4(0.88, 0.82, 0.35, 0.68);  // -70  暖黃
-  vec4 c6  = vec4(0.92, 0.72, 0.32, 0.65);  // -75  淡橘
-  vec4 c7  = vec4(0.88, 0.56, 0.27, 0.62);  // -80  橘
-  vec4 c8  = vec4(0.80, 0.38, 0.24, 0.58);  // -85  深橘紅
-  vec4 c9  = vec4(0.69, 0.24, 0.24, 0.50);  // -90  柔紅
-  vec4 c10 = vec4(0.51, 0.16, 0.16, 0.30);  // -95  暗紅淡出
+  if (v >= -35.0) return vec4(0.92, 0.10, 0.10, 0.90);   // 亮紅（最強）
+  if (v < -85.0)  return vec4(0.0);
+  vec4 c0 = vec4(0.92, 0.10, 0.10, 0.90);  // -35  紅（極佳）
+  vec4 c1 = vec4(1.0,  0.50, 0.05, 0.88);  // -45  橘
+  vec4 c2 = vec4(1.0,  0.85, 0.10, 0.86);  // -55  黃
+  vec4 c3 = vec4(0.40, 0.85, 0.25, 0.84);  // -65  綠
+  vec4 c4 = vec4(0.10, 0.75, 0.80, 0.80);  // -75  青
+  vec4 c5 = vec4(0.12, 0.35, 0.80, 0.55);  // -85  藍（淡出）
 
-  if (v >= -40.0) return mix(c0, c1, (-30.0 - v) / 10.0);
-  if (v >= -50.0) return mix(c1, c2, (-40.0 - v) / 10.0);
-  if (v >= -58.0) return mix(c2, c3, (-50.0 - v) / 8.0);
-  if (v >= -64.0) return mix(c3, c4, (-58.0 - v) / 6.0);
-  if (v >= -70.0) return mix(c4, c5, (-64.0 - v) / 6.0);
-  if (v >= -75.0) return mix(c5, c6, (-70.0 - v) / 5.0);
-  if (v >= -80.0) return mix(c6, c7, (-75.0 - v) / 5.0);
-  if (v >= -85.0) return mix(c7, c8, (-80.0 - v) / 5.0);
-  if (v >= -90.0) return mix(c8, c9, (-85.0 - v) / 5.0);
-  return             mix(c9, c10, (-90.0 - v) / 5.0);
+  if (v >= -45.0) return mix(c0, c1, (-35.0 - v) / 10.0);
+  if (v >= -55.0) return mix(c1, c2, (-45.0 - v) / 10.0);
+  if (v >= -65.0) return mix(c2, c3, (-55.0 - v) / 10.0);
+  if (v >= -75.0) return mix(c3, c4, (-65.0 - v) / 10.0);
+  return             mix(c4, c5, (-75.0 - v) / 10.0);
 }
 
-// SINR 色階（柔和版）
+// SINR 色階（Cisco 風格）
 vec4 sinrColor(float v) {
-  if (v >= 25.0) return vec4(0.13, 0.55, 0.37, 0.80);
-  if (v <= -3.0) return vec4(0.0);
-  vec4 c0 = vec4(0.13, 0.55, 0.37, 0.80);  // 25 dB 深綠
-  vec4 c1 = vec4(0.35, 0.68, 0.40, 0.78);  // 20 dB 青綠
-  vec4 c2 = vec4(0.58, 0.76, 0.32, 0.75);  // 15 dB 黃綠
-  vec4 c3 = vec4(0.85, 0.78, 0.30, 0.72);  // 10 dB 暖黃
-  vec4 c4 = vec4(0.90, 0.55, 0.25, 0.68);  //  5 dB 橘
-  vec4 c5 = vec4(0.75, 0.28, 0.22, 0.60);  //  0 dB 柔紅
-  vec4 c6 = vec4(0.45, 0.12, 0.12, 0.0);   // -3 dB 透明消退
+  if (v >= 25.0) return vec4(0.92, 0.10, 0.10, 0.90);
+  if (v < 0.0)   return vec4(0.0);
+  vec4 c0 = vec4(0.92, 0.10, 0.10, 0.90);  // 25 dB 紅（極佳）
+  vec4 c1 = vec4(1.0,  0.50, 0.05, 0.88);  // 20 dB 橘
+  vec4 c2 = vec4(1.0,  0.85, 0.10, 0.85);  // 15 dB 黃
+  vec4 c3 = vec4(0.40, 0.85, 0.25, 0.82);  // 10 dB 綠
+  vec4 c4 = vec4(0.10, 0.75, 0.80, 0.78);  //  5 dB 青
+  vec4 c5 = vec4(0.12, 0.35, 0.80, 0.40);  //  0 dB 藍（淡出）
   if (v >= 20.0) return mix(c0, c1, (25.0 - v) / 5.0);
   if (v >= 15.0) return mix(c1, c2, (20.0 - v) / 5.0);
   if (v >= 10.0) return mix(c2, c3, (15.0 - v) / 5.0);
   if (v >=  5.0) return mix(c3, c4, (10.0 - v) / 5.0);
-  if (v >=  0.0) return mix(c4, c5, ( 5.0 - v) / 5.0);
-  return               mix(c5, c6, ( 0.0 - v) / 3.0);
+  return               mix(c4, c5, ( 5.0 - v) / 5.0);
 }
 
-// SNR 色階（與 SINR 類似但範圍不同）
+// SNR 色階（Cisco 風格）
 vec4 snrColor(float v) {
-  if (v >= 40.0) return vec4(0.13, 0.55, 0.37, 0.80);
+  if (v >= 40.0) return vec4(0.92, 0.10, 0.10, 0.90);
   if (v <= 0.0)  return vec4(0.0);
-  vec4 c0 = vec4(0.13, 0.55, 0.37, 0.80);  // 40 dB
-  vec4 c1 = vec4(0.35, 0.68, 0.40, 0.78);  // 30 dB
-  vec4 c2 = vec4(0.72, 0.78, 0.30, 0.72);  // 20 dB
-  vec4 c3 = vec4(0.90, 0.55, 0.25, 0.65);  // 10 dB
-  vec4 c4 = vec4(0.69, 0.24, 0.24, 0.40);  //  0 dB
+  vec4 c0 = vec4(0.92, 0.10, 0.10, 0.90);  // 40 dB 紅
+  vec4 c1 = vec4(1.0,  0.50, 0.05, 0.88);  // 30 dB 橘
+  vec4 c2 = vec4(1.0,  0.85, 0.10, 0.85);  // 20 dB 黃
+  vec4 c3 = vec4(0.10, 0.75, 0.80, 0.78);  // 10 dB 青
+  vec4 c4 = vec4(0.12, 0.35, 0.80, 0.40);  //  0 dB 藍
   if (v >= 30.0) return mix(c0, c1, (40.0 - v) / 10.0);
   if (v >= 20.0) return mix(c1, c2, (30.0 - v) / 10.0);
   if (v >= 10.0) return mix(c2, c3, (20.0 - v) / 10.0);
   return               mix(c3, c4, (10.0 - v) / 10.0);
 }
 
-// Channel Overlap 色階（1=綠、2=黃、3+=紅）
+// Channel Overlap 色階（Cisco 風格：1=紅最佳、4+=藍過多）
 vec4 overlapColor(int count) {
   if (count <= 0)  return vec4(0.0);
-  if (count == 1)  return vec4(0.13, 0.55, 0.37, 0.65);  // 綠 — 無重疊
-  if (count == 2)  return vec4(0.85, 0.78, 0.30, 0.70);  // 黃 — 2 重疊
-  if (count == 3)  return vec4(0.90, 0.55, 0.25, 0.72);  // 橘
-  return                  vec4(0.75, 0.28, 0.22, 0.75);  // 紅 — 4+
+  if (count == 1)  return vec4(0.92, 0.10, 0.10, 0.80);  // 紅 — 無重疊（佳）
+  if (count == 2)  return vec4(1.0,  0.85, 0.10, 0.78);  // 黃 — 2 重疊
+  if (count == 3)  return vec4(0.10, 0.75, 0.80, 0.75);  // 青 — 3 重疊
+  return                  vec4(0.12, 0.35, 0.80, 0.75);  // 藍 — 4+（差）
 }
 
-// Data Rate 色階（Mbps，依 SINR 映射到 MCS）
+// Data Rate 色階（Cisco 風格：高速=紅、低速=藍）
 vec4 dataRateColor(float rate) {
   if (rate <= 0.0) return vec4(0.0);
-  // 大致範圍 0~600 Mbps
   float t = clamp(rate / 600.0, 0.0, 1.0);
-  vec4 cLow  = vec4(0.75, 0.28, 0.22, 0.60);
-  vec4 cMid  = vec4(0.85, 0.78, 0.30, 0.70);
-  vec4 cHigh = vec4(0.13, 0.55, 0.37, 0.80);
+  vec4 cLow  = vec4(0.12, 0.35, 0.80, 0.55);  // 藍（低速）
+  vec4 cMid  = vec4(1.0,  0.85, 0.10, 0.78);  // 黃（中速）
+  vec4 cHigh = vec4(0.92, 0.10, 0.10, 0.90);  // 紅（高速）
   if (t < 0.5) return mix(cLow, cMid, t * 2.0);
   return mix(cMid, cHigh, (t - 0.5) * 2.0);
 }
 
-// AP Count 色階
+// AP Count 色階（Cisco 風格）
 vec4 apCountColor(int count) {
   if (count <= 0) return vec4(0.0);
-  if (count == 1) return vec4(0.75, 0.28, 0.22, 0.55);  // 紅 — 僅 1 顆（冗餘不足）
-  if (count == 2) return vec4(0.13, 0.55, 0.37, 0.70);  // 綠 — 2 顆（理想）
-  if (count == 3) return vec4(0.35, 0.68, 0.40, 0.72);  // 青綠
-  return                 vec4(0.85, 0.78, 0.30, 0.70);  // 黃 — 4+（過多）
+  if (count == 1) return vec4(0.12, 0.35, 0.80, 0.60);  // 藍 — 僅 1 顆（冗餘不足）
+  if (count == 2) return vec4(0.92, 0.10, 0.10, 0.80);  // 紅 — 2 顆（理想）
+  if (count == 3) return vec4(1.0,  0.50, 0.05, 0.78);  // 橘 — 3 顆
+  return                 vec4(1.0,  0.85, 0.10, 0.75);  // 黃 — 4+（過多）
 }
 
 // SINR → 預估 Data Rate (Mbps)，簡化 MCS 映射
@@ -369,65 +355,65 @@ const LEGENDS = {
   [HEATMAP_MODE.RSSI]: {
     title: 'RSSI',
     items: [
-      { label: '≥ −30 dBm', color: 'rgba(33,140,95,0.80)' },
-      { label: '−50 dBm',   color: 'rgba(115,186,115,0.75)' },
-      { label: '−65 dBm',   color: 'rgba(194,204,72,0.70)' },
-      { label: '−75 dBm',   color: 'rgba(235,184,82,0.65)' },
-      { label: '−85 dBm',   color: 'rgba(204,97,61,0.58)' },
-      { label: '−95 dBm',   color: 'rgba(130,41,41,0.30)' },
+      { label: '≥ −35 dBm', color: 'rgba(235,26,26,0.90)' },
+      { label: '−45 dBm',   color: 'rgba(255,128,13,0.88)' },
+      { label: '−55 dBm',   color: 'rgba(255,217,26,0.86)' },
+      { label: '−65 dBm',   color: 'rgba(102,217,64,0.84)' },
+      { label: '−75 dBm',   color: 'rgba(26,191,204,0.80)' },
+      { label: '−85 dBm',   color: 'rgba(31,89,204,0.55)' },
       { label: '無覆蓋',     color: 'transparent', noSignal: true },
     ],
   },
   [HEATMAP_MODE.SINR]: {
     title: 'SINR',
     items: [
-      { label: '≥ 25 dB', color: 'rgba(33,140,95,0.80)' },
-      { label: '20 dB',   color: 'rgba(89,173,102,0.78)' },
-      { label: '15 dB',   color: 'rgba(148,194,82,0.75)' },
-      { label: '10 dB',   color: 'rgba(217,199,77,0.72)' },
-      { label: '5 dB',    color: 'rgba(230,140,64,0.68)' },
-      { label: '0 dB',    color: 'rgba(191,71,56,0.60)' },
+      { label: '≥ 25 dB', color: 'rgba(235,26,26,0.90)' },
+      { label: '20 dB',   color: 'rgba(255,128,13,0.88)' },
+      { label: '15 dB',   color: 'rgba(255,217,26,0.85)' },
+      { label: '10 dB',   color: 'rgba(102,217,64,0.82)' },
+      { label: '5 dB',    color: 'rgba(26,191,204,0.78)' },
+      { label: '0 dB',    color: 'rgba(31,89,204,0.40)' },
       { label: '無覆蓋',   color: 'transparent', noSignal: true },
     ],
   },
   [HEATMAP_MODE.SNR]: {
     title: 'SNR',
     items: [
-      { label: '≥ 40 dB', color: 'rgba(33,140,95,0.80)' },
-      { label: '30 dB',   color: 'rgba(89,173,102,0.78)' },
-      { label: '20 dB',   color: 'rgba(184,199,77,0.72)' },
-      { label: '10 dB',   color: 'rgba(230,140,64,0.65)' },
-      { label: '0 dB',    color: 'rgba(176,61,61,0.40)' },
+      { label: '≥ 40 dB', color: 'rgba(235,26,26,0.90)' },
+      { label: '30 dB',   color: 'rgba(255,128,13,0.88)' },
+      { label: '20 dB',   color: 'rgba(255,217,26,0.85)' },
+      { label: '10 dB',   color: 'rgba(26,191,204,0.78)' },
+      { label: '0 dB',    color: 'rgba(31,89,204,0.40)' },
     ],
   },
   [HEATMAP_MODE.CHANNEL_OVERLAP]: {
     title: '頻道重疊',
     items: [
-      { label: '1 AP',  color: 'rgba(33,140,95,0.65)' },
-      { label: '2 AP',  color: 'rgba(217,199,77,0.70)' },
-      { label: '3 AP',  color: 'rgba(230,140,64,0.72)' },
-      { label: '4+ AP', color: 'rgba(191,71,56,0.75)' },
+      { label: '1 AP',  color: 'rgba(235,26,26,0.80)' },
+      { label: '2 AP',  color: 'rgba(255,217,26,0.78)' },
+      { label: '3 AP',  color: 'rgba(26,191,204,0.75)' },
+      { label: '4+ AP', color: 'rgba(31,89,204,0.75)' },
       { label: '無覆蓋', color: 'transparent', noSignal: true },
     ],
   },
   [HEATMAP_MODE.DATA_RATE]: {
     title: '預估速率',
     items: [
-      { label: '≥ 130 Mbps', color: 'rgba(33,140,95,0.80)' },
-      { label: '100 Mbps',   color: 'rgba(130,190,85,0.75)' },
-      { label: '60 Mbps',    color: 'rgba(217,199,77,0.70)' },
-      { label: '26 Mbps',    color: 'rgba(230,140,64,0.65)' },
-      { label: '< 13 Mbps',  color: 'rgba(191,71,56,0.60)' },
+      { label: '≥ 130 Mbps', color: 'rgba(235,26,26,0.90)' },
+      { label: '100 Mbps',   color: 'rgba(255,128,13,0.85)' },
+      { label: '60 Mbps',    color: 'rgba(255,217,26,0.78)' },
+      { label: '26 Mbps',    color: 'rgba(26,191,204,0.70)' },
+      { label: '< 13 Mbps',  color: 'rgba(31,89,204,0.55)' },
       { label: '無覆蓋',      color: 'transparent', noSignal: true },
     ],
   },
   [HEATMAP_MODE.AP_COUNT]: {
     title: '可用 AP 數',
     items: [
-      { label: '1 顆',  color: 'rgba(191,71,56,0.55)' },
-      { label: '2 顆',  color: 'rgba(33,140,95,0.70)' },
-      { label: '3 顆',  color: 'rgba(89,173,102,0.72)' },
-      { label: '4+ 顆', color: 'rgba(217,199,77,0.70)' },
+      { label: '1 顆',  color: 'rgba(31,89,204,0.60)' },
+      { label: '2 顆',  color: 'rgba(235,26,26,0.80)' },
+      { label: '3 顆',  color: 'rgba(255,128,13,0.78)' },
+      { label: '4+ 顆', color: 'rgba(255,217,26,0.75)' },
       { label: '無覆蓋', color: 'transparent', noSignal: true },
     ],
   },
