@@ -21,32 +21,57 @@ function DrawingPreview({ points, mousePos, snapRadius }) {
 
   return (
     <>
+      {/* 已確認的線段 — 黑色外框 */}
+      {points.length >= 2 && (
+        <Line
+          points={flatClosed}
+          stroke="#000"
+          strokeWidth={5}
+          dash={[6, 4]}
+          opacity={0.5}
+          listening={false}
+        />
+      )}
       {/* 已確認的線段 */}
       {points.length >= 2 && (
         <Line
           points={flatClosed}
-          stroke="#f1c40f"
-          strokeWidth={2}
+          stroke="#2ed573"
+          strokeWidth={3}
           dash={[6, 4]}
           listening={false}
         />
       )}
 
-      {/* ghost 線：最後一點 → 滑鼠 */}
+      {/* ghost 線：最後一點 → 滑鼠 — 黑色外框 */}
       {mousePos && (
         <Line
           points={[points[points.length - 1].x, points[points.length - 1].y, mousePos.x, mousePos.y]}
-          stroke="#f1c40f"
-          strokeWidth={2}
+          stroke="#000"
+          strokeWidth={5}
           dash={[6, 4]}
-          opacity={0.6}
+          opacity={0.4}
+          listening={false}
+        />
+      )}
+      {/* ghost 線 */}
+      {mousePos && (
+        <Line
+          points={[points[points.length - 1].x, points[points.length - 1].y, mousePos.x, mousePos.y]}
+          stroke="#2ed573"
+          strokeWidth={3}
+          dash={[6, 4]}
+          opacity={0.7}
           listening={false}
         />
       )}
 
       {/* 頂點圓點 */}
       {points.map((p, i) => (
-        <Circle key={i} x={p.x} y={p.y} radius={4} fill="#f1c40f" listening={false} />
+        <React.Fragment key={i}>
+          <Circle x={p.x} y={p.y} radius={7} fill="#000" opacity={0.4} listening={false} />
+          <Circle x={p.x} y={p.y} radius={5} fill="#2ed573" listening={false} />
+        </React.Fragment>
       ))}
 
       {/* 第一點吸附提示：進入範圍才顯示綠色放大圓 */}
@@ -112,7 +137,7 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
               closed
               fill={style.fill}
               stroke={isSelected ? '#e74c3c' : style.stroke}
-              strokeWidth={isSelected ? 4 : 3}
+              strokeWidth={isSelected ? 5 : 3}
               dash={zone.type === 'out' ? [8, 4] : undefined}
               shadowColor="rgba(0,0,0,0.6)"
               shadowBlur={4}

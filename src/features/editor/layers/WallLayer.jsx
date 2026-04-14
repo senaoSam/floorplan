@@ -59,12 +59,21 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
               onWallDragEnd?.()
             }}
           >
+            {/* 黑色外框增加對比 */}
+            <Line
+              points={[wall.startX, wall.startY, wall.endX, wall.endY]}
+              stroke="#000"
+              strokeWidth={isSelected ? 9 : 7}
+              lineCap="round"
+              opacity={0.4}
+              listening={false}
+            />
             <Line
               points={[wall.startX, wall.startY, wall.endX, wall.endY]}
               stroke={isSelected ? '#e74c3c' : wall.material.color}
-              strokeWidth={isSelected ? 5 : 3}
+              strokeWidth={isSelected ? 6 : 4}
               lineCap="round"
-              hitStrokeWidth={12}
+              hitStrokeWidth={14}
               onClick={(e) => {
                 e.cancelBubble = true
                 onWallClick?.(wall.id)
@@ -85,7 +94,7 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
           <Line
             points={[drawStart.x, drawStart.y, mousePos.x, mousePos.y]}
             stroke="#000"
-            strokeWidth={4}
+            strokeWidth={6}
             dash={[8, 5]}
             opacity={0.5}
             listening={false}
@@ -93,7 +102,7 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
           <Line
             points={[drawStart.x, drawStart.y, mousePos.x, mousePos.y]}
             stroke="#00e5ff"
-            strokeWidth={2}
+            strokeWidth={3}
             dash={[8, 5]}
             listening={false}
           />
@@ -103,8 +112,8 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
       {/* 繪製中的起點 */}
       {drawStart && (
         <>
-          <Circle x={drawStart.x} y={drawStart.y} radius={7} fill="#000" opacity={0.4} listening={false} />
-          <Circle x={drawStart.x} y={drawStart.y} radius={5} fill="#00e5ff" listening={false} />
+          <Circle x={drawStart.x} y={drawStart.y} radius={9} fill="#000" opacity={0.4} listening={false} />
+          <Circle x={drawStart.x} y={drawStart.y} radius={6} fill="#00e5ff" listening={false} />
         </>
       )}
 
