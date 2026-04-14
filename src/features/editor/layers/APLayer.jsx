@@ -29,7 +29,6 @@ function APMarker({ ap, isSelected, isDraggable, onClick, onMoved, onDragMove, i
       onClick={(e) => { e.cancelBubble = true; onClick(ap.id) }}
       onContextMenu={(e) => {
         e.evt.preventDefault()
-        if (isDrawingActive) return
         e.cancelBubble = true
         onClick(ap.id)
       }}

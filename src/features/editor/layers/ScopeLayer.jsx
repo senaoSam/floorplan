@@ -117,13 +117,11 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
               shadowOffset={{ x: 0, y: 0 }}
               hitStrokeWidth={10}
               onClick={(e) => {
-                if (!isSelectMode) return
                 e.cancelBubble = true
                 onScopeClick?.(zone.id)
               }}
               onContextMenu={(e) => {
                 e.evt.preventDefault()
-                if (isDrawingActive) return
                 e.cancelBubble = true
                 onScopeClick?.(zone.id)
               }}

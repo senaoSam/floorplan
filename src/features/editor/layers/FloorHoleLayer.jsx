@@ -126,13 +126,11 @@ function FloorHoleLayer({
               shadowOffset={{ x: 0, y: 0 }}
               hitStrokeWidth={10}
               onClick={(e) => {
-                if (!isSelectMode) return
                 e.cancelBubble = true
                 onHoleClick?.(hole.id)
               }}
               onContextMenu={(e) => {
                 e.evt.preventDefault()
-                if (isDrawingActive) return
                 e.cancelBubble = true
                 onHoleClick?.(hole.id)
               }}

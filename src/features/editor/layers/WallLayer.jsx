@@ -64,13 +64,11 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
               lineCap="round"
               hitStrokeWidth={12}
               onClick={(e) => {
-                if (isDrawMode) return
                 e.cancelBubble = true
                 onWallClick?.(wall.id)
               }}
               onContextMenu={(e) => {
                 e.evt.preventDefault()
-                if (isDrawingActive) return
                 e.cancelBubble = true
                 onWallClick?.(wall.id)
               }}
