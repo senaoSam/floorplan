@@ -8,7 +8,8 @@ const FEATURES = [
   { icon: '📍', text: 'AP 放置：點擊畫布放置，左鍵或右鍵按住可拖曳，支援頻段、發射功率、天線模式設定' },
   { icon: '🟩', text: '範圍區域：繪製建築覆蓋範圍多邊形，區分涵蓋內／外區域；熱力圖自動遮罩至範圍內' },
   { icon: '⬛', text: '挑高區域：標記中庭、挑高等信號可跨樓層穿透的區域' },
-  { icon: '🔥', text: 'SINR 熱力圖：FSPL + 牆體衰減 + Co-channel 干擾，WebGL 即時渲染，含圖例；拖曳物件時即時更新' },
+  { icon: '🔥', text: '多模式熱力圖：RSSI / SINR / SNR / 頻道重疊 / 預估速率 / AP 數量，WebGL 即時渲染' },
+  { icon: '🎨', text: '柔和色階（Ekahau 風格）+ 頻段相關牆體衰減 + 可調路徑損耗指數（環境類型）' },
   { icon: '🖱', text: '右鍵操作：對任意物件按下右鍵可顯示屬性面板（停止繪製），按住右鍵可拖曳物件' },
 ]
 
@@ -54,6 +55,8 @@ const TASKS = [
       { id: '5-2', done: true,  text: 'Ray-casting 牆體衰減（Web Worker）' },
       { id: '5-3', done: true,  text: 'WebGL Fragment Shader 即時渲染' },
       { id: '5-4', done: true,  text: 'Co-channel 干擾 SINR 熱圖' },
+      { id: '5-5', done: true,  text: '多模式熱圖（RSSI/SINR/SNR/頻道重疊/速率/AP數）' },
+      { id: '5-6', done: true,  text: '柔和色階 + 頻段牆體衰減 + 環境路徑損耗' },
     ],
   },
   {

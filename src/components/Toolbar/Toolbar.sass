@@ -54,7 +54,8 @@
 
   &__actions
     display: flex
-    gap: 4px
+    align-items: center
+    gap: 6px
 
   &__heatmap-btn
     padding: 4px 14px
@@ -84,6 +85,25 @@
     &:disabled
       opacity: 0.35
       cursor: not-allowed
+
+  &__select
+    padding: 3px 6px
+    border: 1px solid $border-color
+    border-radius: 4px
+    background: $bg-secondary
+    color: $text-secondary
+    font-size: 11px
+    cursor: pointer
+    outline: none
+    max-width: 140px
+
+    &:hover
+      border-color: rgba(255, 255, 255, 0.3)
+      color: $text-primary
+
+    &:focus
+      border-color: #4fc3f7
+      color: $text-primary
 
   &__view-btn
     padding: 4px 14px

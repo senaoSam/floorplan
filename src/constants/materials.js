@@ -1,40 +1,47 @@
 // 牆體材質與衰減係數 (dB)
+// dbLoss 為 2.4 GHz 基準值，freqFactor 為各頻段乘數
 export const MATERIALS = {
   GLASS: {
     id: 'glass',
     label: '玻璃',
     dbLoss: 2,
+    freqFactor: { 2.4: 1.0, 5: 1.5, 6: 2.0 },
     color: '#48c9b0',   // 青綠
   },
   DRYWALL: {
     id: 'drywall',
     label: '輕隔間 (石膏板)',
     dbLoss: 3,
-    color: '#f39c12',   // 琥珀橘（淺色背景也清楚）
+    freqFactor: { 2.4: 1.0, 5: 1.3, 6: 1.7 },
+    color: '#f39c12',   // 琥珀橘
   },
   WOOD: {
     id: 'wood',
     label: '木板',
     dbLoss: 4,
+    freqFactor: { 2.4: 1.0, 5: 1.25, 6: 1.5 },
     color: '#a04000',   // 深棕
   },
   BRICK: {
     id: 'brick',
     label: '磚牆',
     dbLoss: 8,
+    freqFactor: { 2.4: 1.0, 5: 1.4, 6: 1.6 },
     color: '#cb4335',   // 磚紅
   },
   CONCRETE: {
     id: 'concrete',
     label: '混凝土',
     dbLoss: 12,
-    color: '#2e86c1',   // 藍灰（與金屬明顯不同）
+    freqFactor: { 2.4: 1.0, 5: 1.5, 6: 1.8 },
+    color: '#2e86c1',   // 藍灰
   },
   METAL: {
     id: 'metal',
     label: '金屬',
     dbLoss: 20,
-    color: '#6c3483',   // 深紫（最高衰減，最深色）
+    freqFactor: { 2.4: 1.0, 5: 1.25, 6: 1.4 },
+    color: '#6c3483',   // 深紫
   },
 }
 

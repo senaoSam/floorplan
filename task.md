@@ -54,6 +54,8 @@
 | 5-2 | ✅   | Ray-casting 牆體衰減（Web Worker 背景計算）                   |
 | 5-3 | ✅   | WebGL Fragment Shader 即時渲染（取代 CPU Canvas）             |
 | 5-4 | ✅   | Co-channel 干擾計算：AP 加入 channel 屬性，改以 SINR 顯示熱圖 |
+| 5-5 | ✅   | 多模式熱圖切換（RSSI / SINR / SNR / 頻道重疊 / 預估速率 / AP 數量） |
+| 5-6 | ✅   | 柔和色階 + 頻段相關牆體衰減 + 可調環境路徑損耗指數 |
 ---
 
 ## Layer 6 — 3D 視圖

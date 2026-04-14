@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react'
-import { useEditorStore } from '@/store/useEditorStore'
+import { useEditorStore, HEATMAP_MODE } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useWallStore } from '@/store/useWallStore'
@@ -12,6 +12,9 @@ const MAX_SCOPE_PTS  = 64
 const FREQ_MHZ    = { 2.4: 2437, 5: 5500, 6: 6000 }
 const DEFAULT_CHAN = { 2.4: 1,    5: 36,   6: 1    }
 
+// 頻段索引：用於 wallLoss3 查表（0=2.4, 1=5, 2=6）
+const FREQ_BAND_INDEX = { 2.4: 0, 5: 1, 6: 2 }
+
 // ── Vertex Shader：全螢幕四邊形 ──────────────────────────────────────
 const VERT_SRC = `#version 300 es
 in vec2 a_pos;
@@ -19,13 +22,21 @@ void main() {
   gl_Position = vec4(a_pos, 0.0, 1.0);
 }`
 
-// ── Fragment Shader：逐像素 SINR（含同頻干擾 + 牆體衰減 + Scope mask）
+// ── Fragment Shader：逐像素多模式（RSSI / SINR / SNR / Channel Overlap / Data Rate / AP Count）
 const FRAG_SRC = `#version 300 es
 precision highp float;
 
 #define MAX_APS       ${MAX_APS}
 #define MAX_WALLS     ${MAX_WALLS}
 #define MAX_SCOPE_PTS ${MAX_SCOPE_PTS}
+
+// 模式常數
+#define MODE_RSSI             0
+#define MODE_SINR             1
+#define MODE_SNR              2
+#define MODE_CHANNEL_OVERLAP  3
+#define MODE_DATA_RATE        4
+#define MODE_AP_COUNT         5
 
 uniform vec2  u_resolution;
 uniform float u_vpX;
@@ -34,14 +45,20 @@ uniform float u_vpScale;
 uniform float u_floorScale;
 uniform int   u_apCount;
 uniform int   u_wallCount;
-uniform vec4  u_aps[MAX_APS];
+uniform vec4  u_aps[MAX_APS];          // xy = pos, z = txPower, w = freqMHz
 uniform float u_apChannels[MAX_APS];
+uniform float u_apFreqBand[MAX_APS];   // 頻段索引 0=2.4, 1=5, 2=6
 uniform vec4  u_walls[MAX_WALLS];
-uniform float u_wallLoss[MAX_WALLS];
+uniform vec3  u_wallLoss3[MAX_WALLS];  // xyz = 2.4GHz / 5GHz / 6GHz 衰減
 uniform vec2  u_scopePts[MAX_SCOPE_PTS];
 uniform int   u_scopePtCount;
+uniform int   u_mode;
+uniform float u_pathLossN;
 
 out vec4 outColor;
+
+const float NOISE_DBM = -95.0;
+const float NOISE_LIN = 3.1623e-10;  // pow(10, -95/10)
 
 float log10v(float x) { return log(x) * 0.4342944819; }
 
@@ -56,17 +73,20 @@ bool segHit(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
   return t > 0.0 && t < 1.0 && u > 0.0 && u < 1.0;
 }
 
-float wallLoss(vec2 px, vec2 ap) {
+// 頻段相關的牆體衰減
+float wallLoss(vec2 px, vec2 ap, int freqIdx) {
   float loss = 0.0;
   for (int i = 0; i < MAX_WALLS; i++) {
     if (i >= u_wallCount) break;
-    if (segHit(px, ap, u_walls[i].xy, u_walls[i].zw))
-      loss += u_wallLoss[i];
+    if (segHit(px, ap, u_walls[i].xy, u_walls[i].zw)) {
+      loss += (freqIdx == 0) ? u_wallLoss3[i].x
+            : (freqIdx == 1) ? u_wallLoss3[i].y
+            :                  u_wallLoss3[i].z;
+    }
   }
   return loss;
 }
 
-// Ray-casting point-in-polygon（canvas 座標）
 bool pointInScope(vec2 p) {
   bool inside = false;
   int n = u_scopePtCount;
@@ -84,17 +104,48 @@ bool pointInScope(vec2 p) {
   return inside;
 }
 
-// SINR 色階（參考 Hamina 配色）
-vec4 sinrToColor(float v) {
-  if (v >= 25.0) return vec4(0.659, 0.831, 0.000, 0.85);
+// ── 柔和色階函式 ─────────────────────────────────────────────────
+
+// RSSI 色階（柔和 Ekahau 風格）
+vec4 rssiColor(float v) {
+  if (v >= -30.0) return vec4(0.13, 0.55, 0.37, 0.80);   // 深綠
+  if (v < -95.0)  return vec4(0.0);
+  // 12 段柔和漸變
+  vec4 c0  = vec4(0.13, 0.55, 0.37, 0.80);  // -30  深綠
+  vec4 c1  = vec4(0.28, 0.69, 0.47, 0.78);  // -40  青綠
+  vec4 c2  = vec4(0.45, 0.73, 0.45, 0.75);  // -50  淺綠
+  vec4 c3  = vec4(0.62, 0.78, 0.35, 0.72);  // -58  黃綠
+  vec4 c4  = vec4(0.76, 0.80, 0.28, 0.70);  // -64  淡黃綠
+  vec4 c5  = vec4(0.88, 0.82, 0.35, 0.68);  // -70  暖黃
+  vec4 c6  = vec4(0.92, 0.72, 0.32, 0.65);  // -75  淡橘
+  vec4 c7  = vec4(0.88, 0.56, 0.27, 0.62);  // -80  橘
+  vec4 c8  = vec4(0.80, 0.38, 0.24, 0.58);  // -85  深橘紅
+  vec4 c9  = vec4(0.69, 0.24, 0.24, 0.50);  // -90  柔紅
+  vec4 c10 = vec4(0.51, 0.16, 0.16, 0.30);  // -95  暗紅淡出
+
+  if (v >= -40.0) return mix(c0, c1, (-30.0 - v) / 10.0);
+  if (v >= -50.0) return mix(c1, c2, (-40.0 - v) / 10.0);
+  if (v >= -58.0) return mix(c2, c3, (-50.0 - v) / 8.0);
+  if (v >= -64.0) return mix(c3, c4, (-58.0 - v) / 6.0);
+  if (v >= -70.0) return mix(c4, c5, (-64.0 - v) / 6.0);
+  if (v >= -75.0) return mix(c5, c6, (-70.0 - v) / 5.0);
+  if (v >= -80.0) return mix(c6, c7, (-75.0 - v) / 5.0);
+  if (v >= -85.0) return mix(c7, c8, (-80.0 - v) / 5.0);
+  if (v >= -90.0) return mix(c8, c9, (-85.0 - v) / 5.0);
+  return             mix(c9, c10, (-90.0 - v) / 5.0);
+}
+
+// SINR 色階（柔和版）
+vec4 sinrColor(float v) {
+  if (v >= 25.0) return vec4(0.13, 0.55, 0.37, 0.80);
   if (v <= -3.0) return vec4(0.0);
-  vec4 c0 = vec4(0.659, 0.831, 0.000, 0.85);   // 25 dB  萊姆黃綠
-  vec4 c1 = vec4(0.800, 0.900, 0.100, 0.82);   // 20 dB  亮黃綠
-  vec4 c2 = vec4(1.000, 0.820, 0.000, 0.80);   // 15 dB  黃
-  vec4 c3 = vec4(1.000, 0.420, 0.000, 0.80);   // 10 dB  橘
-  vec4 c4 = vec4(0.900, 0.100, 0.050, 0.78);   //  5 dB  紅
-  vec4 c5 = vec4(0.600, 0.000, 0.000, 0.70);   //  0 dB  暗紅
-  vec4 c6 = vec4(0.400, 0.000, 0.000, 0.0);    // -3 dB  透明消退
+  vec4 c0 = vec4(0.13, 0.55, 0.37, 0.80);  // 25 dB 深綠
+  vec4 c1 = vec4(0.35, 0.68, 0.40, 0.78);  // 20 dB 青綠
+  vec4 c2 = vec4(0.58, 0.76, 0.32, 0.75);  // 15 dB 黃綠
+  vec4 c3 = vec4(0.85, 0.78, 0.30, 0.72);  // 10 dB 暖黃
+  vec4 c4 = vec4(0.90, 0.55, 0.25, 0.68);  //  5 dB 橘
+  vec4 c5 = vec4(0.75, 0.28, 0.22, 0.60);  //  0 dB 柔紅
+  vec4 c6 = vec4(0.45, 0.12, 0.12, 0.0);   // -3 dB 透明消退
   if (v >= 20.0) return mix(c0, c1, (25.0 - v) / 5.0);
   if (v >= 15.0) return mix(c1, c2, (20.0 - v) / 5.0);
   if (v >= 10.0) return mix(c2, c3, (15.0 - v) / 5.0);
@@ -103,61 +154,174 @@ vec4 sinrToColor(float v) {
   return               mix(c5, c6, ( 0.0 - v) / 3.0);
 }
 
+// SNR 色階（與 SINR 類似但範圍不同）
+vec4 snrColor(float v) {
+  if (v >= 40.0) return vec4(0.13, 0.55, 0.37, 0.80);
+  if (v <= 0.0)  return vec4(0.0);
+  vec4 c0 = vec4(0.13, 0.55, 0.37, 0.80);  // 40 dB
+  vec4 c1 = vec4(0.35, 0.68, 0.40, 0.78);  // 30 dB
+  vec4 c2 = vec4(0.72, 0.78, 0.30, 0.72);  // 20 dB
+  vec4 c3 = vec4(0.90, 0.55, 0.25, 0.65);  // 10 dB
+  vec4 c4 = vec4(0.69, 0.24, 0.24, 0.40);  //  0 dB
+  if (v >= 30.0) return mix(c0, c1, (40.0 - v) / 10.0);
+  if (v >= 20.0) return mix(c1, c2, (30.0 - v) / 10.0);
+  if (v >= 10.0) return mix(c2, c3, (20.0 - v) / 10.0);
+  return               mix(c3, c4, (10.0 - v) / 10.0);
+}
+
+// Channel Overlap 色階（1=綠、2=黃、3+=紅）
+vec4 overlapColor(int count) {
+  if (count <= 0)  return vec4(0.0);
+  if (count == 1)  return vec4(0.13, 0.55, 0.37, 0.65);  // 綠 — 無重疊
+  if (count == 2)  return vec4(0.85, 0.78, 0.30, 0.70);  // 黃 — 2 重疊
+  if (count == 3)  return vec4(0.90, 0.55, 0.25, 0.72);  // 橘
+  return                  vec4(0.75, 0.28, 0.22, 0.75);  // 紅 — 4+
+}
+
+// Data Rate 色階（Mbps，依 SINR 映射到 MCS）
+vec4 dataRateColor(float rate) {
+  if (rate <= 0.0) return vec4(0.0);
+  // 大致範圍 0~600 Mbps
+  float t = clamp(rate / 600.0, 0.0, 1.0);
+  vec4 cLow  = vec4(0.75, 0.28, 0.22, 0.60);
+  vec4 cMid  = vec4(0.85, 0.78, 0.30, 0.70);
+  vec4 cHigh = vec4(0.13, 0.55, 0.37, 0.80);
+  if (t < 0.5) return mix(cLow, cMid, t * 2.0);
+  return mix(cMid, cHigh, (t - 0.5) * 2.0);
+}
+
+// AP Count 色階
+vec4 apCountColor(int count) {
+  if (count <= 0) return vec4(0.0);
+  if (count == 1) return vec4(0.75, 0.28, 0.22, 0.55);  // 紅 — 僅 1 顆（冗餘不足）
+  if (count == 2) return vec4(0.13, 0.55, 0.37, 0.70);  // 綠 — 2 顆（理想）
+  if (count == 3) return vec4(0.35, 0.68, 0.40, 0.72);  // 青綠
+  return                 vec4(0.85, 0.78, 0.30, 0.70);  // 黃 — 4+（過多）
+}
+
+// SINR → 預估 Data Rate (Mbps)，簡化 MCS 映射
+float sinrToRate(float sinr) {
+  if (sinr < 2.0)  return 0.0;
+  if (sinr < 5.0)  return 6.5;     // MCS 0
+  if (sinr < 9.0)  return 13.0;    // MCS 1
+  if (sinr < 11.0) return 19.5;    // MCS 2
+  if (sinr < 15.0) return 26.0;    // MCS 3
+  if (sinr < 18.0) return 39.0;    // MCS 4
+  if (sinr < 20.0) return 52.0;    // MCS 5
+  if (sinr < 22.0) return 58.5;    // MCS 6
+  if (sinr < 25.0) return 65.0;    // MCS 7
+  if (sinr < 29.0) return 78.0;    // MCS 8
+  return 86.5;                      // MCS 9
+  // 多 spatial streams 倍率由顯示端換算
+}
+
 void main() {
   if (u_apCount == 0) { outColor = vec4(0.0); return; }
 
   vec2 screen = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y);
   vec2 canvas = (screen - vec2(u_vpX, u_vpY)) / u_vpScale;
 
-  // Scope mask：有定義範圍時，範圍外不渲染
   if (u_scopePtCount > 0 && !pointInScope(canvas)) {
     outColor = vec4(0.0);
     return;
   }
 
-  // Pass 1：計算每顆 AP 的 RSSI，找出最佳服務 AP
+  // Pass 1：計算每顆 AP 的 RSSI
   float rssis[MAX_APS];
   float bestRSSI = -1e10;
   int   bestIdx  = 0;
+  int   hearable = 0;  // RSSI > -85 的 AP 數
 
   for (int i = 0; i < MAX_APS; i++) {
     float rssi = -1e10;
     if (i < u_apCount) {
-      vec2  apPos = u_aps[i].xy;
-      float txPow = u_aps[i].z;
-      float fMHz  = u_aps[i].w;
-      float dist  = length(canvas - apPos);
+      vec2  apPos  = u_aps[i].xy;
+      float txPow  = u_aps[i].z;
+      float fMHz   = u_aps[i].w;
+      int   fIdx   = int(u_apFreqBand[i]);
+      float dist   = length(canvas - apPos);
       if (dist < 0.5) {
         rssi = txPow;
       } else {
         float distM = dist / u_floorScale;
-        float fspl  = 20.0 * log10v(distM) + 20.0 * log10v(fMHz) - 27.56;
-        rssi = txPow - fspl - wallLoss(canvas, apPos);
+        float fspl  = 10.0 * u_pathLossN * log10v(distM) + 20.0 * log10v(fMHz) - 27.56;
+        rssi = txPow - fspl - wallLoss(canvas, apPos, fIdx);
       }
       if (rssi > bestRSSI) { bestRSSI = rssi; bestIdx = i; }
+      if (rssi > -85.0) hearable++;
     }
     rssis[i] = rssi;
   }
 
   if (bestRSSI < -100.0) { outColor = vec4(0.0); return; }
 
-  // Pass 2：累積同頻干擾
+  // ── Mode: RSSI ──
+  if (u_mode == MODE_RSSI) {
+    outColor = rssiColor(bestRSSI);
+    return;
+  }
+
+  // ── Mode: AP Count ──
+  if (u_mode == MODE_AP_COUNT) {
+    outColor = apCountColor(hearable);
+    return;
+  }
+
+  // Pass 2：共用 — 計算 SINR / SNR
   float servingChan = u_apChannels[bestIdx];
   float servingFreq = u_aps[bestIdx].w;
+  float signalLin   = pow(10.0, bestRSSI / 10.0);
+  float intfLinear  = NOISE_LIN;
 
-  const float NOISE_DBM = -95.0;
-  float intfLinear = pow(10.0, NOISE_DBM / 10.0);
+  // Channel overlap 計數
+  int overlapCount = 0;
 
   for (int i = 0; i < MAX_APS; i++) {
     if (i >= u_apCount) break;
+    if (rssis[i] < -100.0) continue;
+
+    // 同頻段、同頻道判斷
+    bool sameChan = abs(u_apChannels[i] - servingChan) < 0.5 &&
+                    abs(u_aps[i].w - servingFreq) < 100.0;
+
+    if (sameChan && rssis[i] > -85.0) overlapCount++;
+
     if (i == bestIdx) continue;
-    if (abs(u_apChannels[i] - servingChan) > 0.5) continue;
-    if (abs(u_aps[i].w      - servingFreq) > 100.0) continue;
+    if (!sameChan) continue;
     intfLinear += pow(10.0, rssis[i] / 10.0);
   }
 
-  float sinr = 10.0 * log10v(pow(10.0, bestRSSI / 10.0) / intfLinear);
-  outColor = sinrToColor(sinr);
+  float sinr = 10.0 * log10v(signalLin / intfLinear);
+  float snr  = bestRSSI - NOISE_DBM;
+
+  // ── Mode: SINR ──
+  if (u_mode == MODE_SINR) {
+    outColor = sinrColor(sinr);
+    return;
+  }
+
+  // ── Mode: SNR ──
+  if (u_mode == MODE_SNR) {
+    outColor = snrColor(snr);
+    return;
+  }
+
+  // ── Mode: Channel Overlap ──
+  if (u_mode == MODE_CHANNEL_OVERLAP) {
+    outColor = overlapColor(overlapCount);
+    return;
+  }
+
+  // ── Mode: Data Rate ──
+  if (u_mode == MODE_DATA_RATE) {
+    float rate = sinrToRate(sinr);
+    // 假設 2 spatial streams → ×2
+    rate *= 2.0;
+    outColor = dataRateColor(rate);
+    return;
+  }
+
+  outColor = vec4(0.0);
 }`
 
 // ── WebGL helpers ─────────────────────────────────────────────────────
@@ -190,18 +354,88 @@ function makeProgram(gl) {
   return prog
 }
 
-// ── SINR Legend ───────────────────────────────────────────────────────
-const LEGEND_ITEMS = [
-  { label: '≥ 25 dB', color: 'rgba(168,212,0,0.85)' },
-  { label: '20 dB',   color: 'rgba(204,230,26,0.82)' },
-  { label: '15 dB',   color: 'rgba(255,209,0,0.80)'  },
-  { label: '10 dB',   color: 'rgba(255,107,0,0.80)'  },
-  { label: '5 dB',    color: 'rgba(230,26,13,0.78)'  },
-  { label: '0 dB',    color: 'rgba(153,0,0,0.70)'    },
-  { label: '無覆蓋',  color: 'transparent', noSignal: true },
-]
+// ── 模式名稱對應 shader int ────────────────────────────────────────
+const MODE_INT = {
+  [HEATMAP_MODE.RSSI]:            0,
+  [HEATMAP_MODE.SINR]:            1,
+  [HEATMAP_MODE.SNR]:             2,
+  [HEATMAP_MODE.CHANNEL_OVERLAP]: 3,
+  [HEATMAP_MODE.DATA_RATE]:       4,
+  [HEATMAP_MODE.AP_COUNT]:        5,
+}
 
-function HeatmapLegend() {
+// ── Legend 配置 ──────────────────────────────────────────────────────
+const LEGENDS = {
+  [HEATMAP_MODE.RSSI]: {
+    title: 'RSSI',
+    items: [
+      { label: '≥ −30 dBm', color: 'rgba(33,140,95,0.80)' },
+      { label: '−50 dBm',   color: 'rgba(115,186,115,0.75)' },
+      { label: '−65 dBm',   color: 'rgba(194,204,72,0.70)' },
+      { label: '−75 dBm',   color: 'rgba(235,184,82,0.65)' },
+      { label: '−85 dBm',   color: 'rgba(204,97,61,0.58)' },
+      { label: '−95 dBm',   color: 'rgba(130,41,41,0.30)' },
+      { label: '無覆蓋',     color: 'transparent', noSignal: true },
+    ],
+  },
+  [HEATMAP_MODE.SINR]: {
+    title: 'SINR',
+    items: [
+      { label: '≥ 25 dB', color: 'rgba(33,140,95,0.80)' },
+      { label: '20 dB',   color: 'rgba(89,173,102,0.78)' },
+      { label: '15 dB',   color: 'rgba(148,194,82,0.75)' },
+      { label: '10 dB',   color: 'rgba(217,199,77,0.72)' },
+      { label: '5 dB',    color: 'rgba(230,140,64,0.68)' },
+      { label: '0 dB',    color: 'rgba(191,71,56,0.60)' },
+      { label: '無覆蓋',   color: 'transparent', noSignal: true },
+    ],
+  },
+  [HEATMAP_MODE.SNR]: {
+    title: 'SNR',
+    items: [
+      { label: '≥ 40 dB', color: 'rgba(33,140,95,0.80)' },
+      { label: '30 dB',   color: 'rgba(89,173,102,0.78)' },
+      { label: '20 dB',   color: 'rgba(184,199,77,0.72)' },
+      { label: '10 dB',   color: 'rgba(230,140,64,0.65)' },
+      { label: '0 dB',    color: 'rgba(176,61,61,0.40)' },
+    ],
+  },
+  [HEATMAP_MODE.CHANNEL_OVERLAP]: {
+    title: '頻道重疊',
+    items: [
+      { label: '1 AP',  color: 'rgba(33,140,95,0.65)' },
+      { label: '2 AP',  color: 'rgba(217,199,77,0.70)' },
+      { label: '3 AP',  color: 'rgba(230,140,64,0.72)' },
+      { label: '4+ AP', color: 'rgba(191,71,56,0.75)' },
+      { label: '無覆蓋', color: 'transparent', noSignal: true },
+    ],
+  },
+  [HEATMAP_MODE.DATA_RATE]: {
+    title: '預估速率',
+    items: [
+      { label: '≥ 130 Mbps', color: 'rgba(33,140,95,0.80)' },
+      { label: '100 Mbps',   color: 'rgba(130,190,85,0.75)' },
+      { label: '60 Mbps',    color: 'rgba(217,199,77,0.70)' },
+      { label: '26 Mbps',    color: 'rgba(230,140,64,0.65)' },
+      { label: '< 13 Mbps',  color: 'rgba(191,71,56,0.60)' },
+      { label: '無覆蓋',      color: 'transparent', noSignal: true },
+    ],
+  },
+  [HEATMAP_MODE.AP_COUNT]: {
+    title: '可用 AP 數',
+    items: [
+      { label: '1 顆',  color: 'rgba(191,71,56,0.55)' },
+      { label: '2 顆',  color: 'rgba(33,140,95,0.70)' },
+      { label: '3 顆',  color: 'rgba(89,173,102,0.72)' },
+      { label: '4+ 顆', color: 'rgba(217,199,77,0.70)' },
+      { label: '無覆蓋', color: 'transparent', noSignal: true },
+    ],
+  },
+}
+
+// ── Legend 元件 ──────────────────────────────────────────────────────
+function HeatmapLegend({ mode }) {
+  const legend = LEGENDS[mode] || LEGENDS[HEATMAP_MODE.SINR]
   return (
     <div style={{
       position: 'absolute',
@@ -217,9 +451,9 @@ function HeatmapLegend() {
       pointerEvents: 'none',
     }}>
       <div style={{ fontSize: 10, fontWeight: 700, color: '#4fc3f7', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 6 }}>
-        SINR
+        {legend.title}
       </div>
-      {LEGEND_ITEMS.map((item) => (
+      {legend.items.map((item) => (
         <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 }}>
           <div style={{
             width: 14,
@@ -242,19 +476,25 @@ function HeatmapLegend() {
 function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef, draggingScopeRef }) {
   const canvasRef = useRef(null)
 
-  const showHeatmap   = useEditorStore((s) => s.showHeatmap)
-  const activeFloorId = useFloorStore((s) => s.activeFloorId)
-  const floorScale    = useFloorStore((s) => s.scale)
+  const showHeatmap      = useEditorStore((s) => s.showHeatmap)
+  const heatmapMode      = useEditorStore((s) => s.heatmapMode)
+  const pathLossExponent = useEditorStore((s) => s.pathLossExponent)
+  const activeFloorId    = useFloorStore((s) => s.activeFloorId)
+  const floorScale       = useFloorStore((s) => s.scale)
 
-  const showHeatmapRef   = useRef(showHeatmap)
-  const activeFloorIdRef = useRef(activeFloorId)
-  const floorScaleRef    = useRef(floorScale)
+  const showHeatmapRef      = useRef(showHeatmap)
+  const heatmapModeRef      = useRef(heatmapMode)
+  const pathLossExponentRef = useRef(pathLossExponent)
+  const activeFloorIdRef    = useRef(activeFloorId)
+  const floorScaleRef       = useRef(floorScale)
 
-  useEffect(() => { showHeatmapRef.current   = showHeatmap   }, [showHeatmap])
-  useEffect(() => { activeFloorIdRef.current = activeFloorId }, [activeFloorId])
-  useEffect(() => { floorScaleRef.current    = floorScale    }, [floorScale])
+  useEffect(() => { showHeatmapRef.current      = showHeatmap      }, [showHeatmap])
+  useEffect(() => { heatmapModeRef.current      = heatmapMode      }, [heatmapMode])
+  useEffect(() => { pathLossExponentRef.current = pathLossExponent  }, [pathLossExponent])
+  useEffect(() => { activeFloorIdRef.current    = activeFloorId     }, [activeFloorId])
+  useEffect(() => { floorScaleRef.current       = floorScale        }, [floorScale])
 
-  // ── WebGL 初始化 + RAF loop（mount 一次）──────────────────────────
+  // ── WebGL 初始化 + RAF loop ──────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current
     const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: false })
@@ -266,7 +506,6 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
     const prog = makeProgram(gl)
     if (!prog) return
 
-    // 全螢幕四邊形
     const vao    = gl.createVertexArray()
     const posBuf = gl.createBuffer()
     gl.bindVertexArray(vao)
@@ -279,45 +518,48 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0)
     gl.bindVertexArray(null)
 
-    // Uniform locations
     const locs = {
-      resolution:   gl.getUniformLocation(prog, 'u_resolution'),
-      vpX:          gl.getUniformLocation(prog, 'u_vpX'),
-      vpY:          gl.getUniformLocation(prog, 'u_vpY'),
-      vpScale:      gl.getUniformLocation(prog, 'u_vpScale'),
-      floorScale:   gl.getUniformLocation(prog, 'u_floorScale'),
-      apCount:      gl.getUniformLocation(prog, 'u_apCount'),
-      wallCount:    gl.getUniformLocation(prog, 'u_wallCount'),
-      aps:          gl.getUniformLocation(prog, 'u_aps[0]'),
-      apChannels:   gl.getUniformLocation(prog, 'u_apChannels[0]'),
-      walls:        gl.getUniformLocation(prog, 'u_walls[0]'),
-      wallLoss:     gl.getUniformLocation(prog, 'u_wallLoss[0]'),
-      scopePts:     gl.getUniformLocation(prog, 'u_scopePts[0]'),
-      scopePtCount: gl.getUniformLocation(prog, 'u_scopePtCount'),
+      resolution:     gl.getUniformLocation(prog, 'u_resolution'),
+      vpX:            gl.getUniformLocation(prog, 'u_vpX'),
+      vpY:            gl.getUniformLocation(prog, 'u_vpY'),
+      vpScale:        gl.getUniformLocation(prog, 'u_vpScale'),
+      floorScale:     gl.getUniformLocation(prog, 'u_floorScale'),
+      apCount:        gl.getUniformLocation(prog, 'u_apCount'),
+      wallCount:      gl.getUniformLocation(prog, 'u_wallCount'),
+      aps:            gl.getUniformLocation(prog, 'u_aps[0]'),
+      apChannels:     gl.getUniformLocation(prog, 'u_apChannels[0]'),
+      apFreqBand:     gl.getUniformLocation(prog, 'u_apFreqBand[0]'),
+      walls:          gl.getUniformLocation(prog, 'u_walls[0]'),
+      wallLoss3:      gl.getUniformLocation(prog, 'u_wallLoss3[0]'),
+      scopePts:       gl.getUniformLocation(prog, 'u_scopePts[0]'),
+      scopePtCount:   gl.getUniformLocation(prog, 'u_scopePtCount'),
+      mode:           gl.getUniformLocation(prog, 'u_mode'),
+      pathLossN:      gl.getUniformLocation(prog, 'u_pathLossN'),
     }
 
-    // 預分配 uniform 資料緩衝
-    const apData       = new Float32Array(MAX_APS        * 4)
-    const apChanData   = new Float32Array(MAX_APS)
-    const wallPosData  = new Float32Array(MAX_WALLS      * 4)
-    const wallLossData = new Float32Array(MAX_WALLS)
-    const scopePtsData = new Float32Array(MAX_SCOPE_PTS  * 2)
+    const apData        = new Float32Array(MAX_APS       * 4)
+    const apChanData    = new Float32Array(MAX_APS)
+    const apFreqData    = new Float32Array(MAX_APS)
+    const wallPosData   = new Float32Array(MAX_WALLS     * 4)
+    const wallLoss3Data = new Float32Array(MAX_WALLS     * 3)
+    const scopePtsData  = new Float32Array(MAX_SCOPE_PTS * 2)
 
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
     gl.useProgram(prog)
 
-    // ── RAF loop ─────────────────────────────────────────────────────
     let rafId
     let prevKey = null
 
     const loop = () => {
       rafId = requestAnimationFrame(loop)
 
-      const stage   = stageRef.current
-      const showH   = showHeatmapRef.current
-      const floorId = activeFloorIdRef.current
-      const floorS  = floorScaleRef.current
+      const stage    = stageRef.current
+      const showH    = showHeatmapRef.current
+      const floorId  = activeFloorIdRef.current
+      const floorS   = floorScaleRef.current
+      const curMode  = heatmapModeRef.current
+      const plN      = pathLossExponentRef.current
       const w = canvas.width
       const h = canvas.height
 
@@ -333,7 +575,6 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         return
       }
 
-      // AP 資料（含拖移覆蓋）
       let aps = useAPStore.getState().apsByFloor[floorId] ?? []
       const drag = draggingAPRef?.current
       if (drag) aps = aps.map((a) => a.id === drag.id ? { ...a, x: drag.x, y: drag.y } : a)
@@ -348,7 +589,6 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         return
       }
 
-      // 牆體資料（含拖移覆蓋）
       let rawWalls = useWallStore.getState().wallsByFloor[floorId] ?? []
       const dragWall = draggingWallRef?.current
       if (dragWall) {
@@ -360,7 +600,6 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         )
       }
 
-      // Scope mask：取第一個 type:'in' 的範圍（含拖移偏移）
       const scopes  = useScopeStore.getState().scopesByFloor[floorId] ?? []
       const inScope = scopes.find((s) => s.type === 'in')
       let scopePtCount = 0
@@ -369,7 +608,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         const isDragging = dragScope && dragScope.id === inScope.id
         const dx = isDragging ? dragScope.dx : 0
         const dy = isDragging ? dragScope.dy : 0
-        const pts = inScope.points  // flat [x0,y0,x1,y1,...]
+        const pts = inScope.points
         scopePtCount = Math.min(pts.length / 2, MAX_SCOPE_PTS)
         for (let i = 0; i < scopePtCount; i++) {
           scopePtsData[i * 2]     = pts[i * 2]     + dx
@@ -379,18 +618,16 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
 
       const vp = { x: stage.x(), y: stage.y(), scale: stage.scaleX() }
 
-      // 變化偵測
       const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0}`).join('|')
       const wallKey  = rawWalls.map((wl) => `${wl.startX},${wl.startY},${wl.endX},${wl.endY},${wl.material?.dbLoss}`).join('|')
       const dragScope = draggingScopeRef?.current
       const scopeKey  = inScope
         ? `${inScope.id},${dragScope?.id === inScope.id ? `${dragScope.dx.toFixed(1)},${dragScope.dy.toFixed(1)}` : '0,0'}`
         : 'none'
-      const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${apKey},${wallKey},${scopeKey}`
+      const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${curMode},${plN},${apKey},${wallKey},${scopeKey}`
       if (key === prevKey) return
       prevKey = key
 
-      // 填充 AP uniform
       const apCount = Math.min(aps.length, MAX_APS)
       for (let i = 0; i < apCount; i++) {
         const a = aps[i]
@@ -399,9 +636,9 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         apData[i*4+2] = a.txPower
         apData[i*4+3] = FREQ_MHZ[a.frequency] ?? 5500
         apChanData[i] = a.channel ?? DEFAULT_CHAN[a.frequency] ?? 1
+        apFreqData[i] = FREQ_BAND_INDEX[a.frequency] ?? 1
       }
 
-      // 填充 Wall uniform
       const wallCount = Math.min(rawWalls.length, MAX_WALLS)
       for (let i = 0; i < wallCount; i++) {
         const wl = rawWalls[i]
@@ -409,27 +646,33 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         wallPosData[i*4+1] = wl.startY
         wallPosData[i*4+2] = wl.endX
         wallPosData[i*4+3] = wl.endY
-        wallLossData[i]    = wl.material?.dbLoss ?? 0
+        const baseLoss = wl.material?.dbLoss ?? 0
+        const ff = wl.material?.freqFactor
+        wallLoss3Data[i*3]   = baseLoss * (ff ? (ff[2.4] ?? 1) : 1)
+        wallLoss3Data[i*3+1] = baseLoss * (ff ? (ff[5]   ?? 1) : 1)
+        wallLoss3Data[i*3+2] = baseLoss * (ff ? (ff[6]   ?? 1) : 1)
       }
 
-      // 繪製
       gl.viewport(0, 0, w, h)
       gl.clearColor(0, 0, 0, 0)
       gl.clear(gl.COLOR_BUFFER_BIT)
 
-      gl.uniform2f(locs.resolution,   w, h)
-      gl.uniform1f(locs.vpX,          vp.x)
-      gl.uniform1f(locs.vpY,          vp.y)
-      gl.uniform1f(locs.vpScale,      vp.scale)
-      gl.uniform1f(locs.floorScale,   floorS)
-      gl.uniform1i(locs.apCount,      apCount)
-      gl.uniform1i(locs.wallCount,    wallCount)
-      gl.uniform4fv(locs.aps,         apData)
-      gl.uniform1fv(locs.apChannels,  apChanData)
-      gl.uniform4fv(locs.walls,       wallPosData)
-      gl.uniform1fv(locs.wallLoss,    wallLossData)
-      gl.uniform2fv(locs.scopePts,    scopePtsData)
-      gl.uniform1i(locs.scopePtCount, scopePtCount)
+      gl.uniform2f(locs.resolution,    w, h)
+      gl.uniform1f(locs.vpX,           vp.x)
+      gl.uniform1f(locs.vpY,           vp.y)
+      gl.uniform1f(locs.vpScale,       vp.scale)
+      gl.uniform1f(locs.floorScale,    floorS)
+      gl.uniform1i(locs.apCount,       apCount)
+      gl.uniform1i(locs.wallCount,     wallCount)
+      gl.uniform4fv(locs.aps,          apData)
+      gl.uniform1fv(locs.apChannels,   apChanData)
+      gl.uniform1fv(locs.apFreqBand,   apFreqData)
+      gl.uniform4fv(locs.walls,        wallPosData)
+      gl.uniform3fv(locs.wallLoss3,    wallLoss3Data)
+      gl.uniform2fv(locs.scopePts,     scopePtsData)
+      gl.uniform1i(locs.scopePtCount,  scopePtCount)
+      gl.uniform1i(locs.mode,          MODE_INT[curMode] ?? 1)
+      gl.uniform1f(locs.pathLossN,     plN)
 
       gl.bindVertexArray(vao)
       gl.drawArrays(gl.TRIANGLES, 0, 6)
@@ -460,7 +703,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
           display: showHeatmap ? 'block' : 'none',
         }}
       />
-      {showHeatmap && <HeatmapLegend />}
+      {showHeatmap && <HeatmapLegend mode={heatmapMode} />}
     </>
   )
 }
