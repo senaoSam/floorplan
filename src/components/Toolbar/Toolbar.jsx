@@ -100,8 +100,9 @@ function Toolbar() {
           2D
         </button>
         <button
-          className={`toolbar__view-btn${viewMode === VIEW_MODE.THREE_D ? ' toolbar__view-btn--active' : ''}`}
-          onClick={() => setViewMode(VIEW_MODE.THREE_D)}
+          className="toolbar__view-btn toolbar__view-btn--disabled"
+          disabled
+          title="3D 檢視功能開發中，敬請期待"
         >
           3D
         </button>
