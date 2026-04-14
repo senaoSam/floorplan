@@ -119,31 +119,29 @@ function APPanel({ floorId, apId }) {
         </div>
       </section>
 
-      {/* 安裝高度 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">安裝高度</p>
+      {/* 安裝高度（3D 視圖開放後啟用） */}
+      <section className="ap-panel__section ap-panel__section--disabled" title="3D 視圖開放後啟用">
+        <p className="ap-panel__label">安裝高度 <span className="ap-panel__coming-soon">即將推出</span></p>
         <div className="ap-panel__number-row">
           <input
             className="ap-panel__input ap-panel__input--number"
             type="number"
-            min="0"
-            step="0.1"
             value={ap.z}
-            onChange={(e) => handleNumber('z', e.target.value)}
+            disabled
           />
           <span className="ap-panel__unit">m</span>
         </div>
       </section>
 
-      {/* 天線模式 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">天線模式</p>
+      {/* 天線模式（定向天線開放後啟用） */}
+      <section className="ap-panel__section ap-panel__section--disabled" title="定向天線功能開發中">
+        <p className="ap-panel__label">天線模式 <span className="ap-panel__coming-soon">即將推出</span></p>
         <div className="ap-panel__btn-group">
           {ANTENNA_OPTIONS.map((o) => (
             <button
               key={o.value}
               className={`ap-panel__btn${ap.antennaMode === o.value ? ' ap-panel__btn--active' : ''}`}
-              onClick={() => handleField('antennaMode', o.value)}
+              disabled
             >
               {o.label}
             </button>
@@ -151,15 +149,15 @@ function APPanel({ floorId, apId }) {
         </div>
       </section>
 
-      {/* 安裝方式 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">安裝方式</p>
+      {/* 安裝方式（3D 視圖開放後啟用） */}
+      <section className="ap-panel__section ap-panel__section--disabled" title="3D 視圖開放後啟用">
+        <p className="ap-panel__label">安裝方式 <span className="ap-panel__coming-soon">即將推出</span></p>
         <div className="ap-panel__btn-group">
           {MOUNT_OPTIONS.map((o) => (
             <button
               key={o.value}
               className={`ap-panel__btn${ap.mountType === o.value ? ' ap-panel__btn--active' : ''}`}
-              onClick={() => handleField('mountType', o.value)}
+              disabled
             >
               {o.label}
             </button>

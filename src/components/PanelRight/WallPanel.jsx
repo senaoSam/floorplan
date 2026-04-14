@@ -61,18 +61,16 @@ function WallPanel({ floorId, wallId }) {
         </div>
       </section>
 
-      {/* 高度設定 */}
-      <section className="wall-panel__section">
-        <p className="wall-panel__label">高度（公尺）</p>
+      {/* 高度設定（3D 視圖開放後啟用） */}
+      <section className="wall-panel__section wall-panel__section--disabled" title="3D 視圖開放後啟用">
+        <p className="wall-panel__label">高度（公尺） <span className="wall-panel__coming-soon">即將推出</span></p>
         <div className="wall-panel__heights">
           <label className="wall-panel__height-field">
             <span>頂部</span>
             <input
               type="number"
-              min="0"
-              step="0.1"
               value={wall.topHeight}
-              onChange={(e) => handleHeight('topHeight', e.target.value)}
+              disabled
             />
             <span>m</span>
           </label>
@@ -80,10 +78,8 @@ function WallPanel({ floorId, wallId }) {
             <span>底部</span>
             <input
               type="number"
-              min="0"
-              step="0.1"
               value={wall.bottomHeight}
-              onChange={(e) => handleHeight('bottomHeight', e.target.value)}
+              disabled
             />
             <span>m</span>
           </label>
