@@ -7,7 +7,7 @@ import { useScopeStore } from '@/store/useScopeStore'
 
 const MAX_APS        = 32
 const MAX_WALLS      = 64
-const MAX_SCOPE_PTS  = 64
+const MAX_SCOPE_PTS  = 256
 
 const FREQ_MHZ    = { 2.4: 2437, 5: 5500, 6: 6000 }
 const DEFAULT_CHAN = { 2.4: 1,    5: 36,   6: 1    }
@@ -87,21 +87,51 @@ float wallLoss(vec2 px, vec2 ap, int freqIdx) {
   return loss;
 }
 
-bool pointInScope(vec2 p) {
+// 多 scope 聯集：u_scopeRanges[k] = (start, count)，每組為一個多邊形
+// 落在任一多邊形內即為 true
+#define MAX_SCOPES 8
+uniform vec2 u_scopeRanges[MAX_SCOPES];     // in-scope (start, count)
+uniform int  u_scopeCount;
+uniform vec2 u_outScopeRanges[MAX_SCOPES];  // out-scope (start, count)
+uniform int  u_outScopeCount;
+
+bool pointInPoly(vec2 p, int start, int n) {
   bool inside = false;
-  int n = u_scopePtCount;
-  int j = n - 1;
+  int j = start + n - 1;
   for (int i = 0; i < MAX_SCOPE_PTS; i++) {
+    int idx = start + i;
     if (i >= n) break;
-    vec2 pi = u_scopePts[i];
+    vec2 pi = u_scopePts[idx];
     vec2 pj = u_scopePts[j];
     if ((pi.y > p.y) != (pj.y > p.y) &&
         p.x < (pj.x - pi.x) * (p.y - pi.y) / (pj.y - pi.y) + pi.x) {
       inside = !inside;
     }
-    j = i;
+    j = idx;
   }
   return inside;
+}
+
+bool pointInScope(vec2 p) {
+  // 有 in-scope 時：必須在任一 in-scope 內
+  if (u_scopeCount > 0) {
+    bool inAny = false;
+    for (int k = 0; k < MAX_SCOPES; k++) {
+      if (k >= u_scopeCount) break;
+      int start = int(u_scopeRanges[k].x);
+      int count = int(u_scopeRanges[k].y);
+      if (pointInPoly(p, start, count)) { inAny = true; break; }
+    }
+    if (!inAny) return false;
+  }
+  // 不能在任何 out-scope 內
+  for (int k = 0; k < MAX_SCOPES; k++) {
+    if (k >= u_outScopeCount) break;
+    int start = int(u_outScopeRanges[k].x);
+    int count = int(u_outScopeRanges[k].y);
+    if (pointInPoly(p, start, count)) return false;
+  }
+  return true;
 }
 
 // ── Cisco 風格色階（紅=強、藍=弱）──────────────────────────────────
@@ -207,9 +237,8 @@ void main() {
   vec2 screen = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y);
   vec2 canvas = (screen - vec2(u_vpX, u_vpY)) / u_vpScale;
 
-  if (u_scopePtCount > 0 && !pointInScope(canvas)) {
-    outColor = vec4(0.0);
-    return;
+  if (u_scopeCount > 0 || u_outScopeCount > 0) {
+    if (!pointInScope(canvas)) { outColor = vec4(0.0); return; }
   }
 
   // Pass 1：計算每顆 AP 的 RSSI
@@ -519,6 +548,10 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       wallLoss3:      gl.getUniformLocation(prog, 'u_wallLoss3[0]'),
       scopePts:       gl.getUniformLocation(prog, 'u_scopePts[0]'),
       scopePtCount:   gl.getUniformLocation(prog, 'u_scopePtCount'),
+      scopeRanges:    gl.getUniformLocation(prog, 'u_scopeRanges[0]'),
+      scopeCount:     gl.getUniformLocation(prog, 'u_scopeCount'),
+      outScopeRanges: gl.getUniformLocation(prog, 'u_outScopeRanges[0]'),
+      outScopeCount:  gl.getUniformLocation(prog, 'u_outScopeCount'),
       mode:           gl.getUniformLocation(prog, 'u_mode'),
       pathLossN:      gl.getUniformLocation(prog, 'u_pathLossN'),
     }
@@ -528,7 +561,9 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
     const apFreqData    = new Float32Array(MAX_APS)
     const wallPosData   = new Float32Array(MAX_WALLS     * 4)
     const wallLoss3Data = new Float32Array(MAX_WALLS     * 3)
-    const scopePtsData  = new Float32Array(MAX_SCOPE_PTS * 2)
+    const scopePtsData    = new Float32Array(MAX_SCOPE_PTS * 2)
+    const scopeRangesData    = new Float32Array(8 * 2)  // MAX_SCOPES=8, vec2 each
+    const outScopeRangesData = new Float32Array(8 * 2)
 
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
@@ -586,30 +621,58 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         )
       }
 
-      const scopes  = useScopeStore.getState().scopesByFloor[floorId] ?? []
-      const inScope = scopes.find((s) => s.type === 'in')
-      let scopePtCount = 0
-      if (inScope) {
-        const dragScope = draggingScopeRef?.current
-        const isDragging = dragScope && dragScope.id === inScope.id
+      const scopes     = useScopeStore.getState().scopesByFloor[floorId] ?? []
+      const inScopes   = scopes.filter((s) => s.type === 'in')
+      const outScopes  = scopes.filter((s) => s.type === 'out')
+      let scopePtCount   = 0
+      let scopeCount     = 0
+      let outScopeCount  = 0
+      const dragScope    = draggingScopeRef?.current
+
+      // 填入 in-scope 多邊形
+      for (let si = 0; si < inScopes.length && si < 8 && scopePtCount < MAX_SCOPE_PTS; si++) {
+        const sc = inScopes[si]
+        const isDragging = dragScope && dragScope.id === sc.id
         const dx = isDragging ? dragScope.dx : 0
         const dy = isDragging ? dragScope.dy : 0
-        const pts = inScope.points
-        scopePtCount = Math.min(pts.length / 2, MAX_SCOPE_PTS)
-        for (let i = 0; i < scopePtCount; i++) {
-          scopePtsData[i * 2]     = pts[i * 2]     + dx
-          scopePtsData[i * 2 + 1] = pts[i * 2 + 1] + dy
+        const pts = sc.points
+        const vtxCount = Math.min(pts.length / 2, MAX_SCOPE_PTS - scopePtCount)
+        scopeRangesData[si * 2]     = scopePtCount
+        scopeRangesData[si * 2 + 1] = vtxCount
+        for (let i = 0; i < vtxCount; i++) {
+          scopePtsData[(scopePtCount + i) * 2]     = pts[i * 2]     + dx
+          scopePtsData[(scopePtCount + i) * 2 + 1] = pts[i * 2 + 1] + dy
         }
+        scopePtCount += vtxCount
+        scopeCount++
+      }
+
+      // 填入 out-scope 多邊形（共用 scopePtsData）
+      for (let si = 0; si < outScopes.length && si < 8 && scopePtCount < MAX_SCOPE_PTS; si++) {
+        const sc = outScopes[si]
+        const isDragging = dragScope && dragScope.id === sc.id
+        const dx = isDragging ? dragScope.dx : 0
+        const dy = isDragging ? dragScope.dy : 0
+        const pts = sc.points
+        const vtxCount = Math.min(pts.length / 2, MAX_SCOPE_PTS - scopePtCount)
+        outScopeRangesData[si * 2]     = scopePtCount
+        outScopeRangesData[si * 2 + 1] = vtxCount
+        for (let i = 0; i < vtxCount; i++) {
+          scopePtsData[(scopePtCount + i) * 2]     = pts[i * 2]     + dx
+          scopePtsData[(scopePtCount + i) * 2 + 1] = pts[i * 2 + 1] + dy
+        }
+        scopePtCount += vtxCount
+        outScopeCount++
       }
 
       const vp = { x: stage.x(), y: stage.y(), scale: stage.scaleX() }
 
       const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0}`).join('|')
       const wallKey  = rawWalls.map((wl) => `${wl.startX},${wl.startY},${wl.endX},${wl.endY},${wl.material?.dbLoss}`).join('|')
-      const dragScope = draggingScopeRef?.current
-      const scopeKey  = inScope
-        ? `${inScope.id},${dragScope?.id === inScope.id ? `${dragScope.dx.toFixed(1)},${dragScope.dy.toFixed(1)}` : '0,0'}`
-        : 'none'
+      const scopeKey = [...inScopes, ...outScopes].map((sc) => {
+        const d = dragScope && dragScope.id === sc.id ? `${dragScope.dx.toFixed(1)},${dragScope.dy.toFixed(1)}` : '0,0'
+        return `${sc.id},${sc.type},${d}`
+      }).join('|') || 'none'
       const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${curMode},${plN},${apKey},${wallKey},${scopeKey}`
       if (key === prevKey) return
       prevKey = key
@@ -657,6 +720,10 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       gl.uniform3fv(locs.wallLoss3,    wallLoss3Data)
       gl.uniform2fv(locs.scopePts,     scopePtsData)
       gl.uniform1i(locs.scopePtCount,  scopePtCount)
+      gl.uniform2fv(locs.scopeRanges,     scopeRangesData)
+      gl.uniform1i(locs.scopeCount,      scopeCount)
+      gl.uniform2fv(locs.outScopeRanges, outScopeRangesData)
+      gl.uniform1i(locs.outScopeCount,   outScopeCount)
       gl.uniform1i(locs.mode,          MODE_INT[curMode] ?? 1)
       gl.uniform1f(locs.pathLossN,     plN)
 
