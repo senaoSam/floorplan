@@ -44,6 +44,7 @@ export const useEditorStore = create((set) => ({
   heatmapMode: HEATMAP_MODE.SINR,
   pathLossExponent: 3.0, // 預設辦公室環境
   panelCollapsed: false,
+  showAPInfo: true,
 
   setEditorMode: (mode) => set({ editorMode: mode, selectedId: null, selectedType: null }),
   setViewMode: (mode) => set({ viewMode: mode }),
@@ -53,4 +54,5 @@ export const useEditorStore = create((set) => ({
   setHeatmapMode: (mode) => set({ heatmapMode: mode }),
   setPathLossExponent: (n) => set({ pathLossExponent: n }),
   togglePanelCollapsed: () => set((s) => ({ panelCollapsed: !s.panelCollapsed })),
+  toggleAPInfo: () => set((s) => ({ showAPInfo: !s.showAPInfo })),
 }))

@@ -1,9 +1,12 @@
 import React from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
+import { useEditorStore } from '@/store/useEditorStore'
 import './SidebarLeft.sass'
 
 function SidebarLeft() {
   const { floors, activeFloorId, setActiveFloor } = useFloorStore()
+  const showAPInfo = useEditorStore((s) => s.showAPInfo)
+  const toggleAPInfo = useEditorStore((s) => s.toggleAPInfo)
 
   return (
     <aside className="sidebar-left">
@@ -41,6 +44,14 @@ function SidebarLeft() {
               <span>{layer}</span>
             </li>
           ))}
+          <li
+            className="sidebar-left__layer-item"
+            onClick={toggleAPInfo}
+            style={{ cursor: 'pointer' }}
+          >
+            <span className="sidebar-left__layer-eye">{showAPInfo ? '👁' : '🚫'}</span>
+            <span>AP 資訊</span>
+          </li>
         </ul>
       </section>
     </aside>

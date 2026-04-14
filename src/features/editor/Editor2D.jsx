@@ -436,6 +436,7 @@ function Editor2D() {
                 onAPDragEnd={() => { draggingAPRef.current = null }}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode}
                 onRightMouseDown={handleRightMouseDown}
+                viewportScale={viewport.scale}
               />
             )}
 

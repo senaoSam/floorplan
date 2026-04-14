@@ -1,6 +1,7 @@
 import React from 'react'
-import { Group, Circle, Arc, Text } from 'react-konva'
+import { Group, Circle, Arc, Text, Rect } from 'react-konva'
 import { useAPStore } from '@/store/useAPStore'
+import { useEditorStore } from '@/store/useEditorStore'
 
 // 依頻段給顏色
 const FREQ_COLOR = {
@@ -9,9 +10,16 @@ const FREQ_COLOR = {
   6:   '#a855f7',
 }
 
-function APMarker({ ap, isSelected, isDraggable, onClick, onMoved, onDragMove, isDrawingActive, onRightMouseDown }) {
+const FREQ_LABEL = {
+  2.4: '2.4G',
+  5:   '5G',
+  6:   '6G',
+}
+
+function APMarker({ ap, isSelected, isDraggable, onClick, onMoved, onDragMove, isDrawingActive, onRightMouseDown, showAPInfo, inverseScale }) {
   const color = FREQ_COLOR[ap.frequency] ?? '#4fc3f7'
   const ringColor = isSelected ? '#e74c3c' : color
+  const s = inverseScale
 
   return (
     <Group
@@ -42,55 +50,77 @@ function APMarker({ ap, isSelected, isDraggable, onClick, onMoved, onDragMove, i
       }}
       hitFunc={(ctx, shape) => {
         ctx.beginPath()
-        ctx.arc(0, 0, 20, 0, Math.PI * 2)
+        ctx.arc(0, 0, 24 * s, 0, Math.PI * 2)
         ctx.closePath()
         shape.fillStrokeShape(shape)
       }}
     >
       {/* 外環 */}
       <Circle
-        radius={16}
+        radius={20 * s}
         fill="rgba(0,0,0,0.35)"
         stroke={ringColor}
-        strokeWidth={isSelected ? 3 : 2}
+        strokeWidth={(isSelected ? 3.5 : 2.5) * s}
       />
       {/* WiFi 弧形（由外到內三層） */}
-      {[11, 7, 3].map((r, i) => (
+      {[14, 9, 4].map((r, i) => (
         <Arc
           key={r}
-          innerRadius={r - 1.5}
-          outerRadius={r}
+          innerRadius={(r - 2) * s}
+          outerRadius={r * s}
           angle={180}
           rotation={-180}
           fill={color}
           opacity={1 - i * 0.2}
-          offsetY={2}
+          offsetY={2.5 * s}
         />
       ))}
       {/* 中心點 */}
-      <Circle radius={2.5} fill={color} offsetY={2} />
-      {/* 名稱標籤：深色陰影確保淺/深背景都清晰 */}
+      <Circle radius={3 * s} fill={color} offsetY={2.5 * s} />
+      {/* 名稱標籤 */}
       <Text
         text={ap.name}
-        fontSize={10}
+        fontSize={13 * s}
         fill="#fff"
         align="center"
-        offsetX={20}
-        offsetY={-22}
-        width={40}
+        offsetX={26 * s}
+        offsetY={-28 * s}
+        width={52 * s}
         shadowColor="#000"
         shadowBlur={4}
         shadowOpacity={0.9}
         shadowOffsetX={0}
         shadowOffsetY={0}
       />
+      {/* AP 資訊標籤 */}
+      {showAPInfo && (
+        <Group y={24 * s} offsetX={40 * s}>
+          <Rect
+            width={80 * s}
+            height={34 * s}
+            fill="rgba(0,0,0,0.75)"
+            cornerRadius={4 * s}
+          />
+          <Text
+            text={`${FREQ_LABEL[ap.frequency] || ap.frequency + 'G'} CH${ap.channel}\n${ap.txPower} dBm`}
+            fontSize={11 * s}
+            fill="#fff"
+            x={5 * s}
+            y={4 * s}
+            width={70 * s}
+            lineHeight={1.3}
+          />
+        </Group>
+      )}
     </Group>
   )
 }
 
-function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd, isDrawingActive, onRightMouseDown }) {
+function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd, isDrawingActive, onRightMouseDown, viewportScale }) {
   const aps        = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   const updateAP   = useAPStore((s) => s.updateAP)
+  const showAPInfo = useEditorStore((s) => s.showAPInfo)
+  const inverseScale = 1 / viewportScale
 
   const handleMoved = (id, x, y) => {
     updateAP(floorId, id, { x, y })
@@ -110,6 +140,8 @@ function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd, 
           onDragMove={onAPDragMove}
           isDrawingActive={isDrawingActive}
           onRightMouseDown={onRightMouseDown}
+          showAPInfo={showAPInfo}
+          inverseScale={inverseScale}
         />
       ))}
     </Group>
