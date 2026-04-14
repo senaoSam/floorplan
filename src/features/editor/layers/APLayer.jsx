@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Group, Circle, Arc, Text, Rect } from 'react-konva'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
@@ -16,18 +16,19 @@ const FREQ_LABEL = {
   6:   '6G',
 }
 
-function APMarker({ ap, isSelected, isDraggable, onClick, onMoved, onDragMove, isDrawingActive, onRightMouseDown, showAPInfo, inverseScale }) {
+function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, onMoved, onDragMove, isDrawingActive, onRightMouseDown, showAPInfo, inverseScale }) {
   const color = FREQ_COLOR[ap.frequency] ?? '#4fc3f7'
   const ringColor = isSelected ? '#e74c3c' : color
-  const s = inverseScale
+  const hoverMul = isHovered && !isSelected ? 1.3 : 1
+  const s = inverseScale * hoverMul
 
   return (
     <Group
       x={ap.x}
       y={ap.y}
       draggable={isDraggable}
-      onMouseEnter={(e) => { e.target.getStage().container().style.cursor = 'move' }}
-      onMouseLeave={(e) => { e.target.getStage().container().style.cursor = 'default' }}
+      onMouseEnter={(e) => { e.target.getStage().container().style.cursor = 'move'; onHover(ap.id) }}
+      onMouseLeave={(e) => { e.target.getStage().container().style.cursor = 'default'; onHover(null) }}
       onClick={(e) => { e.cancelBubble = true; onClick(ap.id) }}
       onContextMenu={(e) => {
         e.evt.preventDefault()
@@ -56,12 +57,23 @@ function APMarker({ ap, isSelected, isDraggable, onClick, onMoved, onDragMove, i
         shape.fillStrokeShape(shape)
       }}
     >
+      {/* hover 光暈 */}
+      {isHovered && !isSelected && (
+        <Circle
+          radius={28 * s}
+          fill="rgba(255,255,255,0.12)"
+          stroke="#fff"
+          strokeWidth={1.5 * s}
+          opacity={0.6}
+          listening={false}
+        />
+      )}
       {/* 外環 */}
       <Circle
         radius={20 * s}
         fill="rgba(0,0,0,0.35)"
-        stroke={ringColor}
-        strokeWidth={(isSelected ? 3.5 : 2.5) * s}
+        stroke={isHovered && !isSelected ? '#fff' : ringColor}
+        strokeWidth={(isSelected || isHovered ? 3.5 : 2.5) * s}
       />
       {/* WiFi 弧形（由外到內三層） */}
       {[14, 9, 4].map((r, i) => (
@@ -123,6 +135,7 @@ function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd, 
   const updateAP   = useAPStore((s) => s.updateAP)
   const showAPInfo = useEditorStore((s) => s.showAPInfo)
   const inverseScale = 1 / viewportScale
+  const [hoveredId, setHoveredId] = useState(null)
 
   const handleMoved = (id, x, y) => {
     updateAP(floorId, id, { x, y })
@@ -136,6 +149,8 @@ function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd, 
           key={ap.id}
           ap={ap}
           isSelected={ap.id === selectedAPId}
+          isHovered={ap.id === hoveredId}
+          onHover={setHoveredId}
           isDraggable
           onClick={onAPClick}
           onMoved={handleMoved}

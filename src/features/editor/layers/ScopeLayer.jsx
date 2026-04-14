@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Group, Line, Circle } from 'react-konva'
 import { useScopeStore } from '@/store/useScopeStore'
 
@@ -92,6 +92,7 @@ function DrawingPreview({ points, mousePos, snapRadius }) {
 function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScopeId, onScopeClick, isSelectMode, isDrawingActive, onScopeDragMove, onScopeDragEnd, onRightMouseDown }) {
   const zones       = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
   const updateScope = useScopeStore((s) => s.updateScope)
+  const [hoveredId, setHoveredId] = useState(null)
 
   return (
     <Group>
@@ -99,12 +100,13 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
       {zones.map((zone) => {
         const style = ZONE_STYLE[zone.type] ?? ZONE_STYLE.in
         const isSelected = zone.id === selectedScopeId
+        const isHovered  = zone.id === hoveredId
         return (
           <Group
             key={zone.id}
             draggable
-            onMouseEnter={(e) => { e.target.getStage().container().style.cursor = 'move' }}
-            onMouseLeave={(e) => { e.target.getStage().container().style.cursor = 'default' }}
+            onMouseEnter={(e) => { e.target.getStage().container().style.cursor = 'move'; setHoveredId(zone.id) }}
+            onMouseLeave={(e) => { e.target.getStage().container().style.cursor = 'default'; setHoveredId(null) }}
             onMouseDown={(e) => {
               if (e.evt.button === 2) {
                 e.cancelBubble = true
@@ -135,12 +137,12 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
             <Line
               points={zone.points}
               closed
-              fill={style.fill}
-              stroke={isSelected ? '#e74c3c' : style.stroke}
-              strokeWidth={isSelected ? 5 : 3}
+              fill={isHovered && !isSelected ? style.fill.replace('0.18', '0.35') : style.fill}
+              stroke={isSelected ? '#e74c3c' : isHovered ? '#fff' : style.stroke}
+              strokeWidth={isSelected ? 5 : isHovered ? 4 : 3}
               dash={zone.type === 'out' ? [8, 4] : undefined}
-              shadowColor="rgba(0,0,0,0.6)"
-              shadowBlur={4}
+              shadowColor={isHovered ? '#fff' : 'rgba(0,0,0,0.6)'}
+              shadowBlur={isHovered ? 8 : 4}
               shadowOffset={{ x: 0, y: 0 }}
               hitStrokeWidth={10}
               onClick={(e) => {

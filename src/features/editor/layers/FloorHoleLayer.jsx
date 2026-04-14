@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Group, Line, Circle } from 'react-konva'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 
@@ -112,18 +112,20 @@ function FloorHoleLayer({
 }) {
   const holes           = useFloorHoleStore((s) => s.floorHolesByFloor[floorId] ?? [])
   const updateFloorHole = useFloorHoleStore((s) => s.updateFloorHole)
+  const [hoveredId, setHoveredId] = useState(null)
 
   return (
     <Group>
       {/* 已完成的 Floor Hole 多邊形 */}
       {holes.map((hole) => {
         const isSelected = hole.id === selectedHoleId
+        const isHovered  = hole.id === hoveredId
         return (
           <Group
             key={hole.id}
             draggable
-            onMouseEnter={(e) => { e.target.getStage().container().style.cursor = 'move' }}
-            onMouseLeave={(e) => { e.target.getStage().container().style.cursor = 'default' }}
+            onMouseEnter={(e) => { e.target.getStage().container().style.cursor = 'move'; setHoveredId(hole.id) }}
+            onMouseLeave={(e) => { e.target.getStage().container().style.cursor = 'default'; setHoveredId(null) }}
             onMouseDown={(e) => {
               if (e.evt.button === 2) {
                 e.cancelBubble = true
@@ -149,12 +151,12 @@ function FloorHoleLayer({
             <Line
               points={hole.points}
               closed
-              fill={HOLE_FILL}
-              stroke={isSelected ? '#e74c3c' : HOLE_STROKE}
-              strokeWidth={isSelected ? 4 : 3}
+              fill={isHovered && !isSelected ? 'rgba(124, 58, 237, 0.35)' : HOLE_FILL}
+              stroke={isSelected ? '#e74c3c' : isHovered ? '#fff' : HOLE_STROKE}
+              strokeWidth={isSelected ? 4 : isHovered ? 4 : 3}
               dash={[10, 4]}
-              shadowColor="rgba(0,0,0,0.6)"
-              shadowBlur={4}
+              shadowColor={isHovered ? '#fff' : 'rgba(0,0,0,0.6)'}
+              shadowBlur={isHovered ? 8 : 4}
               shadowOffset={{ x: 0, y: 0 }}
               hitStrokeWidth={10}
               onClick={(e) => {

@@ -1,10 +1,11 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Group, Line, Circle } from 'react-konva'
 import { useWallStore } from '@/store/useWallStore'
 
 function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, onWallDragMove, onWallDragEnd, isDrawMode, isDrawingActive, snapRadius, onRightMouseDown }) {
   const walls      = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
   const updateWall = useWallStore((s) => s.updateWall)
+  const [hoveredId, setHoveredId] = useState(null)
 
   // 找出游標正在吸附的端點（draw 模式下才需要）
   let snapEndpoint = null
@@ -25,12 +26,13 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
       {/* 已完成的牆體 */}
       {walls.map((wall) => {
         const isSelected = wall.id === selectedWallId
+        const isHovered  = wall.id === hoveredId
         return (
           <Group
             key={wall.id}
             draggable
-            onMouseEnter={(e) => { e.target.getStage().container().style.cursor = 'move' }}
-            onMouseLeave={(e) => { e.target.getStage().container().style.cursor = 'default' }}
+            onMouseEnter={(e) => { e.target.getStage().container().style.cursor = 'move'; setHoveredId(wall.id) }}
+            onMouseLeave={(e) => { e.target.getStage().container().style.cursor = 'default'; setHoveredId(null) }}
             onMouseDown={(e) => {
               if (e.evt.button === 2) {
                 e.cancelBubble = true
@@ -59,19 +61,30 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
               onWallDragEnd?.()
             }}
           >
+            {/* hover 發光 */}
+            {isHovered && !isSelected && (
+              <Line
+                points={[wall.startX, wall.startY, wall.endX, wall.endY]}
+                stroke="#fff"
+                strokeWidth={18}
+                lineCap="round"
+                opacity={0.3}
+                listening={false}
+              />
+            )}
             {/* 黑色外框增加對比 */}
             <Line
               points={[wall.startX, wall.startY, wall.endX, wall.endY]}
               stroke="#000"
-              strokeWidth={isSelected ? 9 : 7}
+              strokeWidth={isHovered ? 14 : isSelected ? 10 : 7}
               lineCap="round"
               opacity={0.4}
               listening={false}
             />
             <Line
               points={[wall.startX, wall.startY, wall.endX, wall.endY]}
-              stroke={isSelected ? '#e74c3c' : wall.material.color}
-              strokeWidth={isSelected ? 6 : 4}
+              stroke={isSelected ? '#e74c3c' : isHovered ? '#fff' : wall.material.color}
+              strokeWidth={isHovered ? 8 : isSelected ? 6 : 4}
               lineCap="round"
               hitStrokeWidth={14}
               onClick={(e) => {
