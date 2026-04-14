@@ -6,7 +6,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
-import { MATERIALS } from '@/constants/materials'
+import { MATERIALS, MATERIAL_LIST } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 import FloorImageLayer from './layers/FloorImageLayer'
 import WallLayer from './layers/WallLayer'
@@ -55,6 +55,10 @@ function Editor2D() {
 
   // ── 裁切繪製狀態 ──────────────────────────────────────
   const [cropStart, setCropStart] = useState(null)   // {x,y}
+
+  // ── 牆體材質快捷鍵 ────────────────────────────────────
+  const [wallMaterial, setWallMaterial] = useState(MATERIALS.CONCRETE)
+  const [materialToast, setMaterialToast] = useState(null) // { label, color, key }
 
   const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected, togglePanelCollapsed,
           showFloorImage, showScopes, showFloorHoles, showWalls, showAPs } = useEditorStore()
@@ -138,9 +142,17 @@ function Editor2D() {
 
   // ── 鍵盤事件 ───────────────────────────────────────────
   const removeWall  = useWallStore((s) => s.removeWall)
+  const updateWall  = useWallStore((s) => s.updateWall)
   const removeAP    = useAPStore((s) => s.removeAP)
   const removeScope     = useScopeStore((s) => s.removeScope)
   const removeFloorHole = useFloorHoleStore((s) => s.removeFloorHole)
+
+  // ── 材質快捷鍵 toast 自動消失 ─────────────────────────
+  useEffect(() => {
+    if (!materialToast) return
+    const t = setTimeout(() => setMaterialToast(null), 1500)
+    return () => clearTimeout(t)
+  }, [materialToast])
 
   useEffect(() => {
     const onKey = (e) => {
@@ -172,10 +184,29 @@ function Editor2D() {
           clearSelected()
         }
       }
+
+      // ── 數字鍵 1~6：切換牆體材質 ─────────────────────
+      const keyNum = parseInt(e.key, 10)
+      if (keyNum >= 1 && keyNum <= 6) {
+        const tag = e.target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return
+        const mat = MATERIAL_LIST[keyNum - 1]
+        if (!mat) return
+        // 畫牆模式 → 切換預設材質
+        if (isWallMode) {
+          setWallMaterial(mat)
+          setMaterialToast({ label: mat.label, color: mat.color, key: keyNum })
+        }
+        // 已選取牆體 → 更新該牆材質
+        if (selectedId && selectedType === 'wall') {
+          updateWall(activeFloorId, selectedId, { material: mat })
+          setMaterialToast({ label: mat.label, color: mat.color, key: keyNum })
+        }
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, selectedType, activeFloorId, removeWall, removeAP, removeScope, removeFloorHole, clearSelected])
+  }, [selectedId, selectedType, activeFloorId, isWallMode, removeWall, updateWall, removeAP, removeScope, removeFloorHole, clearSelected])
 
   // ── 切換模式時清除繪製狀態 ────────────────────────────
   useEffect(() => {
@@ -277,7 +308,7 @@ function Editor2D() {
           id: generateId('wall'),
           startX: wallDrawStart.x, startY: wallDrawStart.y,
           endX: pos.x,             endY: pos.y,
-          material: MATERIALS.CONCRETE,
+          material: wallMaterial,
           topHeight: 3.0,
           bottomHeight: 0,
         })
@@ -486,7 +517,7 @@ function Editor2D() {
     [EDITOR_MODE.SELECT]:          null,
     [EDITOR_MODE.PAN]:             { label: '平移模式', hint: '拖曳畫布移動視角' },
     [EDITOR_MODE.DRAW_SCALE]:      { label: '比例尺模式', hint: '點擊兩點設定比例' },
-    [EDITOR_MODE.DRAW_WALL]:       { label: '畫牆模式', hint: '左鍵點擊設定端點，右鍵或 Esc 結束' },
+    [EDITOR_MODE.DRAW_WALL]:       { label: '畫牆模式', hint: '左鍵點擊設定端點，右鍵或 Esc 結束｜數字鍵 1~6 切換材質' },
     [EDITOR_MODE.PLACE_AP]:        { label: '放置 AP 模式', hint: '左鍵點擊放置 AP' },
     [EDITOR_MODE.DRAW_SCOPE]:      { label: '範圍模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.DRAW_FLOOR_HOLE]: { label: '挑高模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
@@ -499,7 +530,21 @@ function Editor2D() {
       {modeHint && (
         <div className="editor-2d__mode-hint">
           <span className="editor-2d__mode-hint-label">{modeHint.label}</span>
+          {isWallMode && (
+            <span className="editor-2d__mode-hint-material">
+              <span className="editor-2d__mode-hint-mat-dot" style={{ background: wallMaterial.color }} />
+              {wallMaterial.label}
+            </span>
+          )}
           <span className="editor-2d__mode-hint-desc">{modeHint.hint}</span>
+        </div>
+      )}
+
+      {materialToast && (
+        <div className="editor-2d__material-toast" key={materialToast.key + '-' + Date.now()}>
+          <span className="editor-2d__material-toast-dot" style={{ background: materialToast.color }} />
+          <span className="editor-2d__material-toast-key">{materialToast.key}</span>
+          <span className="editor-2d__material-toast-label">{materialToast.label}</span>
         </div>
       )}
       {floors.length === 0 && <DropZone />}

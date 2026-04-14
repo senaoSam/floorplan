@@ -78,7 +78,7 @@ const PHASES = [
       {
         layer: 'Layer 7 — 編輯效率',
         items: [
-          { id: '7-1', done: false, text: '牆體材質快捷鍵切換' },
+          { id: '7-1', done: true, text: '牆體材質快捷鍵切換' },
           { id: '7-2', done: false, text: '批次選取（框選多物件）' },
           { id: '7-3', done: false, text: '門窗結構（牆體上的門/窗段）' },
           { id: '7-4', done: false, text: 'Undo / Redo 操作歷史' },
