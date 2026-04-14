@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Group, Line, Circle } from 'react-konva'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
+import DeleteButton from './DeleteButton'
 
 const HOLE_FILL   = 'rgba(124, 58, 237, 0.20)'
 const HOLE_STROKE = '#7c3aed'
@@ -109,6 +110,8 @@ function FloorHoleLayer({
   isSelectMode,
   isDrawingActive,
   onRightMouseDown,
+  onDelete,
+  viewportScale,
 }) {
   const holes           = useFloorHoleStore((s) => s.floorHolesByFloor[floorId] ?? [])
   const updateFloorHole = useFloorHoleStore((s) => s.updateFloorHole)
@@ -169,6 +172,23 @@ function FloorHoleLayer({
                 onHoleClick?.(hole.id)
               }}
             />
+            {/* 快速刪除按鈕 */}
+            {isHovered && onDelete && (() => {
+              let cx = 0, cy = 0
+              const n = hole.points.length / 2
+              for (let i = 0; i < hole.points.length; i += 2) {
+                cx += hole.points[i]; cy += hole.points[i + 1]
+              }
+              cx /= n; cy /= n
+              return (
+                <DeleteButton
+                  x={cx}
+                  y={cy}
+                  scale={1 / (viewportScale || 1)}
+                  onClick={() => onDelete(hole.id)}
+                />
+              )
+            })()}
           </Group>
         )
       })}

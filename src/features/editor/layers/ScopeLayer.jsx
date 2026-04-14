@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Group, Line, Circle } from 'react-konva'
 import { useScopeStore } from '@/store/useScopeStore'
+import DeleteButton from './DeleteButton'
 
 const ZONE_STYLE = {
   in:  { fill: 'rgba(46, 213, 115, 0.18)', stroke: '#2ed573' },
@@ -89,7 +90,7 @@ function DrawingPreview({ points, mousePos, snapRadius }) {
   )
 }
 
-function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScopeId, onScopeClick, isSelectMode, isDrawingActive, onScopeDragMove, onScopeDragEnd, onRightMouseDown }) {
+function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScopeId, onScopeClick, isSelectMode, isDrawingActive, onScopeDragMove, onScopeDragEnd, onRightMouseDown, onDelete, viewportScale }) {
   const zones       = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
   const updateScope = useScopeStore((s) => s.updateScope)
   const [hoveredId, setHoveredId] = useState(null)
@@ -155,6 +156,23 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
                 onScopeClick?.(zone.id)
               }}
             />
+            {/* 快速刪除按鈕 — 放在多邊形重心 */}
+            {isHovered && onDelete && (() => {
+              let cx = 0, cy = 0
+              const n = zone.points.length / 2
+              for (let i = 0; i < zone.points.length; i += 2) {
+                cx += zone.points[i]; cy += zone.points[i + 1]
+              }
+              cx /= n; cy /= n
+              return (
+                <DeleteButton
+                  x={cx}
+                  y={cy}
+                  scale={1 / (viewportScale || 1)}
+                  onClick={() => onDelete(zone.id)}
+                />
+              )
+            })()}
           </Group>
         )
       })}

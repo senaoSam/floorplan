@@ -478,6 +478,8 @@ function Editor2D() {
                 onScopeDragMove={(id, dx, dy) => { draggingScopeRef.current = { id, dx, dy } }}
                 onScopeDragEnd={() => { draggingScopeRef.current = null }}
                 onRightMouseDown={handleRightMouseDown}
+                onDelete={(id) => { removeScope(activeFloorId, id); clearSelected() }}
+                viewportScale={viewport.scale}
               />
             )}
 
@@ -492,6 +494,8 @@ function Editor2D() {
                 isSelectMode={isSelectMode}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode}
                 onRightMouseDown={handleRightMouseDown}
+                onDelete={(id) => { removeFloorHole(activeFloorId, id); clearSelected() }}
+                viewportScale={viewport.scale}
               />
             )}
 
@@ -508,6 +512,8 @@ function Editor2D() {
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode}
                 snapRadius={SNAP_PX / viewport.scale}
                 onRightMouseDown={handleRightMouseDown}
+                onDelete={(id) => { removeWall(activeFloorId, id); clearSelected() }}
+                viewportScale={viewport.scale}
               />
             )}
 
@@ -521,6 +527,7 @@ function Editor2D() {
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode}
                 onRightMouseDown={handleRightMouseDown}
                 viewportScale={viewport.scale}
+                onDelete={(id) => { removeAP(activeFloorId, id); clearSelected() }}
               />
             )}
 

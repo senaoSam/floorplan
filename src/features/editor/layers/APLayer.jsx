@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { Group, Circle, Arc, Text, Rect } from 'react-konva'
+import DeleteButton from './DeleteButton'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
 
@@ -16,7 +17,7 @@ const FREQ_LABEL = {
   6:   '6G',
 }
 
-function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, onMoved, onDragMove, isDrawingActive, onRightMouseDown, showAPInfo, inverseScale }) {
+function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, onMoved, onDragMove, isDrawingActive, onRightMouseDown, showAPInfo, inverseScale, onDelete }) {
   const color = FREQ_COLOR[ap.frequency] ?? '#4fc3f7'
   const ringColor = isSelected ? '#e74c3c' : color
   const hoverMul = isHovered && !isSelected ? 1.3 : 1
@@ -90,6 +91,15 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
       ))}
       {/* 中心點 */}
       <Circle radius={3 * s} fill={color} offsetY={2.5 * s} />
+      {/* 快速刪除按鈕 */}
+      {isHovered && onDelete && (
+        <DeleteButton
+          x={16 * s}
+          y={-16 * s}
+          scale={s}
+          onClick={() => onDelete(ap.id)}
+        />
+      )}
       {/* 名稱標籤 */}
       <Text
         text={ap.name}
@@ -130,7 +140,7 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
   )
 }
 
-function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd, isDrawingActive, onRightMouseDown, viewportScale }) {
+function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd, isDrawingActive, onRightMouseDown, viewportScale, onDelete }) {
   const aps        = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   const updateAP   = useAPStore((s) => s.updateAP)
   const showAPInfo = useEditorStore((s) => s.showAPInfo)
@@ -159,6 +169,7 @@ function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd, 
           onRightMouseDown={onRightMouseDown}
           showAPInfo={showAPInfo}
           inverseScale={inverseScale}
+          onDelete={onDelete}
         />
       ))}
     </Group>

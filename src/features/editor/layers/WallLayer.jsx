@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
 import { Group, Line, Circle } from 'react-konva'
 import { useWallStore } from '@/store/useWallStore'
+import DeleteButton from './DeleteButton'
 
-function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, onWallDragMove, onWallDragEnd, isDrawMode, isDrawingActive, snapRadius, onRightMouseDown }) {
+function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, onWallDragMove, onWallDragEnd, isDrawMode, isDrawingActive, snapRadius, onRightMouseDown, onDelete, viewportScale }) {
   const walls      = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
   const updateWall = useWallStore((s) => s.updateWall)
   const [hoveredId, setHoveredId] = useState(null)
@@ -97,6 +98,15 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
                 onWallClick?.(wall.id)
               }}
             />
+            {/* 快速刪除按鈕 */}
+            {isHovered && onDelete && (
+              <DeleteButton
+                x={(wall.startX + wall.endX) / 2}
+                y={(wall.startY + wall.endY) / 2 - 18 / (viewportScale || 1)}
+                scale={1 / (viewportScale || 1)}
+                onClick={() => onDelete(wall.id)}
+              />
+            )}
           </Group>
         )
       })}
