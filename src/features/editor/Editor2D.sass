@@ -5,3 +5,29 @@
   height: 100%
   overflow: hidden
   position: relative
+
+  &__mode-hint
+    position: absolute
+    top: 12px
+    left: 50%
+    transform: translateX(-50%)
+    z-index: 100
+    display: flex
+    align-items: center
+    gap: 8px
+    padding: 6px 16px
+    background: rgba(0, 0, 0, 0.75)
+    border: 1px solid rgba(255, 255, 255, 0.15)
+    border-radius: 8px
+    backdrop-filter: blur(8px)
+    pointer-events: none
+    user-select: none
+
+  &__mode-hint-label
+    color: #00e5ff
+    font-size: 13px
+    font-weight: 600
+
+  &__mode-hint-desc
+    color: $text-secondary
+    font-size: 12px

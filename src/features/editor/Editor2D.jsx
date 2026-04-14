@@ -351,12 +351,95 @@ function Editor2D() {
   const pixelDist = scalePt1 && scalePt2
     ? Math.round(Math.hypot(scalePt2.x - scalePt1.x, scalePt2.y - scalePt1.y)) : 0
 
+  const svgCursor = (svg, size = 32, hotX = 16, hotY = 16) =>
+    `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${hotX} ${hotY}, crosshair`
+
+  const cursorAP = svgCursor(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">` +
+    `<circle cx="16" cy="16" r="14" fill="none" stroke="white" stroke-width="1.5" opacity="0.8"/>` +
+    `<line x1="16" y1="4" x2="16" y2="28" stroke="white" stroke-width="1" opacity="0.4"/>` +
+    `<line x1="4" y1="16" x2="28" y2="16" stroke="white" stroke-width="1" opacity="0.4"/>` +
+    `<path d="M16 8 Q10 12 10 17 Q10 20 13 21.5" fill="none" stroke="#4fc3f7" stroke-width="2" stroke-linecap="round"/>` +
+    `<path d="M16 8 Q22 12 22 17 Q22 20 19 21.5" fill="none" stroke="#4fc3f7" stroke-width="2" stroke-linecap="round"/>` +
+    `<circle cx="16" cy="8" r="2.5" fill="#4fc3f7"/>` +
+    `<line x1="16" y1="2" x2="16" y2="6" stroke="#4fc3f7" stroke-width="1.5"/>` +
+    `</svg>`,
+    32, 16, 16,
+  )
+
+  const cursorWall = svgCursor(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">` +
+    `<line x1="16" y1="2" x2="16" y2="30" stroke="white" stroke-width="1" opacity="0.3"/>` +
+    `<line x1="2" y1="16" x2="30" y2="16" stroke="white" stroke-width="1" opacity="0.3"/>` +
+    `<rect x="6" y="10" width="8" height="5" rx="0.5" fill="none" stroke="#ff9800" stroke-width="1.5"/>` +
+    `<rect x="14" y="10" width="8" height="5" rx="0.5" fill="none" stroke="#ff9800" stroke-width="1.5"/>` +
+    `<rect x="10" y="15" width="8" height="5" rx="0.5" fill="none" stroke="#ff9800" stroke-width="1.5"/>` +
+    `<rect x="18" y="15" width="8" height="5" rx="0.5" fill="none" stroke="#ff9800" stroke-width="1.5"/>` +
+    `</svg>`,
+    32, 16, 16,
+  )
+
+  const cursorScale = svgCursor(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">` +
+    `<line x1="16" y1="2" x2="16" y2="30" stroke="white" stroke-width="1" opacity="0.3"/>` +
+    `<line x1="2" y1="16" x2="30" y2="16" stroke="white" stroke-width="1" opacity="0.3"/>` +
+    `<line x1="6" y1="20" x2="26" y2="20" stroke="#f1c40f" stroke-width="2" stroke-linecap="round"/>` +
+    `<line x1="6" y1="17" x2="6" y2="23" stroke="#f1c40f" stroke-width="1.5"/>` +
+    `<line x1="26" y1="17" x2="26" y2="23" stroke="#f1c40f" stroke-width="1.5"/>` +
+    `<line x1="12" y1="18.5" x2="12" y2="21.5" stroke="#f1c40f" stroke-width="1" opacity="0.6"/>` +
+    `<line x1="16" y1="18.5" x2="16" y2="21.5" stroke="#f1c40f" stroke-width="1" opacity="0.6"/>` +
+    `<line x1="20" y1="18.5" x2="20" y2="21.5" stroke="#f1c40f" stroke-width="1" opacity="0.6"/>` +
+    `</svg>`,
+    32, 16, 16,
+  )
+
   const stageCursor =
-    isScaleMode || isWallMode || isScopeMode || isFloorHoleMode ? 'crosshair' :
-    isPanMode                                                    ? 'grab'      : 'default'
+    isScaleMode     ? cursorScale :
+    isWallMode      ? cursorWall  :
+    isAPMode        ? cursorAP    :
+    isScopeMode || isFloorHoleMode ? 'crosshair' :
+    isPanMode                      ? 'grab'      : 'default'
+
+  // Force cursor on Konva canvas — Konva internally resets style.cursor after drag/click
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const canvases = container.querySelectorAll('canvas')
+    if (canvases.length === 0) return
+    const applyCursor = () => {
+      canvases.forEach((c) => c.style.setProperty('cursor', stageCursor, 'important'))
+    }
+    applyCursor()
+    let skip = false
+    const observer = new MutationObserver(() => {
+      if (skip) return
+      skip = true
+      applyCursor()
+      skip = false
+    })
+    canvases.forEach((c) => observer.observe(c, { attributes: true, attributeFilter: ['style'] }))
+    return () => observer.disconnect()
+  }, [stageCursor, editorMode])
+
+  const modeHintMap = {
+    [EDITOR_MODE.SELECT]:          null,
+    [EDITOR_MODE.PAN]:             { label: '平移模式', hint: '拖曳畫布移動視角' },
+    [EDITOR_MODE.DRAW_SCALE]:      { label: '比例尺模式', hint: '點擊兩點設定比例' },
+    [EDITOR_MODE.DRAW_WALL]:       { label: '畫牆模式', hint: '點擊設定端點，雙擊或 Esc 結束' },
+    [EDITOR_MODE.PLACE_AP]:        { label: '放置 AP 模式', hint: '點擊畫布放置 AP' },
+    [EDITOR_MODE.DRAW_SCOPE]:      { label: '範圍模式', hint: '點擊設定端點，形成封閉區域' },
+    [EDITOR_MODE.DRAW_FLOOR_HOLE]: { label: '挑高模式', hint: '點擊設定端點，形成挑高區域' },
+  }
+  const modeHint = modeHintMap[editorMode]
 
   return (
     <div ref={containerRef} className="editor-2d" style={{ cursor: stageCursor }}>
+      {modeHint && (
+        <div className="editor-2d__mode-hint">
+          <span className="editor-2d__mode-hint-label">{modeHint.label}</span>
+          <span className="editor-2d__mode-hint-desc">{modeHint.hint}</span>
+        </div>
+      )}
       {floors.length === 0 && <DropZone />}
 
       {size.width > 0 && (
