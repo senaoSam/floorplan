@@ -29,6 +29,8 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
           <Group
             key={wall.id}
             draggable
+            onMouseEnter={(e) => { e.target.getStage().container().style.cursor = 'move' }}
+            onMouseLeave={(e) => { e.target.getStage().container().style.cursor = 'default' }}
             onMouseDown={(e) => {
               if (e.evt.button === 2) {
                 e.cancelBubble = true
