@@ -11,6 +11,7 @@ const TOOLS = [
   { mode: EDITOR_MODE.PLACE_AP,   label: '放置 AP',icon: '📡' },
   { mode: EDITOR_MODE.DRAW_SCOPE,      label: '範圍',      icon: '⬡' },
   { mode: EDITOR_MODE.DRAW_FLOOR_HOLE, label: '挑高區域', icon: '⬛' },
+  { mode: EDITOR_MODE.CROP_IMAGE,      label: '裁切',     icon: '✂' },
 ]
 
 const HEATMAP_OPTIONS = [

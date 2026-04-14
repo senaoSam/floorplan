@@ -16,11 +16,23 @@ function FloorImageLayer({ floor, isSelectMode, onFloorImageClick }) {
   if (!image) return null
 
   const rotation = floor.rotation || 0
+  const hasCrop = floor.cropX != null && floor.cropWidth != null
   const cx = floor.imageWidth / 2
   const cy = floor.imageHeight / 2
 
+  const clipFunc = hasCrop
+    ? (ctx) => {
+        // Clip in image pixel coordinates
+        // Apply same rotation as image so clip follows the image content
+        ctx.translate(cx, cy)
+        ctx.rotate((rotation * Math.PI) / 180)
+        ctx.translate(-cx, -cy)
+        ctx.rect(floor.cropX, floor.cropY, floor.cropWidth, floor.cropHeight)
+      }
+    : undefined
+
   return (
-    <Layer>
+    <Layer clipFunc={clipFunc}>
       <KonvaImage
         image={image}
         x={cx}

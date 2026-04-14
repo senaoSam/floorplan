@@ -14,6 +14,7 @@ import APLayer from './layers/APLayer'
 import ScopeLayer from './layers/ScopeLayer'
 import FloorHoleLayer from './layers/FloorHoleLayer'
 import ScaleLayer from './layers/ScaleLayer'
+import CropLayer from './layers/CropLayer'
 import HeatmapWebGL from './HeatmapWebGL'
 import ScaleDialog from './ScaleDialog'
 import LayerToggle from '@/components/LayerToggle/LayerToggle'
@@ -52,6 +53,9 @@ function Editor2D() {
   // ── Floor Hole 繪製狀態 ────────────────────────────────
   const [floorHolePoints, setFloorHolePoints] = useState([])  // [{x,y}, ...]
 
+  // ── 裁切繪製狀態 ──────────────────────────────────────
+  const [cropStart, setCropStart] = useState(null)   // {x,y}
+
   const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected, togglePanelCollapsed,
           showFloorImage, showScopes, showFloorHoles, showWalls, showAPs } = useEditorStore()
   const isSelectMode    = editorMode === EDITOR_MODE.SELECT
@@ -61,10 +65,12 @@ function Editor2D() {
   const isAPMode        = editorMode === EDITOR_MODE.PLACE_AP
   const isScopeMode     = editorMode === EDITOR_MODE.DRAW_SCOPE
   const isFloorHoleMode = editorMode === EDITOR_MODE.DRAW_FLOOR_HOLE
+  const isCropMode      = editorMode === EDITOR_MODE.CROP_IMAGE
 
   const floors         = useFloorStore((s) => s.floors)
   const activeFloorId  = useFloorStore((s) => s.activeFloorId)
   const getActiveFloor = useFloorStore((s) => s.getActiveFloor)
+  const updateFloor    = useFloorStore((s) => s.updateFloor)
   const setScale       = useFloorStore((s) => s.setScale)
   const activeFloor    = getActiveFloor()
 
@@ -82,6 +88,22 @@ function Editor2D() {
     x: (screenPos.x - viewport.x) / viewport.scale,
     y: (screenPos.y - viewport.y) / viewport.scale,
   }), [viewport])
+
+  // canvas座標 → 圖片像素座標（反轉旋轉）
+  const toImagePos = useCallback((canvasPos) => {
+    if (!activeFloor) return canvasPos
+    const rot = activeFloor.rotation || 0
+    if (rot === 0) return canvasPos
+    const cx = activeFloor.imageWidth / 2
+    const cy = activeFloor.imageHeight / 2
+    const rad = (-rot * Math.PI) / 180
+    const dx = canvasPos.x - cx
+    const dy = canvasPos.y - cy
+    return {
+      x: dx * Math.cos(rad) - dy * Math.sin(rad) + cx,
+      y: dx * Math.sin(rad) + dy * Math.cos(rad) + cy,
+    }
+  }, [activeFloor])
 
   // ── 容器尺寸監聽（rAF 批次，避免 Panel 動畫期間多次 resize 抖動）
   useEffect(() => {
@@ -101,6 +123,7 @@ function Editor2D() {
     // 切換樓層時清除繪製中狀態
     setScalePt1(null); setScalePt2(null); setShowScaleDialog(false)
     setWallDrawStart(null); setScopePoints([]); setFloorHolePoints([])
+    setCropStart(null)
 
     if (!activeFloor?.imageUrl || size.width === 0) return
     const scaleX = (size.width  * FIT_PADDING) / activeFloor.imageWidth
@@ -125,6 +148,7 @@ function Editor2D() {
         setWallDrawStart(null)
         setScopePoints([])
         setFloorHolePoints([])
+        setCropStart(null)
         resetScale()
         return
       }
@@ -158,6 +182,7 @@ function Editor2D() {
     setWallDrawStart(null)
     setScopePoints([])
     setFloorHolePoints([])
+    setCropStart(null)
     if (!isScaleMode) resetScale()
   }, [editorMode])
 
@@ -318,6 +343,27 @@ function Editor2D() {
       return
     }
 
+    // 裁切模式
+    if (isCropMode) {
+      const imgPos = toImagePos(pos)
+      if (!cropStart) {
+        setCropStart(imgPos)
+      } else {
+        // 完成裁切 → 儲存 + 切回選取模式並打開面板
+        const x = Math.min(cropStart.x, imgPos.x)
+        const y = Math.min(cropStart.y, imgPos.y)
+        const w = Math.abs(imgPos.x - cropStart.x)
+        const h = Math.abs(imgPos.y - cropStart.y)
+        if (w > 2 && h > 2) {
+          updateFloor(activeFloorId, { cropX: x, cropY: y, cropWidth: w, cropHeight: h })
+        }
+        setCropStart(null)
+        setEditorMode(EDITOR_MODE.SELECT)
+        setSelected(activeFloorId, 'floor_image')
+      }
+      return
+    }
+
     // 其他模式點擊空白 → 取消選取
     clearSelected()
   }, [
@@ -326,6 +372,7 @@ function Editor2D() {
     isAPMode, nextAPName,
     isScopeMode, scopePoints, viewport.scale, addScope,
     isFloorHoleMode, floorHolePoints, addFloorHole,
+    isCropMode, cropStart, updateFloor, toImagePos, setSelected,
     toCanvasPos, addWall, addAP, clearSelected,
   ])
 
@@ -336,8 +383,9 @@ function Editor2D() {
     if (isWallMode && wallDrawStart)           { setWallDrawStart(null); return }
     if (isScopeMode && scopePoints.length > 0) { setScopePoints([]);     return }
     if (isFloorHoleMode && floorHolePoints.length > 0) { setFloorHolePoints([]); return }
+    if (isCropMode && cropStart) { setCropStart(null); return }
     togglePanelCollapsed()
-  }, [isWallMode, wallDrawStart, isScopeMode, scopePoints, isFloorHoleMode, floorHolePoints, togglePanelCollapsed])
+  }, [isWallMode, wallDrawStart, isScopeMode, scopePoints, isFloorHoleMode, floorHolePoints, isCropMode, cropStart, togglePanelCollapsed])
 
   // ── 比例尺 helpers ─────────────────────────────────────
   const resetScale = () => {
@@ -407,6 +455,7 @@ function Editor2D() {
     isScaleMode     ? cursorScale :
     isWallMode      ? cursorWall  :
     isAPMode        ? cursorAP    :
+    isCropMode                         ? 'crosshair' :
     isScopeMode || isFloorHoleMode ? 'crosshair' :
     isPanMode                      ? 'grab'      : 'default'
 
@@ -441,6 +490,7 @@ function Editor2D() {
     [EDITOR_MODE.PLACE_AP]:        { label: '放置 AP 模式', hint: '左鍵點擊放置 AP' },
     [EDITOR_MODE.DRAW_SCOPE]:      { label: '範圍模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.DRAW_FLOOR_HOLE]: { label: '挑高模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
+    [EDITOR_MODE.CROP_IMAGE]:      { label: '裁切模式', hint: '左鍵點擊兩點定義裁切區域；右鍵或 Esc 取消' },
   }
   const modeHint = modeHintMap[editorMode]
 
@@ -492,7 +542,7 @@ function Editor2D() {
                 selectedScopeId={selectedType === 'scope' ? selectedId : null}
                 onScopeClick={(id) => setSelected(id, 'scope')}
                 isSelectMode={isSelectMode}
-                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode}
+                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode}
                 onScopeDragMove={(id, dx, dy) => { draggingScopeRef.current = { id, dx, dy } }}
                 onScopeDragEnd={() => { draggingScopeRef.current = null }}
                 onRightMouseDown={handleRightMouseDown}
@@ -511,7 +561,7 @@ function Editor2D() {
                 selectedHoleId={selectedType === 'floor_hole' ? selectedId : null}
                 onHoleClick={(id) => setSelected(id, 'floor_hole')}
                 isSelectMode={isSelectMode}
-                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode}
+                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode}
                 onRightMouseDown={handleRightMouseDown}
                 onDelete={(id) => { removeFloorHole(activeFloorId, id); clearSelected() }}
                 viewportScale={viewport.scale}
@@ -529,7 +579,7 @@ function Editor2D() {
                 onWallDragMove={(id, dx, dy) => { draggingWallRef.current = { id, dx, dy } }}
                 onWallDragEnd={() => { draggingWallRef.current = null }}
                 isDrawMode={isWallMode}
-                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode}
+                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode}
                 snapRadius={SNAP_PX / viewport.scale}
                 onRightMouseDown={handleRightMouseDown}
                 onDelete={(id) => { removeWall(activeFloorId, id); clearSelected() }}
@@ -550,7 +600,7 @@ function Editor2D() {
                 onAPClick={(id) => setSelected(id, 'ap')}
                 onAPDragMove={(id, x, y) => { draggingAPRef.current = { id, x, y } }}
                 onAPDragEnd={() => { draggingAPRef.current = null }}
-                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode}
+                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode}
                 onRightMouseDown={handleRightMouseDown}
                 viewportScale={viewport.scale}
                 onDelete={(id) => { removeAP(activeFloorId, id); clearSelected() }}
@@ -560,6 +610,18 @@ function Editor2D() {
 
             {isScaleMode && (
               <ScaleLayer pt1={scalePt1} pt2={scalePt2} mousePos={mousePos} />
+            )}
+
+            {activeFloor && (isCropMode || activeFloor.cropX != null) && (
+              <CropLayer
+                floor={activeFloor}
+                cropStart={cropStart}
+                mousePos={mousePos ? toImagePos(mousePos) : null}
+                isCropMode={isCropMode}
+                isFloorImageSelected={isSelectMode && selectedType === 'floor_image'}
+                viewportScale={viewport.scale}
+                onCropChange={(patch) => updateFloor(activeFloorId, patch)}
+              />
             )}
           </Layer>
         </Stage>

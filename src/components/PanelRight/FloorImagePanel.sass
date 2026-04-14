@@ -59,6 +59,14 @@
       background: rgba($accent, 0.15)
       border-color: rgba($accent, 0.4)
 
+    &--active
+      background: rgba($accent, 0.15)
+      border-color: rgba($accent, 0.4)
+      color: $accent
+
+    &--full
+      width: 100%
+
   // 角度輸入行
   &__angle-row
     display: flex
@@ -157,6 +165,21 @@
       background: rgba($accent, 0.1)
       border-color: rgba($accent, 0.4)
       color: $text-primary
+
+  // 裁切資訊
+  &__crop-info
+    display: grid
+    grid-template-columns: 1fr 1fr
+    gap: 4px 8px
+    margin-bottom: 10px
+    font-size: 11px
+    color: $text-secondary
+
+    span
+      background: rgba(255, 255, 255, 0.05)
+      padding: 4px 8px
+      border-radius: 4px
+      text-align: center
 
   // 關閉按鈕
   &__close

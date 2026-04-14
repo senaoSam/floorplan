@@ -1,12 +1,14 @@
 import React, { useCallback } from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
-import { useEditorStore } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import './FloorImagePanel.sass'
 
 function FloorImagePanel({ floorId }) {
   const floor = useFloorStore((s) => s.floors.find((f) => f.id === floorId))
   const updateFloor = useFloorStore((s) => s.updateFloor)
   const clearSelected = useEditorStore((s) => s.clearSelected)
+  const editorMode = useEditorStore((s) => s.editorMode)
+  const setEditorMode = useEditorStore((s) => s.setEditorMode)
 
   const rotation = floor?.rotation ?? 0
   const opacity = floor?.opacity ?? 1
@@ -126,6 +128,42 @@ function FloorImagePanel({ floorId }) {
             </button>
           ))}
         </div>
+      </section>
+
+      {/* 裁切控制 */}
+      <section className="floor-image-panel__section">
+        <p className="floor-image-panel__label">裁切區域</p>
+        {floor.cropX != null ? (
+          <>
+            <div className="floor-image-panel__crop-info">
+              <span>X: {Math.round(floor.cropX)}</span>
+              <span>Y: {Math.round(floor.cropY)}</span>
+              <span>W: {Math.round(floor.cropWidth)}</span>
+              <span>H: {Math.round(floor.cropHeight)}</span>
+            </div>
+            <div className="floor-image-panel__rotate-buttons">
+              <button
+                className={`floor-image-panel__rotate-btn${editorMode === EDITOR_MODE.CROP_IMAGE ? ' floor-image-panel__rotate-btn--active' : ''}`}
+                onClick={() => setEditorMode(EDITOR_MODE.CROP_IMAGE)}
+              >
+                重新裁切
+              </button>
+              <button
+                className="floor-image-panel__rotate-btn"
+                onClick={() => updateFloor(floorId, { cropX: null, cropY: null, cropWidth: null, cropHeight: null })}
+              >
+                清除裁切
+              </button>
+            </div>
+          </>
+        ) : (
+          <button
+            className={`floor-image-panel__rotate-btn floor-image-panel__rotate-btn--full${editorMode === EDITOR_MODE.CROP_IMAGE ? ' floor-image-panel__rotate-btn--active' : ''}`}
+            onClick={() => setEditorMode(EDITOR_MODE.CROP_IMAGE)}
+          >
+            ✂ 開始裁切
+          </button>
+        )}
       </section>
 
       <button className="floor-image-panel__close" onClick={clearSelected}>

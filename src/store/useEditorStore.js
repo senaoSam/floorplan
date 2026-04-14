@@ -9,6 +9,7 @@ export const EDITOR_MODE = {
   PLACE_AP: 'place_ap',
   DRAW_SCOPE: 'draw_scope',
   DRAW_FLOOR_HOLE: 'draw_floor_hole',
+  CROP_IMAGE: 'crop_image',
 }
 
 // 視角模式

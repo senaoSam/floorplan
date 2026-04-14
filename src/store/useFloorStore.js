@@ -41,6 +41,7 @@ export const useFloorStore = create((set, get) => ({
     const floor = {
       id, name: floorName, imageUrl, imageWidth, imageHeight,
       opacity: 1, rotation: 0, scale: null, offsetX: 0, offsetY: 0,
+      cropX: null, cropY: null, cropWidth: null, cropHeight: null,
     }
     set((state) => ({
       floors: [...state.floors, floor],
@@ -57,6 +58,7 @@ export const useFloorStore = create((set, get) => ({
     const floor = {
       id, name, imageUrl, imageWidth, imageHeight,
       opacity: 1, rotation: 0, scale: null, offsetX: 0, offsetY: 0,
+      cropX: null, cropY: null, cropWidth: null, cropHeight: null,
     }
     set((state) => ({
       floors: [...state.floors, floor],
@@ -75,6 +77,7 @@ export const useFloorStore = create((set, get) => ({
       imageWidth: page.width,
       imageHeight: page.height,
       opacity: 1, rotation: 0, scale: null, offsetX: 0, offsetY: 0,
+      cropX: null, cropY: null, cropWidth: null, cropHeight: null,
     }))
     set((state) => ({
       floors: [...state.floors, ...newFloors],
