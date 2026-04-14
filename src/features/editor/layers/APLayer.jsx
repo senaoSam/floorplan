@@ -97,17 +97,18 @@ function APMarker({ ap, isSelected, isDraggable, onClick, onMoved, onDragMove, i
         <Group y={24 * s} offsetX={40 * s}>
           <Rect
             width={80 * s}
-            height={34 * s}
+            height={44 * s}
             fill="rgba(0,0,0,0.75)"
             cornerRadius={4 * s}
           />
           <Text
-            text={`${FREQ_LABEL[ap.frequency] || ap.frequency + 'G'} CH${ap.channel}\n${ap.txPower} dBm`}
+            text={`${ap.name}\n${FREQ_LABEL[ap.frequency] || ap.frequency + 'G'} CH${ap.channel}\n${ap.txPower} dBm`}
             fontSize={11 * s}
             fill="#fff"
-            x={5 * s}
+            x={0}
             y={4 * s}
-            width={70 * s}
+            width={80 * s}
+            align="center"
             lineHeight={1.3}
           />
         </Group>

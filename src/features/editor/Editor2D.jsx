@@ -51,7 +51,8 @@ function Editor2D() {
   // ── Floor Hole 繪製狀態 ────────────────────────────────
   const [floorHolePoints, setFloorHolePoints] = useState([])  // [{x,y}, ...]
 
-  const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected, togglePanelCollapsed } = useEditorStore()
+  const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected, togglePanelCollapsed,
+          showFloorImage, showScopes, showFloorHoles, showWalls, showAPs } = useEditorStore()
   const isSelectMode    = editorMode === EDITOR_MODE.SELECT
   const isPanMode       = editorMode === EDITOR_MODE.PAN
   const isScaleMode     = editorMode === EDITOR_MODE.DRAW_SCALE
@@ -377,11 +378,11 @@ function Editor2D() {
             <Rect x={-50000} y={-50000} width={100000} height={100000} fill="#1e1e2e" />
           </Layer>
 
-          {activeFloor && <FloorImageLayer floor={activeFloor} />}
+          {activeFloor && showFloorImage && <FloorImageLayer floor={activeFloor} />}
 
           {/* 所有向量元素合併為單一 Layer，內部用 Group 區隔 */}
           <Layer>
-            {activeFloorId && (
+            {activeFloorId && showScopes && (
               <ScopeLayer
                 floorId={activeFloorId}
                 drawingPoints={isScopeMode ? scopePoints : []}
@@ -397,7 +398,7 @@ function Editor2D() {
               />
             )}
 
-            {activeFloorId && (
+            {activeFloorId && showFloorHoles && (
               <FloorHoleLayer
                 floorId={activeFloorId}
                 drawingPoints={isFloorHoleMode ? floorHolePoints : []}
@@ -411,7 +412,7 @@ function Editor2D() {
               />
             )}
 
-            {activeFloorId && (
+            {activeFloorId && showWalls && (
               <WallLayer
                 floorId={activeFloorId}
                 drawStart={isWallMode ? wallDrawStart : null}
@@ -427,7 +428,7 @@ function Editor2D() {
               />
             )}
 
-            {activeFloorId && (
+            {activeFloorId && showAPs && (
               <APLayer
                 floorId={activeFloorId}
                 selectedAPId={selectedType === 'ap' ? selectedId : null}

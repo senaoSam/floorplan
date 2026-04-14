@@ -3,10 +3,20 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import './SidebarLeft.sass'
 
+const LAYERS = [
+  { key: 'showFloorImage', label: '平面圖' },
+  { key: 'showScopes',     label: '範圍' },
+  { key: 'showFloorHoles', label: '挑高區域' },
+  { key: 'showWalls',      label: '牆體' },
+  { key: 'showAPs',        label: 'AP' },
+  { key: 'showAPInfo',     label: 'AP 資訊' },
+  { key: 'showHeatmap',    label: '熱力圖' },
+]
+
 function SidebarLeft() {
   const { floors, activeFloorId, setActiveFloor } = useFloorStore()
-  const showAPInfo = useEditorStore((s) => s.showAPInfo)
-  const toggleAPInfo = useEditorStore((s) => s.toggleAPInfo)
+  const toggleLayer = useEditorStore((s) => s.toggleLayer)
+  const layerStates = useEditorStore((s) => LAYERS.map((l) => s[l.key]))
 
   return (
     <aside className="sidebar-left">
@@ -38,20 +48,16 @@ function SidebarLeft() {
           <span>圖層</span>
         </div>
         <ul className="sidebar-left__layer-list">
-          {['平面圖', '牆體', 'AP', '熱力圖'].map((layer) => (
-            <li key={layer} className="sidebar-left__layer-item">
-              <span className="sidebar-left__layer-eye">👁</span>
-              <span>{layer}</span>
+          {LAYERS.map((layer, i) => (
+            <li
+              key={layer.key}
+              className={`sidebar-left__layer-item${!layerStates[i] ? ' sidebar-left__layer-item--hidden' : ''}`}
+              onClick={() => toggleLayer(layer.key)}
+            >
+              <span className="sidebar-left__layer-eye">{layerStates[i] ? '👁' : '👁'}</span>
+              <span>{layer.label}</span>
             </li>
           ))}
-          <li
-            className="sidebar-left__layer-item"
-            onClick={toggleAPInfo}
-            style={{ cursor: 'pointer' }}
-          >
-            <span className="sidebar-left__layer-eye">{showAPInfo ? '👁' : '🚫'}</span>
-            <span>AP 資訊</span>
-          </li>
         </ul>
       </section>
     </aside>
