@@ -6,9 +6,11 @@ function FloorImageLayer({ floor }) {
 
   useEffect(() => {
     if (!floor?.imageUrl) return
+    let cancelled = false
     const img = new window.Image()
-    img.onload = () => setImage(img)
+    img.onload = () => { if (!cancelled) setImage(img) }
     img.src = floor.imageUrl
+    return () => { cancelled = true }
   }, [floor?.imageUrl])
 
   if (!image) return null

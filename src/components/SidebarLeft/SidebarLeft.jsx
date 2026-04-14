@@ -54,7 +54,7 @@ function SidebarLeft() {
               className={`sidebar-left__layer-item${!layerStates[i] ? ' sidebar-left__layer-item--hidden' : ''}`}
               onClick={() => toggleLayer(layer.key)}
             >
-              <span className="sidebar-left__layer-eye">{layerStates[i] ? '👁' : '👁'}</span>
+              <span className="sidebar-left__layer-eye">{layerStates[i] ? '👁' : '🚫'}</span>
               <span>{layer.label}</span>
             </li>
           ))}

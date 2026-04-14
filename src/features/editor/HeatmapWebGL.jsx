@@ -633,10 +633,10 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         wallPosData[i*4+2] = wl.endX
         wallPosData[i*4+3] = wl.endY
         const baseLoss = wl.material?.dbLoss ?? 0
-        const ff = wl.material?.freqFactor
-        wallLoss3Data[i*3]   = baseLoss * (ff ? (ff[2.4] ?? 1) : 1)
-        wallLoss3Data[i*3+1] = baseLoss * (ff ? (ff[5]   ?? 1) : 1)
-        wallLoss3Data[i*3+2] = baseLoss * (ff ? (ff[6]   ?? 1) : 1)
+        const ff = wl.material?.freqFactor ?? { 2.4: 1, 5: 1, 6: 1 }
+        wallLoss3Data[i*3]   = baseLoss * (ff[2.4] ?? 1)
+        wallLoss3Data[i*3+1] = baseLoss * (ff[5]   ?? 1)
+        wallLoss3Data[i*3+2] = baseLoss * (ff[6]   ?? 1)
       }
 
       gl.viewport(0, 0, w, h)

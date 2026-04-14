@@ -27,7 +27,7 @@ function WallPanel({ floorId, wallId }) {
 
   if (!wall) return null
 
-  const len = Math.hypot(wall.endX - wall.startX, wall.endY - wall.startY).toFixed(0)
+  const len = Math.hypot(wall.endX - wall.startX, wall.endY - wall.startY).toFixed(1)
 
   return (
     <div className="wall-panel">

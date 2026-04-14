@@ -60,7 +60,7 @@ function Toolbar() {
           title={hasScale ? '熱圖' : '請先設定比例尺才能顯示熱圖'}
           disabled={!hasScale}
         >
-          熱圖
+          {hasScale ? '熱圖' : '🔒 熱圖'}
         </button>
 
         {/* 熱圖模式 + 環境（開啟時才顯示，用下拉收納） */}
@@ -79,7 +79,7 @@ function Toolbar() {
 
             <select
               className="toolbar__select"
-              value={ENV_OPTIONS.find((e) => Math.abs(e.n - pathLossExponent) < 0.01)?.key || 'OFFICE'}
+              value={ENV_OPTIONS.find((e) => Math.abs(e.n - pathLossExponent) < 0.05)?.key || 'OFFICE'}
               onChange={(e) => {
                 const preset = ENVIRONMENT_PRESETS[e.target.value]
                 if (preset) setPathLossExponent(preset.n)

@@ -28,7 +28,7 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
       x={ap.x}
       y={ap.y}
       draggable={isDraggable}
-      onMouseEnter={(e) => { e.target.getStage().container().style.cursor = 'move'; onHover(ap.id) }}
+      onMouseEnter={(e) => { e.target.getStage().container().style.cursor = 'grab'; onHover(ap.id) }}
       onMouseLeave={(e) => { e.target.getStage().container().style.cursor = 'default'; onHover(null) }}
       onClick={(e) => { e.cancelBubble = true; onClick(ap.id) }}
       onContextMenu={(e) => {

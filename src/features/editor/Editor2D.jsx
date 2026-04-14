@@ -69,8 +69,8 @@ function Editor2D() {
 
   const addWall = useWallStore((s) => s.addWall)
 
-  const addAP   = useAPStore((s) => s.addAP)
-  const apCount = useAPStore((s) => (s.apsByFloor[activeFloorId] ?? []).length)
+  const addAP     = useAPStore((s) => s.addAP)
+  const nextAPName = useAPStore((s) => s.nextAPName)
 
   const addScope = useScopeStore((s) => s.addScope)
 
@@ -97,6 +97,10 @@ function Editor2D() {
 
   // ── 切換樓層 fit-to-screen ─────────────────────────────
   useEffect(() => {
+    // 切換樓層時清除繪製中狀態
+    setScalePt1(null); setScalePt2(null); setShowScaleDialog(false)
+    setWallDrawStart(null); setScopePoints([]); setFloorHolePoints([])
+
     if (!activeFloor?.imageUrl || size.width === 0) return
     const scaleX = (size.width  * FIT_PADDING) / activeFloor.imageWidth
     const scaleY = (size.height * FIT_PADDING) / activeFloor.imageHeight
@@ -267,7 +271,7 @@ function Editor2D() {
         channel: 36,
         antennaMode: 'omni',
         mountType: 'ceiling',
-        name: `AP-${String(apCount + 1).padStart(2, '0')}`,
+        name: nextAPName(),
         color: '#4fc3f7',
       })
       return
@@ -318,7 +322,7 @@ function Editor2D() {
   }, [
     isScaleMode, showScaleDialog, scalePt1,
     isWallMode, wallDrawStart, activeFloorId, snapToWallEndpoint,
-    isAPMode, apCount,
+    isAPMode, nextAPName,
     isScopeMode, scopePoints, viewport.scale, addScope,
     isFloorHoleMode, floorHolePoints, addFloorHole,
     toCanvasPos, addWall, addAP, clearSelected,
@@ -340,7 +344,9 @@ function Editor2D() {
   }
 
   const handleScaleConfirm = useCallback((meters) => {
+    if (!scalePt1 || !scalePt2) return
     const dist = Math.hypot(scalePt2.x - scalePt1.x, scalePt2.y - scalePt1.y)
+    if (dist < 1) return
     setScale(dist / meters)
     resetScale()
     setEditorMode(EDITOR_MODE.SELECT)
