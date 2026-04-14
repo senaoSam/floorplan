@@ -16,6 +16,7 @@ import FloorHoleLayer from './layers/FloorHoleLayer'
 import ScaleLayer from './layers/ScaleLayer'
 import HeatmapWebGL from './HeatmapWebGL'
 import ScaleDialog from './ScaleDialog'
+import LayerToggle from '@/components/LayerToggle/LayerToggle'
 import DropZone from '@/features/importer/DropZone'
 import './Editor2D.sass'
 
@@ -557,6 +558,8 @@ function Editor2D() {
           </Layer>
         </Stage>
       )}
+
+      {floors.length > 0 && <LayerToggle />}
 
       <HeatmapWebGL
         width={size.width}
