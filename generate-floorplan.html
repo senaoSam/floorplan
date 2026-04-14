@@ -7,10 +7,19 @@
 <body>
 <canvas id="c"></canvas>
 <script>
-// ─── 畫布設定 ────────────────────────────────────────────
-const W = 2400, H = 2400
+// ─── 版面常數 ────────────────────────────────────────────
+// 主內容：建築平面圖 500×500
+// 上方預留 80px 給比例尺（200×20），不與主內容重疊
+const CONTENT      = 500   // 主內容邊長
+const MARGIN_TOP   = 80    // 上方比例尺區留白
+const MARGIN_SIDE  = 30    // 左右邊距
+const MARGIN_BOT   = 30    // 下方（標題）邊距
+
+const W = CONTENT + MARGIN_SIDE * 2            // 560
+const H = CONTENT + MARGIN_TOP + MARGIN_BOT    // 610
+
 const canvas = document.getElementById('c')
-canvas.width = W
+canvas.width  = W
 canvas.height = H
 const ctx = canvas.getContext('2d')
 
@@ -39,11 +48,11 @@ function label(text, x, y, size = 10, color = '#333', align = 'center') {
   ctx.fillText(text, x, y)
 }
 
-// 牆壁填充：畫斜線 hatch
-function hatch(x, y, w, h, gap = 6) {
+function hatch(x, y, w, h, gap = 4) {
   ctx.save()
   ctx.strokeStyle = '#999'
   ctx.lineWidth = 0.5
+  ctx.beginPath()
   ctx.rect(x, y, w, h)
   ctx.clip()
   for (let i = -Math.max(w, h); i < Math.max(w, h) * 2; i += gap) {
@@ -55,25 +64,22 @@ function hatch(x, y, w, h, gap = 6) {
   ctx.restore()
 }
 
-// 畫一個房間（包含標籤）
-function room(x, y, w, h, name, fontSize = 10) {
-  rect(x, y, w, h, '#fff', '#444', 1.5)
+function room(x, y, w, h, name, fontSize = 8) {
+  rect(x, y, w, h, '#fff', '#444', 1)
   label(name, x + w / 2, y + h / 2, fontSize, '#444')
 }
 
-// ─── 背景 ────────────────────────────────────────────────
-rect(0, 0, W, H, '#f0f0f0')
+// ─── 建築座標 ────────────────────────────────────────────
+const OX = MARGIN_SIDE   // 30
+const OY = MARGIN_TOP    // 80
+const OW = CONTENT       // 500
+const OH = CONTENT       // 500
+const BW = 3
 
-// ─── 建築輪廓尺寸定義 ────────────────────────────────────
-const M  = 60    // 建築外框到 canvas 邊緣的 margin
-const BW = 8     // 外牆厚度
-const OX = M, OY = M, OW = W - M * 2, OH = H - M * 2
-
-// 主要 zone 邊界
-const TOP_ROOMS_H  = 320  // 上方房間高度
-const BOT_ROOMS_H  = 320  // 下方房間高度
-const SIDE_ROOMS_W = 320  // 左右房間寬度
-const CORR         = 120  // 走廊寬度
+const TOP_ROOMS_H  = 70
+const BOT_ROOMS_H  = 70
+const SIDE_ROOMS_W = 70
+const CORR         = 22
 
 const innerX1 = OX + SIDE_ROOMS_W + CORR
 const innerX2 = OX + OW - SIDE_ROOMS_W - CORR
@@ -82,94 +88,85 @@ const innerY2 = OY + OH - BOT_ROOMS_H - CORR
 const innerW  = innerX2 - innerX1
 const innerH  = innerY2 - innerY1
 
-// ─── 整棟建築底色（白）────────────────────────────────────
+const corrTop   = OY + TOP_ROOMS_H
+const corrBot   = OY + OH - BOT_ROOMS_H - CORR
+const corrLeft  = OX + SIDE_ROOMS_W
+const corrRight = OX + OW - SIDE_ROOMS_W - CORR
+
+// ─── 背景 ────────────────────────────────────────────────
+rect(0, 0, W, H, '#f0f0f0')
+
+// ─── 建築底色（白）──────────────────────────────────────
 rect(OX, OY, OW, OH, '#fff')
 
 // ─── 中庭 ────────────────────────────────────────────────
-rect(innerX1, innerY1, innerW, innerH, '#e8e8e8', '#666', 2)
-label('中  庭', innerX1 + innerW / 2, innerY1 + innerH / 2, 28, '#aaa')
+rect(innerX1, innerY1, innerW, innerH, '#e8e8e8', '#666', 1.5)
+label('中  庭', innerX1 + innerW / 2, innerY1 + innerH / 2, 12, '#aaa')
 
-// ─── 走廊（上下左右）────────────────────────────────────
-const corrTop  = OY + TOP_ROOMS_H
-const corrBot  = OY + OH - BOT_ROOMS_H - CORR
-const corrLeft = OX + SIDE_ROOMS_W
-const corrRight= OX + OW - SIDE_ROOMS_W - CORR
-
-// 上走廊
-rect(OX + SIDE_ROOMS_W, OY + TOP_ROOMS_H, OW - SIDE_ROOMS_W * 2, CORR, '#f5f5f5', '#999', 1)
-// 下走廊
-rect(OX + SIDE_ROOMS_W, corrBot, OW - SIDE_ROOMS_W * 2, CORR, '#f5f5f5', '#999', 1)
-// 左走廊
-rect(OX + SIDE_ROOMS_W, OY + TOP_ROOMS_H, CORR, OH - TOP_ROOMS_H - BOT_ROOMS_H, '#f5f5f5', '#999', 1)
-// 右走廊
-rect(corrRight, OY + TOP_ROOMS_H, CORR, OH - TOP_ROOMS_H - BOT_ROOMS_H, '#f5f5f5', '#999', 1)
+// ─── 走廊 ────────────────────────────────────────────────
+rect(OX + SIDE_ROOMS_W, OY + TOP_ROOMS_H, OW - SIDE_ROOMS_W * 2, CORR, '#f5f5f5', '#999', 0.5)
+rect(OX + SIDE_ROOMS_W, corrBot,           OW - SIDE_ROOMS_W * 2, CORR, '#f5f5f5', '#999', 0.5)
+rect(OX + SIDE_ROOMS_W, OY + TOP_ROOMS_H, CORR, OH - TOP_ROOMS_H - BOT_ROOMS_H, '#f5f5f5', '#999', 0.5)
+rect(corrRight,          OY + TOP_ROOMS_H, CORR, OH - TOP_ROOMS_H - BOT_ROOMS_H, '#f5f5f5', '#999', 0.5)
 
 // ─── 上排房間 ─────────────────────────────────────────────
 ;(function drawTopRooms() {
+  // totalW = 500 - 140 = 360；各房間 sum=342，extra=18 補給第一間
   const rooms = [
-    { w: 220, name: '辦公室 A1' }, { w: 160, name: '會議室' },
-    { w: 200, name: '辦公室 A2' }, { w: 180, name: '辦公室 A3' },
-    { w: 160, name: '儲藏室' },   { w: 200, name: '辦公室 A4' },
-    { w: 220, name: '辦公室 A5' },
+    { w: 52, name: '辦公室 A1' }, { w: 42, name: '會議室'  },
+    { w: 52, name: '辦公室 A2' }, { w: 50, name: '辦公室 A3' },
+    { w: 42, name: '儲藏室'   }, { w: 52, name: '辦公室 A4' },
+    { w: 52, name: '辦公室 A5' },
   ]
-  const totalW = OW - SIDE_ROOMS_W * 2
-  const roomsW = totalW - rooms.reduce((s, r) => s + r.w, 0)
+  const extra = (OW - SIDE_ROOMS_W * 2) - rooms.reduce((s, r) => s + r.w, 0)
   let cx = OX + SIDE_ROOMS_W
-
   rooms.forEach((r, i) => {
-    const w = r.w + (i === 0 ? roomsW / rooms.length : 0)
-    room(cx, OY, w, TOP_ROOMS_H, r.name, 9)
+    const w = r.w + (i === 0 ? extra : 0)
+    room(cx, OY, w, TOP_ROOMS_H, r.name)
     cx += w
   })
-
-  // 角落左上
-  room(OX, OY, SIDE_ROOMS_W, TOP_ROOMS_H / 2, '接待', 9)
-  room(OX, OY + TOP_ROOMS_H / 2, SIDE_ROOMS_W, TOP_ROOMS_H / 2, '等候區', 9)
-  // 角落右上
-  room(OX + OW - SIDE_ROOMS_W, OY, SIDE_ROOMS_W, TOP_ROOMS_H / 2, '電梯廳', 9)
-  room(OX + OW - SIDE_ROOMS_W, OY + TOP_ROOMS_H / 2, SIDE_ROOMS_W, TOP_ROOMS_H / 2, '樓梯', 9)
+  room(OX, OY,                    SIDE_ROOMS_W, TOP_ROOMS_H / 2, '接待')
+  room(OX, OY + TOP_ROOMS_H / 2,  SIDE_ROOMS_W, TOP_ROOMS_H / 2, '等候區')
+  room(OX + OW - SIDE_ROOMS_W, OY,                   SIDE_ROOMS_W, TOP_ROOMS_H / 2, '電梯廳')
+  room(OX + OW - SIDE_ROOMS_W, OY + TOP_ROOMS_H / 2, SIDE_ROOMS_W, TOP_ROOMS_H / 2, '樓梯')
 })()
 
 // ─── 下排房間 ─────────────────────────────────────────────
 ;(function drawBottomRooms() {
   const rooms = [
-    { w: 200, name: '辦公室 D1' }, { w: 180, name: '辦公室 D2' },
-    { w: 200, name: '印表機室' },  { w: 180, name: '辦公室 D3' },
-    { w: 160, name: 'WC (女)' },  { w: 160, name: 'WC (男)' },
-    { w: 200, name: '辦公室 D4' },
+    { w: 52, name: '辦公室 D1' }, { w: 46, name: '辦公室 D2' },
+    { w: 52, name: '印表機室'  }, { w: 46, name: '辦公室 D3' },
+    { w: 40, name: 'WC (女)'  }, { w: 40, name: 'WC (男)'  },
+    { w: 52, name: '辦公室 D4' },
   ]
-  const totalW = OW - SIDE_ROOMS_W * 2
-  const extra = totalW - rooms.reduce((s, r) => s + r.w, 0)
+  const extra = (OW - SIDE_ROOMS_W * 2) - rooms.reduce((s, r) => s + r.w, 0)
   let cx = OX + SIDE_ROOMS_W
   const ry = OY + OH - BOT_ROOMS_H
-
   rooms.forEach((r, i) => {
     const w = r.w + (i === 0 ? extra : 0)
-    room(cx, ry, w, BOT_ROOMS_H, r.name, 9)
+    room(cx, ry, w, BOT_ROOMS_H, r.name)
     cx += w
   })
-
-  room(OX, ry, SIDE_ROOMS_W, BOT_ROOMS_H / 2, '機房', 9)
-  room(OX, ry + BOT_ROOMS_H / 2, SIDE_ROOMS_W, BOT_ROOMS_H / 2, '樓梯', 9)
-  room(OX + OW - SIDE_ROOMS_W, ry, SIDE_ROOMS_W, BOT_ROOMS_H / 2, 'WC (無障)', 9)
-  room(OX + OW - SIDE_ROOMS_W, ry + BOT_ROOMS_H / 2, SIDE_ROOMS_W, BOT_ROOMS_H / 2, '電梯廳', 9)
+  room(OX, ry,                    SIDE_ROOMS_W, BOT_ROOMS_H / 2, '機房')
+  room(OX, ry + BOT_ROOMS_H / 2,  SIDE_ROOMS_W, BOT_ROOMS_H / 2, '樓梯')
+  room(OX + OW - SIDE_ROOMS_W, ry,                   SIDE_ROOMS_W, BOT_ROOMS_H / 2, 'WC (無障)')
+  room(OX + OW - SIDE_ROOMS_W, ry + BOT_ROOMS_H / 2, SIDE_ROOMS_W, BOT_ROOMS_H / 2, '電梯廳')
 })()
 
 // ─── 左排房間 ─────────────────────────────────────────────
 ;(function drawLeftRooms() {
   const ry = OY + TOP_ROOMS_H + CORR
-  const rh = OH - TOP_ROOMS_H - BOT_ROOMS_H - CORR * 2
+  const rh = OH - TOP_ROOMS_H - BOT_ROOMS_H - CORR * 2  // 316
   const rooms = [
-    { h: 220, name: '辦公室 B1' }, { h: 180, name: '辦公室 B2' },
-    { h: 160, name: '會議室 B' },  { h: 220, name: '辦公室 B3' },
-    { h: 180, name: '辦公室 B4' },
+    { h: 62, name: '辦公室 B1' }, { h: 52, name: '辦公室 B2' },
+    { h: 46, name: '會議室 B'  }, { h: 62, name: '辦公室 B3' },
+    { h: 50, name: '辦公室 B4' },
   ]
   const extra = rh - rooms.reduce((s, r) => s + r.h, 0)
   let cy = ry
-
   rooms.forEach((r, i) => {
     const h = r.h + (i === 0 ? extra : 0)
-    room(OX, cy, SIDE_ROOMS_W, h, r.name, 9)
+    room(OX, cy, SIDE_ROOMS_W, h, r.name)
     cy += h
   })
 })()
@@ -178,92 +175,103 @@ rect(corrRight, OY + TOP_ROOMS_H, CORR, OH - TOP_ROOMS_H - BOT_ROOMS_H, '#f5f5f5
 ;(function drawRightRooms() {
   const rx = OX + OW - SIDE_ROOMS_W
   const ry = OY + TOP_ROOMS_H + CORR
-  const rh = OH - TOP_ROOMS_H - BOT_ROOMS_H - CORR * 2
+  const rh = OH - TOP_ROOMS_H - BOT_ROOMS_H - CORR * 2  // 316
   const rooms = [
-    { h: 200, name: '辦公室 C1' }, { h: 200, name: '辦公室 C2' },
-    { h: 160, name: '茶水間' },    { h: 180, name: '辦公室 C3' },
-    { h: 220, name: '辦公室 C4' },
+    { h: 58, name: '辦公室 C1' }, { h: 58, name: '辦公室 C2' },
+    { h: 46, name: '茶水間'   }, { h: 52, name: '辦公室 C3' },
+    { h: 58, name: '辦公室 C4' },
   ]
   const extra = rh - rooms.reduce((s, r) => s + r.h, 0)
   let cy = ry
-
   rooms.forEach((r, i) => {
     const h = r.h + (i === 0 ? extra : 0)
-    room(rx, cy, SIDE_ROOMS_W, h, r.name, 9)
+    room(rx, cy, SIDE_ROOMS_W, h, r.name)
     cy += h
   })
 })()
 
-// ─── 門（短缺口表示）────────────────────────────────────
-function door(x, y, w, isHorizontal = true) {
+// ─── 門 ─────────────────────────────────────────────────
+function door(x, y, w, isH = true) {
   ctx.fillStyle = '#fff'
-  if (isHorizontal) {
+  if (isH) {
     ctx.fillRect(x, y - 1, w, 3)
-    // 弧形
     ctx.beginPath()
     ctx.arc(x, y, w, 0, Math.PI / 2)
     ctx.strokeStyle = '#666'
-    ctx.lineWidth = 1
+    ctx.lineWidth = 0.8
     ctx.stroke()
   } else {
     ctx.fillRect(x - 1, y, 3, w)
     ctx.beginPath()
     ctx.arc(x, y, w, Math.PI / 2, Math.PI)
     ctx.strokeStyle = '#666'
-    ctx.lineWidth = 1
+    ctx.lineWidth = 0.8
     ctx.stroke()
   }
 }
 
-// 上走廊門
-door(OX + SIDE_ROOMS_W + 260, corrTop, 40)
-door(OX + SIDE_ROOMS_W + 560, corrTop, 40)
-door(OX + SIDE_ROOMS_W + 860, corrTop, 40)
+door(OX + SIDE_ROOMS_W + 55,  corrTop, 12)
+door(OX + SIDE_ROOMS_W + 120, corrTop, 12)
+door(OX + SIDE_ROOMS_W + 185, corrTop, 12)
 
 // ─── 柱子 ───────────────────────────────────────────────
-function pillar(x, y, s = 24) {
-  rect(x - s/2, y - s/2, s, s, '#ccc', '#666', 1.5)
-  hatch(x - s/2, y - s/2, s, s, 5)
+function pillar(x, y, s = 8) {
+  rect(x - s/2, y - s/2, s, s, '#ccc', '#666', 1)
+  hatch(x - s/2, y - s/2, s, s, 4)
 }
 
-// 走廊角落柱
-const pY1 = corrTop, pY2 = corrTop + CORR
-const pX1 = corrLeft, pX2 = corrLeft + CORR
-const pX3 = corrRight, pX4 = corrRight + CORR
-const pYb1 = corrBot, pYb2 = corrBot + CORR
-
-;[[pX1, pY1],[pX2, pY1],[pX3, pY1],[pX4, pY1],
-  [pX1, pY2],[pX2, pY2],[pX3, pY2],[pX4, pY2],
-  [pX1, pYb1],[pX2, pYb1],[pX3, pYb1],[pX4, pYb1],
-  [pX1, pYb2],[pX2, pYb2],[pX3, pYb2],[pX4, pYb2],
+;[[corrLeft, corrTop],[corrLeft+CORR, corrTop],[corrRight, corrTop],[corrRight+CORR, corrTop],
+  [corrLeft, corrTop+CORR],[corrLeft+CORR, corrTop+CORR],[corrRight, corrTop+CORR],[corrRight+CORR, corrTop+CORR],
+  [corrLeft, corrBot],[corrLeft+CORR, corrBot],[corrRight, corrBot],[corrRight+CORR, corrBot],
+  [corrLeft, corrBot+CORR],[corrLeft+CORR, corrBot+CORR],[corrRight, corrBot+CORR],[corrRight+CORR, corrBot+CORR],
 ].forEach(([px, py]) => pillar(px, py))
 
-// 中庭柱
 ;[[innerX1, innerY1],[innerX2, innerY1],
   [innerX1, innerY2],[innerX2, innerY2]
-].forEach(([px, py]) => pillar(px, py, 28))
+].forEach(([px, py]) => pillar(px, py, 10))
 
-// ─── 外牆（最後畫，蓋在所有房間上）────────────────────
+// ─── 外牆 ────────────────────────────────────────────────
 ctx.strokeStyle = '#222'
 ctx.lineWidth = BW
 ctx.strokeRect(OX + BW/2, OY + BW/2, OW - BW, OH - BW)
 
-// ─── 比例尺 ────────────────────────────────────────────
-const scaleX = OX, scaleY = OY + OH + 20
-ctx.fillStyle = '#333'
-ctx.font = '14px Arial'
+// ─── 比例尺（左上角，主內容上方，不重疊）───────────────
+// 尺寸：200×20，對齊建築左緣，置中於上方留白區域
+const SB_X  = OX          // 30（與建築左緣對齊）
+const SB_W  = 200
+const SB_H  = 20
+const SB_Y  = Math.round((MARGIN_TOP - SB_H) / 2) - 8  // 垂直置中，稍微偏上
+
+// 說明文字（比例尺上方）
+ctx.fillStyle = '#444'
+ctx.font = '11px Arial'
 ctx.textAlign = 'left'
-ctx.fillText('Scale: 1 px ≈ 0.05 m  (2400px ≈ 120m)', scaleX, scaleY + 14)
+ctx.textBaseline = 'alphabetic'
+ctx.fillText('Scale  1 px = 0.1 m', SB_X, SB_Y - 5)
 
-line(scaleX, scaleY + 26, scaleX + 200, scaleY + 26, '#333', 2)
-line(scaleX, scaleY + 20, scaleX, scaleY + 32, '#333', 2)
-line(scaleX + 200, scaleY + 20, scaleX + 200, scaleY + 32, '#333', 2)
-label('10m', scaleX + 100, scaleY + 38, 12, '#333')
+// 比例尺主體：左半黑 + 右半白（地圖標準樣式）
+ctx.fillStyle = '#444'
+ctx.fillRect(SB_X, SB_Y, SB_W / 2, SB_H)
+ctx.fillStyle = '#fff'
+ctx.fillRect(SB_X + SB_W / 2, SB_Y, SB_W / 2, SB_H)
+ctx.strokeStyle = '#444'
+ctx.lineWidth = 1
+ctx.strokeRect(SB_X, SB_Y, SB_W, SB_H)
+line(SB_X + SB_W / 2, SB_Y, SB_X + SB_W / 2, SB_Y + SB_H, '#444', 1)
 
-// ─── 標題 ────────────────────────────────────────────
-label('測試平面圖 — 辦公大樓 1F', W / 2, 28, 18, '#222')
+// 刻度標籤（比例尺下方）
+ctx.fillStyle = '#444'
+ctx.font = '11px Arial'
+ctx.textBaseline = 'top'
+ctx.textAlign = 'center'
+ctx.fillText('0',    SB_X,           SB_Y + SB_H + 3)
+ctx.fillText('10 m', SB_X + SB_W/2,  SB_Y + SB_H + 3)
+ctx.fillText('20 m', SB_X + SB_W,    SB_Y + SB_H + 3)
 
-// ─── 下載 ────────────────────────────────────────────
+// ─── 標題 ────────────────────────────────────────────────
+label('測試平面圖 — 辦公大樓 1F', OX + OW / 2, OY + OH + MARGIN_BOT / 2, 12, '#444')
+
+// ─── 下載 ────────────────────────────────────────────────
 window.addEventListener('load', () => {
   const a = document.createElement('a')
   a.download = 'test-floorplan.png'
