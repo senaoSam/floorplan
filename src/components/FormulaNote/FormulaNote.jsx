@@ -5,7 +5,7 @@ const SECTIONS = [
   {
     title: 'Log-Distance Path Loss',
     rows: [
-      { label: '公式', value: 'PL(dB) = 10·n·log₁₀(d) + 20·log₁₀(f) − 27.56' },
+      { label: '公式', value: 'PL(dB) = 10·n·log₁₀(d) + 20·log₁₀(f) − 27.55' },
       { label: 'd', value: '距離（公尺）' },
       { label: 'f', value: '頻率（MHz）' },
       { label: 'n', value: '路徑損耗指數（環境相關）' },

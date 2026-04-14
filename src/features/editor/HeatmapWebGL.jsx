@@ -230,7 +230,7 @@ void main() {
         rssi = txPow;
       } else {
         float distM = dist / u_floorScale;
-        float fspl  = 10.0 * u_pathLossN * log10v(distM) + 20.0 * log10v(fMHz) - 27.56;
+        float fspl  = 10.0 * u_pathLossN * log10v(distM) + 20.0 * log10v(fMHz) - 27.55;
         rssi = txPow - fspl - wallLoss(canvas, apPos, fIdx);
       }
       if (rssi > bestRSSI) { bestRSSI = rssi; bestIdx = i; }
