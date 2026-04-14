@@ -9,9 +9,9 @@ function FloorImagePanel({ floorId }) {
   const clearSelected = useEditorStore((s) => s.clearSelected)
 
   const rotation = floor?.rotation ?? 0
+  const opacity = floor?.opacity ?? 1
 
   const setRotation = useCallback((deg) => {
-    // normalize to 0..359
     const normalized = ((deg % 360) + 360) % 360
     updateFloor(floorId, { rotation: normalized })
   }, [floorId, updateFloor])
@@ -24,6 +24,11 @@ function FloorImagePanel({ floorId }) {
   const handleInputBlur = useCallback((e) => {
     const val = parseFloat(e.target.value)
     if (isNaN(val)) updateFloor(floorId, { rotation: 0 })
+  }, [floorId, updateFloor])
+
+  const handleOpacityChange = useCallback((e) => {
+    const val = parseFloat(e.target.value)
+    if (!isNaN(val)) updateFloor(floorId, { opacity: Math.min(1, Math.max(0, val)) })
   }, [floorId, updateFloor])
 
   if (!floor) return null
@@ -90,6 +95,34 @@ function FloorImagePanel({ floorId }) {
               onClick={() => setRotation(deg)}
             >
               {deg}°
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* 透明度控制 */}
+      <section className="floor-image-panel__section">
+        <p className="floor-image-panel__label">透明度</p>
+        <div className="floor-image-panel__opacity-row">
+          <input
+            type="range"
+            className="floor-image-panel__angle-slider"
+            value={opacity}
+            onChange={handleOpacityChange}
+            min={0}
+            max={1}
+            step={0.05}
+          />
+          <span className="floor-image-panel__opacity-value">{Math.round(opacity * 100)}%</span>
+        </div>
+        <div className="floor-image-panel__presets">
+          {[0.25, 0.5, 0.75, 1].map((val) => (
+            <button
+              key={val}
+              className={`floor-image-panel__preset-btn${opacity === val ? ' floor-image-panel__preset-btn--active' : ''}`}
+              onClick={() => updateFloor(floorId, { opacity: val })}
+            >
+              {Math.round(val * 100)}%
             </button>
           ))}
         </div>
