@@ -1,7 +1,7 @@
 import React from 'react'
 import { Group, Circle, Line } from 'react-konva'
 
-function DeleteButton({ x, y, scale = 1, onClick }) {
+function DeleteButton({ x, y, scale = 1, onClick, setHoverCursor }) {
   const s = scale
   const r = 10 * s
 
@@ -9,8 +9,8 @@ function DeleteButton({ x, y, scale = 1, onClick }) {
     <Group
       x={x}
       y={y}
-      onMouseEnter={(e) => { e.target.getStage().container().style.cursor = 'pointer' }}
-      onMouseLeave={(e) => { e.target.getStage().container().style.cursor = 'default' }}
+      onMouseEnter={() => { setHoverCursor?.('pointer') }}
+      onMouseLeave={() => { setHoverCursor?.('move') }}
       onClick={(e) => {
         e.cancelBubble = true
         onClick()

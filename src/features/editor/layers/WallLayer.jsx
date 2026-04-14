@@ -3,10 +3,66 @@ import { Group, Line, Circle } from 'react-konva'
 import { useWallStore } from '@/store/useWallStore'
 import DeleteButton from './DeleteButton'
 
-function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, onWallDragMove, onWallDragEnd, isDrawMode, isDrawingActive, snapRadius, onRightMouseDown, onDelete, viewportScale }) {
+// 端點吸附（排除自身牆體）
+function snapToEndpoint(pos, walls, snapDist, excludeWallId) {
+  for (const w of walls) {
+    if (w.id === excludeWallId) continue
+    for (const ep of [{ x: w.startX, y: w.startY }, { x: w.endX, y: w.endY }]) {
+      if (Math.hypot(pos.x - ep.x, pos.y - ep.y) < snapDist) return ep
+    }
+  }
+  return pos
+}
+
+function EndpointHandle({ x, y, which, wallId, walls, floorId, snapRadius, inverseScale, updateWall, onWallDragMove, onWallDragEnd, onExtendFromEndpoint, setHoverCursor }) {
+  const [dragPos, setDragPos] = useState(null)
+  const displayX = dragPos ? dragPos.x : x
+  const displayY = dragPos ? dragPos.y : y
+
+  return (
+    <Circle
+      x={displayX}
+      y={displayY}
+      radius={7 * inverseScale}
+      fill="#fff"
+      stroke="#e74c3c"
+      strokeWidth={2.5 * inverseScale}
+      draggable
+      onMouseEnter={() => { setHoverCursor?.('crosshair') }}
+      onMouseLeave={() => { setHoverCursor?.('move') }}
+      onDragStart={(e) => {
+        e.cancelBubble = true
+      }}
+      onDragMove={(e) => {
+        e.cancelBubble = true
+        const raw = { x: e.target.x(), y: e.target.y() }
+        const snapped = snapToEndpoint(raw, walls, snapRadius, wallId)
+        e.target.position(snapped)
+        setDragPos(snapped)
+        const patch = which === 'start'
+          ? { startX: snapped.x, startY: snapped.y }
+          : { endX: snapped.x, endY: snapped.y }
+        updateWall(floorId, wallId, patch)
+        onWallDragMove?.(wallId, 0, 0)
+      }}
+      onDragEnd={(e) => {
+        e.cancelBubble = true
+        setDragPos(null)
+        onWallDragEnd?.()
+      }}
+      onDblClick={(e) => {
+        e.cancelBubble = true
+        onExtendFromEndpoint?.({ x, y })
+      }}
+    />
+  )
+}
+
+function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, onWallDragMove, onWallDragEnd, isDrawMode, isDrawingActive, snapRadius, onRightMouseDown, onDelete, viewportScale, setHoverCursor, onExtendFromEndpoint }) {
   const walls      = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
   const updateWall = useWallStore((s) => s.updateWall)
   const [hoveredId, setHoveredId] = useState(null)
+  const inverseScale = 1 / (viewportScale || 1)
 
   // 找出游標正在吸附的端點（draw 模式下才需要）
   let snapEndpoint = null
@@ -31,9 +87,9 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
         return (
           <Group
             key={wall.id}
-            draggable
-            onMouseEnter={(e) => { e.target.getStage().container().style.cursor = 'move'; setHoveredId(wall.id) }}
-            onMouseLeave={(e) => { e.target.getStage().container().style.cursor = 'default'; setHoveredId(null) }}
+            draggable={!isDrawMode}
+            onMouseEnter={() => { setHoverCursor?.('move'); setHoveredId(wall.id) }}
+            onMouseLeave={() => { setHoverCursor?.(null); setHoveredId(null) }}
             onMouseDown={(e) => {
               if (e.evt.button === 2) {
                 e.cancelBubble = true
@@ -102,11 +158,35 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
             {isHovered && onDelete && (
               <DeleteButton
                 x={(wall.startX + wall.endX) / 2}
-                y={(wall.startY + wall.endY) / 2 - 18 / (viewportScale || 1)}
-                scale={1 / (viewportScale || 1)}
+                y={(wall.startY + wall.endY) / 2 - 18 * inverseScale}
+                scale={inverseScale}
                 onClick={() => onDelete(wall.id)}
+                setHoverCursor={setHoverCursor}
               />
             )}
+            {/* 端點拖曳把手 */}
+            {(isSelected || isHovered) && ['start', 'end'].map((which) => {
+              const ex = which === 'start' ? wall.startX : wall.endX
+              const ey = which === 'start' ? wall.startY : wall.endY
+              return (
+                <EndpointHandle
+                  key={which}
+                  x={ex}
+                  y={ey}
+                  which={which}
+                  wallId={wall.id}
+                  walls={walls}
+                  floorId={floorId}
+                  snapRadius={snapRadius}
+                  inverseScale={inverseScale}
+                  updateWall={updateWall}
+                  onWallDragMove={onWallDragMove}
+                  onWallDragEnd={onWallDragEnd}
+                  onExtendFromEndpoint={onExtendFromEndpoint}
+                  setHoverCursor={setHoverCursor}
+                />
+              )
+            })}
           </Group>
         )
       })}

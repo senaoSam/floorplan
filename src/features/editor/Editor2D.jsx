@@ -399,14 +399,19 @@ function Editor2D() {
     32, 16, 16,
   )
 
-  const stageCursor =
+  // ── 游標管理 ───────────────────────────────────────────
+  const [hoverCursor, setHoverCursor] = useState(null) // 'move' | 'grab' | 'crosshair' | 'pointer' | null
+
+  const toolCursor =
     isScaleMode     ? cursorScale :
     isWallMode      ? cursorWall  :
     isAPMode        ? cursorAP    :
     isScopeMode || isFloorHoleMode ? 'crosshair' :
     isPanMode                      ? 'grab'      : 'default'
 
-  // Force cursor on Konva canvas — Konva internally resets style.cursor after drag/click
+  const stageCursor = hoverCursor || toolCursor
+
+  // Force cursor on Konva canvas — Konva internally resets style.cursor
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -425,7 +430,7 @@ function Editor2D() {
     })
     canvases.forEach((c) => observer.observe(c, { attributes: true, attributeFilter: ['style'] }))
     return () => observer.disconnect()
-  }, [stageCursor, editorMode])
+  }, [stageCursor])
 
   const modeHintMap = {
     [EDITOR_MODE.SELECT]:          null,
@@ -486,6 +491,7 @@ function Editor2D() {
                 onRightMouseDown={handleRightMouseDown}
                 onDelete={(id) => { removeScope(activeFloorId, id); clearSelected() }}
                 viewportScale={viewport.scale}
+                setHoverCursor={setHoverCursor}
               />
             )}
 
@@ -502,6 +508,7 @@ function Editor2D() {
                 onRightMouseDown={handleRightMouseDown}
                 onDelete={(id) => { removeFloorHole(activeFloorId, id); clearSelected() }}
                 viewportScale={viewport.scale}
+                setHoverCursor={setHoverCursor}
               />
             )}
 
@@ -520,6 +527,12 @@ function Editor2D() {
                 onRightMouseDown={handleRightMouseDown}
                 onDelete={(id) => { removeWall(activeFloorId, id); clearSelected() }}
                 viewportScale={viewport.scale}
+                setHoverCursor={setHoverCursor}
+                onExtendFromEndpoint={(pt) => {
+                  clearSelected()
+                  setEditorMode(EDITOR_MODE.DRAW_WALL)
+                  setWallDrawStart(pt)
+                }}
               />
             )}
 
@@ -534,6 +547,7 @@ function Editor2D() {
                 onRightMouseDown={handleRightMouseDown}
                 viewportScale={viewport.scale}
                 onDelete={(id) => { removeAP(activeFloorId, id); clearSelected() }}
+                setHoverCursor={setHoverCursor}
               />
             )}
 

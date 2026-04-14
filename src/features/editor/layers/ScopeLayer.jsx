@@ -90,7 +90,7 @@ function DrawingPreview({ points, mousePos, snapRadius }) {
   )
 }
 
-function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScopeId, onScopeClick, isSelectMode, isDrawingActive, onScopeDragMove, onScopeDragEnd, onRightMouseDown, onDelete, viewportScale }) {
+function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScopeId, onScopeClick, isSelectMode, isDrawingActive, onScopeDragMove, onScopeDragEnd, onRightMouseDown, onDelete, viewportScale, setHoverCursor }) {
   const zones       = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
   const updateScope = useScopeStore((s) => s.updateScope)
   const [hoveredId, setHoveredId] = useState(null)
@@ -106,8 +106,8 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
           <Group
             key={zone.id}
             draggable
-            onMouseEnter={(e) => { e.target.getStage().container().style.cursor = 'move'; setHoveredId(zone.id) }}
-            onMouseLeave={(e) => { e.target.getStage().container().style.cursor = 'default'; setHoveredId(null) }}
+            onMouseEnter={() => { setHoverCursor?.('move'); setHoveredId(zone.id) }}
+            onMouseLeave={() => { setHoverCursor?.(null); setHoveredId(null) }}
             onMouseDown={(e) => {
               if (e.evt.button === 2) {
                 e.cancelBubble = true
@@ -170,6 +170,7 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
                   y={cy}
                   scale={1 / (viewportScale || 1)}
                   onClick={() => onDelete(zone.id)}
+                  setHoverCursor={setHoverCursor}
                 />
               )
             })()}

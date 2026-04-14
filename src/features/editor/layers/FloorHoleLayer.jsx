@@ -112,6 +112,7 @@ function FloorHoleLayer({
   onRightMouseDown,
   onDelete,
   viewportScale,
+  setHoverCursor,
 }) {
   const holes           = useFloorHoleStore((s) => s.floorHolesByFloor[floorId] ?? [])
   const updateFloorHole = useFloorHoleStore((s) => s.updateFloorHole)
@@ -127,8 +128,8 @@ function FloorHoleLayer({
           <Group
             key={hole.id}
             draggable
-            onMouseEnter={(e) => { e.target.getStage().container().style.cursor = 'move'; setHoveredId(hole.id) }}
-            onMouseLeave={(e) => { e.target.getStage().container().style.cursor = 'default'; setHoveredId(null) }}
+            onMouseEnter={() => { setHoverCursor?.('move'); setHoveredId(hole.id) }}
+            onMouseLeave={() => { setHoverCursor?.(null); setHoveredId(null) }}
             onMouseDown={(e) => {
               if (e.evt.button === 2) {
                 e.cancelBubble = true
@@ -186,6 +187,7 @@ function FloorHoleLayer({
                   y={cy}
                   scale={1 / (viewportScale || 1)}
                   onClick={() => onDelete(hole.id)}
+                  setHoverCursor={setHoverCursor}
                 />
               )
             })()}
