@@ -459,7 +459,7 @@ function Editor2D() {
           width={size.width}  height={size.height}
           x={viewport.x}      y={viewport.y}
           scaleX={viewport.scale} scaleY={viewport.scale}
-          draggable
+          draggable={!hoverCursor}
           onWheel={handleWheel}
           onDragEnd={handleDragEnd}
           onMouseDown={handleMouseDown}

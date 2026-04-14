@@ -87,7 +87,7 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
         return (
           <Group
             key={wall.id}
-            draggable={!isDrawMode}
+            draggable
             onMouseEnter={() => { setHoverCursor?.('move'); setHoveredId(wall.id) }}
             onMouseLeave={() => { setHoverCursor?.(null); setHoveredId(null) }}
             onMouseDown={(e) => {
