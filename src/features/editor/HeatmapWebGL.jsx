@@ -621,6 +621,41 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         )
       }
 
+      // 展開門窗 openings 為獨立子段（不同材質/dB）
+      const expandedWalls = []
+      for (const wl of rawWalls) {
+        const ops = wl.openings ?? []
+        if (ops.length === 0) { expandedWalls.push(wl); continue }
+        // 排序 openings by startFrac
+        const sorted = [...ops].sort((a, b) => a.startFrac - b.startFrac)
+        const dx = wl.endX - wl.startX, dy = wl.endY - wl.startY
+        let cursor = 0
+        for (const op of sorted) {
+          // 牆段：cursor → op.startFrac
+          if (op.startFrac > cursor + 0.001) {
+            expandedWalls.push({ ...wl, openings: undefined,
+              startX: wl.startX + cursor * dx, startY: wl.startY + cursor * dy,
+              endX:   wl.startX + op.startFrac * dx, endY: wl.startY + op.startFrac * dy })
+          }
+          // opening 段
+          expandedWalls.push({ ...wl, openings: undefined, material: op.material,
+            startX: wl.startX + op.startFrac * dx, startY: wl.startY + op.startFrac * dy,
+            endX:   wl.startX + op.endFrac * dx,   endY:   wl.startY + op.endFrac * dy })
+          cursor = op.endFrac
+        }
+        // 剩餘牆段
+        if (cursor < 0.999) {
+          expandedWalls.push({ ...wl, openings: undefined,
+            startX: wl.startX + cursor * dx, startY: wl.startY + cursor * dy,
+            endX: wl.endX, endY: wl.endY })
+        }
+      }
+      // 保留原始牆體 openings 用於 cache key
+      const openingsKey = rawWalls.filter((wl) => (wl.openings ?? []).length > 0)
+        .map((wl) => wl.openings.map((o) => `${o.id}:${o.type},${o.startFrac},${o.endFrac},${o.material?.id}`).join(';'))
+        .join('|')
+      rawWalls = expandedWalls
+
       const scopes     = useScopeStore.getState().scopesByFloor[floorId] ?? []
       const inScopes   = scopes.filter((s) => s.type === 'in')
       const outScopes  = scopes.filter((s) => s.type === 'out')
@@ -668,12 +703,12 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       const vp = { x: stage.x(), y: stage.y(), scale: stage.scaleX() }
 
       const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0}`).join('|')
-      const wallKey  = rawWalls.map((wl) => `${wl.startX},${wl.startY},${wl.endX},${wl.endY},${wl.material?.dbLoss}`).join('|')
+      const wallKey  = rawWalls.map((wl) => `${wl.startX.toFixed(1)},${wl.startY.toFixed(1)},${wl.endX.toFixed(1)},${wl.endY.toFixed(1)},${wl.material?.id ?? ''},${wl.material?.dbLoss ?? 0}`).join('|')
       const scopeKey = [...inScopes, ...outScopes].map((sc) => {
         const d = dragScope && dragScope.id === sc.id ? `${dragScope.dx.toFixed(1)},${dragScope.dy.toFixed(1)}` : '0,0'
         return `${sc.id},${sc.type},${d}`
       }).join('|') || 'none'
-      const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${curMode},${plN},${apKey},${wallKey},${scopeKey}`
+      const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${curMode},${plN},${apKey},${wallKey},${openingsKey},${scopeKey}`
       if (key === prevKey) return
       prevKey = key
 

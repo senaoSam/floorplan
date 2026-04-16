@@ -108,6 +108,7 @@ function FloorHoleLayer({
   selectedHoleId,
   selectedItems = [],
   onHoleClick,
+  dimmed,
   isSelectMode,
   isDrawingActive,
   onRightMouseDown,
@@ -121,7 +122,7 @@ function FloorHoleLayer({
   const batchSelectedIds = selectedItems.length > 1 ? new Set(selectedItems.filter((it) => it.type === 'floor_hole').map((it) => it.id)) : null
 
   return (
-    <Group>
+    <Group opacity={dimmed ? 0.2 : 1}>
       {/* 已完成的 Floor Hole 多邊形 */}
       {holes.map((hole) => {
         const isSelected = hole.id === selectedHoleId || (batchSelectedIds?.has(hole.id) ?? false)

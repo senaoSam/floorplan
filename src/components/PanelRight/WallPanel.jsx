@@ -1,7 +1,7 @@
 import React, { useCallback } from 'react'
 import { useWallStore } from '@/store/useWallStore'
 import { useEditorStore } from '@/store/useEditorStore'
-import { MATERIAL_LIST } from '@/constants/materials'
+import { MATERIAL_LIST, OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import './WallPanel.sass'
 
 function WallPanel({ floorId, wallId }) {
@@ -9,6 +9,8 @@ function WallPanel({ floorId, wallId }) {
   const wall       = useWallStore((s) => (s.wallsByFloor[floorId] ?? []).find((w) => w.id === wallId))
   const updateWall = useWallStore((s) => s.updateWall)
   const removeWall = useWallStore((s) => s.removeWall)
+  const updateOpening = useWallStore((s) => s.updateOpening)
+  const removeOpening = useWallStore((s) => s.removeOpening)
   const clearSelected = useEditorStore((s) => s.clearSelected)
 
   const handleMaterial = useCallback((mat) => {
@@ -85,6 +87,91 @@ function WallPanel({ floorId, wallId }) {
           </label>
         </div>
       </section>
+
+      {/* 門窗 */}
+      {(wall.openings ?? []).length > 0 && (
+        <section className="wall-panel__section">
+          <p className="wall-panel__label">門窗</p>
+          <div className="wall-panel__openings">
+            {wall.openings.map((op) => {
+              const ot = OPENING_TYPES[op.type === 'window' ? 'WINDOW' : 'DOOR']
+              const handleFracChange = (field, raw) => {
+                const pct = parseInt(raw, 10)
+                if (isNaN(pct)) return
+                const frac = Math.max(0, Math.min(100, pct)) / 100
+                const newStart = field === 'startFrac' ? frac : op.startFrac
+                const newEnd   = field === 'endFrac'   ? frac : op.endFrac
+                if (newStart >= newEnd) return
+                // 檢查與其他 opening 是否重疊
+                const others = wall.openings.filter((o) => o.id !== op.id)
+                const overlaps = others.some((o) => newStart < o.endFrac && newEnd > o.startFrac)
+                if (overlaps) return
+                updateOpening(floorId, wallId, op.id, { [field]: frac })
+              }
+              const handleTypeToggle = () => {
+                const newType = op.type === 'door' ? 'window' : 'door'
+                const newOt = OPENING_TYPES[newType === 'window' ? 'WINDOW' : 'DOOR']
+                const defaultMat = getMaterialById(newOt.defaultMaterial)
+                updateOpening(floorId, wallId, op.id, { type: newType, material: defaultMat })
+              }
+              const handleMaterialChange = (matId) => {
+                const mat = getMaterialById(matId)
+                updateOpening(floorId, wallId, op.id, { material: mat })
+              }
+              return (
+                <div key={op.id} className="wall-panel__opening-item">
+                  <button
+                    className="wall-panel__opening-type-btn"
+                    style={{ background: ot.color }}
+                    onClick={handleTypeToggle}
+                    title={`點擊切換為${op.type === 'door' ? '窗' : '門'}`}
+                  >
+                    {ot.label}
+                  </button>
+                  <select
+                    className="wall-panel__opening-mat-select"
+                    value={op.material?.id ?? ''}
+                    onChange={(e) => handleMaterialChange(e.target.value)}
+                  >
+                    {MATERIAL_LIST.map((mat) => (
+                      <option key={mat.id} value={mat.id}>{mat.label} ({mat.dbLoss} dB)</option>
+                    ))}
+                  </select>
+                  <div className="wall-panel__opening-inputs">
+                    <input
+                      className="wall-panel__opening-input"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={Math.round(op.startFrac * 100)}
+                      onChange={(e) => handleFracChange('startFrac', e.target.value)}
+                    />
+                    <span className="wall-panel__opening-sep">~</span>
+                    <input
+                      className="wall-panel__opening-input"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={Math.round(op.endFrac * 100)}
+                      onChange={(e) => handleFracChange('endFrac', e.target.value)}
+                    />
+                    <span className="wall-panel__opening-pct">%</span>
+                  </div>
+                  <button
+                    className="wall-panel__opening-del"
+                    onClick={() => removeOpening(floorId, wallId, op.id)}
+                    title="刪除"
+                  >
+                    ×
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       <button className="wall-panel__delete" onClick={handleDelete}>
         刪除牆體

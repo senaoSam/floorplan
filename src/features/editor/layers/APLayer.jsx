@@ -141,7 +141,7 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
   )
 }
 
-function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPDragMove, onAPDragEnd, isDrawingActive, onRightMouseDown, viewportScale, onDelete, setHoverCursor }) {
+function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPDragMove, onAPDragEnd, isDrawingActive, onRightMouseDown, viewportScale, onDelete, setHoverCursor, dimmed }) {
   const aps        = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   const updateAP   = useAPStore((s) => s.updateAP)
   const showAPInfo = useEditorStore((s) => s.showAPInfo)
@@ -155,7 +155,7 @@ function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPDra
   }
 
   return (
-    <Group>
+    <Group opacity={dimmed ? 0.2 : 1}>
       {aps.map((ap) => (
         <APMarker
           key={ap.id}

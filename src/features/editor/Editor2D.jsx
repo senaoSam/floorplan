@@ -6,7 +6,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
-import { MATERIALS, MATERIAL_LIST } from '@/constants/materials'
+import { MATERIALS, MATERIAL_LIST, OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 import FloorImageLayer from './layers/FloorImageLayer'
 import WallLayer from './layers/WallLayer'
@@ -54,6 +54,11 @@ function Editor2D() {
   // ── Floor Hole 繪製狀態 ────────────────────────────────
   const [floorHolePoints, setFloorHolePoints] = useState([])  // [{x,y}, ...]
 
+  // ── 門窗繪製狀態 ──────────────────────────────────────
+  const [dwWallId, setDwWallId]     = useState(null)   // 目標牆體 ID
+  const [dwStartFrac, setDwStartFrac] = useState(null) // 第一點 fraction (0~1)
+  const [dwOpeningType, setDwOpeningType] = useState('door') // 'door' | 'window'
+
   // ── 裁切繪製狀態 ──────────────────────────────────────
   const [cropStart, setCropStart] = useState(null)   // {x,y}
 
@@ -70,6 +75,7 @@ function Editor2D() {
           showFloorImage, showScopes, showFloorHoles, showWalls, showAPs } = useEditorStore()
   const isSelectMode    = editorMode === EDITOR_MODE.SELECT
   const isMarqueeMode   = editorMode === EDITOR_MODE.MARQUEE_SELECT
+  const isDoorWindowMode = editorMode === EDITOR_MODE.DOOR_WINDOW
   const isPanMode       = editorMode === EDITOR_MODE.PAN
   const isScaleMode     = editorMode === EDITOR_MODE.DRAW_SCALE
   const isWallMode      = editorMode === EDITOR_MODE.DRAW_WALL
@@ -85,7 +91,8 @@ function Editor2D() {
   const setScale       = useFloorStore((s) => s.setScale)
   const activeFloor    = getActiveFloor()
 
-  const addWall = useWallStore((s) => s.addWall)
+  const addWall    = useWallStore((s) => s.addWall)
+  const addOpening = useWallStore((s) => s.addOpening)
 
   const addAP     = useAPStore((s) => s.addAP)
   const nextAPName = useAPStore((s) => s.nextAPName)
@@ -115,6 +122,33 @@ function Editor2D() {
       y: dx * Math.sin(rad) + dy * Math.cos(rad) + cy,
     }
   }, [activeFloor])
+
+  // ── 投影點到牆體線段 → 回傳 fraction (0~1) ──────────────
+  const projectToWall = useCallback((pos, wall) => {
+    const dx = wall.endX - wall.startX
+    const dy = wall.endY - wall.startY
+    const lenSq = dx * dx + dy * dy
+    if (lenSq < 1e-6) return 0
+    const t = ((pos.x - wall.startX) * dx + (pos.y - wall.startY) * dy) / lenSq
+    return Math.max(0, Math.min(1, t))
+  }, [])
+
+  // ── 找最近的牆體（螢幕距離 < threshold）──────────────────
+  const findNearestWall = useCallback((canvasPos) => {
+    const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
+    const threshold = 15 / viewport.scale
+    let best = null, bestDist = threshold
+    for (const w of walls) {
+      const dx = w.endX - w.startX, dy = w.endY - w.startY
+      const lenSq = dx * dx + dy * dy
+      if (lenSq < 1e-6) continue
+      const t = Math.max(0, Math.min(1, ((canvasPos.x - w.startX) * dx + (canvasPos.y - w.startY) * dy) / lenSq))
+      const px = w.startX + t * dx, py = w.startY + t * dy
+      const dist = Math.hypot(canvasPos.x - px, canvasPos.y - py)
+      if (dist < bestDist) { best = w; bestDist = dist }
+    }
+    return best
+  }, [activeFloorId, viewport.scale])
 
   // ── 容器尺寸監聽（rAF 批次，避免 Panel 動畫期間多次 resize 抖動）
   useEffect(() => {
@@ -172,6 +206,8 @@ function Editor2D() {
         setScopePoints([])
         setFloorHolePoints([])
         setCropStart(null)
+        setDwWallId(null)
+        setDwStartFrac(null)
         resetScale()
         return
       }
@@ -213,6 +249,20 @@ function Editor2D() {
         }
       }
 
+      // ── D / W：門窗模式下切換門/窗 ─────────────────────
+      if (isDoorWindowMode) {
+        const tag = e.target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return
+        if (e.key === 'd' || e.key === 'D') {
+          setDwOpeningType('door')
+          setMaterialToast({ label: '門', color: '#8B5E3C', key: 'D' })
+        }
+        if (e.key === 'w' || e.key === 'W') {
+          setDwOpeningType('window')
+          setMaterialToast({ label: '窗', color: '#5DADE2', key: 'W' })
+        }
+      }
+
       // ── 數字鍵 1~6：切換牆體材質 ─────────────────────
       const keyNum = parseInt(e.key, 10)
       if (keyNum >= 1 && keyNum <= 6) {
@@ -234,7 +284,7 @@ function Editor2D() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, selectedType, activeFloorId, isWallMode, removeWall, removeWalls, updateWall, removeAP, removeAPs, removeScope, removeScopes, removeFloorHole, removeFloorHoles, clearSelected])
+  }, [selectedId, selectedType, activeFloorId, isWallMode, isDoorWindowMode, removeWall, removeWalls, updateWall, removeAP, removeAPs, removeScope, removeScopes, removeFloorHole, removeFloorHoles, clearSelected])
 
   // ── 切換模式時清除繪製狀態 ────────────────────────────
   useEffect(() => {
@@ -242,6 +292,8 @@ function Editor2D() {
     setScopePoints([])
     setFloorHolePoints([])
     setCropStart(null)
+    setDwWallId(null)
+    setDwStartFrac(null)
     if (!isScaleMode) resetScale()
   }, [editorMode])
 
@@ -563,17 +615,58 @@ function Editor2D() {
       return
     }
 
+    // 門窗模式
+    if (isDoorWindowMode) {
+      const wall = findNearestWall(pos)
+      if (!wall) {
+        // 點空白處 → 取消進行中的繪製
+        setDwWallId(null); setDwStartFrac(null)
+        return
+      }
+      const frac = projectToWall(pos, wall)
+      if (!dwWallId || dwWallId !== wall.id) {
+        // 第一次點擊（或切換到不同牆）→ 記錄起點
+        setDwWallId(wall.id)
+        setDwStartFrac(frac)
+      } else {
+        // 第二次點擊同一面牆 → 建立 opening
+        const f1 = Math.min(dwStartFrac, frac)
+        const f2 = Math.max(dwStartFrac, frac)
+        if (f2 - f1 > 0.01) {
+          // 檢查是否與既有 opening 重疊
+          const existing = wall.openings ?? []
+          const overlaps = existing.some((o) => f1 < o.endFrac && f2 > o.startFrac)
+          if (!overlaps) {
+            const ot = OPENING_TYPES[dwOpeningType === 'window' ? 'WINDOW' : 'DOOR']
+            const defaultMat = getMaterialById(ot.defaultMaterial)
+            addOpening(activeFloorId, wall.id, {
+              id: generateId('opening'),
+              type: dwOpeningType,
+              startFrac: f1,
+              endFrac: f2,
+              material: defaultMat,
+              topHeight: 2.1,
+              bottomHeight: 0,
+            })
+          }
+        }
+        setDwWallId(null); setDwStartFrac(null)
+      }
+      return
+    }
+
     // 其他模式點擊空白 → 取消選取
     clearSelected()
   }, [
-    isMarqueeMode,
+    isMarqueeMode, isDoorWindowMode,
     isScaleMode, showScaleDialog, scalePt1,
     isWallMode, wallDrawStart, activeFloorId, snapToWallEndpoint,
     isAPMode, nextAPName,
     isScopeMode, scopePoints, viewport.scale, addScope,
     isFloorHoleMode, floorHolePoints, addFloorHole,
     isCropMode, cropStart, updateFloor, toImagePos, setSelected,
-    toCanvasPos, addWall, addAP, clearSelected,
+    toCanvasPos, addWall, addAP, addOpening, clearSelected,
+    findNearestWall, projectToWall, dwWallId, dwStartFrac, dwOpeningType,
   ])
 
   // ── 右鍵：有繪製進行中 → 停止繪製；否則 → 切換 Panel 收合 ──
@@ -584,8 +677,9 @@ function Editor2D() {
     if (isScopeMode && scopePoints.length > 0) { setScopePoints([]);     return }
     if (isFloorHoleMode && floorHolePoints.length > 0) { setFloorHolePoints([]); return }
     if (isCropMode && cropStart) { setCropStart(null); return }
+    if (isDoorWindowMode && dwWallId) { setDwWallId(null); setDwStartFrac(null); return }
     togglePanelCollapsed()
-  }, [isWallMode, wallDrawStart, isScopeMode, scopePoints, isFloorHoleMode, floorHolePoints, isCropMode, cropStart, togglePanelCollapsed])
+  }, [isWallMode, wallDrawStart, isScopeMode, scopePoints, isFloorHoleMode, floorHolePoints, isCropMode, cropStart, isDoorWindowMode, dwWallId, togglePanelCollapsed])
 
   // ── 比例尺 helpers ─────────────────────────────────────
   const resetScale = () => {
@@ -655,6 +749,7 @@ function Editor2D() {
     isScaleMode     ? cursorScale :
     isWallMode      ? cursorWall  :
     isAPMode        ? cursorAP    :
+    isDoorWindowMode                   ? 'crosshair' :
     isMarqueeMode                      ? 'crosshair' :
     isCropMode                         ? 'crosshair' :
     isScopeMode || isFloorHoleMode ? 'crosshair' :
@@ -689,6 +784,7 @@ function Editor2D() {
     [EDITOR_MODE.PAN]:             { label: '平移模式', hint: '拖曳畫布移動視角' },
     [EDITOR_MODE.DRAW_SCALE]:      { label: '比例尺模式', hint: '點擊兩點設定比例' },
     [EDITOR_MODE.DRAW_WALL]:       { label: '畫牆模式', hint: '左鍵點擊設定端點，右鍵或 Esc 結束｜數字鍵 1~6 切換材質' },
+    [EDITOR_MODE.DOOR_WINDOW]:     { label: '門窗模式', hint: '點擊牆體兩點設定門/窗位置；D 切換門、W 切換窗；右鍵或 Esc 取消' },
     [EDITOR_MODE.PLACE_AP]:        { label: '放置 AP 模式', hint: '左鍵點擊放置 AP' },
     [EDITOR_MODE.DRAW_SCOPE]:      { label: '熱圖範圍模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.DRAW_FLOOR_HOLE]: { label: '挑高模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
@@ -705,6 +801,12 @@ function Editor2D() {
             <span className="editor-2d__mode-hint-material">
               <span className="editor-2d__mode-hint-mat-dot" style={{ background: wallMaterial.color }} />
               {wallMaterial.label}
+            </span>
+          )}
+          {isDoorWindowMode && (
+            <span className="editor-2d__mode-hint-material">
+              <span className="editor-2d__mode-hint-mat-dot" style={{ background: dwOpeningType === 'door' ? '#8B5E3C' : '#5DADE2' }} />
+              {dwOpeningType === 'door' ? '門' : '窗'}
             </span>
           )}
           <span className="editor-2d__mode-hint-desc">{modeHint.hint}</span>
@@ -769,6 +871,7 @@ function Editor2D() {
                 onDelete={(id) => { removeScope(activeFloorId, id); clearSelected() }}
                 viewportScale={viewport.scale}
                 setHoverCursor={setHoverCursor}
+                dimmed={isDoorWindowMode}
               />
             )}
 
@@ -790,6 +893,7 @@ function Editor2D() {
                 onDelete={(id) => { removeFloorHole(activeFloorId, id); clearSelected() }}
                 viewportScale={viewport.scale}
                 setHoverCursor={setHoverCursor}
+                dimmed={isDoorWindowMode}
               />
             )}
 
@@ -818,6 +922,10 @@ function Editor2D() {
                   setEditorMode(EDITOR_MODE.DRAW_WALL)
                   setWallDrawStart(pt)
                 }}
+                isDoorWindowMode={isDoorWindowMode}
+                dwWallId={dwWallId}
+                dwStartFrac={dwStartFrac}
+                dwOpeningType={dwOpeningType}
               />
             )}
 
@@ -837,6 +945,7 @@ function Editor2D() {
                 viewportScale={viewport.scale}
                 onDelete={(id) => { removeAP(activeFloorId, id); clearSelected() }}
                 setHoverCursor={setHoverCursor}
+                dimmed={isDoorWindowMode}
               />
             )}
 

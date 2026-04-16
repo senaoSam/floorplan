@@ -62,4 +62,44 @@ export const useWallStore = create((set, get) => ({
     set((state) => ({
       wallsByFloor: { ...state.wallsByFloor, [floorId]: walls },
     })),
+
+  // ── 門窗 openings ──────────────────────────────────────
+  // Opening: { id, type: 'door'|'window', startFrac, endFrac, material, topHeight, bottomHeight }
+  // startFrac/endFrac: 0~1 沿牆體方向的比例位置
+
+  addOpening: (floorId, wallId, opening) =>
+    set((state) => ({
+      wallsByFloor: {
+        ...state.wallsByFloor,
+        [floorId]: (state.wallsByFloor[floorId] ?? []).map((w) =>
+          w.id === wallId
+            ? { ...w, openings: [...(w.openings ?? []), opening] }
+            : w
+        ),
+      },
+    })),
+
+  updateOpening: (floorId, wallId, openingId, patch) =>
+    set((state) => ({
+      wallsByFloor: {
+        ...state.wallsByFloor,
+        [floorId]: (state.wallsByFloor[floorId] ?? []).map((w) =>
+          w.id === wallId
+            ? { ...w, openings: (w.openings ?? []).map((o) => o.id === openingId ? { ...o, ...patch } : o) }
+            : w
+        ),
+      },
+    })),
+
+  removeOpening: (floorId, wallId, openingId) =>
+    set((state) => ({
+      wallsByFloor: {
+        ...state.wallsByFloor,
+        [floorId]: (state.wallsByFloor[floorId] ?? []).map((w) =>
+          w.id === wallId
+            ? { ...w, openings: (w.openings ?? []).filter((o) => o.id !== openingId) }
+            : w
+        ),
+      },
+    })),
 }))

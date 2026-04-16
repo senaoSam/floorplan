@@ -11,6 +11,7 @@ export const EDITOR_MODE = {
   DRAW_FLOOR_HOLE: 'draw_floor_hole',
   CROP_IMAGE: 'crop_image',
   MARQUEE_SELECT: 'marquee_select',
+  DOOR_WINDOW: 'door_window',
 }
 
 // 視角模式

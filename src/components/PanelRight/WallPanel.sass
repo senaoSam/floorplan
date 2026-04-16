@@ -123,6 +123,110 @@
     span:last-child
       width: 16px
 
+  // 門窗清單
+  &__openings
+    display: flex
+    flex-direction: column
+    gap: 4px
+
+  &__opening-item
+    display: flex
+    flex-wrap: wrap
+    align-items: center
+    gap: 4px 6px
+    padding: 6px 6px
+    border-radius: 4px
+    background: rgba(255, 255, 255, 0.04)
+
+  &__opening-type-btn
+    border: none
+    border-radius: 4px
+    color: #fff
+    font-size: 11px
+    font-weight: 600
+    padding: 2px 8px
+    cursor: pointer
+    flex-shrink: 0
+    opacity: 0.85
+    transition: opacity 0.12s
+
+    &:hover
+      opacity: 1
+
+  &__opening-mat-select
+    flex: 1
+    min-width: 0
+    background: rgba(255, 255, 255, 0.07)
+    border: 1px solid $border-color
+    border-radius: 4px
+    color: $text-primary
+    font-size: 11px
+    padding: 2px 4px
+    outline: none
+    cursor: pointer
+
+    &:focus
+      border-color: $accent
+
+    option
+      background: $bg-secondary
+      color: $text-primary
+
+  &__opening-inputs
+    display: flex
+    align-items: center
+    gap: 4px
+    flex: 1
+    justify-content: flex-end
+
+  &__opening-input
+    width: 42px
+    background: rgba(255, 255, 255, 0.07)
+    border: 1px solid $border-color
+    border-radius: 4px
+    color: $text-primary
+    font-size: 12px
+    padding: 2px 4px
+    outline: none
+    text-align: center
+
+    &:focus
+      border-color: $accent
+
+    // 隱藏 spin buttons
+    -moz-appearance: textfield
+    &::-webkit-outer-spin-button,
+    &::-webkit-inner-spin-button
+      -webkit-appearance: none
+      margin: 0
+
+  &__opening-sep
+    font-size: 11px
+    color: $text-secondary
+
+  &__opening-pct
+    font-size: 11px
+    color: $text-secondary
+
+  &__opening-del
+    width: 18px
+    height: 18px
+    border: none
+    border-radius: 3px
+    background: transparent
+    color: $text-secondary
+    font-size: 14px
+    line-height: 1
+    cursor: pointer
+    display: flex
+    align-items: center
+    justify-content: center
+    flex-shrink: 0
+
+    &:hover
+      background: rgba(231, 76, 60, 0.2)
+      color: #e74c3c
+
   // 刪除按鈕
   &__delete
     margin: 12px 14px

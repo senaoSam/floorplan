@@ -9,6 +9,7 @@ const TOOLS = [
   { mode: EDITOR_MODE.PAN,            label: '平移',     icon: '\u270B' },
   { mode: EDITOR_MODE.DRAW_SCALE,     label: '比例尺',   icon: '\uD83D\uDCCF' },
   { mode: EDITOR_MODE.DRAW_WALL,      label: '畫牆',     icon: '\u25AC' },
+  { mode: EDITOR_MODE.DOOR_WINDOW,    label: '門窗',     icon: '\uD83D\uDEAA' },
   { mode: EDITOR_MODE.PLACE_AP,       label: '放置 AP',  icon: '\uD83D\uDCE1' },
   { mode: EDITOR_MODE.DRAW_SCOPE,     label: '熱圖範圍', icon: '\u2B21' },
   { mode: EDITOR_MODE.DRAW_FLOOR_HOLE,label: '挑高區域', icon: '\u2B1B' },
