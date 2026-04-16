@@ -423,7 +423,8 @@ const MODE_INT = {
 }
 
 // ── Legend 配置 ──────────────────────────────────────────────────────
-const LEGENDS = {
+// Exported so HeatmapControl can render the swatches alongside its mode selector.
+export const LEGENDS = {
   [HEATMAP_MODE.RSSI]: {
     title: 'RSSI',
     items: [
@@ -486,43 +487,6 @@ const LEGENDS = {
   },
 }
 
-// ── Legend 元件 ──────────────────────────────────────────────────────
-function HeatmapLegend({ mode }) {
-  const legend = LEGENDS[mode] || LEGENDS[HEATMAP_MODE.SINR]
-  return (
-    <div style={{
-      position: 'absolute',
-      bottom: 16,
-      left: 16,
-      zIndex: 400,
-      background: 'rgba(18,18,30,0.90)',
-      backdropFilter: 'blur(8px)',
-      border: '1px solid rgba(255,255,255,0.12)',
-      borderRadius: 8,
-      padding: '8px 12px',
-      minWidth: 110,
-      pointerEvents: 'none',
-    }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: '#4fc3f7', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 6 }}>
-        {legend.title}
-      </div>
-      {legend.items.map((item) => (
-        <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 }}>
-          <div style={{
-            width: 14,
-            height: 14,
-            borderRadius: 3,
-            background: item.color,
-            flexShrink: 0,
-          }} />
-          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.75)', fontFamily: 'monospace' }}>
-            {item.label}
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
 
 // ── 主元件 ────────────────────────────────────────────────────────────
 function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef, draggingScopeRef }) {
@@ -868,7 +832,6 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
           display: showHeatmap ? 'block' : 'none',
         }}
       />
-      {showHeatmap && <HeatmapLegend mode={heatmapMode} />}
     </>
   )
 }

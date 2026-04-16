@@ -1,0 +1,156 @@
+@use '@/styles/variables' as *
+
+.heatmap-control
+  position: absolute
+  left: 16px
+  bottom: 16px
+  z-index: 400
+  display: flex
+  flex-direction: column
+  gap: 8px
+  align-items: stretch
+  min-width: 140px
+  user-select: none
+
+  &__legend
+    background: rgba(18, 18, 30, 0.90)
+    backdrop-filter: blur(8px)
+    border: 1px solid rgba(255, 255, 255, 0.12)
+    border-radius: 8px
+    padding: 8px 12px
+
+  &__mode
+    position: relative
+    margin-bottom: 6px
+
+  &__mode-header
+    display: flex
+    align-items: center
+    gap: 6px
+    width: 100%
+    padding: 5px 10px
+    background-color: rgba(79, 195, 247, 0.10)
+    border: 1px solid rgba(79, 195, 247, 0.35)
+    border-radius: 5px
+    color: #4fc3f7
+    font-size: 11px
+    font-weight: 700
+    letter-spacing: 0.5px
+    text-transform: uppercase
+    cursor: pointer
+    outline: none
+    transition: background-color 0.15s, border-color 0.15s
+
+    &:hover
+      background-color: rgba(79, 195, 247, 0.20)
+      border-color: rgba(79, 195, 247, 0.6)
+
+    &--open
+      background-color: rgba(79, 195, 247, 0.20)
+      border-color: #4fc3f7
+
+  &__mode-label
+    flex: 1
+    text-align: left
+
+  &__mode-arrow
+    font-size: 10px
+    transition: transform 0.2s
+
+    &--open
+      transform: rotate(180deg)
+
+  &__mode-list
+    list-style: none
+    margin: 4px 0 0
+    padding: 4px
+    background: rgba(18, 18, 30, 0.98)
+    border: 1px solid rgba(255, 255, 255, 0.15)
+    border-radius: 6px
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4)
+
+  &__mode-item
+    padding: 5px 8px
+    font-size: 11px
+    color: $text-secondary
+    border-radius: 4px
+    cursor: pointer
+    transition: background 0.12s, color 0.12s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.06)
+      color: $text-primary
+
+    &--focused
+      background: rgba(79, 195, 247, 0.12)
+      color: $text-primary
+
+    &--active
+      color: #4fc3f7
+
+  &__legend-item
+    display: flex
+    align-items: center
+    gap: 7px
+    margin-bottom: 3px
+
+    &:last-child
+      margin-bottom: 0
+
+  &__swatch
+    width: 14px
+    height: 14px
+    border-radius: 3px
+    flex-shrink: 0
+
+  &__legend-label
+    font-size: 10px
+    color: rgba(255, 255, 255, 0.75)
+    font-family: monospace
+
+  &__env-select
+    padding: 4px 6px
+    background: rgba(18, 18, 30, 0.90)
+    backdrop-filter: blur(8px)
+    border: 1px solid rgba(255, 255, 255, 0.12)
+    border-radius: 6px
+    color: $text-primary
+    font-size: 12px
+    cursor: pointer
+    outline: none
+
+    &:focus
+      border-color: $accent
+
+    option
+      background: $bg-secondary
+      color: $text-primary
+
+  &__toggle
+    padding: 6px 14px
+    border: 1px solid rgba(255, 255, 255, 0.18)
+    border-radius: 6px
+    background: rgba(18, 18, 30, 0.90)
+    backdrop-filter: blur(8px)
+    color: $text-secondary
+    font-size: 12px
+    font-weight: 600
+    cursor: pointer
+    transition: all 0.15s
+
+    &:hover:not(:disabled):not(&--active)
+      border-color: #4fc3f7
+      color: #4fc3f7
+
+    &--active
+      background: #2196f3
+      border-color: #2196f3
+      color: #fff
+
+      &:hover
+        background: #1976d2
+        border-color: #1976d2
+
+    &:disabled
+      opacity: 0.5
+      cursor: not-allowed

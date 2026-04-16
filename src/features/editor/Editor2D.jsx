@@ -21,6 +21,8 @@ import HeatmapWebGL from './HeatmapWebGL'
 import ScaleDialog from './ScaleDialog'
 import LayerToggle from '@/components/LayerToggle/LayerToggle'
 import RegulatorySelector from '@/components/RegulatorySelector/RegulatorySelector'
+import HeatmapControl from '@/components/HeatmapControl/HeatmapControl'
+import { LEGENDS } from './HeatmapWebGL'
 import DropZone from '@/features/importer/DropZone'
 import './Editor2D.sass'
 
@@ -1054,6 +1056,8 @@ function Editor2D() {
         draggingWallRef={draggingWallRef}
         draggingScopeRef={draggingScopeRef}
       />
+
+      <HeatmapControl legends={LEGENDS} />
 
       {showScaleDialog && (
         <ScaleDialog
