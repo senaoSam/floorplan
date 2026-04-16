@@ -1,6 +1,7 @@
 import React, { useCallback } from 'react'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { AP_MODEL_LIST, DEFAULT_AP_MODEL_ID, getAPModelById } from '@/constants/apModels'
 import './APPanel.sass'
 
 const FREQ_OPTIONS = [
@@ -33,18 +34,47 @@ function APPanel({ floorId, apId }) {
   const removeAP    = useAPStore((s) => s.removeAP)
   const clearSelected = useEditorStore((s) => s.clearSelected)
 
+  const model = getAPModelById(ap?.modelId ?? DEFAULT_AP_MODEL_ID)
+
+  const handleModel = useCallback((modelId) => {
+    const newModel = getAPModelById(modelId)
+    const patch = { modelId }
+    // If current frequency unsupported, switch to first supported band.
+    const freq = ap.frequency
+    const bandOk = newModel.supportedBands.includes(freq)
+    const targetFreq = bandOk ? freq : newModel.supportedBands[0]
+    if (!bandOk) {
+      patch.frequency = targetFreq
+      patch.channel = DEFAULT_CHANNEL[targetFreq] ?? 1
+    }
+    // Clamp txPower to new model's max for the target band.
+    const maxTx = newModel.maxTxPower[targetFreq] ?? 23
+    if (ap.txPower > maxTx) patch.txPower = maxTx
+    updateAP(floorId, apId, patch)
+  }, [floorId, apId, ap, updateAP])
+
   const handleField = useCallback((field, value) => {
     if (field === 'frequency') {
-      updateAP(floorId, apId, { frequency: value, channel: DEFAULT_CHANNEL[value] ?? 1 })
+      if (!model.supportedBands.includes(value)) return
+      const maxTx = model.maxTxPower[value] ?? 23
+      const patch = { frequency: value, channel: DEFAULT_CHANNEL[value] ?? 1 }
+      if (ap.txPower > maxTx) patch.txPower = maxTx
+      updateAP(floorId, apId, patch)
     } else {
       updateAP(floorId, apId, { [field]: value })
     }
-  }, [floorId, apId, updateAP])
+  }, [floorId, apId, ap, updateAP, model])
 
   const handleNumber = useCallback((field, raw) => {
     const num = parseFloat(raw)
-    if (!isNaN(num) && num >= 0) updateAP(floorId, apId, { [field]: num })
-  }, [floorId, apId, updateAP])
+    if (isNaN(num) || num < 0) return
+    if (field === 'txPower') {
+      const maxTx = model.maxTxPower[ap.frequency] ?? 23
+      updateAP(floorId, apId, { txPower: Math.min(num, maxTx) })
+    } else {
+      updateAP(floorId, apId, { [field]: num })
+    }
+  }, [floorId, apId, ap, updateAP, model])
 
   const handleDelete = () => {
     removeAP(floorId, apId)
@@ -53,12 +83,33 @@ function APPanel({ floorId, apId }) {
 
   if (!ap) return null
 
+  const maxTxForBand = model.maxTxPower[ap.frequency] ?? 23
+
   return (
     <div className="ap-panel">
       <div className="ap-panel__header">
         <span className="ap-panel__title">AP 屬性</span>
         <span className="ap-panel__dot" style={{ background: FREQ_OPTIONS.find(f => f.value === ap.frequency)?.color ?? '#4fc3f7' }} />
       </div>
+
+      {/* 型號 */}
+      <section className="ap-panel__section">
+        <p className="ap-panel__label">型號</p>
+        <select
+          className="ap-panel__input ap-panel__select"
+          value={ap.modelId ?? DEFAULT_AP_MODEL_ID}
+          onChange={(e) => handleModel(e.target.value)}
+        >
+          {AP_MODEL_LIST.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.vendor} {m.name} ({m.wifiGen})
+            </option>
+          ))}
+        </select>
+        <p className="ap-panel__hint">
+          支援：{model.supportedBands.map((b) => `${b} GHz`).join(' / ')}　最大 {maxTxForBand} dBm
+        </p>
+      </section>
 
       {/* 名稱 */}
       <section className="ap-panel__section">
@@ -75,16 +126,22 @@ function APPanel({ floorId, apId }) {
       <section className="ap-panel__section">
         <p className="ap-panel__label">頻段</p>
         <div className="ap-panel__btn-group">
-          {FREQ_OPTIONS.map((f) => (
-            <button
-              key={f.value}
-              className={`ap-panel__btn${ap.frequency === f.value ? ' ap-panel__btn--active' : ''}`}
-              style={ap.frequency === f.value ? { borderColor: f.color, color: f.color } : {}}
-              onClick={() => handleField('frequency', f.value)}
-            >
-              {f.label}
-            </button>
-          ))}
+          {FREQ_OPTIONS.map((f) => {
+            const supported = model.supportedBands.includes(f.value)
+            const active = ap.frequency === f.value
+            return (
+              <button
+                key={f.value}
+                className={`ap-panel__btn${active ? ' ap-panel__btn--active' : ''}${supported ? '' : ' ap-panel__btn--disabled'}`}
+                style={active ? { borderColor: f.color, color: f.color } : {}}
+                onClick={() => handleField('frequency', f.value)}
+                disabled={!supported}
+                title={supported ? '' : `${model.vendor} ${model.name} 不支援此頻段`}
+              >
+                {f.label}
+              </button>
+            )
+          })}
         </div>
       </section>
 
@@ -110,12 +167,12 @@ function APPanel({ floorId, apId }) {
             className="ap-panel__input ap-panel__input--number"
             type="number"
             min="0"
-            max="33"
+            max={maxTxForBand}
             step="1"
             value={ap.txPower}
             onChange={(e) => handleNumber('txPower', e.target.value)}
           />
-          <span className="ap-panel__unit">dBm</span>
+          <span className="ap-panel__unit">dBm（上限 {maxTxForBand}）</span>
         </div>
       </section>
 

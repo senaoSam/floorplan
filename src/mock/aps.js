@@ -10,6 +10,7 @@ export const mockAPs = {
       frequency: 5,       // GHz: 2.4 | 5 | 6
       antennaMode: 'omni',
       mountType: 'ceiling',
+      modelId: 'generic-wifi6',
       name: 'AP-01',
       color: '#4fc3f7',
     },

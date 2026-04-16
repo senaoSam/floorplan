@@ -111,6 +111,20 @@
       background: rgba(255, 255, 255, 0.1)
       color: $text-primary
 
+    &--disabled,
+    &:disabled
+      opacity: 0.35
+      cursor: not-allowed
+
+      &:hover
+        background: transparent
+        color: $text-secondary
+
+  &__hint
+    margin-top: 6px
+    font-size: 11px
+    color: $text-secondary
+
   &__delete
     margin: 12px 14px
     padding: 7px

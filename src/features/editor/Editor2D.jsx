@@ -8,6 +8,7 @@ import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { MATERIALS, MATERIAL_LIST, OPENING_TYPES, getMaterialById } from '@/constants/materials'
+import { DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
 import { generateId } from '@/utils/id'
 import FloorImageLayer from './layers/FloorImageLayer'
 import WallLayer from './layers/WallLayer'
@@ -201,6 +202,25 @@ function Editor2D() {
   }, [materialToast])
 
   useEffect(() => {
+    // Undo/Redo 後：若原選取物件仍存在，保留 selection；否則清除以避免面板顯示無效內容。
+    const clearSelectedIfMissing = () => {
+      const { selectedId: sid, selectedType: stype } = useEditorStore.getState()
+      if (!sid || !stype) return
+      const fid = useFloorStore.getState().activeFloorId
+      if (!fid) return
+      const exists = (() => {
+        switch (stype) {
+          case 'wall':       return (useWallStore.getState().wallsByFloor[fid] ?? []).some((w) => w.id === sid)
+          case 'ap':         return (useAPStore.getState().apsByFloor[fid] ?? []).some((a) => a.id === sid)
+          case 'scope':      return (useScopeStore.getState().scopesByFloor[fid] ?? []).some((s) => s.id === sid)
+          case 'floor_hole': return (useFloorHoleStore.getState().floorHolesByFloor[fid] ?? []).some((h) => h.id === sid)
+          case 'floor_image':return true
+          default:           return false
+        }
+      })()
+      if (!exists) clearSelected()
+    }
+
     const onKey = (e) => {
       // ── Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y：Undo / Redo ──
       if ((e.ctrlKey || e.metaKey) && !e.altKey) {
@@ -211,13 +231,13 @@ function Editor2D() {
           } else {
             useHistoryStore.getState().undo()
           }
-          clearSelected()
+          clearSelectedIfMissing()
           return
         }
         if (e.key === 'y' || e.key === 'Y') {
           e.preventDefault()
           useHistoryStore.getState().redo()
-          clearSelected()
+          clearSelectedIfMissing()
           return
         }
       }
@@ -569,6 +589,7 @@ function Editor2D() {
         channel: 36,
         antennaMode: 'omni',
         mountType: 'ceiling',
+        modelId: DEFAULT_AP_MODEL_ID,
         name: nextAPName(),
         color: '#4fc3f7',
       })
