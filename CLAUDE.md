@@ -120,28 +120,15 @@ Default wall material: `MATERIALS.CONCRETE`.
 
 ## Session Start
 
-**At the beginning of every new conversation, always read `task.md`** to understand current progress before doing anything else.
-
----
-
-## User Signal Keywords
-
-These keywords carry specific meaning and must be handled exactly as described:
-
-| Keyword | Meaning | Action |
-|---|---|---|
-| **`ok`** | User confirms the task works correctly | 1. Update `task.md` — mark completed tasks ✅ <br> 2. Update `ProgressPanel.jsx` — set `done: true` for corresponding items (if applicable) <br> 3. Provide a short English commit message |
-| **`next`** | User wants to proceed to the next task | Read `task.md`, identify the next pending task, and begin implementation immediately |
-| *(anything else)* | There is a bug or something incomplete | Do NOT mark anything as done. Investigate, fix, or ask for clarification |
-
-> **Rule:** Only mark a task complete and provide a commit message when the user explicitly says `ok`. Never do so preemptively.
+**At the beginning of every new conversation:**
+1. 讀 `.claude/workflow.md` 了解協作流程
+2. 讀 `.claude/task.md` 了解目前任務進度
+3. 讀 `.claude/file-structure.md` 了解檔案結構
 
 ---
 
 ## Conventions
 
-- **Commit messages: English only**
-- **After each task: provide Chinese testing steps** for user to verify
 - No TypeScript, no JSDoc, no prop-types
 - No `.scss` files — only `.sass` (indented syntax)
 - SASS files use `@use '@/styles/variables' as *`
@@ -149,46 +136,12 @@ These keywords carry specific meaning and must be handled exactly as described:
 
 ---
 
-## File Structure
+## .claude/ 資料夾
 
-```
-src/
-  features/
-    editor/
-      Editor2D.jsx          # Main canvas, all drawing modes, keyboard/mouse handlers
-      layers/
-        FloorImageLayer.jsx
-        WallLayer.jsx
-        APLayer.jsx
-        ScopeLayer.jsx
-        ScaleLayer.jsx
-      ScaleDialog.jsx
-    importer/
-      DropZone.jsx          # PNG/JPG/PDF drag & drop
-  components/
-    Toolbar/
-    SidebarLeft/
-    PanelRight/
-      WallPanel.jsx
-      APPanel.jsx
-      ScopePanel.jsx
-  store/
-    useEditorStore.js
-    useFloorStore.js
-    useWallStore.js
-    useAPStore.js
-    useScopeStore.js
-  constants/
-    materials.js
-  utils/
-    id.js
-    pdfUtils.js
-  styles/
-    _variables.sass
-```
-
----
-
-## Task Progress
-
-See `task.md` in the project root for current status.
+| 檔案 | 用途 |
+|------|------|
+| `.claude/workflow.md` | 協作流程規範（commit、測試、回應語言） |
+| `.claude/file-structure.md` | 完整檔案結構與各檔說明（隨時更新） |
+| `.claude/task.md` | 任務進度追蹤 |
+| `.claude/spec.md` | 產品規格書 |
+| `.claude/youtube.md` | Hamina Network Planner 影片筆記 |
