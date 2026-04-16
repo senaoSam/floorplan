@@ -193,9 +193,9 @@ function HeatmapControl({ legends }) {
         className={`heatmap-control__toggle${showHeatmap ? ' heatmap-control__toggle--active' : ''}`}
         onClick={toggleHeatmap}
         disabled={!hasScale}
-        title={hasScale ? '切換熱圖' : '請先設定比例尺才能顯示熱圖'}
+        title={hasScale ? '切換熱圖' : '熱圖需要實際距離來計算訊號衰減，請先在「比例尺」工具標出已知長度'}
       >
-        {hasScale ? (showHeatmap ? '關閉熱圖' : '開啟熱圖') : '需先設定比例尺'}
+        {hasScale ? (showHeatmap ? '關閉熱圖' : '開啟熱圖') : '熱圖需先設比例尺'}
       </button>
     </div>
   )

@@ -21,8 +21,16 @@
 
   &__tools
     display: flex
-    gap: 4px
+    align-items: center
     justify-content: center
+
+  &__group
+    display: flex
+    gap: 4px
+    padding: 0 8px
+
+    & + &
+      border-left: 1px solid $border-color
 
   &__btn
     display: flex

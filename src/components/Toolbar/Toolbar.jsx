@@ -3,17 +3,25 @@ import { useEditorStore, EDITOR_MODE, VIEW_MODE } from '@/store/useEditorStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import './Toolbar.sass'
 
-const TOOLS = [
-  { mode: EDITOR_MODE.SELECT,         label: '選取',     icon: '\u2196' },
-  { mode: EDITOR_MODE.MARQUEE_SELECT, label: '框選',     icon: '\u25A2' },
-  { mode: EDITOR_MODE.PAN,            label: '平移',     icon: '\u270B' },
-  { mode: EDITOR_MODE.DRAW_SCALE,     label: '比例尺',   icon: '\uD83D\uDCCF' },
-  { mode: EDITOR_MODE.DRAW_WALL,      label: '畫牆',     icon: '\u25AC' },
-  { mode: EDITOR_MODE.DOOR_WINDOW,    label: '門窗',     icon: '\uD83D\uDEAA' },
-  { mode: EDITOR_MODE.PLACE_AP,       label: '放置 AP',  icon: '\uD83D\uDCE1' },
-  { mode: EDITOR_MODE.DRAW_SCOPE,     label: '熱圖範圍', icon: '\u2B21' },
-  { mode: EDITOR_MODE.DRAW_FLOOR_HOLE,label: '中庭',     icon: '\u2B1B' },
-  { mode: EDITOR_MODE.CROP_IMAGE,     label: '裁切',     icon: '\u2702' },
+const TOOL_GROUPS = [
+  [
+    { mode: EDITOR_MODE.SELECT,         label: '選取',     icon: '\u2196' },
+    { mode: EDITOR_MODE.MARQUEE_SELECT, label: '框選',     icon: '\u25A2' },
+    { mode: EDITOR_MODE.PAN,            label: '平移',     icon: '\u270B' },
+  ],
+  [
+    { mode: EDITOR_MODE.CROP_IMAGE,     label: '裁切',     icon: '\u2702' },
+    { mode: EDITOR_MODE.DRAW_SCALE,     label: '比例尺',   icon: '\uD83D\uDCCF' },
+  ],
+  [
+    { mode: EDITOR_MODE.DRAW_WALL,      label: '畫牆',     icon: '\u25AC' },
+    { mode: EDITOR_MODE.DOOR_WINDOW,    label: '門窗',     icon: '\uD83D\uDEAA' },
+    { mode: EDITOR_MODE.DRAW_FLOOR_HOLE,label: '中庭',     icon: '\u2B1B' },
+  ],
+  [
+    { mode: EDITOR_MODE.PLACE_AP,       label: 'AP',       icon: '\uD83D\uDCE1' },
+    { mode: EDITOR_MODE.DRAW_SCOPE,     label: '熱圖範圍', icon: '\u2B21' },
+  ],
 ]
 
 function Toolbar() {
@@ -28,16 +36,20 @@ function Toolbar() {
       <div className="toolbar__brand">Floorplan</div>
 
       <div className="toolbar__tools">
-        {TOOLS.map((t) => (
-          <button
-            key={t.mode}
-            className={`toolbar__btn${editorMode === t.mode ? ' toolbar__btn--active' : ''}`}
-            onClick={() => setEditorMode(t.mode)}
-            title={t.label}
-          >
-            <span className="toolbar__btn-icon">{t.icon}</span>
-            <span className="toolbar__btn-label">{t.label}</span>
-          </button>
+        {TOOL_GROUPS.map((group, gi) => (
+          <div key={gi} className="toolbar__group">
+            {group.map((t) => (
+              <button
+                key={t.mode}
+                className={`toolbar__btn${editorMode === t.mode ? ' toolbar__btn--active' : ''}`}
+                onClick={() => setEditorMode(t.mode)}
+                title={t.label}
+              >
+                <span className="toolbar__btn-icon">{t.icon}</span>
+                <span className="toolbar__btn-label">{t.label}</span>
+              </button>
+            ))}
+          </div>
         ))}
       </div>
 
