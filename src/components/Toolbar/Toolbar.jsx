@@ -1,6 +1,7 @@
 import React from 'react'
 import { useEditorStore, EDITOR_MODE, VIEW_MODE, HEATMAP_MODE, ENVIRONMENT_PRESETS } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import './Toolbar.sass'
 
 const TOOLS = [
@@ -36,6 +37,10 @@ function Toolbar() {
           setEditorMode, setViewMode, toggleHeatmap, setHeatmapMode, setPathLossExponent } = useEditorStore()
   const floorScale = useFloorStore((s) => s.scale)
   const hasScale = !!floorScale
+  const undoLen = useHistoryStore((s) => s.undoStack.length)
+  const redoLen = useHistoryStore((s) => s.redoStack.length)
+  const undo = useHistoryStore((s) => s.undo)
+  const redo = useHistoryStore((s) => s.redo)
 
   return (
     <header className="toolbar">
@@ -53,6 +58,27 @@ function Toolbar() {
             <span className="toolbar__btn-label">{t.label}</span>
           </button>
         ))}
+      </div>
+
+      <div className="toolbar__history">
+        <button
+          className="toolbar__btn"
+          onClick={undo}
+          disabled={undoLen === 0}
+          title="復原 (Ctrl+Z)"
+        >
+          <span className="toolbar__btn-icon">↩</span>
+          <span className="toolbar__btn-label">復原</span>
+        </button>
+        <button
+          className="toolbar__btn"
+          onClick={redo}
+          disabled={redoLen === 0}
+          title="重做 (Ctrl+Shift+Z)"
+        >
+          <span className="toolbar__btn-icon">↪</span>
+          <span className="toolbar__btn-label">重做</span>
+        </button>
       </div>
 
       <div className="toolbar__actions">

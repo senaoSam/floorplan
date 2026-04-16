@@ -66,6 +66,18 @@ src/store/
   useFloorHoleStore.js        # 中庭/挑高管理（per floor）
                               #   - floorHolesByFloor {}
                               #   - addFloorHole(), updateFloorHole(), removeFloorHole(), removeFloorHoles()
+
+  useHistoryStore.js          # Undo/Redo 歷史管理
+                              #   - undoStack[], redoStack[] (snapshot-based)
+                              #   - undo(), redo(), canUndo(), canRedo(), clearHistory()
+                              #   - 自動監聽 wall/AP/scope/floorHole 四個 store 的變化
+                              #   - 還原時設 _restoring 旗標避免觸發循環記錄
+                              #   - Debounce 300ms：拖曳等連續操作合併為一步
+                              #
+                              #   ⚠ 新增 data store 時必須更新此檔案（搜尋「擴充點」）：
+                              #     A. takeSnapshot() — 加入新 store 的資料欄位
+                              #     B. restoreSnapshot() — 加入還原邏輯
+                              #     C. 底部 subscribe — 加一組 _prev 變數 + 監聽
 ```
 
 ### Constants

@@ -81,7 +81,7 @@ const PHASES = [
           { id: '7-1', done: true, text: '牆體材質快捷鍵切換' },
           { id: '7-2', done: true, text: '批次選取（框選多物件）' },
           { id: '7-3', done: true, text: '門窗結構（牆體上的門/窗段）' },
-          { id: '7-4', done: false, text: 'Undo / Redo 操作歷史' },
+          { id: '7-4', done: true, text: 'Undo / Redo 操作歷史' },
         ],
       },
     ],

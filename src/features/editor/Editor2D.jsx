@@ -6,6 +6,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { MATERIALS, MATERIAL_LIST, OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 import FloorImageLayer from './layers/FloorImageLayer'
@@ -201,6 +202,26 @@ function Editor2D() {
 
   useEffect(() => {
     const onKey = (e) => {
+      // ── Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y：Undo / Redo ──
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        if (e.key === 'z' || e.key === 'Z') {
+          e.preventDefault()
+          if (e.shiftKey) {
+            useHistoryStore.getState().redo()
+          } else {
+            useHistoryStore.getState().undo()
+          }
+          clearSelected()
+          return
+        }
+        if (e.key === 'y' || e.key === 'Y') {
+          e.preventDefault()
+          useHistoryStore.getState().redo()
+          clearSelected()
+          return
+        }
+      }
+
       if (e.key === 'Escape') {
         setWallDrawStart(null)
         setScopePoints([])
