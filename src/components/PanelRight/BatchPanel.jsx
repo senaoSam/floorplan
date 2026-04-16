@@ -55,7 +55,9 @@ function BatchPanel() {
   const aps              = useAPStore((s) => s.apsByFloor[activeFloorId] ?? [])
   const removeAPs        = useAPStore((s) => s.removeAPs)
   const updateAPs        = useAPStore((s) => s.updateAPs)
+  const scopes           = useScopeStore((s) => s.scopesByFloor[activeFloorId] ?? [])
   const removeScopes     = useScopeStore((s) => s.removeScopes)
+  const updateScopes     = useScopeStore((s) => s.updateScopes)
   const removeFloorHoles = useFloorHoleStore((s) => s.removeFloorHoles)
 
   const wallIds  = selectedItems.filter((it) => it.type === 'wall').map((it) => it.id)
@@ -63,7 +65,15 @@ function BatchPanel() {
   const scopeIds = selectedItems.filter((it) => it.type === 'scope').map((it) => it.id)
   const holeIds  = selectedItems.filter((it) => it.type === 'floor_hole').map((it) => it.id)
 
-  // Resolve selected AP objects for "mixed value" detection in dropdowns.
+  // Only expose per-type editing when the selection is homogeneous —
+  // mixed selections only keep the summary + delete to avoid accidental cross-type edits.
+  const typesPresent = [wallIds.length > 0, apIds.length > 0, scopeIds.length > 0, holeIds.length > 0].filter(Boolean).length
+  const isHomogeneous = typesPresent === 1
+  const showWallFields  = isHomogeneous && wallIds.length > 0
+  const showAPFields    = isHomogeneous && apIds.length > 0
+  const showScopeFields = isHomogeneous && scopeIds.length > 0
+
+  // Resolve selected objects for "mixed value" detection in dropdowns.
   const selectedAPs = aps.filter((a) => apIds.includes(a.id))
   const apFreq     = uniformValue(selectedAPs, 'frequency')
   const apChannel  = uniformValue(selectedAPs, 'channel')
@@ -73,6 +83,9 @@ function BatchPanel() {
   const apAzimuth  = uniformValue(selectedAPs, 'azimuth')
   const apBeam     = uniformValue(selectedAPs, 'beamwidth')
   const apPattern  = uniformValue(selectedAPs, 'patternId')
+
+  const selectedScopes = scopes.filter((z) => scopeIds.includes(z.id))
+  const scopeType      = uniformValue(selectedScopes, 'type')
 
   const handleDeleteAll = useCallback(() => {
     if (wallIds.length)  removeWalls(activeFloorId, wallIds)
@@ -85,6 +98,10 @@ function BatchPanel() {
   const handleWallMaterial = useCallback((mat) => {
     updateWalls(activeFloorId, wallIds, { material: mat })
   }, [activeFloorId, wallIds, updateWalls])
+
+  const handleScopeType = useCallback((type) => {
+    updateScopes(activeFloorId, scopeIds, { type })
+  }, [activeFloorId, scopeIds, updateScopes])
 
   const handleAPFrequency = useCallback((freq) => {
     const allowed = allowedChannels(domainId, freq)
@@ -160,6 +177,7 @@ function BatchPanel() {
       <div className="batch-panel__header">
         <span className="batch-panel__title">批次選取</span>
         <span className="batch-panel__count">{selectedItems.length} 個物件</span>
+        <button className="panel-delete-btn" onClick={handleDeleteAll}>刪除</button>
       </div>
 
       {/* 摘要 */}
@@ -173,8 +191,17 @@ function BatchPanel() {
         </div>
       </section>
 
+      {/* 混合類型：不提供批次欄位，避免跨類型誤改 */}
+      {!isHomogeneous && (
+        <section className="batch-panel__section">
+          <p className="batch-panel__hint-block">
+            混合類型選取：僅支援刪除。若需批次編輯屬性，請只選同一類物件。
+          </p>
+        </section>
+      )}
+
       {/* 牆體批次修改材質 */}
-      {wallIds.length > 0 && (
+      {showWallFields && (
         <>
           <section className="batch-panel__section">
             <p className="batch-panel__label">牆體材質（批次變更）</p>
@@ -217,7 +244,7 @@ function BatchPanel() {
       )}
 
       {/* AP 批次 */}
-      {apIds.length > 0 && (
+      {showAPFields && (
         <>
           {/* 型號 */}
           {(() => {
@@ -464,9 +491,34 @@ function BatchPanel() {
         </>
       )}
 
-      <button className="batch-panel__delete" onClick={handleDeleteAll}>
-        刪除全部（{selectedItems.length}）
-      </button>
+      {/* Scope 批次：類型（In / Out） */}
+      {showScopeFields && (
+        <section className="batch-panel__section">
+          <p className="batch-panel__label">
+            類型（批次變更）
+            {scopeType === MIXED && <span className="batch-panel__hint">多個值</span>}
+          </p>
+          <div className="batch-panel__btn-group">
+            {[
+              { value: 'in',  label: 'In-Scope',  color: '#2ed573' },
+              { value: 'out', label: 'Out-of-Scope', color: '#ff4757' },
+            ].map((o) => {
+              const active = scopeType === o.value
+              return (
+                <button
+                  key={o.value}
+                  className={`batch-panel__btn${active ? ' batch-panel__btn--active' : ''}`}
+                  style={active ? { borderColor: o.color, color: o.color } : {}}
+                  onClick={() => handleScopeType(o.value)}
+                >
+                  {o.label}
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
     </div>
   )
 }

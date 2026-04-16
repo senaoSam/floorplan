@@ -28,6 +28,7 @@ function ScopePanel({ floorId, zoneId }) {
       <div className="scope-panel__header">
         <span className="scope-panel__title">熱圖範圍</span>
         <span className="scope-panel__dot" style={{ background: current.color }} />
+        <button className="panel-delete-btn" onClick={handleDelete}>刪除</button>
       </div>
 
       <section className="scope-panel__section">
@@ -51,9 +52,6 @@ function ScopePanel({ floorId, zoneId }) {
         <span className="scope-panel__value">{zone.points.length / 2}</span>
       </section>
 
-      <button className="scope-panel__delete" onClick={handleDelete}>
-        刪除區域
-      </button>
     </div>
   )
 }

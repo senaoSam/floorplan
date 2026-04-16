@@ -70,13 +70,15 @@ export const useEditorStore = create((set, get) => ({
     panelCollapsed: false,
   }),
   toggleSelectedItem: (id, type) => set((s) => {
-    const exists = s.selectedItems.find((it) => it.id === id && it.type === type)
-    let next
-    if (exists) {
-      next = s.selectedItems.filter((it) => !(it.id === id && it.type === type))
-    } else {
-      next = [...s.selectedItems, { id, type }]
-    }
+    // Seed from existing single selection so Ctrl+Click accumulates from it,
+    // rather than dropping the original pick (matches common editor UX).
+    const base = s.selectedItems.length > 0
+      ? s.selectedItems
+      : (s.selectedId && s.selectedType ? [{ id: s.selectedId, type: s.selectedType }] : [])
+    const exists = base.find((it) => it.id === id && it.type === type)
+    const next = exists
+      ? base.filter((it) => !(it.id === id && it.type === type))
+      : [...base, { id, type }]
     return {
       selectedItems: next,
       selectedId: next.length === 1 ? next[0].id : null,

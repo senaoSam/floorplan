@@ -20,6 +20,7 @@ function FloorHolePanel({ floorId, holeId }) {
       <div className="floor-hole-panel__header">
         <span className="floor-hole-panel__title">Floor Hole</span>
         <span className="floor-hole-panel__dot" />
+        <button className="panel-delete-btn" onClick={handleDelete}>刪除</button>
       </div>
 
       <section className="floor-hole-panel__section">
@@ -34,9 +35,6 @@ function FloorHolePanel({ floorId, holeId }) {
         <span className="floor-hole-panel__value">{hole.points.length / 2}</span>
       </section>
 
-      <button className="floor-hole-panel__delete" onClick={handleDelete}>
-        刪除區域
-      </button>
     </div>
   )
 }

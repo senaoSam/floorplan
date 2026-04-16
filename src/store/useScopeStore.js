@@ -40,4 +40,17 @@ export const useScopeStore = create((set) => ({
         },
       }
     }),
+
+  updateScopes: (floorId, zoneIds, patch) =>
+    set((state) => {
+      const idSet = new Set(zoneIds)
+      return {
+        scopesByFloor: {
+          ...state.scopesByFloor,
+          [floorId]: (state.scopesByFloor[floorId] ?? []).map((z) =>
+            idSet.has(z.id) ? { ...z, ...patch } : z
+          ),
+        },
+      }
+    }),
 }))

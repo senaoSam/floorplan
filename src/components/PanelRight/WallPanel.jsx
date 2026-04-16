@@ -36,6 +36,7 @@ function WallPanel({ floorId, wallId }) {
       <div className="wall-panel__header">
         <span className="wall-panel__title">牆體屬性</span>
         <span className="wall-panel__meta">{len} px</span>
+        <button className="panel-delete-btn" onClick={handleDelete}>刪除</button>
       </div>
 
       {/* 材質選擇 */}
@@ -173,9 +174,6 @@ function WallPanel({ floorId, wallId }) {
         </section>
       )}
 
-      <button className="wall-panel__delete" onClick={handleDelete}>
-        刪除牆體
-      </button>
     </div>
   )
 }

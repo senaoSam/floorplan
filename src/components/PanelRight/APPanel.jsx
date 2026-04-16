@@ -135,6 +135,7 @@ function APPanel({ floorId, apId }) {
       <div className="ap-panel__header">
         <span className="ap-panel__title">AP 屬性</span>
         <span className="ap-panel__dot" style={{ background: FREQ_OPTIONS.find(f => f.value === ap.frequency)?.color ?? '#4fc3f7' }} />
+        <button className="panel-delete-btn" onClick={handleDelete}>刪除</button>
       </div>
 
       {/* 型號 */}
@@ -363,9 +364,6 @@ function APPanel({ floorId, apId }) {
         })()}
       </section>
 
-      <button className="ap-panel__delete" onClick={handleDelete}>
-        刪除 AP
-      </button>
     </div>
   )
 }
