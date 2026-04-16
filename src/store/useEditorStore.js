@@ -46,7 +46,7 @@ export const useEditorStore = create((set, get) => ({
   // 批次選取 — [{ id, type }]
   selectedItems: [],
   showHeatmap: false,
-  heatmapMode: HEATMAP_MODE.SINR,
+  heatmapMode: HEATMAP_MODE.RSSI,
   pathLossExponent: 3.0, // 預設辦公室環境
   panelCollapsed: false,
   showFloorImage: true,
