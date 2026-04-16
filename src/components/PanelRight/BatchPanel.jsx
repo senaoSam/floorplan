@@ -67,7 +67,7 @@ function BatchPanel() {
         <div className="batch-panel__summary">
           {wallIds.length > 0 && <span className="batch-panel__chip batch-panel__chip--wall">{wallIds.length} 牆體</span>}
           {apIds.length > 0 && <span className="batch-panel__chip batch-panel__chip--ap">{apIds.length} AP</span>}
-          {scopeIds.length > 0 && <span className="batch-panel__chip batch-panel__chip--scope">{scopeIds.length} 範圍</span>}
+          {scopeIds.length > 0 && <span className="batch-panel__chip batch-panel__chip--scope">{scopeIds.length} 熱圖範圍</span>}
           {holeIds.length > 0 && <span className="batch-panel__chip batch-panel__chip--hole">{holeIds.length} 挑高</span>}
         </div>
       </section>

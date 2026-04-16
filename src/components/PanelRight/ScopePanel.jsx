@@ -26,7 +26,7 @@ function ScopePanel({ floorId, zoneId }) {
   return (
     <div className="scope-panel">
       <div className="scope-panel__header">
-        <span className="scope-panel__title">範圍區域</span>
+        <span className="scope-panel__title">熱圖範圍</span>
         <span className="scope-panel__dot" style={{ background: current.color }} />
       </div>
 
