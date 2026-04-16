@@ -24,6 +24,7 @@ function PanelRight() {
       {isBatch && activeFloorId && (
         <BatchPanel />
       )}
+      {/* [SELECTABLE-TYPE] 新增可選取物件類型 → 在此加一個單選面板分支 */}
       {!isBatch && selectedType === 'wall' && activeFloorId && (
         <WallPanel floorId={activeFloorId} wallId={selectedId} />
       )}

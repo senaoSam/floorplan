@@ -204,6 +204,7 @@ function Editor2D() {
 
   useEffect(() => {
     // Undo/Redo 後：若原選取物件仍存在，保留 selection；否則清除以避免面板顯示無效內容。
+    // [SELECTABLE-TYPE] 新增物件類型 → 在 switch 加一個 case，判斷該物件在 store 中是否存在
     const clearSelectedIfMissing = () => {
       const { selectedId: sid, selectedType: stype } = useEditorStore.getState()
       if (!sid || !stype) return
@@ -257,6 +258,7 @@ function Editor2D() {
         const tag = e.target.tagName
         if (tag === 'INPUT' || tag === 'TEXTAREA') return
 
+        // [SELECTABLE-TYPE] 新增物件類型 → 在此加上批次與單選刪除對應分支
         // 批次選取刪除
         const items = useEditorStore.getState().selectedItems
         if (items.length > 1) {

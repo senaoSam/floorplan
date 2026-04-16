@@ -60,6 +60,7 @@ function BatchPanel() {
   const updateScopes     = useScopeStore((s) => s.updateScopes)
   const removeFloorHoles = useFloorHoleStore((s) => s.removeFloorHoles)
 
+  // [SELECTABLE-TYPE] 新增物件類型 → 在下方 ids 陣列、typesPresent 計數、showXxxFields 都要加
   const wallIds  = selectedItems.filter((it) => it.type === 'wall').map((it) => it.id)
   const apIds    = selectedItems.filter((it) => it.type === 'ap').map((it) => it.id)
   const scopeIds = selectedItems.filter((it) => it.type === 'scope').map((it) => it.id)
@@ -87,6 +88,7 @@ function BatchPanel() {
   const selectedScopes = scopes.filter((z) => scopeIds.includes(z.id))
   const scopeType      = uniformValue(selectedScopes, 'type')
 
+  // [SELECTABLE-TYPE] 新增物件類型 → 在此加 removeXxxs 呼叫
   const handleDeleteAll = useCallback(() => {
     if (wallIds.length)  removeWalls(activeFloorId, wallIds)
     if (apIds.length)    removeAPs(activeFloorId, apIds)
@@ -181,6 +183,7 @@ function BatchPanel() {
       </div>
 
       {/* 摘要 */}
+      {/* [SELECTABLE-TYPE] 新增物件類型 → 在此加一個 chip，並於 BatchPanel.sass 加對應 chip 顏色 */}
       <section className="batch-panel__section">
         <p className="batch-panel__label">已選取</p>
         <div className="batch-panel__summary">

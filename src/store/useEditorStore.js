@@ -38,10 +38,17 @@ export const ENVIRONMENT_PRESETS = {
   CORRIDOR:    { label: '走廊',       n: 1.8 },
 }
 
+// ⚠️ 新增可選取物件類型時的聯動點（grep 'SELECTABLE-TYPE' 可找到所有需要一起改的地方）：
+//   [SELECTABLE-TYPE] 此處 `selectedType` 的 JSDoc 列舉
+//   [SELECTABLE-TYPE] PanelRight.jsx 的 selectedType 分派
+//   [SELECTABLE-TYPE] Editor2D.jsx 的 clearSelectedIfMissing / 刪除快捷鍵 / Layer onClick Ctrl+Click
+//   [SELECTABLE-TYPE] BatchPanel.jsx 的 typesPresent / 同類型欄位 (showXxxFields)
+//   [SELECTABLE-TYPE] useHistoryStore.js 的 takeSnapshot / restoreSnapshot / 監聽擴充點
 export const useEditorStore = create((set, get) => ({
   editorMode: EDITOR_MODE.SELECT,
   viewMode: VIEW_MODE.TWO_D,
   selectedId: null,
+  // [SELECTABLE-TYPE] 新增物件類型時在此 JSDoc 加字串
   selectedType: null, // 'wall' | 'ap' | 'scope' | 'floor_hole' | 'floor_image' | null
   // 批次選取 — [{ id, type }]
   selectedItems: [],
