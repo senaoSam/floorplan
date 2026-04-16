@@ -18,8 +18,15 @@ Built as a pure-frontend app using mock data. Intended for eventual embedding in
 | State | **Zustand v4** | Isolated from main product's Flux store |
 | Styles | **.sass** (indented syntax, NOT .scss) | Matches main product convention |
 | Language | **Plain JavaScript** (no TypeScript) | Main product has no TypeScript |
+| Node.js | **20.x** | See `.node-version`; managed by fnm |
 | Build | **Vite + pnpm** | |
 | Path alias | `@` → `./src` | Configured in vite.config.js |
+
+### Shell Environment
+Shell 預設的 Node 版本不正確，執行 build / dev 等指令前必須先載入 fnm：
+```bash
+eval "$(fnm env)" && fnm use
+```
 
 ---
 
