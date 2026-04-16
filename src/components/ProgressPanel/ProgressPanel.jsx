@@ -94,7 +94,7 @@ const PHASES = [
         items: [
           { id: '8-1', done: true, text: 'AP 型號資料庫（多廠商）' },
           { id: '8-2a', done: true, text: '天線模式資料模型 + APPanel UI' },
-          { id: '8-2b', done: false, text: 'APLayer 定向扇形視覺化' },
+          { id: '8-2b', done: true, text: 'APLayer 定向扇形視覺化' },
           { id: '8-2c', done: false, text: 'Heatmap 納入定向增益（WebGL）' },
           { id: '8-2d', done: false, text: 'Custom pattern 內建預設 + 預覽' },
           { id: '8-3', done: false, text: '自動頻道規劃' },

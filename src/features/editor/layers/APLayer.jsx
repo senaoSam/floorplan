@@ -1,8 +1,12 @@
 import React, { useState } from 'react'
-import { Group, Circle, Arc, Text, Rect } from 'react-konva'
+import { Group, Circle, Arc, Line, Text, Rect } from 'react-konva'
 import DeleteButton from './DeleteButton'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
+
+// Normalize azimuth to [0, 360) and beamwidth to [10, 180].
+const wrapAzimuth = (v) => (((v % 360) + 360) % 360)
+const clampBeamwidth = (v) => Math.max(10, Math.min(180, v))
 
 // 依頻段給顏色
 const FREQ_COLOR = {
@@ -22,6 +26,15 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
   const ringColor = isSelected ? '#e74c3c' : color
   const hoverMul = isHovered && !isSelected ? 1.3 : 1
   const s = inverseScale * hoverMul
+
+  const isDirectional = ap.antennaMode === 'directional'
+  const azimuth       = wrapAzimuth(ap.azimuth ?? 0)
+  const beamwidth     = clampBeamwidth(ap.beamwidth ?? 60)
+  // Konva Arc: rotation 0° points to +x (right), sweeps clockwise for positive angle.
+  // Our azimuth uses the same convention → center axis = azimuth, arc starts at azimuth - beamwidth/2.
+  const arcStart = azimuth - beamwidth / 2
+  const axisRad  = azimuth * Math.PI / 180
+  const axisLen  = 40 * s
 
   return (
     <Group
@@ -58,6 +71,40 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
         shape.fillStrokeShape(shape)
       }}
     >
+      {/* 定向覆蓋扇形（僅指示方向與波瓣寬度，不代表真實距離） */}
+      {isDirectional && (
+        <>
+          <Arc
+            innerRadius={22 * s}
+            outerRadius={45 * s}
+            angle={beamwidth}
+            rotation={arcStart}
+            fill={color}
+            opacity={isSelected ? 0.35 : (isHovered ? 0.28 : 0.18)}
+            listening={false}
+          />
+          {isSelected && (
+            <Arc
+              innerRadius={44 * s}
+              outerRadius={45 * s}
+              angle={beamwidth}
+              rotation={arcStart}
+              stroke={color}
+              strokeWidth={1 * s}
+              dash={[3 * s, 3 * s]}
+              listening={false}
+            />
+          )}
+          {/* 方位中軸指示線 */}
+          <Line
+            points={[0, 0, Math.cos(axisRad) * axisLen, Math.sin(axisRad) * axisLen]}
+            stroke={isSelected ? '#e74c3c' : color}
+            strokeWidth={(isSelected ? 2 : 1.2) * s}
+            opacity={0.85}
+            listening={false}
+          />
+        </>
+      )}
       {/* hover 光暈 */}
       {isHovered && !isSelected && (
         <Circle
@@ -76,21 +123,39 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
         stroke={isHovered && !isSelected ? '#fff' : ringColor}
         strokeWidth={(isSelected || isHovered ? 3.5 : 2.5) * s}
       />
-      {/* WiFi 弧形（由外到內三層） */}
-      {[14, 9, 4].map((r, i) => (
-        <Arc
-          key={r}
-          innerRadius={(r - 2) * s}
-          outerRadius={r * s}
-          angle={180}
-          rotation={-180}
-          fill={color}
-          opacity={1 - i * 0.2}
-          offsetY={2.5 * s}
-        />
-      ))}
+      {/* 中央圖示：omni → WiFi 三層弧；directional → 方位箭頭 */}
+      {!isDirectional ? (
+        [14, 9, 4].map((r, i) => (
+          <Arc
+            key={r}
+            innerRadius={(r - 2) * s}
+            outerRadius={r * s}
+            angle={180}
+            rotation={-180}
+            fill={color}
+            opacity={1 - i * 0.2}
+            offsetY={2.5 * s}
+          />
+        ))
+      ) : (
+        <Group rotation={azimuth}>
+          {/* 箭身 */}
+          <Line
+            points={[-8 * s, 0, 8 * s, 0]}
+            stroke={color}
+            strokeWidth={2.5 * s}
+            lineCap="round"
+          />
+          {/* 箭頭 */}
+          <Line
+            points={[14 * s, 0, 6 * s, -5 * s, 6 * s, 5 * s]}
+            closed
+            fill={color}
+          />
+        </Group>
+      )}
       {/* 中心點 */}
-      <Circle radius={3 * s} fill={color} offsetY={2.5 * s} />
+      <Circle radius={3 * s} fill={color} offsetY={isDirectional ? 0 : 2.5 * s} />
       {/* 快速刪除按鈕 */}
       {isHovered && onDelete && (
         <DeleteButton
