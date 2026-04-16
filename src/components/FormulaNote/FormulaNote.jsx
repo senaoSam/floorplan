@@ -122,6 +122,16 @@ const SECTIONS = [
 
 function FormulaNote() {
   const [open, setOpen] = useState(false)
+  // Expanded state per section title; all collapsed by default for overview.
+  const [expanded, setExpanded] = useState({})
+
+  const allOpen = SECTIONS.every((s) => expanded[s.title])
+  const toggleAll = () => {
+    if (allOpen) setExpanded({})
+    else setExpanded(Object.fromEntries(SECTIONS.map((s) => [s.title, true])))
+  }
+  const toggleSection = (title) =>
+    setExpanded((prev) => ({ ...prev, [title]: !prev[title] }))
 
   return (
     <>
@@ -137,20 +147,40 @@ function FormulaNote() {
         <div className="formula-note-panel">
           <div className="formula-note-panel__header">
             <span>計算公式</span>
-            <button className="formula-note-panel__close" onClick={() => setOpen(false)}>✕</button>
+            <div className="formula-note-panel__header-actions">
+              <button className="formula-note-panel__toggle-all" onClick={toggleAll}>
+                {allOpen ? '全部收合' : '全部展開'}
+              </button>
+              <button className="formula-note-panel__close" onClick={() => setOpen(false)}>✕</button>
+            </div>
           </div>
           <div className="formula-note-panel__body">
-            {SECTIONS.map((sec) => (
-              <section key={sec.title} className="formula-note-panel__section">
-                <p className="formula-note-panel__section-title">{sec.title}</p>
-                {sec.rows.map((row) => (
-                  <div key={row.label} className="formula-note-panel__row">
-                    <span className="formula-note-panel__row-label">{row.label}</span>
-                    <span className="formula-note-panel__row-value">{row.value}</span>
-                  </div>
-                ))}
-              </section>
-            ))}
+            {SECTIONS.map((sec) => {
+              const isOpen = !!expanded[sec.title]
+              return (
+                <section key={sec.title} className={`formula-note-panel__section${isOpen ? ' formula-note-panel__section--open' : ''}`}>
+                  <button
+                    type="button"
+                    className="formula-note-panel__section-header"
+                    onClick={() => toggleSection(sec.title)}
+                    aria-expanded={isOpen}
+                  >
+                    <span className="formula-note-panel__section-caret">{isOpen ? '▾' : '▸'}</span>
+                    <span className="formula-note-panel__section-title">{sec.title}</span>
+                  </button>
+                  {isOpen && (
+                    <div className="formula-note-panel__section-body">
+                      {sec.rows.map((row) => (
+                        <div key={row.label} className="formula-note-panel__row">
+                          <span className="formula-note-panel__row-label">{row.label}</span>
+                          <span className="formula-note-panel__row-value">{row.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )
+            })}
           </div>
         </div>
       )}
