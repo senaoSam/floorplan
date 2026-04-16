@@ -23,6 +23,11 @@ const ANTENNA_OPTIONS = [
   { value: 'directional', label: '定向' },
 ]
 
+const DEFAULT_AZIMUTH   = 0
+const DEFAULT_BEAMWIDTH = 60
+const MIN_BEAMWIDTH     = 10
+const MAX_BEAMWIDTH     = 180
+
 const MOUNT_OPTIONS = [
   { value: 'ceiling', label: '天花板' },
   { value: 'wall',    label: '牆面' },
@@ -75,6 +80,32 @@ function APPanel({ floorId, apId }) {
       updateAP(floorId, apId, { [field]: num })
     }
   }, [floorId, apId, ap, updateAP, model])
+
+  const handleAntennaMode = useCallback((mode) => {
+    const patch = { antennaMode: mode }
+    // Ensure directional APs have azimuth/beamwidth defaults.
+    if (mode === 'directional') {
+      if (ap.azimuth == null)   patch.azimuth = DEFAULT_AZIMUTH
+      if (ap.beamwidth == null) patch.beamwidth = DEFAULT_BEAMWIDTH
+    }
+    updateAP(floorId, apId, patch)
+  }, [floorId, apId, ap, updateAP])
+
+  // Store raw user input; wrapping/clamping happens only for display and downstream use.
+  const handleAzimuth = useCallback((raw) => {
+    const num = parseFloat(raw)
+    if (isNaN(num)) return
+    updateAP(floorId, apId, { azimuth: num })
+  }, [floorId, apId, updateAP])
+
+  const handleBeamwidth = useCallback((raw) => {
+    const num = parseFloat(raw)
+    if (isNaN(num)) return
+    updateAP(floorId, apId, { beamwidth: num })
+  }, [floorId, apId, updateAP])
+
+  const wrapAzimuth = (v) => (((v % 360) + 360) % 360)
+  const clampBeamwidth = (v) => Math.max(MIN_BEAMWIDTH, Math.min(MAX_BEAMWIDTH, v))
 
   const handleDelete = () => {
     removeAP(floorId, apId)
@@ -190,20 +221,68 @@ function APPanel({ floorId, apId }) {
         </div>
       </section>
 
-      {/* 天線模式（定向天線開放後啟用） */}
-      <section className="ap-panel__section ap-panel__section--disabled" title="定向天線功能開發中">
-        <p className="ap-panel__label">天線模式 <span className="ap-panel__coming-soon">即將推出</span></p>
+      {/* 天線模式 */}
+      <section className="ap-panel__section">
+        <p className="ap-panel__label">天線模式</p>
         <div className="ap-panel__btn-group">
           {ANTENNA_OPTIONS.map((o) => (
             <button
               key={o.value}
               className={`ap-panel__btn${ap.antennaMode === o.value ? ' ap-panel__btn--active' : ''}`}
-              disabled
+              onClick={() => handleAntennaMode(o.value)}
             >
               {o.label}
             </button>
           ))}
         </div>
+
+        {ap.antennaMode === 'directional' && (() => {
+          const rawAz = ap.azimuth ?? DEFAULT_AZIMUTH
+          const rawBw = ap.beamwidth ?? DEFAULT_BEAMWIDTH
+          const effAz = wrapAzimuth(rawAz)
+          const effBw = clampBeamwidth(rawBw)
+          const azChanged = effAz !== rawAz
+          const bwChanged = effBw !== rawBw
+          return (
+            <>
+              <p className="ap-panel__label" style={{ marginTop: 10 }}>
+                方位角{azChanged ? (
+                  <span className="ap-panel__hint-inline">（實際 {effAz}°）</span>
+                ) : (
+                  <span className="ap-panel__hint-inline">（0°=右，順時針）</span>
+                )}
+              </p>
+              <div className="ap-panel__number-row">
+                <input
+                  className="ap-panel__input ap-panel__input--number"
+                  type="number"
+                  step="1"
+                  value={rawAz}
+                  onChange={(e) => handleAzimuth(e.target.value)}
+                />
+                <span className="ap-panel__unit">度</span>
+              </div>
+
+              <p className="ap-panel__label" style={{ marginTop: 10 }}>
+                波瓣寬度{bwChanged ? (
+                  <span className="ap-panel__hint-inline">（實際 {effBw}°）</span>
+                ) : (
+                  <span className="ap-panel__hint-inline">（HPBW，{MIN_BEAMWIDTH}~{MAX_BEAMWIDTH}）</span>
+                )}
+              </p>
+              <div className="ap-panel__number-row">
+                <input
+                  className="ap-panel__input ap-panel__input--number"
+                  type="number"
+                  step="5"
+                  value={rawBw}
+                  onChange={(e) => handleBeamwidth(e.target.value)}
+                />
+                <span className="ap-panel__unit">度</span>
+              </div>
+            </>
+          )
+        })()}
       </section>
 
       {/* 安裝方式（3D 視圖開放後啟用） */}

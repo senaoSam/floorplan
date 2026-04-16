@@ -93,7 +93,10 @@ const PHASES = [
         layer: 'Layer 8 — AP 型號與自動規劃',
         items: [
           { id: '8-1', done: true, text: 'AP 型號資料庫（多廠商）' },
-          { id: '8-2', done: false, text: '天線模式擴充（Directional / 自訂）' },
+          { id: '8-2a', done: true, text: '天線模式資料模型 + APPanel UI' },
+          { id: '8-2b', done: false, text: 'APLayer 定向扇形視覺化' },
+          { id: '8-2c', done: false, text: 'Heatmap 納入定向增益（WebGL）' },
+          { id: '8-2d', done: false, text: 'Custom pattern 內建預設 + 預覽' },
           { id: '8-3', done: false, text: '自動頻道規劃' },
           { id: '8-4', done: false, text: '自動功率規劃' },
           { id: '8-5', done: false, text: '頻寬設定（20/40/80/160 MHz）' },

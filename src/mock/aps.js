@@ -9,6 +9,8 @@ export const mockAPs = {
       txPower: 20,        // dBm
       frequency: 5,       // GHz: 2.4 | 5 | 6
       antennaMode: 'omni',
+      azimuth: 0,
+      beamwidth: 60,
       mountType: 'ceiling',
       modelId: 'generic-wifi6',
       name: 'AP-01',

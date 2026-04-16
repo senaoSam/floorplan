@@ -588,6 +588,8 @@ function Editor2D() {
         frequency: 5,
         channel: 36,
         antennaMode: 'omni',
+        azimuth: 0,
+        beamwidth: 60,
         mountType: 'ceiling',
         modelId: DEFAULT_AP_MODEL_ID,
         name: nextAPName(),
