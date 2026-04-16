@@ -114,14 +114,24 @@ Default wall material: `MATERIALS.CONCRETE`.
 
 ---
 
+## User Signal Keywords
+
+These keywords carry specific meaning and must be handled exactly as described:
+
+| Keyword | Meaning | Action |
+|---|---|---|
+| **`ok`** | User confirms the task works correctly | 1. Update `task.md` — mark completed tasks ✅ <br> 2. Update `ProgressPanel.jsx` — set `done: true` for corresponding items (if applicable) <br> 3. Provide a short English commit message |
+| **`next`** | User wants to proceed to the next task | Read `task.md`, identify the next pending task, and begin implementation immediately |
+| *(anything else)* | There is a bug or something incomplete | Do NOT mark anything as done. Investigate, fix, or ask for clarification |
+
+> **Rule:** Only mark a task complete and provide a commit message when the user explicitly says `ok`. Never do so preemptively.
+
+---
+
 ## Conventions
 
 - **Commit messages: English only**
 - **After each task: provide Chinese testing steps** for user to verify
-- **After user confirms "ok": do all three of the following:**
-  1. Update `task.md` — mark completed tasks ✅
-  2. Update `src/components/ProgressPanel/ProgressPanel.jsx` — set `done: true` for the corresponding task item(s) in the `TASKS` array
-  3. Provide a short English commit message
 - No TypeScript, no JSDoc, no prop-types
 - No `.scss` files — only `.sass` (indented syntax)
 - SASS files use `@use '@/styles/variables' as *`
