@@ -19,11 +19,11 @@ const TOOLS = [
 
 const HEATMAP_OPTIONS = [
   { mode: HEATMAP_MODE.RSSI,            label: 'RSSI 訊號強度' },
-  { mode: HEATMAP_MODE.SINR,            label: 'SINR 訊號干擾比' },
   { mode: HEATMAP_MODE.SNR,             label: 'SNR 訊號噪聲比' },
+  { mode: HEATMAP_MODE.SINR,            label: 'SINR 訊號干擾比' },
   { mode: HEATMAP_MODE.CHANNEL_OVERLAP, label: '頻道重疊' },
-  { mode: HEATMAP_MODE.DATA_RATE,       label: '預估速率' },
   { mode: HEATMAP_MODE.AP_COUNT,        label: '可用 AP 數' },
+  { mode: HEATMAP_MODE.DATA_RATE,       label: '預估速率' },
 ]
 
 const ENV_OPTIONS = Object.entries(ENVIRONMENT_PRESETS).map(([key, val]) => ({
