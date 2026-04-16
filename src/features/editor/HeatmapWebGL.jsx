@@ -433,7 +433,6 @@ const LEGENDS = {
       { label: '−65 dBm',   color: 'rgba(102,217,64,0.84)' },
       { label: '−75 dBm',   color: 'rgba(26,191,204,0.80)' },
       { label: '−85 dBm',   color: 'rgba(31,89,204,0.55)' },
-      { label: '無覆蓋',     color: 'transparent', noSignal: true },
     ],
   },
   [HEATMAP_MODE.SINR]: {
@@ -445,7 +444,6 @@ const LEGENDS = {
       { label: '10 dB',   color: 'rgba(102,217,64,0.82)' },
       { label: '5 dB',    color: 'rgba(26,191,204,0.78)' },
       { label: '0 dB',    color: 'rgba(31,89,204,0.40)' },
-      { label: '無覆蓋',   color: 'transparent', noSignal: true },
     ],
   },
   [HEATMAP_MODE.SNR]: {
@@ -465,7 +463,6 @@ const LEGENDS = {
       { label: '2 AP',  color: 'rgba(255,217,26,0.78)' },
       { label: '3 AP',  color: 'rgba(26,191,204,0.75)' },
       { label: '4+ AP', color: 'rgba(31,89,204,0.75)' },
-      { label: '無覆蓋', color: 'transparent', noSignal: true },
     ],
   },
   [HEATMAP_MODE.DATA_RATE]: {
@@ -476,7 +473,6 @@ const LEGENDS = {
       { label: '60 Mbps',    color: 'rgba(255,217,26,0.78)' },
       { label: '26 Mbps',    color: 'rgba(26,191,204,0.70)' },
       { label: '< 13 Mbps',  color: 'rgba(31,89,204,0.55)' },
-      { label: '無覆蓋',      color: 'transparent', noSignal: true },
     ],
   },
   [HEATMAP_MODE.AP_COUNT]: {
@@ -486,7 +482,6 @@ const LEGENDS = {
       { label: '2 顆',  color: 'rgba(235,26,26,0.80)' },
       { label: '3 顆',  color: 'rgba(255,128,13,0.78)' },
       { label: '4+ 顆', color: 'rgba(255,217,26,0.75)' },
-      { label: '無覆蓋', color: 'transparent', noSignal: true },
     ],
   },
 }
@@ -517,8 +512,7 @@ function HeatmapLegend({ mode }) {
             width: 14,
             height: 14,
             borderRadius: 3,
-            background: item.noSignal ? 'transparent' : item.color,
-            border: item.noSignal ? '1px dashed rgba(255,255,255,0.3)' : 'none',
+            background: item.color,
             flexShrink: 0,
           }} />
           <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.75)', fontFamily: 'monospace' }}>
