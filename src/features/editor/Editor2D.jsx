@@ -20,6 +20,7 @@ import CropLayer from './layers/CropLayer'
 import HeatmapWebGL from './HeatmapWebGL'
 import ScaleDialog from './ScaleDialog'
 import LayerToggle from '@/components/LayerToggle/LayerToggle'
+import RegulatorySelector from '@/components/RegulatorySelector/RegulatorySelector'
 import DropZone from '@/features/importer/DropZone'
 import './Editor2D.sass'
 
@@ -1028,7 +1029,20 @@ function Editor2D() {
         </Stage>
       )}
 
-      {floors.length > 0 && <LayerToggle />}
+      {floors.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: 12,
+          left: 12,
+          zIndex: 400,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}>
+          <LayerToggle />
+          <RegulatorySelector />
+        </div>
+      )}
 
       <HeatmapWebGL
         width={size.width}
