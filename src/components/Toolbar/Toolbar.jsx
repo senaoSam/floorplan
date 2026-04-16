@@ -12,7 +12,7 @@ const TOOLS = [
   { mode: EDITOR_MODE.DOOR_WINDOW,    label: '門窗',     icon: '\uD83D\uDEAA' },
   { mode: EDITOR_MODE.PLACE_AP,       label: '放置 AP',  icon: '\uD83D\uDCE1' },
   { mode: EDITOR_MODE.DRAW_SCOPE,     label: '熱圖範圍', icon: '\u2B21' },
-  { mode: EDITOR_MODE.DRAW_FLOOR_HOLE,label: '挑高區域', icon: '\u2B1B' },
+  { mode: EDITOR_MODE.DRAW_FLOOR_HOLE,label: '中庭',     icon: '\u2B1B' },
   { mode: EDITOR_MODE.CROP_IMAGE,     label: '裁切',     icon: '\u2702' },
 ]
 

@@ -25,7 +25,7 @@ function FloorHolePanel({ floorId, holeId }) {
       <section className="floor-hole-panel__section">
         <p className="floor-hole-panel__label">說明</p>
         <span className="floor-hole-panel__value floor-hole-panel__value--desc">
-          中庭 / 挑高區域，信號可跨樓層穿透
+          中庭區域，信號可跨樓層穿透
         </span>
       </section>
 

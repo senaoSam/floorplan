@@ -5,7 +5,7 @@ import './LayerToggle.sass'
 const LAYERS = [
   { key: 'showFloorImage', label: '平面圖' },
   { key: 'showScopes',     label: '熱圖範圍' },
-  { key: 'showFloorHoles', label: '挑高區域' },
+  { key: 'showFloorHoles', label: '中庭' },
   { key: 'showWalls',      label: '牆體' },
   { key: 'showAPs',        label: 'AP' },
   { key: 'showAPInfo',     label: 'AP 資訊' },
