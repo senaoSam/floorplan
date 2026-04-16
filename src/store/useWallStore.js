@@ -34,6 +34,30 @@ export const useWallStore = create((set, get) => ({
       },
     })),
 
+  removeWalls: (floorId, wallIds) =>
+    set((state) => {
+      const idSet = new Set(wallIds)
+      return {
+        wallsByFloor: {
+          ...state.wallsByFloor,
+          [floorId]: (state.wallsByFloor[floorId] ?? []).filter((w) => !idSet.has(w.id)),
+        },
+      }
+    }),
+
+  updateWalls: (floorId, wallIds, patch) =>
+    set((state) => {
+      const idSet = new Set(wallIds)
+      return {
+        wallsByFloor: {
+          ...state.wallsByFloor,
+          [floorId]: (state.wallsByFloor[floorId] ?? []).map((w) =>
+            idSet.has(w.id) ? { ...w, ...patch } : w
+          ),
+        },
+      }
+    }),
+
   setWalls: (floorId, walls) =>
     set((state) => ({
       wallsByFloor: { ...state.wallsByFloor, [floorId]: walls },

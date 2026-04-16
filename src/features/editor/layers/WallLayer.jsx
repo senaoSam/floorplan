@@ -58,11 +58,12 @@ function EndpointHandle({ x, y, which, wallId, walls, floorId, snapRadius, inver
   )
 }
 
-function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, onWallDragMove, onWallDragEnd, isDrawMode, isDrawingActive, snapRadius, onRightMouseDown, onDelete, viewportScale, setHoverCursor, onExtendFromEndpoint }) {
+function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems = [], onWallClick, onWallDragMove, onWallDragEnd, isDrawMode, isDrawingActive, snapRadius, onRightMouseDown, onDelete, viewportScale, setHoverCursor, onExtendFromEndpoint }) {
   const walls      = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
   const updateWall = useWallStore((s) => s.updateWall)
   const [hoveredId, setHoveredId] = useState(null)
   const inverseScale = 1 / (viewportScale || 1)
+  const batchSelectedIds = selectedItems.length > 1 ? new Set(selectedItems.filter((it) => it.type === 'wall').map((it) => it.id)) : null
 
   // 找出游標正在吸附的端點（draw 模式下才需要）
   let snapEndpoint = null
@@ -82,7 +83,7 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
     <Group>
       {/* 已完成的牆體 */}
       {walls.map((wall) => {
-        const isSelected = wall.id === selectedWallId
+        const isSelected = wall.id === selectedWallId || (batchSelectedIds?.has(wall.id) ?? false)
         const isHovered  = wall.id === hoveredId
         return (
           <Group
@@ -98,7 +99,7 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
             }}
             onDragStart={(e) => {
               e.cancelBubble = true
-              onWallClick?.(wall.id)
+              onWallClick?.(wall.id, e)
             }}
             onDragMove={(e) => {
               e.cancelBubble = true
@@ -146,12 +147,12 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, onWallClick, 
               hitStrokeWidth={14}
               onClick={(e) => {
                 e.cancelBubble = true
-                onWallClick?.(wall.id)
+                onWallClick?.(wall.id, e)
               }}
               onContextMenu={(e) => {
                 e.evt.preventDefault()
                 e.cancelBubble = true
-                onWallClick?.(wall.id)
+                onWallClick?.(wall.id, e)
               }}
             />
             {/* 快速刪除按鈕 */}

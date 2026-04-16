@@ -6,31 +6,37 @@ import APPanel from './APPanel'
 import ScopePanel from './ScopePanel'
 import FloorHolePanel from './FloorHolePanel'
 import FloorImagePanel from './FloorImagePanel'
+import BatchPanel from './BatchPanel'
 import './PanelRight.sass'
 
 function PanelRight() {
   const selectedId     = useEditorStore((s) => s.selectedId)
   const selectedType   = useEditorStore((s) => s.selectedType)
+  const selectedItems  = useEditorStore((s) => s.selectedItems)
   const panelCollapsed = useEditorStore((s) => s.panelCollapsed)
   const activeFloorId  = useFloorStore((s) => s.activeFloorId)
 
-  const isOpen = !!selectedId && !panelCollapsed
+  const isBatch = selectedItems.length > 1
+  const isOpen  = (!!selectedId || isBatch) && !panelCollapsed
 
   return (
     <aside className={`panel-right${isOpen ? ' panel-right--open' : ''}`}>
-      {selectedType === 'wall' && activeFloorId && (
+      {isBatch && activeFloorId && (
+        <BatchPanel />
+      )}
+      {!isBatch && selectedType === 'wall' && activeFloorId && (
         <WallPanel floorId={activeFloorId} wallId={selectedId} />
       )}
-      {selectedType === 'ap' && activeFloorId && (
+      {!isBatch && selectedType === 'ap' && activeFloorId && (
         <APPanel floorId={activeFloorId} apId={selectedId} />
       )}
-      {selectedType === 'scope' && activeFloorId && (
+      {!isBatch && selectedType === 'scope' && activeFloorId && (
         <ScopePanel floorId={activeFloorId} zoneId={selectedId} />
       )}
-      {selectedType === 'floor_hole' && activeFloorId && (
+      {!isBatch && selectedType === 'floor_hole' && activeFloorId && (
         <FloorHolePanel floorId={activeFloorId} holeId={selectedId} />
       )}
-      {selectedType === 'floor_image' && activeFloorId && (
+      {!isBatch && selectedType === 'floor_image' && activeFloorId && (
         <FloorImagePanel floorId={activeFloorId} />
       )}
     </aside>

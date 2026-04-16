@@ -10,6 +10,7 @@ export const EDITOR_MODE = {
   DRAW_SCOPE: 'draw_scope',
   DRAW_FLOOR_HOLE: 'draw_floor_hole',
   CROP_IMAGE: 'crop_image',
+  MARQUEE_SELECT: 'marquee_select',
 }
 
 // 視角模式
@@ -36,11 +37,13 @@ export const ENVIRONMENT_PRESETS = {
   CORRIDOR:    { label: '走廊',       n: 1.8 },
 }
 
-export const useEditorStore = create((set) => ({
+export const useEditorStore = create((set, get) => ({
   editorMode: EDITOR_MODE.SELECT,
   viewMode: VIEW_MODE.TWO_D,
   selectedId: null,
   selectedType: null, // 'wall' | 'ap' | 'scope' | 'floor_hole' | 'floor_image' | null
+  // 批次選取 — [{ id, type }]
+  selectedItems: [],
   showHeatmap: false,
   heatmapMode: HEATMAP_MODE.SINR,
   pathLossExponent: 3.0, // 預設辦公室環境
@@ -52,10 +55,39 @@ export const useEditorStore = create((set) => ({
   showAPs: true,
   showAPInfo: true,
 
-  setEditorMode: (mode) => set({ editorMode: mode, selectedId: null, selectedType: null }),
+  setEditorMode: (mode) => set({ editorMode: mode, selectedId: null, selectedType: null, selectedItems: [] }),
   setViewMode: (mode) => set({ viewMode: mode }),
-  setSelected: (id, type) => set({ selectedId: id, selectedType: type, panelCollapsed: false }),
-  clearSelected: () => set({ selectedId: null, selectedType: null }),
+  setSelected: (id, type) => set({ selectedId: id, selectedType: type, selectedItems: [], panelCollapsed: false }),
+  clearSelected: () => set({ selectedId: null, selectedType: null, selectedItems: [] }),
+
+  // 批次選取 actions
+  setSelectedItems: (items) => set({
+    selectedItems: items,
+    selectedId: items.length === 1 ? items[0].id : null,
+    selectedType: items.length === 1 ? items[0].type : null,
+    panelCollapsed: false,
+  }),
+  toggleSelectedItem: (id, type) => set((s) => {
+    const exists = s.selectedItems.find((it) => it.id === id && it.type === type)
+    let next
+    if (exists) {
+      next = s.selectedItems.filter((it) => !(it.id === id && it.type === type))
+    } else {
+      next = [...s.selectedItems, { id, type }]
+    }
+    return {
+      selectedItems: next,
+      selectedId: next.length === 1 ? next[0].id : null,
+      selectedType: next.length === 1 ? next[0].type : null,
+      panelCollapsed: false,
+    }
+  }),
+  isItemSelected: (id) => {
+    const s = get()
+    if (s.selectedId === id) return true
+    return s.selectedItems.some((it) => it.id === id)
+  },
+
   toggleHeatmap: () => set((s) => ({ showHeatmap: !s.showHeatmap })),
   setHeatmapMode: (mode) => set({ heatmapMode: mode }),
   setPathLossExponent: (n) => set({ pathLossExponent: n }),

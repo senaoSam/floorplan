@@ -4,14 +4,15 @@ import { useFloorStore } from '@/store/useFloorStore'
 import './Toolbar.sass'
 
 const TOOLS = [
-  { mode: EDITOR_MODE.SELECT,     label: '選取',   icon: '↖' },
-  { mode: EDITOR_MODE.PAN,        label: '平移',   icon: '✋' },
-  { mode: EDITOR_MODE.DRAW_SCALE, label: '比例尺', icon: '📏' },
-  { mode: EDITOR_MODE.DRAW_WALL,  label: '畫牆',   icon: '▬' },
-  { mode: EDITOR_MODE.PLACE_AP,   label: '放置 AP',icon: '📡' },
-  { mode: EDITOR_MODE.DRAW_SCOPE,      label: '範圍',      icon: '⬡' },
-  { mode: EDITOR_MODE.DRAW_FLOOR_HOLE, label: '挑高區域', icon: '⬛' },
-  { mode: EDITOR_MODE.CROP_IMAGE,      label: '裁切',     icon: '✂' },
+  { mode: EDITOR_MODE.SELECT,         label: '選取',     icon: '\u2196' },
+  { mode: EDITOR_MODE.MARQUEE_SELECT, label: '框選',     icon: '\u25A2' },
+  { mode: EDITOR_MODE.PAN,            label: '平移',     icon: '\u270B' },
+  { mode: EDITOR_MODE.DRAW_SCALE,     label: '比例尺',   icon: '\uD83D\uDCCF' },
+  { mode: EDITOR_MODE.DRAW_WALL,      label: '畫牆',     icon: '\u25AC' },
+  { mode: EDITOR_MODE.PLACE_AP,       label: '放置 AP',  icon: '\uD83D\uDCE1' },
+  { mode: EDITOR_MODE.DRAW_SCOPE,     label: '範圍',     icon: '\u2B21' },
+  { mode: EDITOR_MODE.DRAW_FLOOR_HOLE,label: '挑高區域', icon: '\u2B1B' },
+  { mode: EDITOR_MODE.CROP_IMAGE,     label: '裁切',     icon: '\u2702' },
 ]
 
 const HEATMAP_OPTIONS = [

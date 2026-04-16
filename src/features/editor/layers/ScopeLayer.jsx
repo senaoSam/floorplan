@@ -90,17 +90,18 @@ function DrawingPreview({ points, mousePos, snapRadius }) {
   )
 }
 
-function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScopeId, onScopeClick, isSelectMode, isDrawingActive, onScopeDragMove, onScopeDragEnd, onRightMouseDown, onDelete, viewportScale, setHoverCursor }) {
+function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScopeId, selectedItems = [], onScopeClick, isSelectMode, isDrawingActive, onScopeDragMove, onScopeDragEnd, onRightMouseDown, onDelete, viewportScale, setHoverCursor }) {
   const zones       = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
   const updateScope = useScopeStore((s) => s.updateScope)
   const [hoveredId, setHoveredId] = useState(null)
+  const batchSelectedIds = selectedItems.length > 1 ? new Set(selectedItems.filter((it) => it.type === 'scope').map((it) => it.id)) : null
 
   return (
     <Group>
       {/* 已完成的區域 */}
       {zones.map((zone) => {
         const style = ZONE_STYLE[zone.type] ?? ZONE_STYLE.in
-        const isSelected = zone.id === selectedScopeId
+        const isSelected = zone.id === selectedScopeId || (batchSelectedIds?.has(zone.id) ?? false)
         const isHovered  = zone.id === hoveredId
         return (
           <Group
@@ -116,7 +117,7 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
             }}
             onDragStart={(e) => {
               e.cancelBubble = true
-              onScopeClick?.(zone.id)
+              onScopeClick?.(zone.id, e)
             }}
             onDragMove={(e) => {
               e.cancelBubble = true
@@ -148,12 +149,12 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
               hitStrokeWidth={10}
               onClick={(e) => {
                 e.cancelBubble = true
-                onScopeClick?.(zone.id)
+                onScopeClick?.(zone.id, e)
               }}
               onContextMenu={(e) => {
                 e.evt.preventDefault()
                 e.cancelBubble = true
-                onScopeClick?.(zone.id)
+                onScopeClick?.(zone.id, e)
               }}
             />
             {/* 快速刪除按鈕 — 放在多邊形重心 */}

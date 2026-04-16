@@ -29,4 +29,15 @@ export const useFloorHoleStore = create((set) => ({
         [floorId]: (state.floorHolesByFloor[floorId] ?? []).filter((h) => h.id !== holeId),
       },
     })),
+
+  removeFloorHoles: (floorId, holeIds) =>
+    set((state) => {
+      const idSet = new Set(holeIds)
+      return {
+        floorHolesByFloor: {
+          ...state.floorHolesByFloor,
+          [floorId]: (state.floorHolesByFloor[floorId] ?? []).filter((h) => !idSet.has(h.id)),
+        },
+      }
+    }),
 }))

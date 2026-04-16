@@ -106,6 +106,7 @@ function FloorHoleLayer({
   mousePos,
   snapRadius,
   selectedHoleId,
+  selectedItems = [],
   onHoleClick,
   isSelectMode,
   isDrawingActive,
@@ -117,12 +118,13 @@ function FloorHoleLayer({
   const holes           = useFloorHoleStore((s) => s.floorHolesByFloor[floorId] ?? [])
   const updateFloorHole = useFloorHoleStore((s) => s.updateFloorHole)
   const [hoveredId, setHoveredId] = useState(null)
+  const batchSelectedIds = selectedItems.length > 1 ? new Set(selectedItems.filter((it) => it.type === 'floor_hole').map((it) => it.id)) : null
 
   return (
     <Group>
       {/* 已完成的 Floor Hole 多邊形 */}
       {holes.map((hole) => {
-        const isSelected = hole.id === selectedHoleId
+        const isSelected = hole.id === selectedHoleId || (batchSelectedIds?.has(hole.id) ?? false)
         const isHovered  = hole.id === hoveredId
         return (
           <Group
@@ -138,7 +140,7 @@ function FloorHoleLayer({
             }}
             onDragStart={(e) => {
               e.cancelBubble = true
-              onHoleClick?.(hole.id)
+              onHoleClick?.(hole.id, e)
             }}
             onDragEnd={(e) => {
               e.cancelBubble = true
@@ -165,12 +167,12 @@ function FloorHoleLayer({
               hitStrokeWidth={10}
               onClick={(e) => {
                 e.cancelBubble = true
-                onHoleClick?.(hole.id)
+                onHoleClick?.(hole.id, e)
               }}
               onContextMenu={(e) => {
                 e.evt.preventDefault()
                 e.cancelBubble = true
-                onHoleClick?.(hole.id)
+                onHoleClick?.(hole.id, e)
               }}
             />
             {/* 快速刪除按鈕 */}

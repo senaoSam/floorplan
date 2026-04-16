@@ -30,11 +30,11 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
       draggable={isDraggable}
       onMouseEnter={() => { setHoverCursor?.('grab'); onHover(ap.id) }}
       onMouseLeave={() => { setHoverCursor?.(null); onHover(null) }}
-      onClick={(e) => { e.cancelBubble = true; onClick(ap.id) }}
+      onClick={(e) => { e.cancelBubble = true; onClick(ap.id, e) }}
       onContextMenu={(e) => {
         e.evt.preventDefault()
         e.cancelBubble = true
-        onClick(ap.id)
+        onClick(ap.id, e)
       }}
       onMouseDown={(e) => {
         if (e.evt.button === 2) {
@@ -42,7 +42,7 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
           onRightMouseDown?.(e.currentTarget)
         }
       }}
-      onDragStart={(e) => { e.cancelBubble = true; onClick(ap.id) }}
+      onDragStart={(e) => { e.cancelBubble = true; onClick(ap.id, e) }}
       onDragMove={(e) => {
         e.cancelBubble = true
         onDragMove?.(ap.id, e.target.x(), e.target.y())
@@ -141,12 +141,13 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
   )
 }
 
-function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd, isDrawingActive, onRightMouseDown, viewportScale, onDelete, setHoverCursor }) {
+function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPDragMove, onAPDragEnd, isDrawingActive, onRightMouseDown, viewportScale, onDelete, setHoverCursor }) {
   const aps        = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   const updateAP   = useAPStore((s) => s.updateAP)
   const showAPInfo = useEditorStore((s) => s.showAPInfo)
   const inverseScale = 1 / viewportScale
   const [hoveredId, setHoveredId] = useState(null)
+  const batchSelectedIds = selectedItems.length > 1 ? new Set(selectedItems.filter((it) => it.type === 'ap').map((it) => it.id)) : null
 
   const handleMoved = (id, x, y) => {
     updateAP(floorId, id, { x, y })
@@ -159,7 +160,7 @@ function APLayer({ floorId, selectedAPId, onAPClick, onAPDragMove, onAPDragEnd, 
         <APMarker
           key={ap.id}
           ap={ap}
-          isSelected={ap.id === selectedAPId}
+          isSelected={ap.id === selectedAPId || (batchSelectedIds?.has(ap.id) ?? false)}
           isHovered={ap.id === hoveredId}
           onHover={setHoveredId}
           isDraggable

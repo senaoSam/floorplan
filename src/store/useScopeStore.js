@@ -29,4 +29,15 @@ export const useScopeStore = create((set) => ({
         [floorId]: (state.scopesByFloor[floorId] ?? []).filter((z) => z.id !== zoneId),
       },
     })),
+
+  removeScopes: (floorId, zoneIds) =>
+    set((state) => {
+      const idSet = new Set(zoneIds)
+      return {
+        scopesByFloor: {
+          ...state.scopesByFloor,
+          [floorId]: (state.scopesByFloor[floorId] ?? []).filter((z) => !idSet.has(z.id)),
+        },
+      }
+    }),
 }))

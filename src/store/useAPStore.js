@@ -41,6 +41,30 @@ export const useAPStore = create((set, get) => ({
       },
     })),
 
+  removeAPs: (floorId, apIds) =>
+    set((state) => {
+      const idSet = new Set(apIds)
+      return {
+        apsByFloor: {
+          ...state.apsByFloor,
+          [floorId]: (state.apsByFloor[floorId] ?? []).filter((ap) => !idSet.has(ap.id)),
+        },
+      }
+    }),
+
+  updateAPs: (floorId, apIds, patch) =>
+    set((state) => {
+      const idSet = new Set(apIds)
+      return {
+        apsByFloor: {
+          ...state.apsByFloor,
+          [floorId]: (state.apsByFloor[floorId] ?? []).map((ap) =>
+            idSet.has(ap.id) ? { ...ap, ...patch } : ap
+          ),
+        },
+      }
+    }),
+
   setAPs: (floorId, aps) =>
     set((state) => ({
       apsByFloor: { ...state.apsByFloor, [floorId]: aps },

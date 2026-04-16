@@ -35,6 +35,7 @@ function Editor2D() {
   const draggingScopeRef       = useRef(null)   // { id, dx, dy } Scope 拖移中暫存偏移
   const rightDragPendingRef    = useRef(null)   // { node, startX, startY } 右鍵等待拖曳
   const suppressContextMenuRef = useRef(false)  // 右鍵拖曳發生後略過下一次 contextMenu
+  const marqueeRef             = useRef(null)   // { startX, startY } canvas coords — 框選起點
   const [size, setSize]         = useState({ width: 0, height: 0 })
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 })
   const [mousePos, setMousePos] = useState(null)
@@ -56,13 +57,19 @@ function Editor2D() {
   // ── 裁切繪製狀態 ──────────────────────────────────────
   const [cropStart, setCropStart] = useState(null)   // {x,y}
 
+  // ── 框選狀態 ──────────────────────────────────────────
+  const [marquee, setMarquee] = useState(null)       // { startX, startY, endX, endY } canvas coords
+  const marqueeRectRef        = useRef(null)          // 同步副本，避免 useCallback 閉包取到舊值
+
   // ── 牆體材質快捷鍵 ────────────────────────────────────
   const [wallMaterial, setWallMaterial] = useState(MATERIALS.CONCRETE)
   const [materialToast, setMaterialToast] = useState(null) // { label, color, key }
 
   const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected, togglePanelCollapsed,
+          selectedItems, setSelectedItems, toggleSelectedItem,
           showFloorImage, showScopes, showFloorHoles, showWalls, showAPs } = useEditorStore()
   const isSelectMode    = editorMode === EDITOR_MODE.SELECT
+  const isMarqueeMode   = editorMode === EDITOR_MODE.MARQUEE_SELECT
   const isPanMode       = editorMode === EDITOR_MODE.PAN
   const isScaleMode     = editorMode === EDITOR_MODE.DRAW_SCALE
   const isWallMode      = editorMode === EDITOR_MODE.DRAW_WALL
@@ -142,10 +149,14 @@ function Editor2D() {
 
   // ── 鍵盤事件 ───────────────────────────────────────────
   const removeWall  = useWallStore((s) => s.removeWall)
+  const removeWalls = useWallStore((s) => s.removeWalls)
   const updateWall  = useWallStore((s) => s.updateWall)
   const removeAP    = useAPStore((s) => s.removeAP)
+  const removeAPs   = useAPStore((s) => s.removeAPs)
   const removeScope     = useScopeStore((s) => s.removeScope)
+  const removeScopes    = useScopeStore((s) => s.removeScopes)
   const removeFloorHole = useFloorHoleStore((s) => s.removeFloorHole)
+  const removeFloorHoles = useFloorHoleStore((s) => s.removeFloorHoles)
 
   // ── 材質快捷鍵 toast 自動消失 ─────────────────────────
   useEffect(() => {
@@ -167,6 +178,23 @@ function Editor2D() {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const tag = e.target.tagName
         if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
+        // 批次選取刪除
+        const items = useEditorStore.getState().selectedItems
+        if (items.length > 1) {
+          const wallIds = items.filter((it) => it.type === 'wall').map((it) => it.id)
+          const apIds   = items.filter((it) => it.type === 'ap').map((it) => it.id)
+          const scopeIds = items.filter((it) => it.type === 'scope').map((it) => it.id)
+          const holeIds  = items.filter((it) => it.type === 'floor_hole').map((it) => it.id)
+          if (wallIds.length)  removeWalls(activeFloorId, wallIds)
+          if (apIds.length)    removeAPs(activeFloorId, apIds)
+          if (scopeIds.length) removeScopes(activeFloorId, scopeIds)
+          if (holeIds.length)  removeFloorHoles(activeFloorId, holeIds)
+          clearSelected()
+          return
+        }
+
+        // 單選刪除
         if (selectedId && selectedType === 'wall') {
           removeWall(activeFloorId, selectedId)
           clearSelected()
@@ -206,7 +234,7 @@ function Editor2D() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, selectedType, activeFloorId, isWallMode, removeWall, updateWall, removeAP, removeScope, removeFloorHole, clearSelected])
+  }, [selectedId, selectedType, activeFloorId, isWallMode, removeWall, removeWalls, updateWall, removeAP, removeAPs, removeScope, removeScopes, removeFloorHole, removeFloorHoles, clearSelected])
 
   // ── 切換模式時清除繪製狀態 ────────────────────────────
   useEffect(() => {
@@ -239,14 +267,138 @@ function Editor2D() {
     setViewport((prev) => ({ ...prev, x: s.x(), y: s.y() }))
   }, [])
 
-  // ── 中鍵：防止預設行為（開新分頁等）────────────────────
+  // ── 框選相交判定 helpers ────────────────────────────────
+  const collectMarqueeHits = useCallback((rect) => {
+    const minX = Math.min(rect.startX, rect.endX)
+    const minY = Math.min(rect.startY, rect.endY)
+    const maxX = Math.max(rect.startX, rect.endX)
+    const maxY = Math.max(rect.startY, rect.endY)
+
+    // 線段 vs 矩形相交（Cohen-Sutherland 簡易版）
+    const segIntersectsRect = (x1, y1, x2, y2) => {
+      // 如果任一端點在矩形內 → 相交
+      if ((x1 >= minX && x1 <= maxX && y1 >= minY && y1 <= maxY) ||
+          (x2 >= minX && x2 <= maxX && y2 >= minY && y2 <= maxY)) return true
+      // 檢查線段是否穿過矩形的四條邊
+      const edges = [
+        [minX, minY, maxX, minY], [maxX, minY, maxX, maxY],
+        [maxX, maxY, minX, maxY], [minX, maxY, minX, minY],
+      ]
+      for (const [ex1, ey1, ex2, ey2] of edges) {
+        if (segmentsIntersect(x1, y1, x2, y2, ex1, ey1, ex2, ey2)) return true
+      }
+      return false
+    }
+
+    const segmentsIntersect = (ax, ay, bx, by, cx, cy, dx, dy) => {
+      const cross = (ux, uy, vx, vy) => ux * vy - uy * vx
+      const dAB = { x: bx - ax, y: by - ay }
+      const dCD = { x: dx - cx, y: dy - cy }
+      const denom = cross(dAB.x, dAB.y, dCD.x, dCD.y)
+      if (Math.abs(denom) < 1e-10) return false
+      const t = cross(cx - ax, cy - ay, dCD.x, dCD.y) / denom
+      const u = cross(cx - ax, cy - ay, dAB.x, dAB.y) / denom
+      return t >= 0 && t <= 1 && u >= 0 && u <= 1
+    }
+
+    // 多邊形 vs 矩形：任一頂點在矩形內 或 任一邊與矩形相交
+    const polyIntersectsRect = (flatPoints) => {
+      const n = flatPoints.length / 2
+      for (let i = 0; i < n; i++) {
+        const px = flatPoints[i * 2], py = flatPoints[i * 2 + 1]
+        if (px >= minX && px <= maxX && py >= minY && py <= maxY) return true
+      }
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n
+        if (segIntersectsRect(flatPoints[i*2], flatPoints[i*2+1], flatPoints[j*2], flatPoints[j*2+1])) return true
+      }
+      // 矩形完全在多邊形內 — 用射線法檢查矩形角點
+      return pointInPolygon(minX, minY, flatPoints)
+    }
+
+    const pointInPolygon = (px, py, flatPts) => {
+      const n = flatPts.length / 2
+      let inside = false
+      for (let i = 0, j = n - 1; i < n; j = i++) {
+        const xi = flatPts[i*2], yi = flatPts[i*2+1]
+        const xj = flatPts[j*2], yj = flatPts[j*2+1]
+        if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) {
+          inside = !inside
+        }
+      }
+      return inside
+    }
+
+    const hits = []
+
+    // 牆體
+    if (showWalls) {
+      const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
+      for (const w of walls) {
+        if (segIntersectsRect(w.startX, w.startY, w.endX, w.endY)) {
+          hits.push({ id: w.id, type: 'wall' })
+        }
+      }
+    }
+
+    // AP（中心點在矩形內）
+    if (showAPs) {
+      const aps = useAPStore.getState().apsByFloor[activeFloorId] ?? []
+      for (const ap of aps) {
+        if (ap.x >= minX && ap.x <= maxX && ap.y >= minY && ap.y <= maxY) {
+          hits.push({ id: ap.id, type: 'ap' })
+        }
+      }
+    }
+
+    // Scope zones
+    if (showScopes) {
+      const zones = useScopeStore.getState().scopesByFloor[activeFloorId] ?? []
+      for (const z of zones) {
+        if (polyIntersectsRect(z.points)) hits.push({ id: z.id, type: 'scope' })
+      }
+    }
+
+    // Floor Holes
+    if (showFloorHoles) {
+      const holes = useFloorHoleStore.getState().floorHolesByFloor[activeFloorId] ?? []
+      for (const h of holes) {
+        if (polyIntersectsRect(h.points)) hits.push({ id: h.id, type: 'floor_hole' })
+      }
+    }
+
+    return hits
+  }, [activeFloorId, showWalls, showAPs, showScopes, showFloorHoles])
+
+  // ── 中鍵：防止預設行為（開新分頁等）/ 左鍵：框選起點 ────
   const handleMouseDown = useCallback((e) => {
     if (e.evt.button === 1) e.evt.preventDefault()
-  }, [])
+    // 左鍵 + 框選模式 → 記錄框選起點
+    if (e.evt.button === 0 && isMarqueeMode) {
+      const pos = toCanvasPos(stageRef.current.getPointerPosition())
+      marqueeRef.current = { startX: pos.x, startY: pos.y }
+    }
+  }, [isMarqueeMode, toCanvasPos])
 
   const handleMouseUp = useCallback((e) => {
     if (e.evt.button === 2) rightDragPendingRef.current = null
-  }, [])
+
+    // 框選結束
+    if (e.evt.button === 0 && marqueeRef.current) {
+      const rect = marqueeRectRef.current
+      if (rect) {
+        const hits = collectMarqueeHits(rect)
+        if (hits.length > 0) {
+          setSelectedItems(hits)
+        } else {
+          clearSelected()
+        }
+      }
+      marqueeRef.current = null
+      marqueeRectRef.current = null
+      setMarquee(null)
+    }
+  }, [collectMarqueeHits, setSelectedItems, clearSelected])
 
   const handleRightMouseDown = useCallback((node) => {
     const pos = stageRef.current?.getPointerPosition()
@@ -265,7 +417,7 @@ function Editor2D() {
     return pos
   }, [activeFloorId, viewport.scale])
 
-  // ── 滑鼠移動：右鍵拖曳閾值判斷 / 更新 ghost 線 ─────────
+  // ── 滑鼠移動：右鍵拖曳閾值判斷 / 框選 / 更新 ghost 線 ──
   const handleMouseMove = useCallback(() => {
     const pos = stageRef.current?.getPointerPosition()
     if (!pos) return
@@ -281,13 +433,29 @@ function Editor2D() {
       return
     }
 
+    // 框選拖曳
+    if (marqueeRef.current) {
+      const canvasPos = toCanvasPos(pos)
+      const { startX, startY } = marqueeRef.current
+      // 超過 5 canvas px 才開始顯示框選矩形
+      if (Math.hypot(canvasPos.x - startX, canvasPos.y - startY) > 5 / viewport.scale) {
+        const rect = { startX, startY, endX: canvasPos.x, endY: canvasPos.y }
+        marqueeRectRef.current = rect
+        setMarquee(rect)
+      }
+      return
+    }
+
     const canvasPos = toCanvasPos(pos)
     setMousePos(isWallMode ? snapToWallEndpoint(canvasPos) : canvasPos)
-  }, [toCanvasPos, isWallMode, snapToWallEndpoint])
+  }, [toCanvasPos, isWallMode, snapToWallEndpoint, viewport.scale])
 
   // ── 點擊：分流到各模式 ─────────────────────────────────
   const handleStageClick = useCallback((e) => {
     if (e.evt.button !== 0) return
+
+    // 框選模式下點擊不處理（交由 mouseDown/mouseUp 處理）
+    if (isMarqueeMode) { return }
 
     const rawPos = toCanvasPos(stageRef.current.getPointerPosition())
     const pos = isWallMode ? snapToWallEndpoint(rawPos) : rawPos
@@ -398,6 +566,7 @@ function Editor2D() {
     // 其他模式點擊空白 → 取消選取
     clearSelected()
   }, [
+    isMarqueeMode,
     isScaleMode, showScaleDialog, scalePt1,
     isWallMode, wallDrawStart, activeFloorId, snapToWallEndpoint,
     isAPMode, nextAPName,
@@ -486,6 +655,7 @@ function Editor2D() {
     isScaleMode     ? cursorScale :
     isWallMode      ? cursorWall  :
     isAPMode        ? cursorAP    :
+    isMarqueeMode                      ? 'crosshair' :
     isCropMode                         ? 'crosshair' :
     isScopeMode || isFloorHoleMode ? 'crosshair' :
     isPanMode                      ? 'grab'      : 'default'
@@ -515,6 +685,7 @@ function Editor2D() {
 
   const modeHintMap = {
     [EDITOR_MODE.SELECT]:          null,
+    [EDITOR_MODE.MARQUEE_SELECT]:  { label: '框選模式', hint: '左鍵拖曳框選多物件；Ctrl+Click 追加選取' },
     [EDITOR_MODE.PAN]:             { label: '平移模式', hint: '拖曳畫布移動視角' },
     [EDITOR_MODE.DRAW_SCALE]:      { label: '比例尺模式', hint: '點擊兩點設定比例' },
     [EDITOR_MODE.DRAW_WALL]:       { label: '畫牆模式', hint: '左鍵點擊設定端點，右鍵或 Esc 結束｜數字鍵 1~6 切換材質' },
@@ -555,7 +726,7 @@ function Editor2D() {
           width={size.width}  height={size.height}
           x={viewport.x}      y={viewport.y}
           scaleX={viewport.scale} scaleY={viewport.scale}
-          draggable={!hoverCursor}
+          draggable={!hoverCursor && !marquee && !isMarqueeMode}
           onWheel={handleWheel}
           onDragEnd={handleDragEnd}
           onMouseDown={handleMouseDown}
@@ -585,7 +756,11 @@ function Editor2D() {
                 mousePos={mousePos}
                 snapRadius={SNAP_PX / viewport.scale}
                 selectedScopeId={selectedType === 'scope' ? selectedId : null}
-                onScopeClick={(id) => setSelected(id, 'scope')}
+                selectedItems={selectedItems}
+                onScopeClick={(id, e) => {
+                  if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'scope'); return }
+                  setSelected(id, 'scope')
+                }}
                 isSelectMode={isSelectMode}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode}
                 onScopeDragMove={(id, dx, dy) => { draggingScopeRef.current = { id, dx, dy } }}
@@ -604,7 +779,11 @@ function Editor2D() {
                 mousePos={mousePos}
                 snapRadius={SNAP_PX / viewport.scale}
                 selectedHoleId={selectedType === 'floor_hole' ? selectedId : null}
-                onHoleClick={(id) => setSelected(id, 'floor_hole')}
+                selectedItems={selectedItems}
+                onHoleClick={(id, e) => {
+                  if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'floor_hole'); return }
+                  setSelected(id, 'floor_hole')
+                }}
                 isSelectMode={isSelectMode}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode}
                 onRightMouseDown={handleRightMouseDown}
@@ -620,7 +799,11 @@ function Editor2D() {
                 drawStart={isWallMode ? wallDrawStart : null}
                 mousePos={mousePos}
                 selectedWallId={selectedType === 'wall' ? selectedId : null}
-                onWallClick={(id) => setSelected(id, 'wall')}
+                selectedItems={selectedItems}
+                onWallClick={(id, e) => {
+                  if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'wall'); return }
+                  setSelected(id, 'wall')
+                }}
                 onWallDragMove={(id, dx, dy) => { draggingWallRef.current = { id, dx, dy } }}
                 onWallDragEnd={() => { draggingWallRef.current = null }}
                 isDrawMode={isWallMode}
@@ -642,7 +825,11 @@ function Editor2D() {
               <APLayer
                 floorId={activeFloorId}
                 selectedAPId={selectedType === 'ap' ? selectedId : null}
-                onAPClick={(id) => setSelected(id, 'ap')}
+                selectedItems={selectedItems}
+                onAPClick={(id, e) => {
+                  if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'ap'); return }
+                  setSelected(id, 'ap')
+                }}
                 onAPDragMove={(id, x, y) => { draggingAPRef.current = { id, x, y } }}
                 onAPDragEnd={() => { draggingAPRef.current = null }}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode}
@@ -666,6 +853,21 @@ function Editor2D() {
                 isFloorImageSelected={isSelectMode && selectedType === 'floor_image'}
                 viewportScale={viewport.scale}
                 onCropChange={(patch) => updateFloor(activeFloorId, patch)}
+              />
+            )}
+
+            {/* 框選矩形 */}
+            {marquee && (
+              <Rect
+                x={Math.min(marquee.startX, marquee.endX)}
+                y={Math.min(marquee.startY, marquee.endY)}
+                width={Math.abs(marquee.endX - marquee.startX)}
+                height={Math.abs(marquee.endY - marquee.startY)}
+                fill="rgba(0, 229, 255, 0.08)"
+                stroke="#00e5ff"
+                strokeWidth={1.5 / viewport.scale}
+                dash={[6 / viewport.scale, 3 / viewport.scale]}
+                listening={false}
               />
             )}
           </Layer>
