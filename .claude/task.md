@@ -75,7 +75,7 @@
 | 8-1 | ✅   | AP 型號資料庫：多廠商 AP 規格（增益、支援頻段、最大功率）    |
 | 8-2a | ✅   | 天線模式資料模型 + APPanel UI（方位角、波瓣寬度，無視覺）   |
 | 8-2b | ✅   | APLayer 定向扇形視覺化（方位指示、扇形覆蓋）                 |
-| 8-2c | ⬜   | Heatmap 納入定向增益（WebGL shader，cosine-squared 模型）     |
+| 8-2c | ✅   | Heatmap 納入定向增益（WebGL shader，cosine-squared 模型）     |
 | 8-2d | ⬜   | Custom pattern 內建預設（Patch / Sector 等）+ pattern 預覽    |
 | 8-3 | ⬜   | 自動頻道規劃：依國家頻段限制自動分配頻道                     |
 | 8-4 | ⬜   | 自動功率規劃：依覆蓋需求自動調整 AP 發射功率                 |

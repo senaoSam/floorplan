@@ -15,9 +15,21 @@ const SECTIONS = [
   {
     title: 'RSSI 接收訊號強度',
     rows: [
-      { label: '公式', value: 'RSSI(dBm) = P_tx − PL − L_wall' },
+      { label: '公式', value: 'RSSI(dBm) = P_tx + G_ant − PL − L_wall' },
       { label: 'P_tx', value: '發射功率（dBm）' },
+      { label: 'G_ant', value: '天線增益（dB，omni 為 0；directional 依方位角與波瓣寬度）' },
       { label: 'L_wall', value: 'Ray-casting 牆體衰減總和（dB），依頻段調整' },
+    ],
+  },
+  {
+    title: '天線增益（Directional）',
+    rows: [
+      { label: '公式', value: 'G_ant(θ) = max( −12·(Δθ / (BW/2))², −FB )' },
+      { label: 'Δθ', value: '目標方向與方位角夾角（wrap 到 [0°, 180°]）' },
+      { label: 'BW', value: '波瓣寬度 HPBW（使用者設定，10°~180°）' },
+      { label: 'FB', value: 'Front-to-Back 最大背面衰減（預設 20 dB）' },
+      { label: 'Omni', value: 'G_ant ≡ 0（無方向性）' },
+      { label: '說明', value: 'Cosine-squared / 3GPP 抛物近似：中軸 0 dB，HPBW 邊緣約 −3 dB，背面至多 −20 dB' },
     ],
   },
   {

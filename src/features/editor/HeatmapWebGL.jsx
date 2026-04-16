@@ -48,6 +48,7 @@ uniform int   u_wallCount;
 uniform vec4  u_aps[MAX_APS];          // xy = pos, z = txPower, w = freqMHz
 uniform float u_apChannels[MAX_APS];
 uniform float u_apFreqBand[MAX_APS];   // 頻段索引 0=2.4, 1=5, 2=6
+uniform vec4  u_apAnt[MAX_APS];        // x = mode(0=omni,1=dir), y = azimuthRad, z = halfBeamwidthRad, w = frontBackDb
 uniform vec4  u_walls[MAX_WALLS];
 uniform vec3  u_wallLoss3[MAX_WALLS];  // xyz = 2.4GHz / 5GHz / 6GHz 衰減
 uniform vec2  u_scopePts[MAX_SCOPE_PTS];
@@ -71,6 +72,25 @@ bool segHit(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
   float t   = (qp.x * s.y - qp.y * s.x) / rxs;
   float u   = (qp.x * r.y - qp.y * r.x) / rxs;
   return t > 0.0 && t < 1.0 && u > 0.0 && u < 1.0;
+}
+
+// 定向天線增益（dB，中軸=0，波瓣寬度外衰減到 -frontBackDb）
+// 使用 cosine-squared / parabolic 近似：-12 * (offset/halfBW)^2
+float antennaGain(vec2 px, vec2 ap, vec4 ant) {
+  if (ant.x < 0.5) return 0.0;  // omni
+  float azim = ant.y;
+  float halfBW = ant.z;
+  float frontBack = ant.w;
+  // 像素相對 AP 的方向角（+x=0，順時針）— canvas y 朝下，atan2 的 y 用 px.y - ap.y
+  float targetAng = atan(px.y - ap.y, px.x - ap.x);
+  float diff = targetAng - azim;
+  // wrap to [-PI, PI]
+  diff = mod(diff + 3.14159265, 6.28318530) - 3.14159265;
+  float offset = abs(diff);
+  if (halfBW < 0.0001) return -frontBack;
+  float norm = offset / halfBW;
+  float g = -12.0 * norm * norm;
+  return max(g, -frontBack);
 }
 
 // 頻段相關的牆體衰減
@@ -260,7 +280,8 @@ void main() {
       } else {
         float distM = dist / u_floorScale;
         float fspl  = 10.0 * u_pathLossN * log10v(distM) + 20.0 * log10v(fMHz) - 27.55;
-        rssi = txPow - fspl - wallLoss(canvas, apPos, fIdx);
+        float gain  = antennaGain(canvas, apPos, u_apAnt[i]);
+        rssi = txPow + gain - fspl - wallLoss(canvas, apPos, fIdx);
       }
       if (rssi > bestRSSI) { bestRSSI = rssi; bestIdx = i; }
       if (rssi > -85.0) hearable++;
@@ -544,6 +565,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       aps:            gl.getUniformLocation(prog, 'u_aps[0]'),
       apChannels:     gl.getUniformLocation(prog, 'u_apChannels[0]'),
       apFreqBand:     gl.getUniformLocation(prog, 'u_apFreqBand[0]'),
+      apAnt:          gl.getUniformLocation(prog, 'u_apAnt[0]'),
       walls:          gl.getUniformLocation(prog, 'u_walls[0]'),
       wallLoss3:      gl.getUniformLocation(prog, 'u_wallLoss3[0]'),
       scopePts:       gl.getUniformLocation(prog, 'u_scopePts[0]'),
@@ -559,6 +581,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
     const apData        = new Float32Array(MAX_APS       * 4)
     const apChanData    = new Float32Array(MAX_APS)
     const apFreqData    = new Float32Array(MAX_APS)
+    const apAntData     = new Float32Array(MAX_APS       * 4)
     const wallPosData   = new Float32Array(MAX_WALLS     * 4)
     const wallLoss3Data = new Float32Array(MAX_WALLS     * 3)
     const scopePtsData    = new Float32Array(MAX_SCOPE_PTS * 2)
@@ -702,7 +725,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
 
       const vp = { x: stage.x(), y: stage.y(), scale: stage.scaleX() }
 
-      const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0}`).join('|')
+      const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0},${a.antennaMode ?? 'omni'},${a.azimuth ?? 0},${a.beamwidth ?? 60}`).join('|')
       const wallKey  = rawWalls.map((wl) => `${wl.startX.toFixed(1)},${wl.startY.toFixed(1)},${wl.endX.toFixed(1)},${wl.endY.toFixed(1)},${wl.material?.id ?? ''},${wl.material?.dbLoss ?? 0}`).join('|')
       const scopeKey = [...inScopes, ...outScopes].map((sc) => {
         const d = dragScope && dragScope.id === sc.id ? `${dragScope.dx.toFixed(1)},${dragScope.dy.toFixed(1)}` : '0,0'
@@ -721,6 +744,14 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         apData[i*4+3] = FREQ_MHZ[a.frequency] ?? 5500
         apChanData[i] = a.channel ?? DEFAULT_CHAN[a.frequency] ?? 1
         apFreqData[i] = FREQ_BAND_INDEX[a.frequency] ?? 1
+        // Antenna: directional → apply gain pattern; omni → mode=0 (short-circuit in shader).
+        const isDir     = a.antennaMode === 'directional'
+        const azDeg     = ((a.azimuth ?? 0) % 360 + 360) % 360
+        const bwDeg     = Math.max(10, Math.min(180, a.beamwidth ?? 60))
+        apAntData[i*4]   = isDir ? 1 : 0
+        apAntData[i*4+1] = azDeg * Math.PI / 180
+        apAntData[i*4+2] = (bwDeg / 2) * Math.PI / 180
+        apAntData[i*4+3] = 20  // frontBackDb: 背面最多衰減 20 dB
       }
 
       const wallCount = Math.min(rawWalls.length, MAX_WALLS)
@@ -751,6 +782,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       gl.uniform4fv(locs.aps,          apData)
       gl.uniform1fv(locs.apChannels,   apChanData)
       gl.uniform1fv(locs.apFreqBand,   apFreqData)
+      gl.uniform4fv(locs.apAnt,        apAntData)
       gl.uniform4fv(locs.walls,        wallPosData)
       gl.uniform3fv(locs.wallLoss3,    wallLoss3Data)
       gl.uniform2fv(locs.scopePts,     scopePtsData)
