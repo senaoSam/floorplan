@@ -2,6 +2,7 @@ import React, { useCallback } from 'react'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { AP_MODEL_LIST, DEFAULT_AP_MODEL_ID, getAPModelById } from '@/constants/apModels'
+import { ANTENNA_PATTERN_LIST, DEFAULT_PATTERN_ID, getPatternById } from '@/constants/antennaPatterns'
 import './APPanel.sass'
 
 const FREQ_OPTIONS = [
@@ -21,12 +22,55 @@ const DEFAULT_CHANNEL = { 2.4: 1, 5: 36, 6: 1 }
 const ANTENNA_OPTIONS = [
   { value: 'omni',        label: '全向' },
   { value: 'directional', label: '定向' },
+  { value: 'custom',      label: '自訂' },
 ]
 
 const DEFAULT_AZIMUTH   = 0
 const DEFAULT_BEAMWIDTH = 60
 const MIN_BEAMWIDTH     = 10
 const MAX_BEAMWIDTH     = 180
+
+// Polar preview of a custom antenna pattern. 36 dB samples → normalized radius.
+// Orientation: index 0 points right (+x), matching our azimuth convention.
+function PatternPreview({ pattern, color, azimuth = 0 }) {
+  const size = 96
+  const cx = size / 2
+  const cy = size / 2
+  const maxR = 38
+  const minDb = -30
+  const samples = pattern.samples
+  const n = samples.length
+  const pts = []
+  for (let i = 0; i < n; i++) {
+    const db = Math.max(samples[i], minDb)
+    const r = ((db - minDb) / -minDb) * maxR
+    const angDeg = i * (360 / n) + azimuth
+    const ang = angDeg * Math.PI / 180
+    pts.push(`${(cx + r * Math.cos(ang)).toFixed(2)},${(cy + r * Math.sin(ang)).toFixed(2)}`)
+  }
+  return (
+    <svg width={size} height={size} className="ap-panel__pattern-svg">
+      {/* -10/-20 dB rings */}
+      {[(1/3) * maxR, (2/3) * maxR, maxR].map((r, i) => (
+        <circle key={r} cx={cx} cy={cy} r={r} fill="none"
+          stroke={i === 2 ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)'}
+          strokeDasharray={i === 2 ? '' : '2 3'} strokeWidth="1" />
+      ))}
+      {/* crosshair */}
+      <line x1={cx - maxR} y1={cy} x2={cx + maxR} y2={cy} stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
+      <line x1={cx} y1={cy - maxR} x2={cx} y2={cy + maxR} stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
+      {/* pattern polygon */}
+      <polygon points={pts.join(' ')} fill={color} fillOpacity="0.3" stroke={color} strokeWidth="1.5" />
+      {/* bore-sight arrow */}
+      <line
+        x1={cx} y1={cy}
+        x2={cx + maxR * Math.cos(azimuth * Math.PI / 180)}
+        y2={cy + maxR * Math.sin(azimuth * Math.PI / 180)}
+        stroke={color} strokeWidth="1.5" strokeDasharray="3 2"
+      />
+    </svg>
+  )
+}
 
 const MOUNT_OPTIONS = [
   { value: 'ceiling', label: '天花板' },
@@ -83,13 +127,22 @@ function APPanel({ floorId, apId }) {
 
   const handleAntennaMode = useCallback((mode) => {
     const patch = { antennaMode: mode }
-    // Ensure directional APs have azimuth/beamwidth defaults.
-    if (mode === 'directional') {
-      if (ap.azimuth == null)   patch.azimuth = DEFAULT_AZIMUTH
-      if (ap.beamwidth == null) patch.beamwidth = DEFAULT_BEAMWIDTH
+    // Directional / custom both need an azimuth; custom also needs a patternId.
+    if (mode === 'directional' || mode === 'custom') {
+      if (ap.azimuth == null) patch.azimuth = DEFAULT_AZIMUTH
+    }
+    if (mode === 'directional' && ap.beamwidth == null) {
+      patch.beamwidth = DEFAULT_BEAMWIDTH
+    }
+    if (mode === 'custom' && ap.patternId == null) {
+      patch.patternId = DEFAULT_PATTERN_ID
     }
     updateAP(floorId, apId, patch)
   }, [floorId, apId, ap, updateAP])
+
+  const handlePattern = useCallback((patternId) => {
+    updateAP(floorId, apId, { patternId })
+  }, [floorId, apId, updateAP])
 
   // Store raw user input; wrapping/clamping happens only for display and downstream use.
   const handleAzimuth = useCallback((raw) => {
@@ -236,13 +289,10 @@ function APPanel({ floorId, apId }) {
           ))}
         </div>
 
-        {ap.antennaMode === 'directional' && (() => {
+        {(ap.antennaMode === 'directional' || ap.antennaMode === 'custom') && (() => {
           const rawAz = ap.azimuth ?? DEFAULT_AZIMUTH
-          const rawBw = ap.beamwidth ?? DEFAULT_BEAMWIDTH
           const effAz = wrapAzimuth(rawAz)
-          const effBw = clampBeamwidth(rawBw)
           const azChanged = effAz !== rawAz
-          const bwChanged = effBw !== rawBw
           return (
             <>
               <p className="ap-panel__label" style={{ marginTop: 10 }}>
@@ -263,23 +313,55 @@ function APPanel({ floorId, apId }) {
                 <span className="ap-panel__unit">度</span>
               </div>
 
-              <p className="ap-panel__label" style={{ marginTop: 10 }}>
-                波瓣寬度{bwChanged ? (
-                  <span className="ap-panel__hint-inline">（實際 {effBw}°）</span>
-                ) : (
-                  <span className="ap-panel__hint-inline">（HPBW，{MIN_BEAMWIDTH}~{MAX_BEAMWIDTH}）</span>
-                )}
-              </p>
-              <div className="ap-panel__number-row">
-                <input
-                  className="ap-panel__input ap-panel__input--number"
-                  type="number"
-                  step="5"
-                  value={rawBw}
-                  onChange={(e) => handleBeamwidth(e.target.value)}
-                />
-                <span className="ap-panel__unit">度</span>
-              </div>
+              {ap.antennaMode === 'directional' && (() => {
+                const rawBw = ap.beamwidth ?? DEFAULT_BEAMWIDTH
+                const effBw = clampBeamwidth(rawBw)
+                const bwChanged = effBw !== rawBw
+                return (
+                  <>
+                    <p className="ap-panel__label" style={{ marginTop: 10 }}>
+                      波瓣寬度{bwChanged ? (
+                        <span className="ap-panel__hint-inline">（實際 {effBw}°）</span>
+                      ) : (
+                        <span className="ap-panel__hint-inline">（HPBW，{MIN_BEAMWIDTH}~{MAX_BEAMWIDTH}）</span>
+                      )}
+                    </p>
+                    <div className="ap-panel__number-row">
+                      <input
+                        className="ap-panel__input ap-panel__input--number"
+                        type="number"
+                        step="5"
+                        value={rawBw}
+                        onChange={(e) => handleBeamwidth(e.target.value)}
+                      />
+                      <span className="ap-panel__unit">度</span>
+                    </div>
+                  </>
+                )
+              })()}
+
+              {ap.antennaMode === 'custom' && (() => {
+                const pattern = getPatternById(ap.patternId ?? DEFAULT_PATTERN_ID)
+                const color = FREQ_OPTIONS.find((f) => f.value === ap.frequency)?.color ?? '#4fc3f7'
+                return (
+                  <>
+                    <p className="ap-panel__label" style={{ marginTop: 10 }}>Pattern</p>
+                    <select
+                      className="ap-panel__input ap-panel__select"
+                      value={pattern.id}
+                      onChange={(e) => handlePattern(e.target.value)}
+                    >
+                      {ANTENNA_PATTERN_LIST.map((p) => (
+                        <option key={p.id} value={p.id}>{p.label}</option>
+                      ))}
+                    </select>
+                    <p className="ap-panel__hint">{pattern.description}</p>
+                    <div className="ap-panel__pattern-preview">
+                      <PatternPreview pattern={pattern} color={color} azimuth={effAz} />
+                    </div>
+                  </>
+                )
+              })()}
             </>
           )
         })()}

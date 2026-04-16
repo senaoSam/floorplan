@@ -22,13 +22,15 @@ const SECTIONS = [
     ],
   },
   {
-    title: '天線增益（Directional）',
+    title: '天線增益（Directional / Custom）',
     rows: [
-      { label: '公式', value: 'G_ant(θ) = max( −12·(Δθ / (BW/2))², −FB )' },
+      { label: 'Omni', value: 'G_ant ≡ 0（無方向性）' },
+      { label: 'Directional', value: 'G_ant(θ) = max( −12·(Δθ / (BW/2))², −FB )' },
       { label: 'Δθ', value: '目標方向與方位角夾角（wrap 到 [0°, 180°]）' },
       { label: 'BW', value: '波瓣寬度 HPBW（使用者設定，10°~180°）' },
       { label: 'FB', value: 'Front-to-Back 最大背面衰減（預設 20 dB）' },
-      { label: 'Omni', value: 'G_ant ≡ 0（無方向性）' },
+      { label: 'Custom', value: 'G_ant(θ) = patternLookup(36-sample, 線性內插)' },
+      { label: '內建', value: 'Patch（cos² 漸降）/ Sector 90° / Sector 120°' },
       { label: '說明', value: 'Cosine-squared / 3GPP 抛物近似：中軸 0 dB，HPBW 邊緣約 −3 dB，背面至多 −20 dB' },
     ],
   },

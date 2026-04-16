@@ -11,6 +11,7 @@ export const mockAPs = {
       antennaMode: 'omni',
       azimuth: 0,
       beamwidth: 60,
+      patternId: null,
       mountType: 'ceiling',
       modelId: 'generic-wifi6',
       name: 'AP-01',

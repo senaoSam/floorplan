@@ -4,6 +4,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useScopeStore } from '@/store/useScopeStore'
+import { getPatternById, DEFAULT_PATTERN_ID, PATTERN_SAMPLES } from '@/constants/antennaPatterns'
 
 const MAX_APS        = 32
 const MAX_WALLS      = 64
@@ -29,6 +30,7 @@ precision highp float;
 #define MAX_APS       ${MAX_APS}
 #define MAX_WALLS     ${MAX_WALLS}
 #define MAX_SCOPE_PTS ${MAX_SCOPE_PTS}
+#define PATTERN_SAMPLES ${PATTERN_SAMPLES}
 
 // 模式常數
 #define MODE_RSSI             0
@@ -48,7 +50,8 @@ uniform int   u_wallCount;
 uniform vec4  u_aps[MAX_APS];          // xy = pos, z = txPower, w = freqMHz
 uniform float u_apChannels[MAX_APS];
 uniform float u_apFreqBand[MAX_APS];   // 頻段索引 0=2.4, 1=5, 2=6
-uniform vec4  u_apAnt[MAX_APS];        // x = mode(0=omni,1=dir), y = azimuthRad, z = halfBeamwidthRad, w = frontBackDb
+uniform vec4  u_apAnt[MAX_APS];        // x = mode(0=omni,1=dir,2=custom), y = azimuthRad, z = halfBeamwidthRad, w = frontBackDb
+uniform sampler2D u_apPattern;         // MAX_APS x PATTERN_SAMPLES, R32F, value = gain dB at (AP, angleBin)
 uniform vec4  u_walls[MAX_WALLS];
 uniform vec3  u_wallLoss3[MAX_WALLS];  // xyz = 2.4GHz / 5GHz / 6GHz 衰減
 uniform vec2  u_scopePts[MAX_SCOPE_PTS];
@@ -74,18 +77,37 @@ bool segHit(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
   return t > 0.0 && t < 1.0 && u > 0.0 && u < 1.0;
 }
 
-// 定向天線增益（dB，中軸=0，波瓣寬度外衰減到 -frontBackDb）
-// 使用 cosine-squared / parabolic 近似：-12 * (offset/halfBW)^2
-float antennaGain(vec2 px, vec2 ap, vec4 ant) {
-  if (ant.x < 0.5) return 0.0;  // omni
+// 從 custom pattern texture 採樣增益 (dB)。signedOffset 範圍 [-PI, PI]，對應到 pattern 0..N-1 後線性插值。
+float customGainLookup(int apIdx, float signedOffset) {
+  // 把 signedOffset 轉成 [0, 2PI) 後 → 索引 [0, N)
+  float t = signedOffset;
+  if (t < 0.0) t += 6.28318530;
+  float idxF = t / 6.28318530 * float(PATTERN_SAMPLES);
+  int lo = int(floor(idxF)) % PATTERN_SAMPLES;
+  int hi = (lo + 1) % PATTERN_SAMPLES;
+  float frac = idxF - floor(idxF);
+  float a = texelFetch(u_apPattern, ivec2(lo, apIdx), 0).r;
+  float b = texelFetch(u_apPattern, ivec2(hi, apIdx), 0).r;
+  return mix(a, b, frac);
+}
+
+// 天線增益（dB）：mode 0=omni / 1=directional / 2=custom
+float antennaGain(int apIdx, vec2 px, vec2 ap, vec4 ant) {
+  int mode = int(ant.x + 0.5);
+  if (mode == 0) return 0.0;
   float azim = ant.y;
-  float halfBW = ant.z;
-  float frontBack = ant.w;
   // 像素相對 AP 的方向角（+x=0，順時針）— canvas y 朝下，atan2 的 y 用 px.y - ap.y
   float targetAng = atan(px.y - ap.y, px.x - ap.x);
   float diff = targetAng - azim;
   // wrap to [-PI, PI]
   diff = mod(diff + 3.14159265, 6.28318530) - 3.14159265;
+  if (mode == 2) {
+    // custom pattern lookup：diff 作為相對中軸的帶符號角
+    return customGainLookup(apIdx, diff);
+  }
+  // directional cosine-squared
+  float halfBW = ant.z;
+  float frontBack = ant.w;
   float offset = abs(diff);
   if (halfBW < 0.0001) return -frontBack;
   float norm = offset / halfBW;
@@ -280,7 +302,7 @@ void main() {
       } else {
         float distM = dist / u_floorScale;
         float fspl  = 10.0 * u_pathLossN * log10v(distM) + 20.0 * log10v(fMHz) - 27.55;
-        float gain  = antennaGain(canvas, apPos, u_apAnt[i]);
+        float gain  = antennaGain(i, canvas, apPos, u_apAnt[i]);
         rssi = txPow + gain - fspl - wallLoss(canvas, apPos, fIdx);
       }
       if (rssi > bestRSSI) { bestRSSI = rssi; bestIdx = i; }
@@ -476,7 +498,7 @@ function HeatmapLegend({ mode }) {
     <div style={{
       position: 'absolute',
       bottom: 16,
-      right: 16,
+      left: 16,
       zIndex: 400,
       background: 'rgba(18,18,30,0.90)',
       backdropFilter: 'blur(8px)',
@@ -566,6 +588,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       apChannels:     gl.getUniformLocation(prog, 'u_apChannels[0]'),
       apFreqBand:     gl.getUniformLocation(prog, 'u_apFreqBand[0]'),
       apAnt:          gl.getUniformLocation(prog, 'u_apAnt[0]'),
+      apPattern:      gl.getUniformLocation(prog, 'u_apPattern'),
       walls:          gl.getUniformLocation(prog, 'u_walls[0]'),
       wallLoss3:      gl.getUniformLocation(prog, 'u_wallLoss3[0]'),
       scopePts:       gl.getUniformLocation(prog, 'u_scopePts[0]'),
@@ -582,6 +605,18 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
     const apChanData    = new Float32Array(MAX_APS)
     const apFreqData    = new Float32Array(MAX_APS)
     const apAntData     = new Float32Array(MAX_APS       * 4)
+    const apPatternData = new Float32Array(MAX_APS       * PATTERN_SAMPLES)
+
+    // R32F 2D texture: width = PATTERN_SAMPLES, height = MAX_APS. Each row = one AP's pattern.
+    const patternTex = gl.createTexture()
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, patternTex)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    const extFloat = gl.getExtension('EXT_color_buffer_float') || gl.getExtension('OES_texture_float')
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, PATTERN_SAMPLES, MAX_APS, 0, gl.RED, gl.FLOAT, null)
     const wallPosData   = new Float32Array(MAX_WALLS     * 4)
     const wallLoss3Data = new Float32Array(MAX_WALLS     * 3)
     const scopePtsData    = new Float32Array(MAX_SCOPE_PTS * 2)
@@ -725,7 +760,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
 
       const vp = { x: stage.x(), y: stage.y(), scale: stage.scaleX() }
 
-      const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0},${a.antennaMode ?? 'omni'},${a.azimuth ?? 0},${a.beamwidth ?? 60}`).join('|')
+      const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0},${a.antennaMode ?? 'omni'},${a.azimuth ?? 0},${a.beamwidth ?? 60},${a.patternId ?? ''}`).join('|')
       const wallKey  = rawWalls.map((wl) => `${wl.startX.toFixed(1)},${wl.startY.toFixed(1)},${wl.endX.toFixed(1)},${wl.endY.toFixed(1)},${wl.material?.id ?? ''},${wl.material?.dbLoss ?? 0}`).join('|')
       const scopeKey = [...inScopes, ...outScopes].map((sc) => {
         const d = dragScope && dragScope.id === sc.id ? `${dragScope.dx.toFixed(1)},${dragScope.dy.toFixed(1)}` : '0,0'
@@ -744,14 +779,25 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         apData[i*4+3] = FREQ_MHZ[a.frequency] ?? 5500
         apChanData[i] = a.channel ?? DEFAULT_CHAN[a.frequency] ?? 1
         apFreqData[i] = FREQ_BAND_INDEX[a.frequency] ?? 1
-        // Antenna: directional → apply gain pattern; omni → mode=0 (short-circuit in shader).
-        const isDir     = a.antennaMode === 'directional'
+        // Antenna: omni(0) / directional(1) / custom(2); custom AP fills its pattern row.
+        const mode = a.antennaMode === 'directional' ? 1 : a.antennaMode === 'custom' ? 2 : 0
         const azDeg     = ((a.azimuth ?? 0) % 360 + 360) % 360
         const bwDeg     = Math.max(10, Math.min(180, a.beamwidth ?? 60))
-        apAntData[i*4]   = isDir ? 1 : 0
+        apAntData[i*4]   = mode
         apAntData[i*4+1] = azDeg * Math.PI / 180
         apAntData[i*4+2] = (bwDeg / 2) * Math.PI / 180
         apAntData[i*4+3] = 20  // frontBackDb: 背面最多衰減 20 dB
+        if (mode === 2) {
+          const pat = getPatternById(a.patternId ?? DEFAULT_PATTERN_ID)
+          for (let k = 0; k < PATTERN_SAMPLES; k++) {
+            apPatternData[i * PATTERN_SAMPLES + k] = pat.samples[k]
+          }
+        } else {
+          // Zero-fill so stale pattern data doesn't leak into a non-custom AP.
+          for (let k = 0; k < PATTERN_SAMPLES; k++) {
+            apPatternData[i * PATTERN_SAMPLES + k] = 0
+          }
+        }
       }
 
       const wallCount = Math.min(rawWalls.length, MAX_WALLS)
@@ -783,6 +829,10 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       gl.uniform1fv(locs.apChannels,   apChanData)
       gl.uniform1fv(locs.apFreqBand,   apFreqData)
       gl.uniform4fv(locs.apAnt,        apAntData)
+      gl.activeTexture(gl.TEXTURE0)
+      gl.bindTexture(gl.TEXTURE_2D, patternTex)
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, PATTERN_SAMPLES, MAX_APS, gl.RED, gl.FLOAT, apPatternData)
+      gl.uniform1i(locs.apPattern, 0)
       gl.uniform4fv(locs.walls,        wallPosData)
       gl.uniform3fv(locs.wallLoss3,    wallLoss3Data)
       gl.uniform2fv(locs.scopePts,     scopePtsData)
@@ -805,6 +855,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       cancelAnimationFrame(rafId)
       gl.deleteVertexArray(vao)
       gl.deleteBuffer(posBuf)
+      gl.deleteTexture(patternTex)
       gl.deleteProgram(prog)
     }
   }, [stageRef, draggingAPRef, draggingWallRef, draggingScopeRef])

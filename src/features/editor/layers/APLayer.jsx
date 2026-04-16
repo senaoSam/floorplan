@@ -3,10 +3,26 @@ import { Group, Circle, Arc, Line, Text, Rect } from 'react-konva'
 import DeleteButton from './DeleteButton'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
 
 // Normalize azimuth to [0, 360) and beamwidth to [10, 180].
 const wrapAzimuth = (v) => (((v % 360) + 360) % 360)
 const clampBeamwidth = (v) => Math.max(10, Math.min(180, v))
+
+// Build polygon points for a custom antenna pattern, scaled to given outer radius.
+// minDb caps the smallest visible gain; samples index 0 points +x (azimuth-relative).
+function patternPolygonPoints(pattern, outerR, azimuthRad, minDb = -30) {
+  const samples = pattern.samples
+  const n = samples.length
+  const pts = []
+  for (let i = 0; i < n; i++) {
+    const db = Math.max(samples[i], minDb)
+    const r = ((db - minDb) / -minDb) * outerR
+    const ang = azimuthRad + i * (2 * Math.PI / n)
+    pts.push(r * Math.cos(ang), r * Math.sin(ang))
+  }
+  return pts
+}
 
 // 依頻段給顏色
 const FREQ_COLOR = {
@@ -28,6 +44,8 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
   const s = inverseScale * hoverMul
 
   const isDirectional = ap.antennaMode === 'directional'
+  const isCustom      = ap.antennaMode === 'custom'
+  const isOriented    = isDirectional || isCustom
   const azimuth       = wrapAzimuth(ap.azimuth ?? 0)
   const beamwidth     = clampBeamwidth(ap.beamwidth ?? 60)
   // Konva Arc: rotation 0° points to +x (right), sweeps clockwise for positive angle.
@@ -35,6 +53,8 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
   const arcStart = azimuth - beamwidth / 2
   const axisRad  = azimuth * Math.PI / 180
   const axisLen  = 40 * s
+  const customPattern = isCustom ? getPatternById(ap.patternId ?? DEFAULT_PATTERN_ID) : null
+  const customPts     = isCustom ? patternPolygonPoints(customPattern, 42 * s, axisRad) : null
 
   return (
     <Group
@@ -95,15 +115,29 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
               listening={false}
             />
           )}
-          {/* 方位中軸指示線 */}
-          <Line
-            points={[0, 0, Math.cos(axisRad) * axisLen, Math.sin(axisRad) * axisLen]}
-            stroke={isSelected ? '#e74c3c' : color}
-            strokeWidth={(isSelected ? 2 : 1.2) * s}
-            opacity={0.85}
-            listening={false}
-          />
         </>
+      )}
+      {/* 自訂 pattern：極座標輪廓（位於外環外側，朝 azimuth 旋轉） */}
+      {isCustom && customPts && (
+        <Line
+          points={customPts}
+          closed
+          fill={color}
+          opacity={isSelected ? 0.35 : (isHovered ? 0.28 : 0.2)}
+          stroke={color}
+          strokeWidth={(isSelected ? 1.2 : 0.8) * s}
+          listening={false}
+        />
+      )}
+      {/* 方位中軸指示線（directional / custom 共用） */}
+      {isOriented && (
+        <Line
+          points={[0, 0, Math.cos(axisRad) * axisLen, Math.sin(axisRad) * axisLen]}
+          stroke={isSelected ? '#e74c3c' : color}
+          strokeWidth={(isSelected ? 2 : 1.2) * s}
+          opacity={0.85}
+          listening={false}
+        />
       )}
       {/* hover 光暈 */}
       {isHovered && !isSelected && (
@@ -123,8 +157,8 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
         stroke={isHovered && !isSelected ? '#fff' : ringColor}
         strokeWidth={(isSelected || isHovered ? 3.5 : 2.5) * s}
       />
-      {/* 中央圖示：omni → WiFi 三層弧；directional → 方位箭頭 */}
-      {!isDirectional ? (
+      {/* 中央圖示：omni → WiFi 三層弧；directional / custom → 方位箭頭 */}
+      {!isOriented ? (
         [14, 9, 4].map((r, i) => (
           <Arc
             key={r}
@@ -155,7 +189,7 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
         </Group>
       )}
       {/* 中心點 */}
-      <Circle radius={3 * s} fill={color} offsetY={isDirectional ? 0 : 2.5 * s} />
+      <Circle radius={3 * s} fill={color} offsetY={isOriented ? 0 : 2.5 * s} />
       {/* 快速刪除按鈕 */}
       {isHovered && onDelete && (
         <DeleteButton

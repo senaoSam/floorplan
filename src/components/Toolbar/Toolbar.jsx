@@ -60,27 +60,6 @@ function Toolbar() {
         ))}
       </div>
 
-      <div className="toolbar__history">
-        <button
-          className="toolbar__btn"
-          onClick={undo}
-          disabled={undoLen === 0}
-          title="復原 (Ctrl+Z)"
-        >
-          <span className="toolbar__btn-icon">↩</span>
-          <span className="toolbar__btn-label">復原</span>
-        </button>
-        <button
-          className="toolbar__btn"
-          onClick={redo}
-          disabled={redoLen === 0}
-          title="重做 (Ctrl+Shift+Z)"
-        >
-          <span className="toolbar__btn-icon">↪</span>
-          <span className="toolbar__btn-label">重做</span>
-        </button>
-      </div>
-
       <div className="toolbar__actions">
         {/* 熱圖開關 */}
         <button
@@ -121,6 +100,27 @@ function Toolbar() {
             </select>
           </>
         )}
+
+        <div className="toolbar__history">
+          <button
+            className="toolbar__btn toolbar__btn--history"
+            onClick={undo}
+            disabled={undoLen === 0}
+            title="復原 (Ctrl+Z)"
+          >
+            <span className="toolbar__btn-icon">↩</span>
+            <span className="toolbar__btn-label">復原</span>
+          </button>
+          <button
+            className="toolbar__btn toolbar__btn--history"
+            onClick={redo}
+            disabled={redoLen === 0}
+            title="重做 (Ctrl+Shift+Z)"
+          >
+            <span className="toolbar__btn-icon">↪</span>
+            <span className="toolbar__btn-label">重做</span>
+          </button>
+        </div>
 
         <button
           className={`toolbar__view-btn${viewMode === VIEW_MODE.TWO_D ? ' toolbar__view-btn--active' : ''}`}

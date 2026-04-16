@@ -590,6 +590,7 @@ function Editor2D() {
         antennaMode: 'omni',
         azimuth: 0,
         beamwidth: 60,
+        patternId: null,
         mountType: 'ceiling',
         modelId: DEFAULT_AP_MODEL_ID,
         name: nextAPName(),
