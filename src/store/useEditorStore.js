@@ -48,6 +48,7 @@ export const useEditorStore = create((set, get) => ({
   showHeatmap: false,
   heatmapMode: HEATMAP_MODE.RSSI,
   pathLossExponent: 3.0, // 預設辦公室環境
+  regulatoryDomain: 'TW',
   panelCollapsed: false,
   showFloorImage: true,
   showScopes: true,
@@ -92,6 +93,7 @@ export const useEditorStore = create((set, get) => ({
   toggleHeatmap: () => set((s) => ({ showHeatmap: !s.showHeatmap })),
   setHeatmapMode: (mode) => set({ heatmapMode: mode }),
   setPathLossExponent: (n) => set({ pathLossExponent: n }),
+  setRegulatoryDomain: (id) => set({ regulatoryDomain: id }),
   togglePanelCollapsed: () => set((s) => ({ panelCollapsed: !s.panelCollapsed })),
   toggleLayer: (key) => set((s) => ({ [key]: !s[key] })),
 }))

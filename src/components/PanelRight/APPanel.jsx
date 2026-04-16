@@ -3,6 +3,8 @@ import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { AP_MODEL_LIST, DEFAULT_AP_MODEL_ID, getAPModelById } from '@/constants/apModels'
 import { ANTENNA_PATTERN_LIST, DEFAULT_PATTERN_ID, getPatternById } from '@/constants/antennaPatterns'
+import { channelEntries, isChannelAllowed, allowedChannels } from '@/constants/regulatoryDomains'
+import PatternPreview from './PatternPreview'
 import './APPanel.sass'
 
 const FREQ_OPTIONS = [
@@ -10,12 +12,6 @@ const FREQ_OPTIONS = [
   { value: 5,   label: '5 GHz',   color: '#4fc3f7' },
   { value: 6,   label: '6 GHz',   color: '#a855f7' },
 ]
-
-const CHANNEL_OPTIONS = {
-  2.4: [1, 6, 11],
-  5:   [36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144, 149, 153, 157, 161, 165],
-  6:   [1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49, 53, 57, 61, 65, 69, 73, 77, 81, 85, 89, 93],
-}
 
 const DEFAULT_CHANNEL = { 2.4: 1, 5: 36, 6: 1 }
 
@@ -30,48 +26,6 @@ const DEFAULT_BEAMWIDTH = 60
 const MIN_BEAMWIDTH     = 10
 const MAX_BEAMWIDTH     = 180
 
-// Polar preview of a custom antenna pattern. 36 dB samples → normalized radius.
-// Orientation: index 0 points right (+x), matching our azimuth convention.
-function PatternPreview({ pattern, color, azimuth = 0 }) {
-  const size = 96
-  const cx = size / 2
-  const cy = size / 2
-  const maxR = 38
-  const minDb = -30
-  const samples = pattern.samples
-  const n = samples.length
-  const pts = []
-  for (let i = 0; i < n; i++) {
-    const db = Math.max(samples[i], minDb)
-    const r = ((db - minDb) / -minDb) * maxR
-    const angDeg = i * (360 / n) + azimuth
-    const ang = angDeg * Math.PI / 180
-    pts.push(`${(cx + r * Math.cos(ang)).toFixed(2)},${(cy + r * Math.sin(ang)).toFixed(2)}`)
-  }
-  return (
-    <svg width={size} height={size} className="ap-panel__pattern-svg">
-      {/* -10/-20 dB rings */}
-      {[(1/3) * maxR, (2/3) * maxR, maxR].map((r, i) => (
-        <circle key={r} cx={cx} cy={cy} r={r} fill="none"
-          stroke={i === 2 ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)'}
-          strokeDasharray={i === 2 ? '' : '2 3'} strokeWidth="1" />
-      ))}
-      {/* crosshair */}
-      <line x1={cx - maxR} y1={cy} x2={cx + maxR} y2={cy} stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
-      <line x1={cx} y1={cy - maxR} x2={cx} y2={cy + maxR} stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
-      {/* pattern polygon */}
-      <polygon points={pts.join(' ')} fill={color} fillOpacity="0.3" stroke={color} strokeWidth="1.5" />
-      {/* bore-sight arrow */}
-      <line
-        x1={cx} y1={cy}
-        x2={cx + maxR * Math.cos(azimuth * Math.PI / 180)}
-        y2={cy + maxR * Math.sin(azimuth * Math.PI / 180)}
-        stroke={color} strokeWidth="1.5" strokeDasharray="3 2"
-      />
-    </svg>
-  )
-}
-
 const MOUNT_OPTIONS = [
   { value: 'ceiling', label: '天花板' },
   { value: 'wall',    label: '牆面' },
@@ -82,8 +36,15 @@ function APPanel({ floorId, apId }) {
   const updateAP    = useAPStore((s) => s.updateAP)
   const removeAP    = useAPStore((s) => s.removeAP)
   const clearSelected = useEditorStore((s) => s.clearSelected)
+  const domainId    = useEditorStore((s) => s.regulatoryDomain)
 
   const model = getAPModelById(ap?.modelId ?? DEFAULT_AP_MODEL_ID)
+
+  // Pick the first domain-allowed channel for a band; fall back to the historical default.
+  const firstAllowedChannel = useCallback((band) => {
+    const allowed = allowedChannels(domainId, band)
+    return allowed[0] ?? DEFAULT_CHANNEL[band] ?? 1
+  }, [domainId])
 
   const handleModel = useCallback((modelId) => {
     const newModel = getAPModelById(modelId)
@@ -94,25 +55,25 @@ function APPanel({ floorId, apId }) {
     const targetFreq = bandOk ? freq : newModel.supportedBands[0]
     if (!bandOk) {
       patch.frequency = targetFreq
-      patch.channel = DEFAULT_CHANNEL[targetFreq] ?? 1
+      patch.channel = firstAllowedChannel(targetFreq)
     }
     // Clamp txPower to new model's max for the target band.
     const maxTx = newModel.maxTxPower[targetFreq] ?? 23
     if (ap.txPower > maxTx) patch.txPower = maxTx
     updateAP(floorId, apId, patch)
-  }, [floorId, apId, ap, updateAP])
+  }, [floorId, apId, ap, updateAP, firstAllowedChannel])
 
   const handleField = useCallback((field, value) => {
     if (field === 'frequency') {
       if (!model.supportedBands.includes(value)) return
       const maxTx = model.maxTxPower[value] ?? 23
-      const patch = { frequency: value, channel: DEFAULT_CHANNEL[value] ?? 1 }
+      const patch = { frequency: value, channel: firstAllowedChannel(value) }
       if (ap.txPower > maxTx) patch.txPower = maxTx
       updateAP(floorId, apId, patch)
     } else {
       updateAP(floorId, apId, { [field]: value })
     }
-  }, [floorId, apId, ap, updateAP, model])
+  }, [floorId, apId, ap, updateAP, model, firstAllowedChannel])
 
   const handleNumber = useCallback((field, raw) => {
     const num = parseFloat(raw)
@@ -230,18 +191,37 @@ function APPanel({ floorId, apId }) {
       </section>
 
       {/* 頻道 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">頻道</p>
-        <select
-          className="ap-panel__input ap-panel__select"
-          value={ap.channel ?? DEFAULT_CHANNEL[ap.frequency] ?? 1}
-          onChange={(e) => handleField('channel', Number(e.target.value))}
-        >
-          {(CHANNEL_OPTIONS[ap.frequency] ?? []).map((ch) => (
-            <option key={ch} value={ch}>Ch {ch}</option>
-          ))}
-        </select>
-      </section>
+      {(() => {
+        const entries = channelEntries(domainId, ap.frequency)
+        const curCh = ap.channel ?? DEFAULT_CHANNEL[ap.frequency] ?? 1
+        const curAllowed = isChannelAllowed(domainId, ap.frequency, curCh)
+        return (
+          <section className="ap-panel__section">
+            <p className="ap-panel__label">
+              頻道
+              {!curAllowed && (
+                <span className="ap-panel__hint-inline">（當前國家不支援）</span>
+              )}
+            </p>
+            <select
+              className="ap-panel__input ap-panel__select"
+              value={curCh}
+              onChange={(e) => handleField('channel', Number(e.target.value))}
+            >
+              {!curAllowed && (
+                <option key={`cur-${curCh}`} value={curCh}>Ch {curCh}（不允許）</option>
+              )}
+              {entries.map((c) => (
+                <option key={c.ch} value={c.ch}>
+                  Ch {c.ch}
+                  {c.dfs ? '（DFS）' : ''}
+                  {c.indoorOnly ? '（室內）' : ''}
+                </option>
+              ))}
+            </select>
+          </section>
+        )
+      })()}
 
       {/* 發射功率 */}
       <section className="ap-panel__section">
@@ -271,6 +251,22 @@ function APPanel({ floorId, apId }) {
             disabled
           />
           <span className="ap-panel__unit">m</span>
+        </div>
+      </section>
+
+      {/* 安裝方式（3D 視圖開放後啟用） */}
+      <section className="ap-panel__section ap-panel__section--disabled" title="3D 視圖開放後啟用">
+        <p className="ap-panel__label">安裝方式 <span className="ap-panel__coming-soon">即將推出</span></p>
+        <div className="ap-panel__btn-group">
+          {MOUNT_OPTIONS.map((o) => (
+            <button
+              key={o.value}
+              className={`ap-panel__btn${ap.mountType === o.value ? ' ap-panel__btn--active' : ''}`}
+              disabled
+            >
+              {o.label}
+            </button>
+          ))}
         </div>
       </section>
 
@@ -365,22 +361,6 @@ function APPanel({ floorId, apId }) {
             </>
           )
         })()}
-      </section>
-
-      {/* 安裝方式（3D 視圖開放後啟用） */}
-      <section className="ap-panel__section ap-panel__section--disabled" title="3D 視圖開放後啟用">
-        <p className="ap-panel__label">安裝方式 <span className="ap-panel__coming-soon">即將推出</span></p>
-        <div className="ap-panel__btn-group">
-          {MOUNT_OPTIONS.map((o) => (
-            <button
-              key={o.value}
-              className={`ap-panel__btn${ap.mountType === o.value ? ' ap-panel__btn--active' : ''}`}
-              disabled
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
       </section>
 
       <button className="ap-panel__delete" onClick={handleDelete}>

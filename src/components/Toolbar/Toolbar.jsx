@@ -2,6 +2,7 @@ import React from 'react'
 import { useEditorStore, EDITOR_MODE, VIEW_MODE, HEATMAP_MODE, ENVIRONMENT_PRESETS } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
+import { REGULATORY_LIST } from '@/constants/regulatoryDomains'
 import './Toolbar.sass'
 
 const TOOLS = [
@@ -33,8 +34,8 @@ const ENV_OPTIONS = Object.entries(ENVIRONMENT_PRESETS).map(([key, val]) => ({
 }))
 
 function Toolbar() {
-  const { editorMode, viewMode, showHeatmap, heatmapMode, pathLossExponent,
-          setEditorMode, setViewMode, toggleHeatmap, setHeatmapMode, setPathLossExponent } = useEditorStore()
+  const { editorMode, viewMode, showHeatmap, heatmapMode, pathLossExponent, regulatoryDomain,
+          setEditorMode, setViewMode, toggleHeatmap, setHeatmapMode, setPathLossExponent, setRegulatoryDomain } = useEditorStore()
   const floorScale = useFloorStore((s) => s.scale)
   const hasScale = !!floorScale
   const undoLen = useHistoryStore((s) => s.undoStack.length)
@@ -61,6 +62,18 @@ function Toolbar() {
       </div>
 
       <div className="toolbar__actions">
+        {/* 國家頻段 */}
+        <select
+          className="toolbar__select"
+          value={regulatoryDomain}
+          onChange={(e) => setRegulatoryDomain(e.target.value)}
+          title="國家頻段規範"
+        >
+          {REGULATORY_LIST.map((d) => (
+            <option key={d.id} value={d.id}>{d.label}</option>
+          ))}
+        </select>
+
         {/* 熱圖開關 */}
         <button
           className={`toolbar__heatmap-btn${showHeatmap ? ' toolbar__heatmap-btn--active' : ''}`}
