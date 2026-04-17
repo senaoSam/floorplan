@@ -1140,6 +1140,9 @@ function Editor2D() {
       )}
 
       {floors.length > 0 && (
+        // pointerEvents:'none' on wrappers so the empty gaps between floating
+        // panels don't eat canvas clicks (e.g. AP placement). Each child panel
+        // re-enables pointer events on itself.
         <div style={{
           position: 'absolute',
           top: 12,
@@ -1149,12 +1152,13 @@ function Editor2D() {
           flexDirection: 'column',
           gap: 8,
           alignItems: 'flex-start',
+          pointerEvents: 'none',
         }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-            <LayerToggle />
-            <DevicePlanningPanel />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', pointerEvents: 'none' }}>
+            <div style={{ pointerEvents: 'auto' }}><LayerToggle /></div>
+            <div style={{ pointerEvents: 'auto' }}><DevicePlanningPanel /></div>
           </div>
-          <RegulatorySelector />
+          <div style={{ pointerEvents: 'auto' }}><RegulatorySelector /></div>
         </div>
       )}
 
