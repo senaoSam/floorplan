@@ -14,6 +14,7 @@ import { greedyChannelAssign } from '@/utils/autoChannelPlan'
 import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
 import FloorImageLayer from './layers/FloorImageLayer'
 import RefWallLayer from './layers/RefWallLayer'
+import RefVectorLayer from './layers/RefVectorLayer'
 import WallLayer from './layers/WallLayer'
 import { getFloorColor } from '@/utils/floorColor'
 import APLayer from './layers/APLayer'
@@ -991,6 +992,7 @@ function Editor2D() {
                   />
                   <Layer {...alignLayerProps(f)} listening={false}>
                     <RefWallLayer floorId={f.id} color={color} opacity={Math.min(1, alignRefOpacity + 0.3)} />
+                    <RefVectorLayer floorId={f.id} color={color} opacity={Math.min(1, alignRefOpacity + 0.3)} />
                   </Layer>
                 </React.Fragment>
               )

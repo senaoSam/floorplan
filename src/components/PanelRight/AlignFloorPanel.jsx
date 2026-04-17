@@ -98,6 +98,25 @@ function AlignFloorPanel({ floorId }) {
                 onChange={(e) => setAlignRefOpacity(parseFloat(e.target.value))}
               />
             </div>
+
+            {refIds.length > 0 && (
+              // [REF-OVERLAY-TYPE] 新增可疊影物件類型時同步新增圖例（grep 標籤可找到所有擴充點）
+              <div className="align-floor-panel__legend">
+                <div className="align-floor-panel__legend-title">疊影元素</div>
+                <div className="align-floor-panel__legend-grid">
+                  <span className="align-floor-panel__legend-swatch align-floor-panel__legend-swatch--image" />
+                  <span>平面圖</span>
+                  <span className="align-floor-panel__legend-swatch align-floor-panel__legend-swatch--wall" />
+                  <span>牆體（實線）</span>
+                  <span className="align-floor-panel__legend-swatch align-floor-panel__legend-swatch--scope" />
+                  <span>範圍（虛線）</span>
+                  <span className="align-floor-panel__legend-swatch align-floor-panel__legend-swatch--hole" />
+                  <span>中庭（實線框）</span>
+                  <span className="align-floor-panel__legend-swatch align-floor-panel__legend-swatch--ap" />
+                  <span>AP（圈點）</span>
+                </div>
+              </div>
+            )}
           </>
         )}
       </section>

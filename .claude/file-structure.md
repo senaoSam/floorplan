@@ -193,6 +193,7 @@ src/features/
     layers/
       FloorImageLayer.jsx     # 平面圖圖層：旋轉/透明度/裁切 clipping，點擊選取
       RefWallLayer.jsx        # 對齊模式：參考樓層的牆體輪廓（tint、不互動）
+      RefVectorLayer.jsx      # 對齊模式：參考樓層的 AP / Scope / Floor Hole 輪廓（tint、不互動）
       WallLayer.jsx           # 牆體圖層：線段繪製 + 端點把手 + 材質顏色、拖曳吸附、刪除按鈕
       APLayer.jsx             # AP 圖層：同心圓(頻段色碼 2.4G=橘, 5G=青, 6G=紫)、拖曳移動、標籤
       ScopeLayer.jsx          # 範圍圖層：多邊形繪製(in=綠, out=紅)、第一點吸附、刪除
