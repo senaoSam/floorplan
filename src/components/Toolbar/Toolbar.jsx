@@ -4,6 +4,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
+import { greedyPowerAssign } from '@/utils/autoPowerPlan'
 import './Toolbar.sass'
 
 const TOOL_GROUPS = [
@@ -28,12 +29,13 @@ const TOOL_GROUPS = [
 ]
 
 function Toolbar() {
-  const { editorMode, viewMode, regulatoryDomain, autoChannelOnPlace, setEditorMode, setViewMode, toggleAutoChannelOnPlace } = useEditorStore()
+  const { editorMode, viewMode, regulatoryDomain, autoChannelOnPlace, pathLossExponent, setEditorMode, setViewMode, toggleAutoChannelOnPlace } = useEditorStore()
   const undoLen = useHistoryStore((s) => s.undoStack.length)
   const redoLen = useHistoryStore((s) => s.redoStack.length)
   const undo = useHistoryStore((s) => s.undo)
   const redo = useHistoryStore((s) => s.redo)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
+  const floorScale = useFloorStore((s) => s.scale)
   const apsByFloor = useAPStore((s) => s.apsByFloor)
   const setAPs = useAPStore((s) => s.setAPs)
 
@@ -44,6 +46,17 @@ function Toolbar() {
     const updated = aps.map((ap) => {
       const a = assignments.get(ap.id)
       return a ? { ...ap, channel: a.channel } : ap
+    })
+    setAPs(activeFloorId, updated)
+  }
+
+  function handleAutoPower() {
+    const aps = apsByFloor[activeFloorId] ?? []
+    if (aps.length === 0 || !floorScale) return
+    const assignments = greedyPowerAssign(aps, floorScale, pathLossExponent)
+    const updated = aps.map((ap) => {
+      const a = assignments.get(ap.id)
+      return a ? { ...ap, txPower: a.txPower } : ap
     })
     setAPs(activeFloorId, updated)
   }
@@ -94,6 +107,19 @@ function Toolbar() {
             自動
           </label>
         </div>
+
+        <button
+          className="toolbar__auto-pw-btn"
+          onClick={handleAutoPower}
+          disabled={apsOnFloor === 0 || !floorScale}
+          title={
+            !floorScale
+              ? '需先設定比例尺才能進行功率規劃'
+              : '自動功率規劃：依最近鄰 AP 距離反推最小覆蓋功率（目標 −67 dBm）'
+          }
+        >
+          ⚡ 自動功率
+        </button>
 
         <div className="toolbar__history">
           <button

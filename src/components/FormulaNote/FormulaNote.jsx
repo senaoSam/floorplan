@@ -114,6 +114,18 @@ const SECTIONS = [
     ],
   },
   {
+    title: '自動功率規劃（Min-Power Cell Overlap）',
+    rows: [
+      { label: '公式', value: 'P_tx = RSSI_target − G_ant + PL(d_nearest)' },
+      { label: 'RSSI_target', value: '目標邊緣覆蓋強度（預設 −67 dBm，Cisco 語音等級）' },
+      { label: 'G_ant', value: 'AP 模型在該頻段的天線增益（dBi）' },
+      { label: 'PL', value: '套用 Log-Distance 公式，距離 = 同頻段最近 AP 的公尺距離' },
+      { label: 'd_nearest', value: '取相同頻段鄰居 AP；孤立 AP（無鄰居）→ 使用模型最大功率' },
+      { label: '範圍', value: '結果夾限於 [5 dBm, 模型 maxTxPower]，四捨五入到整數' },
+      { label: '前提', value: '需已設定比例尺（floor.scale）才能將畫布像素換算為公尺' },
+    ],
+  },
+  {
     title: '比例尺校正',
     rows: [
       { label: '公式', value: 'scale(px/m) = 像素距離 / 實際距離(m)' },
