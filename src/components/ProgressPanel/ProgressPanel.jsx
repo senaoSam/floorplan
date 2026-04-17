@@ -127,75 +127,91 @@ const PHASES = [
     ],
   },
   {
-    phase: 'Phase 5 — 網路基礎設施',
+    phase: 'Phase 5 — 效能優化',
     groups: [
       {
-        layer: 'Layer 10 — Switch & PoE',
+        layer: 'Layer PERF — 拖曳流暢度 & 熱圖即時性',
         items: [
-          { id: '10-1', done: false, text: 'Switch 放置與屬性面板' },
-          { id: '10-2', done: false, text: 'AP ↔ Switch 連線' },
-          { id: '10-3', done: false, text: 'PoE 電力預算 + 過載警告' },
-          { id: '10-4', done: false, text: 'MDF / IDF 堆疊設定' },
-        ],
-      },
-      {
-        layer: 'Layer 11 — 走線管路',
-        items: [
-          { id: '11-1', done: false, text: 'Cable Tray 路徑繪製' },
-          { id: '11-2', done: false, text: '自動計算線長' },
-          { id: '11-3', done: false, text: 'Cable Riser 垂直升降點' },
-        ],
-      },
-      {
-        layer: 'Layer 12 — 多設備支援',
-        items: [
-          { id: '12-1', done: false, text: 'IPCam 放置與屬性面板' },
-          { id: '12-2', done: false, text: 'Gateway 放置與屬性面板' },
-          { id: '12-3', done: false, text: '通用 IoT 設備放置' },
+          { id: 'P-1', done: false, text: 'AP 拖曳 RAF buffer（放開才提交 store）' },
+          { id: 'P-2', done: false, text: 'AP 拖曳時 Heatmap 低頻 preview（100~150ms）' },
+          { id: 'P-3', done: false, text: 'WebGL Heatmap dirty-check 閾值放寬（≥1px）' },
+          { id: 'P-4', done: false, text: 'History snapshot 非阻塞 + flushPending' },
+          { id: 'P-5', done: false, text: 'WallLayer snap bounding box 過濾' },
+          { id: 'P-6', done: false, text: 'Editor2D 鍵盤 effect 依賴穩定化' },
         ],
       },
     ],
   },
   {
-    phase: 'Phase 6 — 容量規劃 & Client 模擬',
+    phase: 'Phase 6 — 3D 視圖',
     groups: [
       {
-        layer: 'Layer 13 — 容量規劃',
+        layer: 'Layer 10 — 3D 視覺化',
         items: [
-          { id: '13-1', done: false, text: '容量區域繪製 + 子區域' },
-          { id: '13-2', done: false, text: '區域 client 數與頻段分佈設定' },
-          { id: '13-3', done: false, text: 'AP radio 負載視覺化' },
-          { id: '13-4', done: false, text: '6 GHz client 比例調整' },
-        ],
-      },
-      {
-        layer: 'Layer 14 — Client 體驗模擬',
-        items: [
-          { id: '14-1', done: false, text: 'Client 裝置類型設定' },
-          { id: '14-2', done: false, text: 'Client 連線品質模擬（MCS）' },
-          { id: '14-3', done: false, text: 'Client 漫遊路徑視覺化' },
-          { id: '14-4', done: false, text: 'Wi-Fi 6E / Wi-Fi 7 模擬' },
+          { id: '10-1', done: false, text: 'R3F 基礎場景（平面圖貼圖）' },
+          { id: '10-2', done: false, text: '3D 牆體生成' },
+          { id: '10-3', done: false, text: '3D AP 標記' },
+          { id: '10-4', done: false, text: '3D Scope / Floor Hole 視覺化' },
+          { id: '10-5', done: false, text: '3D 多樓層堆疊 + 訊號穿透視覺化' },
         ],
       },
     ],
   },
   {
-    phase: 'Phase 7 — 3D 視圖',
+    phase: 'Phase 7 — 網路基礎設施',
     groups: [
       {
-        layer: 'Layer 15 — 3D 視覺化',
+        layer: 'Layer 11 — Switch & PoE',
         items: [
-          { id: '15-1', done: false, text: 'R3F 基礎場景（平面圖貼圖）' },
-          { id: '15-2', done: false, text: '3D 牆體生成' },
-          { id: '15-3', done: false, text: '3D AP 標記' },
-          { id: '15-4', done: false, text: '3D Scope / Floor Hole 視覺化' },
-          { id: '15-5', done: false, text: '3D 多樓層堆疊 + 訊號穿透視覺化' },
+          { id: '11-1', done: false, text: 'Switch 放置與屬性面板' },
+          { id: '11-2', done: false, text: 'AP ↔ Switch 連線' },
+          { id: '11-3', done: false, text: 'PoE 電力預算 + 過載警告' },
+          { id: '11-4', done: false, text: 'MDF / IDF 堆疊設定' },
+        ],
+      },
+      {
+        layer: 'Layer 12 — 走線管路',
+        items: [
+          { id: '12-1', done: false, text: 'Cable Tray 路徑繪製' },
+          { id: '12-2', done: false, text: '自動計算線長' },
+          { id: '12-3', done: false, text: 'Cable Riser 垂直升降點' },
+        ],
+      },
+      {
+        layer: 'Layer 13 — 多設備支援',
+        items: [
+          { id: '13-1', done: false, text: 'IPCam 放置與屬性面板' },
+          { id: '13-2', done: false, text: 'Gateway 放置與屬性面板' },
+          { id: '13-3', done: false, text: '通用 IoT 設備放置' },
         ],
       },
     ],
   },
   {
-    phase: 'Phase 8 — AI 輔助 & 進階視覺化',
+    phase: 'Phase 8 — 容量規劃 & Client 模擬',
+    groups: [
+      {
+        layer: 'Layer 14 — 容量規劃',
+        items: [
+          { id: '14-1', done: false, text: '容量區域繪製 + 子區域' },
+          { id: '14-2', done: false, text: '區域 client 數與頻段分佈設定' },
+          { id: '14-3', done: false, text: 'AP radio 負載視覺化' },
+          { id: '14-4', done: false, text: '6 GHz client 比例調整' },
+        ],
+      },
+      {
+        layer: 'Layer 15 — Client 體驗模擬',
+        items: [
+          { id: '15-1', done: false, text: 'Client 裝置類型設定' },
+          { id: '15-2', done: false, text: 'Client 連線品質模擬（MCS）' },
+          { id: '15-3', done: false, text: 'Client 漫遊路徑視覺化' },
+          { id: '15-4', done: false, text: 'Wi-Fi 6E / Wi-Fi 7 模擬' },
+        ],
+      },
+    ],
+  },
+  {
+    phase: 'Phase 9 — AI 輔助 & 進階視覺化',
     groups: [
       {
         layer: 'Layer 16 — AI 自動化',
