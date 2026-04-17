@@ -1,35 +1,227 @@
-import React from 'react'
+import React, { useRef, useState, useEffect } from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
+import { useWallStore } from '@/store/useWallStore'
+import { useAPStore } from '@/store/useAPStore'
+import { useScopeStore } from '@/store/useScopeStore'
+import { useFloorHoleStore } from '@/store/useFloorHoleStore'
+import { useFloorImport } from '@/features/importer/useFloorImport'
+import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import './SidebarLeft.sass'
 
 function SidebarLeft() {
-  const { floors, activeFloorId, setActiveFloor } = useFloorStore()
+  const floors          = useFloorStore((s) => s.floors)
+  const activeFloorId   = useFloorStore((s) => s.activeFloorId)
+  const setActiveFloor  = useFloorStore((s) => s.setActiveFloor)
+  const updateFloor     = useFloorStore((s) => s.updateFloor)
+  const removeFloor     = useFloorStore((s) => s.removeFloor)
+  const reorderFloors   = useFloorStore((s) => s.reorderFloors)
+  const clearWalls      = useWallStore((s) => s.clearFloor)
+  const clearAPs        = useAPStore((s) => s.clearFloor)
+  const clearScopes     = useScopeStore((s) => s.clearFloor)
+  const clearHoles      = useFloorHoleStore((s) => s.clearFloor)
+
+  const { processFile, isLoading, loadingMsg } = useFloorImport()
+  const fileInputRef = useRef(null)
+
+  // Rename inline state; null = not editing.
+  const [editingId, setEditingId]   = useState(null)
+  const [editingName, setEditingName] = useState('')
+  const editInputRef = useRef(null)
+
+  // Menu popover per floor (⋯ button).
+  const [menuOpenId, setMenuOpenId] = useState(null)
+
+  // Pending removal — null = no dialog open, otherwise the floor object to remove.
+  const [pendingRemove, setPendingRemove] = useState(null)
+
+  // Drag-and-drop reorder.
+  const [dragIndex, setDragIndex] = useState(null)
+  const [dropIndex, setDropIndex] = useState(null)
+
+  useEffect(() => {
+    if (editingId && editInputRef.current) {
+      editInputRef.current.select()
+    }
+  }, [editingId])
+
+  // Close menu on any outside click.
+  useEffect(() => {
+    if (!menuOpenId) return
+    const onDocClick = () => setMenuOpenId(null)
+    // Defer attachment so the click that opened the menu doesn't immediately close it.
+    const t = setTimeout(() => document.addEventListener('click', onDocClick), 0)
+    return () => { clearTimeout(t); document.removeEventListener('click', onDocClick) }
+  }, [menuOpenId])
+
+  const handleAddClick = () => {
+    if (isLoading) return
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = (e) => {
+    processFile(e.target.files?.[0])
+    e.target.value = ''
+  }
+
+  const startRename = (floor) => {
+    setEditingId(floor.id)
+    setEditingName(floor.name)
+    setMenuOpenId(null)
+  }
+
+  const commitRename = () => {
+    const name = editingName.trim()
+    if (editingId && name) updateFloor(editingId, { name })
+    setEditingId(null)
+  }
+
+  const cancelRename = () => setEditingId(null)
+
+  const requestRemove = (floor) => {
+    setMenuOpenId(null)
+    setPendingRemove(floor)
+  }
+
+  const confirmRemove = () => {
+    const floor = pendingRemove
+    if (!floor) return
+    // Free the imported image blob URL (createObjectURL) before discarding the floor.
+    if (floor.imageUrl?.startsWith('blob:')) {
+      try { URL.revokeObjectURL(floor.imageUrl) } catch {}
+    }
+    clearWalls(floor.id)
+    clearAPs(floor.id)
+    clearScopes(floor.id)
+    clearHoles(floor.id)
+    removeFloor(floor.id)
+    setPendingRemove(null)
+  }
+
+  const handleDragStart = (e, idx) => {
+    setDragIndex(idx)
+    e.dataTransfer.effectAllowed = 'move'
+    // Firefox requires some data to be set, else drag aborts immediately.
+    e.dataTransfer.setData('text/plain', String(idx))
+  }
+
+  const handleDragOver = (e, idx) => {
+    if (dragIndex === null) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDropIndex(idx)
+  }
+
+  const handleDrop = (e, idx) => {
+    e.preventDefault()
+    if (dragIndex !== null && dragIndex !== idx) {
+      reorderFloors(dragIndex, idx)
+    }
+    setDragIndex(null); setDropIndex(null)
+  }
+
+  const handleDragEnd = () => { setDragIndex(null); setDropIndex(null) }
 
   return (
     <aside className="sidebar-left">
       <section className="sidebar-left__section">
         <div className="sidebar-left__section-header">
-          <span>樓層</span>
-          <button className="sidebar-left__icon-btn" title="新增樓層">＋</button>
+          <span>樓層{isLoading && <span className="sidebar-left__loading-badge">{loadingMsg}</span>}</span>
+          <button
+            className="sidebar-left__icon-btn"
+            title="新增樓層（匯入平面圖）"
+            onClick={handleAddClick}
+            disabled={isLoading}
+          >
+            ＋
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".png,.jpg,.jpeg,.pdf"
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+          />
         </div>
 
         <ul className="sidebar-left__floor-list">
           {floors.length === 0 && (
             <li className="sidebar-left__empty">尚未匯入平面圖</li>
           )}
-          {floors.map((floor) => (
-            <li
-              key={floor.id}
-              className={`sidebar-left__floor-item${activeFloorId === floor.id ? ' sidebar-left__floor-item--active' : ''}`}
-              onClick={() => setActiveFloor(floor.id)}
-            >
-              <span className="sidebar-left__floor-icon">▣</span>
-              <span className="sidebar-left__floor-name">{floor.name}</span>
-            </li>
-          ))}
+          {floors.map((floor, idx) => {
+            const isActive = activeFloorId === floor.id
+            const isEditing = editingId === floor.id
+            const isMenuOpen = menuOpenId === floor.id
+            const isDragOver = dropIndex === idx && dragIndex !== null && dragIndex !== idx
+            return (
+              <li
+                key={floor.id}
+                className={[
+                  'sidebar-left__floor-item',
+                  isActive ? 'sidebar-left__floor-item--active' : '',
+                  isDragOver ? 'sidebar-left__floor-item--drop-target' : '',
+                ].filter(Boolean).join(' ')}
+                onClick={() => !isEditing && setActiveFloor(floor.id)}
+                draggable={!isEditing}
+                onDragStart={(e) => handleDragStart(e, idx)}
+                onDragOver={(e) => handleDragOver(e, idx)}
+                onDrop={(e) => handleDrop(e, idx)}
+                onDragEnd={handleDragEnd}
+              >
+                <span className="sidebar-left__floor-icon">▣</span>
+                {isEditing ? (
+                  <input
+                    ref={editInputRef}
+                    className="sidebar-left__floor-rename"
+                    value={editingName}
+                    onChange={(e) => setEditingName(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter')  commitRename()
+                      if (e.key === 'Escape') cancelRename()
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <span className="sidebar-left__floor-name">{floor.name}</span>
+                )}
+                {!isEditing && (
+                  <button
+                    className="sidebar-left__floor-menu-btn"
+                    title="選項"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setMenuOpenId(isMenuOpen ? null : floor.id)
+                    }}
+                  >
+                    ⋯
+                  </button>
+                )}
+                {isMenuOpen && (
+                  <div
+                    className="sidebar-left__floor-menu"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button className="sidebar-left__menu-item" onClick={() => startRename(floor)}>重新命名</button>
+                    <button className="sidebar-left__menu-item sidebar-left__menu-item--danger" onClick={() => requestRemove(floor)}>刪除樓層</button>
+                  </div>
+                )}
+              </li>
+            )
+          })}
         </ul>
       </section>
 
+      {pendingRemove && (
+        <ConfirmDialog
+          title="刪除樓層"
+          message={`確定要刪除「${pendingRemove.name}」？其上的牆體、AP、範圍等資料會一併移除，且此操作無法復原。`}
+          confirmLabel="刪除"
+          cancelLabel="取消"
+          danger
+          onConfirm={confirmRemove}
+          onCancel={() => setPendingRemove(null)}
+        />
+      )}
     </aside>
   )
 }

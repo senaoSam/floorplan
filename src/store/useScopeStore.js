@@ -53,4 +53,10 @@ export const useScopeStore = create((set) => ({
         },
       }
     }),
+
+  clearFloor: (floorId) =>
+    set((state) => {
+      const { [floorId]: _, ...rest } = state.scopesByFloor
+      return { scopesByFloor: rest }
+    }),
 }))

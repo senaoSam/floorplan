@@ -1,0 +1,72 @@
+@use '@/styles/variables' as *
+
+.confirm-dialog-overlay
+  position: fixed
+  inset: 0
+  z-index: 1000
+  display: flex
+  align-items: center
+  justify-content: center
+  background: rgba(0, 0, 0, 0.5)
+  backdrop-filter: blur(2px)
+
+.confirm-dialog
+  background: $bg-secondary
+  border: 1px solid $border-color
+  border-radius: 10px
+  padding: 20px 24px
+  min-width: 300px
+  max-width: 420px
+  display: flex
+  flex-direction: column
+  gap: 10px
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4)
+
+  &__title
+    font-size: 15px
+    font-weight: 600
+    color: $text-primary
+
+  &__message
+    font-size: 13px
+    color: $text-secondary
+    line-height: 1.5
+
+  &__actions
+    display: flex
+    gap: 8px
+    justify-content: flex-end
+    margin-top: 6px
+
+  &__btn
+    padding: 6px 16px
+    border-radius: 6px
+    border: none
+    font-size: 13px
+    cursor: pointer
+    transition: opacity 0.15s, background 0.15s
+
+    &:focus
+      outline: 2px solid rgba(255, 255, 255, 0.25)
+      outline-offset: 1px
+
+    &--cancel
+      background: rgba(255, 255, 255, 0.08)
+      color: $text-secondary
+
+      &:hover
+        background: rgba(255, 255, 255, 0.12)
+
+    &--confirm
+      background: $accent
+      color: #fff
+
+      &:hover
+        opacity: 0.85
+
+    &--danger
+      background: #e74c3c
+      color: #fff
+
+      &:hover
+        background: #c0392b

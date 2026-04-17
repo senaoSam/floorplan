@@ -69,4 +69,10 @@ export const useAPStore = create((set, get) => ({
     set((state) => ({
       apsByFloor: { ...state.apsByFloor, [floorId]: aps },
     })),
+
+  clearFloor: (floorId) =>
+    set((state) => {
+      const { [floorId]: _, ...rest } = state.apsByFloor
+      return { apsByFloor: rest }
+    }),
 }))

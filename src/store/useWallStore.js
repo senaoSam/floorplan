@@ -63,6 +63,12 @@ export const useWallStore = create((set, get) => ({
       wallsByFloor: { ...state.wallsByFloor, [floorId]: walls },
     })),
 
+  clearFloor: (floorId) =>
+    set((state) => {
+      const { [floorId]: _, ...rest } = state.wallsByFloor
+      return { wallsByFloor: rest }
+    }),
+
   // ── 門窗 openings ──────────────────────────────────────
   // Opening: { id, type: 'door'|'window', startFrac, endFrac, material, topHeight, bottomHeight }
   // startFrac/endFrac: 0~1 沿牆體方向的比例位置

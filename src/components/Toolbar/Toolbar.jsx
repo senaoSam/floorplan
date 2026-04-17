@@ -35,7 +35,7 @@ function Toolbar() {
   const undo = useHistoryStore((s) => s.undo)
   const redo = useHistoryStore((s) => s.redo)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
-  const floorScale = useFloorStore((s) => s.scale)
+  const floorScale = useFloorStore((s) => s.floors.find((f) => f.id === s.activeFloorId)?.scale ?? null)
   const apsByFloor = useAPStore((s) => s.apsByFloor)
   const setAPs = useAPStore((s) => s.setAPs)
 

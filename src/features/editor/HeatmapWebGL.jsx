@@ -523,7 +523,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
   const heatmapMode      = useEditorStore((s) => s.heatmapMode)
   const pathLossExponent = useEditorStore((s) => s.pathLossExponent)
   const activeFloorId    = useFloorStore((s) => s.activeFloorId)
-  const floorScale       = useFloorStore((s) => s.scale)
+  const floorScale       = useFloorStore((s) => s.floors.find((f) => f.id === s.activeFloorId)?.scale ?? null)
 
   const showHeatmapRef      = useRef(showHeatmap)
   const heatmapModeRef      = useRef(heatmapMode)

@@ -28,7 +28,7 @@ function HeatmapControl({ legends }) {
   const toggleHeatmap     = useEditorStore((s) => s.toggleHeatmap)
   const setHeatmapMode    = useEditorStore((s) => s.setHeatmapMode)
   const setPathLossExp    = useEditorStore((s) => s.setPathLossExponent)
-  const floorScale        = useFloorStore((s) => s.scale)
+  const floorScale        = useFloorStore((s) => s.floors.find((f) => f.id === s.activeFloorId)?.scale ?? null)
   const hasScale = !!floorScale
 
   const envKey = ENV_OPTIONS.find((x) => Math.abs(x.n - pathLossExponent) < 0.05)?.key || 'OFFICE'

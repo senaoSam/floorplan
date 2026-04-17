@@ -43,6 +43,18 @@
       background: rgba(255, 255, 255, 0.08)
       color: $text-primary
 
+    &:disabled
+      opacity: 0.4
+      cursor: not-allowed
+
+  &__loading-badge
+    margin-left: 8px
+    font-size: 10px
+    font-weight: 400
+    color: $accent
+    text-transform: none
+    letter-spacing: 0
+
   &__floor-list,
   &__layer-list
     list-style: none
@@ -55,6 +67,7 @@
     text-align: center
 
   &__floor-item
+    position: relative
     display: flex
     align-items: center
     gap: 8px
@@ -69,9 +82,15 @@
       background: rgba(255, 255, 255, 0.06)
       color: $text-primary
 
+      .sidebar-left__floor-menu-btn
+        opacity: 1
+
     &--active
       background: rgba($accent, 0.12)
       color: $text-primary
+
+    &--drop-target
+      box-shadow: inset 0 2px 0 $accent
 
   &__floor-icon
     font-size: 12px
@@ -82,6 +101,70 @@
     overflow: hidden
     text-overflow: ellipsis
     white-space: nowrap
+
+  &__floor-rename
+    flex: 1
+    background: rgba(0, 0, 0, 0.3)
+    border: 1px solid $accent
+    border-radius: 4px
+    color: $text-primary
+    font-size: 13px
+    padding: 2px 6px
+    outline: none
+    min-width: 0
+
+  &__floor-menu-btn
+    width: 20px
+    height: 20px
+    border: none
+    border-radius: 4px
+    background: transparent
+    color: $text-secondary
+    cursor: pointer
+    font-size: 14px
+    line-height: 1
+    opacity: 0
+    flex-shrink: 0
+    display: flex
+    align-items: center
+    justify-content: center
+
+    &:hover
+      background: rgba(255, 255, 255, 0.12)
+      color: $text-primary
+
+  &__floor-menu
+    position: absolute
+    top: 100%
+    right: 4px
+    margin-top: 2px
+    min-width: 120px
+    background: $bg-secondary
+    border: 1px solid $border-color
+    border-radius: 6px
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35)
+    z-index: 20
+    padding: 4px 0
+    display: flex
+    flex-direction: column
+
+  &__menu-item
+    text-align: left
+    padding: 6px 12px
+    background: transparent
+    border: none
+    color: $text-primary
+    font-size: 12px
+    cursor: pointer
+
+    &:hover
+      background: rgba(255, 255, 255, 0.08)
+
+    &--danger
+      color: #ff6b6b
+
+      &:hover
+        background: rgba(255, 107, 107, 0.12)
 
   &__layer-item
     display: flex

@@ -96,7 +96,7 @@ function Editor2D() {
   const activeFloorId  = useFloorStore((s) => s.activeFloorId)
   const getActiveFloor = useFloorStore((s) => s.getActiveFloor)
   const updateFloor    = useFloorStore((s) => s.updateFloor)
-  const setScale       = useFloorStore((s) => s.setScale)
+  const setFloorScale  = useFloorStore((s) => s.setFloorScale)
   const activeFloor    = getActiveFloor()
 
   const addWall    = useWallStore((s) => s.addWall)
@@ -171,23 +171,45 @@ function Editor2D() {
     return () => { observer.disconnect(); if (rafId) cancelAnimationFrame(rafId) }
   }, [])
 
-  // ── 切換樓層 fit-to-screen ─────────────────────────────
+  // ── 切換樓層：保留 viewport（初次則 fit-to-screen）──────
+  // Per-floor viewport cache. Only populated after a floor has been fitted at
+  // least once, so the initial `{0,0,1}` viewport never leaks into the cache.
+  const viewportByFloorRef = useRef({})  // { [floorId]: {x,y,scale} }
+
+  // Mirror viewport into the cache, but only for floors that have already
+  // been fitted. This way an unfitted floor keeps no cache entry and the
+  // fit-to-screen branch below runs on its first view.
   useEffect(() => {
-    // 切換樓層時清除繪製中狀態
+    if (activeFloorId && viewportByFloorRef.current[activeFloorId]) {
+      viewportByFloorRef.current[activeFloorId] = viewport
+    }
+  }, [viewport, activeFloorId])
+
+  useEffect(() => {
+    // Clear in-progress drawing state on every floor switch.
     setScalePt1(null); setScalePt2(null); setShowScaleDialog(false)
     setWallDrawStart(null); setScopePoints([]); setFloorHolePoints([])
     setCropStart(null)
 
     if (!activeFloor?.imageUrl || size.width === 0) return
+
+    const cached = viewportByFloorRef.current[activeFloorId]
+    if (cached) {
+      setViewport(cached)
+      return
+    }
+
     const scaleX = (size.width  * FIT_PADDING) / activeFloor.imageWidth
     const scaleY = (size.height * FIT_PADDING) / activeFloor.imageHeight
     const scale  = Math.min(scaleX, scaleY)
-    setViewport({
+    const fitted = {
       scale,
       x: (size.width  - activeFloor.imageWidth  * scale) / 2,
       y: (size.height - activeFloor.imageHeight * scale) / 2,
-    })
-  }, [activeFloorId])
+    }
+    viewportByFloorRef.current[activeFloorId] = fitted
+    setViewport(fitted)
+  }, [activeFloorId, size.width, size.height])
 
   // ── 鍵盤事件 ───────────────────────────────────────────
   const removeWall  = useWallStore((s) => s.removeWall)
@@ -754,13 +776,13 @@ function Editor2D() {
   }
 
   const handleScaleConfirm = useCallback((meters) => {
-    if (!scalePt1 || !scalePt2) return
+    if (!scalePt1 || !scalePt2 || !activeFloorId) return
     const dist = Math.hypot(scalePt2.x - scalePt1.x, scalePt2.y - scalePt1.y)
     if (dist < 1) return
-    setScale(dist / meters)
+    setFloorScale(activeFloorId, dist / meters)
     resetScale()
     setEditorMode(EDITOR_MODE.SELECT)
-  }, [scalePt1, scalePt2, setScale, setEditorMode])
+  }, [scalePt1, scalePt2, activeFloorId, setFloorScale, setEditorMode])
 
   const handleScaleCancel = () => { resetScale(); setEditorMode(EDITOR_MODE.SELECT) }
 

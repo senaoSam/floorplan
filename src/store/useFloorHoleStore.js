@@ -40,4 +40,10 @@ export const useFloorHoleStore = create((set) => ({
         },
       }
     }),
+
+  clearFloor: (floorId) =>
+    set((state) => {
+      const { [floorId]: _, ...rest } = state.floorHolesByFloor
+      return { floorHolesByFloor: rest }
+    }),
 }))
