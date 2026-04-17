@@ -52,6 +52,7 @@ $RECYCLE.BIN/
 
 # Misc
 sampleImg/
+.playwright-mcp/
 
 *.local
 .vercel

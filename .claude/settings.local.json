@@ -24,7 +24,14 @@
       "Bash(xargs cat:*)",
       "Bash(pnpm dev:*)",
       "Bash(git add:*)",
-      "Bash(git commit -m ':*)"
+      "Bash(git commit -m ':*)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_run_code",
+      "mcp__playwright__browser_type",
+      "mcp__playwright__browser_press_key"
     ]
   }
 }
