@@ -658,6 +658,9 @@ export const LEGENDS = {
 
 
 // ── 主元件 ────────────────────────────────────────────────────────────
+// P-2 LOD：拖曳期間 framebuffer 以此倍率渲染（CSS 尺寸不變，只降取樣解析度）
+const DRAG_RENDER_SCALE = 0.3
+
 function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef, draggingScopeRef }) {
   const canvasRef = useRef(null)
 
@@ -672,12 +675,14 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
   const pathLossExponentRef = useRef(pathLossExponent)
   const activeFloorIdRef    = useRef(activeFloorId)
   const floorScaleRef       = useRef(floorScale)
+  const cssSizeRef          = useRef({ w: width, h: height })
 
   useEffect(() => { showHeatmapRef.current      = showHeatmap      }, [showHeatmap])
   useEffect(() => { heatmapModeRef.current      = heatmapMode      }, [heatmapMode])
   useEffect(() => { pathLossExponentRef.current = pathLossExponent  }, [pathLossExponent])
   useEffect(() => { activeFloorIdRef.current    = activeFloorId     }, [activeFloorId])
   useEffect(() => { floorScaleRef.current       = floorScale        }, [floorScale])
+  useEffect(() => { cssSizeRef.current          = { w: width, h: height } }, [width, height])
 
   // ── WebGL 初始化 + RAF loop ──────────────────────────────────────
   useEffect(() => {
@@ -777,6 +782,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
 
     let rafId
     let prevKey = null
+    let prevRenderScale = 1
 
     const loop = () => {
       rafId = requestAnimationFrame(loop)
@@ -787,6 +793,24 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       const floorS   = floorScaleRef.current
       const curMode  = heatmapModeRef.current
       const plN      = pathLossExponentRef.current
+
+      // P-2 LOD：判斷是否正在拖曳任一物件，拖曳期間降低 framebuffer 解析度
+      const isDragging =
+        !!(draggingAPRef?.current)   ||
+        !!(draggingWallRef?.current) ||
+        !!(draggingScopeRef?.current)
+      const renderScale = isDragging ? DRAG_RENDER_SCALE : 1
+
+      // CSS 尺寸永遠為 logical size；framebuffer 尺寸隨 renderScale 變動
+      // 不能讀 canvas.clientWidth/width（我們每幀在改 canvas.width，會形成自我反饋迴圈）
+      const cssW = cssSizeRef.current.w
+      const cssH = cssSizeRef.current.h
+      const targetW = Math.max(1, Math.round(cssW * renderScale))
+      const targetH = Math.max(1, Math.round(cssH * renderScale))
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width  = targetW
+        canvas.height = targetH
+      }
       const w = canvas.width
       const h = canvas.height
 
@@ -931,6 +955,10 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       }
 
       const vp = { x: stage.x(), y: stage.y(), scale: stage.scaleX() }
+      // P-2 LOD：vp uniforms 是 CSS-pixel 空間，framebuffer 若縮放 k 倍，三者同步 × k 才能與 gl_FragCoord 對齊
+      const vpXScaled     = vp.x     * renderScale
+      const vpYScaled     = vp.y     * renderScale
+      const vpScaleScaled = vp.scale * renderScale
 
       const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0},${a.channelWidth ?? 0},${a.antennaMode ?? 'omni'},${a.azimuth ?? 0},${a.beamwidth ?? 60},${a.patternId ?? ''},${a._srcFloorIdx ?? 0}`).join('|')
       const wallKey  = rawWalls.map((wl) => `${wl.startX.toFixed(1)},${wl.startY.toFixed(1)},${wl.endX.toFixed(1)},${wl.endY.toFixed(1)},${wl.material?.id ?? ''},${wl.material?.dbLoss ?? 0}`).join('|')
@@ -946,9 +974,10 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         if (holes.length === 0) return `${f.id}:none`
         return `${f.id}:${holes.map((h) => `${h.id}[${h.points.map((p) => p.toFixed(1)).join(',')}]b=${h.bottomFloorId ?? f.id}t=${h.topFloorId ?? f.id}`).join(';')}`
       }).join('|')
-      const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${curMode},${plN},${apKey},${wallKey},${openingsKey},${scopeKey},${slabKey},${holesKey}`
-      if (key === prevKey) return
+      const key = `${w},${h},${renderScale},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${curMode},${plN},${apKey},${wallKey},${openingsKey},${scopeKey},${slabKey},${holesKey}`
+      if (key === prevKey && renderScale === prevRenderScale) return
       prevKey = key
+      prevRenderScale = renderScale
 
       const apCount = Math.min(aps.length, MAX_APS)
       for (let i = 0; i < apCount; i++) {
@@ -1047,9 +1076,9 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       gl.clear(gl.COLOR_BUFFER_BIT)
 
       gl.uniform2f(locs.resolution,    w, h)
-      gl.uniform1f(locs.vpX,           vp.x)
-      gl.uniform1f(locs.vpY,           vp.y)
-      gl.uniform1f(locs.vpScale,       vp.scale)
+      gl.uniform1f(locs.vpX,           vpXScaled)
+      gl.uniform1f(locs.vpY,           vpYScaled)
+      gl.uniform1f(locs.vpScale,       vpScaleScaled)
       gl.uniform1f(locs.floorScale,    floorS)
       gl.uniform1i(locs.apCount,       apCount)
       gl.uniform1i(locs.wallCount,     wallCount)
@@ -1110,6 +1139,8 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
           position: 'absolute',
           top: 0,
           left: 0,
+          width:  `${width}px`,   // P-2 LOD：CSS 尺寸固定，framebuffer 會在拖曳時縮到 0.7×
+          height: `${height}px`,
           pointerEvents: 'none',
           display: showHeatmap ? 'block' : 'none',
         }}
