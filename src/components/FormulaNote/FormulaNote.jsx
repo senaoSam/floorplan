@@ -15,10 +15,24 @@ const SECTIONS = [
   {
     title: 'RSSI 接收訊號強度',
     rows: [
-      { label: '公式', value: 'RSSI(dBm) = P_tx + G_ant − PL − L_wall' },
+      { label: '公式', value: 'RSSI(dBm) = P_tx + G_ant − PL − L_wall − L_slab' },
       { label: 'P_tx', value: '發射功率（dBm）' },
       { label: 'G_ant', value: '天線增益（dB，omni 為 0；directional 依方位角與波瓣寬度）' },
       { label: 'L_wall', value: 'Ray-casting 牆體衰減總和（dB），依頻段調整' },
+      { label: 'L_slab', value: '跨樓層樓板累積衰減（dB），同樓層為 0；若 3D 斜線在中間樓層的 Floor Hole 內則 bypass' },
+    ],
+  },
+
+  {
+    title: '跨樓層樓板衰減 (9-3)',
+    rows: [
+      { label: '情境', value: 'AP 在樓層 A，目標像素在樓層 B（B = active）。跨越樓板 slab_i，i ∈ [min(A,B), max(A,B))' },
+      { label: 'L_slab', value: 'Σ floorSlabAttenuationDb(i)，對每個中間樓層 i 加總' },
+      { label: 'dB 預設', value: '玻璃 2 / 石膏板 3 / 木板 4 / 磚 8 / 混凝土 12 / 金屬 20（同牆體材質，可覆寫）' },
+      { label: 'Bypass', value: '9-3d per-pixel：AP↔pixel 3D 斜線在 floor i+0.5 的水平穿越點若落在該樓 Floor Hole 內 → slab_i 視為 0' },
+      { label: '穿越點', value: 'crossWorld = mix(apWorld, pxWorld, t)，t = (i + 0.5 − srcIdx) / (actIdx − srcIdx)' },
+      { label: '座標空間', value: '世界座標經各樓 align transform 換算；AP 與 pixel 先用 active 樓的 align 推到共用基準' },
+      { label: '限制', value: '中庭目前需逐層畫 Floor Hole；9-3e 預計支援垂直貫穿多層' },
     ],
   },
   {

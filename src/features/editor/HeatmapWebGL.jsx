@@ -11,6 +11,9 @@ import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
 const MAX_APS        = 32
 const MAX_WALLS      = 64
 const MAX_SCOPE_PTS  = 256
+const MAX_FLOORS     = 16
+const MAX_HOLES_TOTAL = 32
+const MAX_HOLE_PTS   = 128
 
 const FREQ_MHZ    = { 2.4: 2437, 5: 5500, 6: 6000 }
 const DEFAULT_CHAN = { 2.4: 1,    5: 36,   6: 1    }
@@ -53,52 +56,6 @@ function projectApToActive(apPos, srcFloor, activeFloor) {
   return alignInv(alignFwd(apPos, srcFloor), activeFloor)
 }
 
-// Ray-cast point-in-polygon: polyPoints 為 flat array [x0,y0,x1,y1,...]
-function pointInPolygonFlat(x, y, pts) {
-  let inside = false
-  const n = pts.length / 2
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = pts[i * 2], yi = pts[i * 2 + 1]
-    const xj = pts[j * 2], yj = pts[j * 2 + 1]
-    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
-      inside = !inside
-    }
-  }
-  return inside
-}
-
-// 跨樓層樓板累積衰減 (dB)：AP 由 srcFloor 到 activeFloor，跨越兩者間所有樓板。
-// Rule: sum of floorSlabAttenuationDb for each floor crossed. Adjacent floors = 1 slab.
-// 9-3c: 若 AP 的垂直投影點落在中間樓層的 Floor Hole 多邊形內，該層樓板 dB 視為 0（訊號穿過中庭/挑高）。
-function computeFloorAttDb(floors, srcFloorId, activeFloorId, apSrcPos, floorHolesByFloor) {
-  if (srcFloorId === activeFloorId) return 0
-  const srcIdx = floors.findIndex((f) => f.id === srcFloorId)
-  const actIdx = floors.findIndex((f) => f.id === activeFloorId)
-  if (srcIdx < 0 || actIdx < 0) return 0
-  const [lo, hi] = srcIdx < actIdx ? [srcIdx, actIdx] : [actIdx, srcIdx]
-  const srcFloor = floors[srcIdx]
-  // 先把 AP 座標轉到世界空間（共用 align 基準），再推到各中間樓層的 local
-  const apWorld = apSrcPos ? alignFwd(apSrcPos, srcFloor) : null
-  let total = 0
-  for (let i = lo; i < hi; i++) {
-    const f = floors[i]
-    const slabDb = f.floorSlabAttenuationDb ?? 0
-    if (slabDb === 0) continue
-
-    // 檢查 AP 投影點是否落在本樓的某個 floor hole 內
-    if (apWorld && floorHolesByFloor) {
-      const holes = floorHolesByFloor[f.id] ?? []
-      if (holes.length > 0) {
-        const apLocal = alignInv(apWorld, f)
-        const bypass = holes.some((h) => pointInPolygonFlat(apLocal.x, apLocal.y, h.points))
-        if (bypass) continue
-      }
-    }
-    total += slabDb
-  }
-  return total
-}
-
 // 頻道中心頻率 (MHz)：2.4 → 2407+5N，5 → 5000+5N，6 → 5950+5N
 function channelCenterMHz(band, channel) {
   if (band === 2.4) return 2407 + 5 * channel
@@ -121,6 +78,9 @@ precision highp float;
 #define MAX_APS       ${MAX_APS}
 #define MAX_WALLS     ${MAX_WALLS}
 #define MAX_SCOPE_PTS ${MAX_SCOPE_PTS}
+#define MAX_FLOORS       ${MAX_FLOORS}
+#define MAX_HOLES_TOTAL  ${MAX_HOLES_TOTAL}
+#define MAX_HOLE_PTS     ${MAX_HOLE_PTS}
 #define PATTERN_SAMPLES ${PATTERN_SAMPLES}
 
 // 模式常數
@@ -143,8 +103,18 @@ uniform float u_apChannels[MAX_APS];
 uniform float u_apFreqBand[MAX_APS];   // 頻段索引 0=2.4, 1=5, 2=6
 uniform float u_apCenterMHz[MAX_APS];  // 該頻道+頻寬的中心頻率 (MHz)
 uniform float u_apWidthMHz[MAX_APS];   // 頻寬 (MHz)
-uniform float u_apFloorAttDb[MAX_APS]; // 跨樓層樓板累積衰減 (dB)，同樓層 = 0
+uniform float u_apSrcFloorIdx[MAX_APS];// AP 所在樓層索引 (float for uniform typing)
 uniform vec4  u_apAnt[MAX_APS];        // x = mode(0=omni,1=dir,2=custom), y = azimuthRad, z = halfBeamwidthRad, w = frontBackDb
+
+// 9-3d: 多樓層 slab + floor hole 資料，供 per-pixel 跨樓層 bypass 判定
+uniform int   u_floorCount;
+uniform int   u_activeFloorIdx;
+uniform float u_floorSlabDb[MAX_FLOORS];
+uniform vec4  u_floorAlign[MAX_FLOORS];    // (offsetX, offsetY, scale, rotationRad)
+uniform vec2  u_floorImgCenter[MAX_FLOORS];// (imgW/2, imgH/2) — align pivot
+uniform vec2  u_holePts[MAX_HOLE_PTS];     // 所有樓層 hole 頂點（各自在 source 樓的 local 座標）
+uniform vec4  u_holeRanges[MAX_HOLES_TOTAL]; // (start, count, floorIdx, 0)
+uniform int   u_holeCount;
 uniform sampler2D u_apPattern;         // MAX_APS x PATTERN_SAMPLES, R32F, value = gain dB at (AP, angleBin)
 uniform vec4  u_walls[MAX_WALLS];
 uniform vec3  u_wallLoss3[MAX_WALLS];  // xyz = 2.4GHz / 5GHz / 6GHz 衰減
@@ -207,6 +177,86 @@ float antennaGain(int apIdx, vec2 px, vec2 ap, vec4 ant) {
   float norm = offset / halfBW;
   float g = -12.0 * norm * norm;
   return max(g, -frontBack);
+}
+
+// ── 9-3d: 多樓層 align transform helpers ──────────────────────────
+// alignFwd: local → world。f = (offX, offY, scale, rotRad), c = pivot (imgW/2, imgH/2)
+vec2 alignFwdGL(vec2 pt, vec4 f, vec2 c) {
+  vec2 d = pt - c;
+  float cs = cos(f.w), sn = sin(f.w);
+  vec2 r = vec2(d.x * cs - d.y * sn, d.x * sn + d.y * cs);
+  return c + f.xy + r * f.z;
+}
+
+vec2 alignInvGL(vec2 pt, vec4 f, vec2 c) {
+  vec2 p = (pt - c - f.xy) / f.z;
+  float cs = cos(-f.w), sn = sin(-f.w);
+  return c + vec2(p.x * cs - p.y * sn, p.x * sn + p.y * cs);
+}
+
+// 點是否在某樓層的任何 floor hole 內（hole 頂點以該樓層 local 儲存）
+bool pointInFloorHoles(vec2 p, int floorIdx) {
+  for (int k = 0; k < MAX_HOLES_TOTAL; k++) {
+    if (k >= u_holeCount) break;
+    vec4 r = u_holeRanges[k];
+    int fIdx = int(r.z + 0.5);
+    if (fIdx != floorIdx) continue;
+    int start = int(r.x + 0.5);
+    int n     = int(r.y + 0.5);
+    // Ray-cast point-in-polygon
+    bool inside = false;
+    int j = start + n - 1;
+    for (int i2 = 0; i2 < MAX_HOLE_PTS; i2++) {
+      int idx = start + i2;
+      if (i2 >= n) break;
+      vec2 pi = u_holePts[idx];
+      vec2 pj = u_holePts[j];
+      if ((pi.y > p.y) != (pj.y > p.y) &&
+          p.x < (pj.x - pi.x) * (p.y - pi.y) / (pj.y - pi.y) + pi.x) {
+        inside = !inside;
+      }
+      j = idx;
+    }
+    if (inside) return true;
+  }
+  return false;
+}
+
+// 跨樓層斜線穿越點（per-pixel）：AP src 樓 → pixel active 樓。
+// 對每個中間樓 i 的樓板，取 3D 斜線 midpoint (i+0.5) 水平投影，轉到樓 i 的 local，
+// 若在該樓 hole 內則 bypass 此 slab。
+float slabAttDb(vec2 apActiveLocal, vec2 pxActiveLocal, int srcIdx, int actIdx) {
+  if (srcIdx == actIdx) return 0.0;
+  if (u_activeFloorIdx < 0) return 0.0;
+
+  // 把 AP 和 pixel 都轉到「世界座標」（以 active 樓的 align 為基準之外的共同空間）
+  vec4 actAlign = u_floorAlign[actIdx];
+  vec2 actPivot = u_floorImgCenter[actIdx];
+  vec2 apWorld  = alignFwdGL(apActiveLocal, actAlign, actPivot);
+  vec2 pxWorld  = alignFwdGL(pxActiveLocal, actAlign, actPivot);
+
+  float srcF = float(srcIdx), actF = float(actIdx);
+  float denom = actF - srcF;  // 非 0（已排除同樓）
+
+  int lo = srcIdx < actIdx ? srcIdx : actIdx;
+  int hi = srcIdx < actIdx ? actIdx : srcIdx;
+
+  float total = 0.0;
+  for (int i = 0; i < MAX_FLOORS; i++) {
+    if (i < lo) continue;
+    if (i >= hi) break;
+    float slab = u_floorSlabDb[i];
+    if (slab <= 0.0) continue;
+
+    // 該 slab 穿越點在 3D 斜線參數 t = (midFloor - srcIdx) / (actIdx - srcIdx)
+    float midFloor = float(i) + 0.5;
+    float t = (midFloor - srcF) / denom;
+    vec2 crossWorld = mix(apWorld, pxWorld, t);
+    vec2 crossLocal = alignInvGL(crossWorld, u_floorAlign[i], u_floorImgCenter[i]);
+    if (pointInFloorHoles(crossLocal, i)) continue;
+    total += slab;
+  }
+  return total;
 }
 
 // 頻段相關的牆體衰減
@@ -391,13 +441,15 @@ void main() {
       float fMHz   = u_aps[i].w;
       int   fIdx   = int(u_apFreqBand[i]);
       float dist   = length(canvas - apPos);
+      int apSrc = int(u_apSrcFloorIdx[i] + 0.5);
+      float slabDb = slabAttDb(apPos, canvas, apSrc, u_activeFloorIdx);
       if (dist < 0.5) {
-        rssi = txPow - u_apFloorAttDb[i];
+        rssi = txPow - slabDb;
       } else {
         float distM = dist / u_floorScale;
         float fspl  = 10.0 * u_pathLossN * log10v(distM) + 20.0 * log10v(fMHz) - 27.55;
         float gain  = antennaGain(i, canvas, apPos, u_apAnt[i]);
-        rssi = txPow + gain - fspl - wallLoss(canvas, apPos, fIdx) - u_apFloorAttDb[i];
+        rssi = txPow + gain - fspl - wallLoss(canvas, apPos, fIdx) - slabDb;
       }
       if (rssi > bestRSSI) { bestRSSI = rssi; bestIdx = i; }
       if (rssi > -85.0) hearable++;
@@ -657,8 +709,16 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       apFreqBand:     gl.getUniformLocation(prog, 'u_apFreqBand[0]'),
       apCenterMHz:    gl.getUniformLocation(prog, 'u_apCenterMHz[0]'),
       apWidthMHz:     gl.getUniformLocation(prog, 'u_apWidthMHz[0]'),
-      apFloorAttDb:   gl.getUniformLocation(prog, 'u_apFloorAttDb[0]'),
+      apSrcFloorIdx:  gl.getUniformLocation(prog, 'u_apSrcFloorIdx[0]'),
       apAnt:          gl.getUniformLocation(prog, 'u_apAnt[0]'),
+      floorCount:     gl.getUniformLocation(prog, 'u_floorCount'),
+      activeFloorIdx: gl.getUniformLocation(prog, 'u_activeFloorIdx'),
+      floorSlabDb:    gl.getUniformLocation(prog, 'u_floorSlabDb[0]'),
+      floorAlign:     gl.getUniformLocation(prog, 'u_floorAlign[0]'),
+      floorImgCenter: gl.getUniformLocation(prog, 'u_floorImgCenter[0]'),
+      holePts:        gl.getUniformLocation(prog, 'u_holePts[0]'),
+      holeRanges:     gl.getUniformLocation(prog, 'u_holeRanges[0]'),
+      holeCount:      gl.getUniformLocation(prog, 'u_holeCount'),
       apPattern:      gl.getUniformLocation(prog, 'u_apPattern'),
       walls:          gl.getUniformLocation(prog, 'u_walls[0]'),
       wallLoss3:      gl.getUniformLocation(prog, 'u_wallLoss3[0]'),
@@ -677,8 +737,13 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
     const apFreqData    = new Float32Array(MAX_APS)
     const apCenterData  = new Float32Array(MAX_APS)
     const apWidthData   = new Float32Array(MAX_APS)
-    const apFloorAttData = new Float32Array(MAX_APS)
+    const apSrcFloorIdxData = new Float32Array(MAX_APS)
     const apAntData     = new Float32Array(MAX_APS       * 4)
+    const floorSlabDbData    = new Float32Array(MAX_FLOORS)
+    const floorAlignData     = new Float32Array(MAX_FLOORS * 4)
+    const floorImgCenterData = new Float32Array(MAX_FLOORS * 2)
+    const holePtsData        = new Float32Array(MAX_HOLE_PTS * 2)
+    const holeRangesData     = new Float32Array(MAX_HOLES_TOTAL * 4)
     const apPatternData = new Float32Array(MAX_APS       * PATTERN_SAMPLES)
 
     // R32F 2D texture: width = PATTERN_SAMPLES, height = MAX_APS. Each row = one AP's pattern.
@@ -729,31 +794,30 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       }
 
       // Cross-floor (9-3b): collect APs from all floors; project their positions
-      // into the active floor's local canvas space via align transforms, and
-      // precompute per-AP slab attenuation in dB.
-      // 9-3c: pass each AP's source-local position + all floors' holes so
-      // computeFloorAttDb can skip slabs bypassed by a floor hole.
+      // into the active floor's local canvas space via align transforms.
+      // 9-3d: slab attenuation is now computed per-pixel in shader (supports
+      // diagonal crossing through floor holes). Here we only tag AP with its
+      // source floor index.
       const allFloors      = useFloorStore.getState().floors
       const activeFlr      = allFloors.find((f) => f.id === floorId)
+      const activeIdx      = allFloors.findIndex((f) => f.id === floorId)
       const apsByFloor     = useAPStore.getState().apsByFloor
       const floorHolesByFl = useFloorHoleStore.getState().floorHolesByFloor
       const drag           = draggingAPRef?.current
       let aps = []
-      for (const f of allFloors) {
+      for (let fi = 0; fi < allFloors.length; fi++) {
+        const f = allFloors[fi]
         const fApsRaw = apsByFloor[f.id] ?? []
         if (fApsRaw.length === 0) continue
         for (const a of fApsRaw) {
           const isActive = f.id === floorId
           let x = a.x, y = a.y
           if (isActive && drag && drag.id === a.id) { x = drag.x; y = drag.y }
-          // AP source-local position (對 hole bypass 判定用，永遠是 source 樓層的 local)
-          const srcLocal = { x, y }
           if (!isActive) {
             const p = projectApToActive({ x, y }, f, activeFlr)
             x = p.x; y = p.y
           }
-          const attDb = computeFloorAttDb(allFloors, f.id, floorId, srcLocal, floorHolesByFl)
-          aps.push({ ...a, x, y, _floorAttDb: attDb })
+          aps.push({ ...a, x, y, _srcFloorIdx: fi })
         }
       }
 
@@ -859,7 +923,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
 
       const vp = { x: stage.x(), y: stage.y(), scale: stage.scaleX() }
 
-      const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0},${a.channelWidth ?? 0},${a.antennaMode ?? 'omni'},${a.azimuth ?? 0},${a.beamwidth ?? 60},${a.patternId ?? ''},${(a._floorAttDb ?? 0).toFixed(1)}`).join('|')
+      const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0},${a.channelWidth ?? 0},${a.antennaMode ?? 'omni'},${a.azimuth ?? 0},${a.beamwidth ?? 60},${a.patternId ?? ''},${a._srcFloorIdx ?? 0}`).join('|')
       const wallKey  = rawWalls.map((wl) => `${wl.startX.toFixed(1)},${wl.startY.toFixed(1)},${wl.endX.toFixed(1)},${wl.endY.toFixed(1)},${wl.material?.id ?? ''},${wl.material?.dbLoss ?? 0}`).join('|')
       const scopeKey = [...inScopes, ...outScopes].map((sc) => {
         const d = dragScope && dragScope.id === sc.id ? `${dragScope.dx.toFixed(1)},${dragScope.dy.toFixed(1)}` : '0,0'
@@ -889,7 +953,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         apFreqData[i] = FREQ_BAND_INDEX[a.frequency] ?? 1
         apCenterData[i] = channelCenterMHz(a.frequency, ch)
         apWidthData[i] = bw
-        apFloorAttData[i] = a._floorAttDb ?? 0
+        apSrcFloorIdxData[i] = a._srcFloorIdx ?? 0
         // Antenna: omni(0) / directional(1) / custom(2); custom AP fills its pattern row.
         const mode = a.antennaMode === 'directional' ? 1 : a.antennaMode === 'custom' ? 2 : 0
         const azDeg     = ((a.azimuth ?? 0) % 360 + 360) % 360
@@ -925,6 +989,40 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         wallLoss3Data[i*3+2] = baseLoss * (ff[6]   ?? 1)
       }
 
+      // 9-3d: per-floor slab/align + floor hole data for shader-side per-pixel bypass
+      const floorCount = Math.min(allFloors.length, MAX_FLOORS)
+      for (let i = 0; i < floorCount; i++) {
+        const f = allFloors[i]
+        floorSlabDbData[i] = f.floorSlabAttenuationDb ?? 0
+        floorAlignData[i*4]   = f.alignOffsetX ?? 0
+        floorAlignData[i*4+1] = f.alignOffsetY ?? 0
+        floorAlignData[i*4+2] = f.alignScale ?? 1
+        floorAlignData[i*4+3] = ((f.alignRotation ?? 0) * Math.PI) / 180
+        floorImgCenterData[i*2]   = (f.imageWidth ?? 0) / 2
+        floorImgCenterData[i*2+1] = (f.imageHeight ?? 0) / 2
+      }
+
+      let holePtCount = 0
+      let holeCount   = 0
+      for (let fi = 0; fi < floorCount && holeCount < MAX_HOLES_TOTAL; fi++) {
+        const holes = floorHolesByFl[allFloors[fi].id] ?? []
+        for (const h of holes) {
+          if (holeCount >= MAX_HOLES_TOTAL) break
+          const n = Math.min(h.points.length / 2, MAX_HOLE_PTS - holePtCount)
+          if (n < 3) continue
+          holeRangesData[holeCount*4]   = holePtCount
+          holeRangesData[holeCount*4+1] = n
+          holeRangesData[holeCount*4+2] = fi
+          holeRangesData[holeCount*4+3] = 0
+          for (let k = 0; k < n; k++) {
+            holePtsData[(holePtCount + k)*2]   = h.points[k*2]
+            holePtsData[(holePtCount + k)*2+1] = h.points[k*2+1]
+          }
+          holePtCount += n
+          holeCount++
+        }
+      }
+
       gl.viewport(0, 0, w, h)
       gl.clearColor(0, 0, 0, 0)
       gl.clear(gl.COLOR_BUFFER_BIT)
@@ -941,8 +1039,16 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       gl.uniform1fv(locs.apFreqBand,   apFreqData)
       gl.uniform1fv(locs.apCenterMHz,  apCenterData)
       gl.uniform1fv(locs.apWidthMHz,   apWidthData)
-      gl.uniform1fv(locs.apFloorAttDb, apFloorAttData)
+      gl.uniform1fv(locs.apSrcFloorIdx, apSrcFloorIdxData)
       gl.uniform4fv(locs.apAnt,        apAntData)
+      gl.uniform1i(locs.floorCount,     floorCount)
+      gl.uniform1i(locs.activeFloorIdx, activeIdx >= 0 ? activeIdx : 0)
+      gl.uniform1fv(locs.floorSlabDb,   floorSlabDbData)
+      gl.uniform4fv(locs.floorAlign,    floorAlignData)
+      gl.uniform2fv(locs.floorImgCenter, floorImgCenterData)
+      gl.uniform2fv(locs.holePts,       holePtsData)
+      gl.uniform4fv(locs.holeRanges,    holeRangesData)
+      gl.uniform1i(locs.holeCount,      holeCount)
       gl.activeTexture(gl.TEXTURE0)
       gl.bindTexture(gl.TEXTURE_2D, patternTex)
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, PATTERN_SAMPLES, MAX_APS, gl.RED, gl.FLOAT, apPatternData)

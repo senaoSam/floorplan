@@ -98,9 +98,9 @@ const PHASES = [
           { id: '8-2c', done: true, text: 'Heatmap 納入定向增益（WebGL）' },
           { id: '8-2d', done: true, text: 'Custom pattern 內建預設 + 預覽' },
           { id: '8-3a', done: true, text: '國家頻段資料庫 + 頻道選單過濾' },
-          { id: '8-3b', done: false, text: '自動頻道規劃演算法（批次）' },
-          { id: '8-3c', done: false, text: '放置新 AP 自動挑頻道' },
-          { id: '8-4', done: false, text: '自動功率規劃' },
+          { id: '8-3b', done: true,  text: '自動頻道規劃演算法（批次）' },
+          { id: '8-3c', done: true,  text: '放置新 AP 自動挑頻道' },
+          { id: '8-4', done: true,  text: '自動功率規劃' },
           { id: '8-5', done: true, text: '頻寬設定（20/40/80/160 MHz）' },
         ],
       },
@@ -116,11 +116,12 @@ const PHASES = [
           { id: '9-2a', done: true,  text: '樓層對齊模式（偏移、縮放、旋轉 + 疊影 + 離開確認）' },
           { id: '9-2b', done: true,  text: '參考樓層疊影（選層、顯示開關、透明度）' },
           { id: '9-2c', done: true,  text: '參考樓層進階視覺化（色調、牆體輪廓）' },
-          { id: '9-2d', done: false, text: '參考樓層向量物件疊影（AP / Scope / Floor Hole）' },
-          { id: '9-3a', done: false, text: '樓板衰減資料模型 + UI' },
-          { id: '9-3b', done: false, text: '樓板衰減納入熱圖（跨樓層）' },
+          { id: '9-2d', done: true,  text: '參考樓層向量物件疊影（AP / Scope / Floor Hole）' },
+          { id: '9-3a', done: true,  text: '樓板衰減資料模型 + UI' },
+          { id: '9-3b', done: true,  text: '樓板衰減納入熱圖（跨樓層）' },
           { id: '9-3c', done: true,  text: '中庭穿透例外 v1（AP 正投影）' },
-          { id: '9-3d', done: false, text: '中庭穿透例外 v2（3D 斜線 per-pixel）' },
+          { id: '9-3d', done: true,  text: '中庭穿透例外 v2（3D 斜線 per-pixel）' },
+          { id: '9-3e', done: false, text: '中庭垂直延伸範圍（貫穿多層）' },
         ],
       },
     ],
@@ -205,18 +206,6 @@ const PHASES = [
           { id: '16-4', done: false, text: 'AI 自動建議 AP 位置' },
         ],
       },
-      {
-        layer: 'Layer 17 — 進階顯示',
-        items: [
-          { id: '17-1', done: false, text: '人流熱區顯示' },
-          { id: '17-2', done: false, text: 'WiFi Client 訊號模擬顯示' },
-        ],
-      },
-    ],
-  },
-  {
-    phase: 'Phase 8 — 進階視覺化',
-    groups: [
       {
         layer: 'Layer 17 — 進階顯示',
         items: [
