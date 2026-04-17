@@ -68,3 +68,12 @@ export const OPENING_LIST = Object.values(OPENING_TYPES)
 
 // 透過 id 找材質
 export const getMaterialById = (id) => MATERIAL_LIST.find((m) => m.id === id) ?? MATERIALS.WOOD
+
+// 樓板（ceiling / slab）預設衰減值 (dB)
+// 直接沿用牆體材質的 dbLoss，維持全系統材質 dB 一致；使用者若需更高衰減可手動調整。
+export const FLOOR_SLAB_DEFAULT_DB = Object.fromEntries(
+  MATERIAL_LIST.map((m) => [m.id, m.dbLoss]),
+)
+
+export const DEFAULT_FLOOR_SLAB_MATERIAL_ID = 'concrete'
+export const DEFAULT_FLOOR_SLAB_DB = FLOOR_SLAB_DEFAULT_DB[DEFAULT_FLOOR_SLAB_MATERIAL_ID]
