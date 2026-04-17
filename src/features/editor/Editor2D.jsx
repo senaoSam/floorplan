@@ -81,7 +81,8 @@ function Editor2D() {
   const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected, togglePanelCollapsed,
           selectedItems, setSelectedItems, toggleSelectedItem,
           showFloorImage, showScopes, showFloorHoles, showWalls, showAPs,
-          autoChannelOnPlace, regulatoryDomain } = useEditorStore()
+          autoChannelOnPlace, regulatoryDomain,
+          alignRefFloors, alignRefOpacity } = useEditorStore()
   const isSelectMode    = editorMode === EDITOR_MODE.SELECT
   const isMarqueeMode   = editorMode === EDITOR_MODE.MARQUEE_SELECT
   const isDoorWindowMode = editorMode === EDITOR_MODE.DOOR_WINDOW
@@ -970,16 +971,19 @@ function Editor2D() {
             <Rect x={-50000} y={-50000} width={100000} height={100000} fill="#1e1e2e" />
           </Layer>
 
-          {/* Align-mode: dim every other floor behind the active one so user can
-              match outlines. Each reference floor gets its own align transform. */}
-          {isAlignMode && floors.filter((f) => f.id !== activeFloorId).map((f) => (
-            <FloorImageLayer
-              key={`ref-${f.id}`}
-              floor={{ ...f, opacity: 0.3 }}
-              isSelectMode={false}
-              layerProps={{ ...alignLayerProps(f), listening: false }}
-            />
-          ))}
+          {/* Align-mode: dim selected reference floors behind the active one so
+              user can match outlines. Each reference floor gets its own align
+              transform. Visibility + opacity controlled via AlignFloorPanel. */}
+          {isAlignMode && floors
+            .filter((f) => f.id !== activeFloorId && (alignRefFloors ?? []).includes(f.id))
+            .map((f) => (
+              <FloorImageLayer
+                key={`ref-${f.id}`}
+                floor={{ ...f, opacity: alignRefOpacity }}
+                isSelectMode={false}
+                layerProps={{ ...alignLayerProps(f), listening: false }}
+              />
+            ))}
 
           {activeFloor && showFloorImage && (
             <FloorImageLayer

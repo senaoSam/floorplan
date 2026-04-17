@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react'
+import React, { useCallback, useEffect } from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import './AlignFloorPanel.sass'
@@ -10,6 +10,18 @@ function AlignFloorPanel({ floorId }) {
   const resetAlignTransform = useFloorStore((s) => s.resetAlignTransform)
   const setEditorMode       = useEditorStore((s) => s.setEditorMode)
   const clearSelected       = useEditorStore((s) => s.clearSelected)
+  const alignRefFloors      = useEditorStore((s) => s.alignRefFloors)
+  const alignRefOpacity     = useEditorStore((s) => s.alignRefOpacity)
+  const setAlignRefFloors   = useEditorStore((s) => s.setAlignRefFloors)
+  const toggleAlignRefFloor = useEditorStore((s) => s.toggleAlignRefFloor)
+  const setAlignRefOpacity  = useEditorStore((s) => s.setAlignRefOpacity)
+
+  // Seed reference list on first entry to align mode: default to all other floors visible.
+  useEffect(() => {
+    if (alignRefFloors === null) {
+      setAlignRefFloors(floors.filter((f) => f.id !== floorId).map((f) => f.id))
+    }
+  }, [alignRefFloors, floors, floorId, setAlignRefFloors])
 
   const onExit = useCallback(() => {
     setEditorMode(EDITOR_MODE.SELECT)
@@ -23,9 +35,8 @@ function AlignFloorPanel({ floorId }) {
   const s  = floor.alignScale   ?? 1
   const r  = floor.alignRotation ?? 0
 
-  const idx         = floors.findIndex((f) => f.id === floorId)
-  const refFloor    = idx > 0 ? floors[idx - 1] : (floors.length > 1 ? floors[idx + 1] : null)
-  const refFloorHint = refFloor ? `${refFloor.name}（半透明疊影）` : '（無其他樓層可疊影對照）'
+  const otherFloors = floors.filter((f) => f.id !== floorId)
+  const refIds = alignRefFloors ?? []
 
   const patch = (p) => setAlignTransform(floorId, p)
 
@@ -37,8 +48,53 @@ function AlignFloorPanel({ floorId }) {
       </div>
 
       <div className="align-floor-panel__intro">
-        調整本樓層相對於其他樓層的位置。參考樓層：{refFloorHint}
+        調整本樓層相對於其他樓層的位置。勾選參考樓層以半透明疊影顯示輔助對齊。
       </div>
+
+      {/* 參考樓層疊影 */}
+      <section className="align-floor-panel__section">
+        <p className="align-floor-panel__label">參考樓層疊影</p>
+        {otherFloors.length === 0 ? (
+          <div className="align-floor-panel__hint">（無其他樓層可疊影對照）</div>
+        ) : (
+          <>
+            <div className="align-floor-panel__ref-list">
+              {otherFloors.map((f) => (
+                <label key={f.id} className="align-floor-panel__ref-item">
+                  <input
+                    type="checkbox"
+                    checked={refIds.includes(f.id)}
+                    onChange={() => toggleAlignRefFloor(f.id)}
+                  />
+                  <span>{f.name}</span>
+                </label>
+              ))}
+            </div>
+            <div className="align-floor-panel__row">
+              <span className="align-floor-panel__axis">不透明度</span>
+              <input
+                type="number"
+                className="align-floor-panel__num"
+                value={alignRefOpacity.toFixed(2)}
+                min={0.05}
+                max={1}
+                step={0.05}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value)
+                  if (!isNaN(v)) setAlignRefOpacity(Math.max(0.05, Math.min(1, v)))
+                }}
+              />
+              <input
+                type="range"
+                className="align-floor-panel__slider"
+                value={alignRefOpacity}
+                min={0.05} max={1} step={0.05}
+                onChange={(e) => setAlignRefOpacity(parseFloat(e.target.value))}
+              />
+            </div>
+          </>
+        )}
+      </section>
 
       {/* 偏移 */}
       <section className="align-floor-panel__section">

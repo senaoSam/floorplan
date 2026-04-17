@@ -67,6 +67,13 @@ export const useEditorStore = create((set, get) => ({
   showAPs: true,
   showAPInfo: true,
 
+  // Align-mode reference overlay. `alignRefFloors` is a Set of floor IDs that
+  // should render as semi-transparent reference layers while in ALIGN_FLOOR
+  // mode. null = "not yet initialized for this session"; the AlignFloorPanel
+  // seeds it to all other floors on first entry.
+  alignRefFloors: null,
+  alignRefOpacity: 0.3,
+
   setEditorMode: (mode) => set({ editorMode: mode, selectedId: null, selectedType: null, selectedItems: [] }),
   setViewMode: (mode) => set({ viewMode: mode }),
   setSelected: (id, type) => set({ selectedId: id, selectedType: type, selectedItems: [], panelCollapsed: false }),
@@ -109,4 +116,12 @@ export const useEditorStore = create((set, get) => ({
   toggleAutoChannelOnPlace: () => set((s) => ({ autoChannelOnPlace: !s.autoChannelOnPlace })),
   togglePanelCollapsed: () => set((s) => ({ panelCollapsed: !s.panelCollapsed })),
   toggleLayer: (key) => set((s) => ({ [key]: !s[key] })),
+
+  setAlignRefFloors: (ids) => set({ alignRefFloors: ids }),
+  toggleAlignRefFloor: (id) => set((s) => {
+    const current = s.alignRefFloors ?? []
+    const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id]
+    return { alignRefFloors: next }
+  }),
+  setAlignRefOpacity: (v) => set({ alignRefOpacity: v }),
 }))
