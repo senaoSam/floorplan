@@ -110,12 +110,11 @@
 | ----- | ---- | -------------------------------------------------------------------------------------------- |
 | P-1   | ✅   | AP 拖曳 RAF buffer：拖曳中座標暫存於 ref，以 requestAnimationFrame 更新視覺，放開才提交 store |
 | P-2   | ✅   | LOD 拖曳降解析度：拖曳期間 framebuffer 以 renderScale=0.3 渲染（放開恢復 full-res），可調參數 |
-| P-3   | ⬜   | AP 拖曳時 Heatmap 低頻 preview：每 100~150ms 用暫存座標重算一次（保持即時更新體感）          |
-| P-4   | ⬜   | WebGL Heatmap dirty-check 閾值放寬：座標精度由 .toFixed(1) 改為位移 >= 1px 才視為 dirty      |
-| P-5   | ⬜   | History store snapshot 非阻塞化：structuredClone 改 async（或 Web Worker / 分層 lazy clone），避免放開操作時 50~100ms 卡頓；補 flushPending() 確保 Undo 正確性 |
-| P-6   | ⬜   | WallLayer snap 加 bounding box 快速過濾：避開 O(n) 全掃，並移除 EndpointHandle 重複掃描       |
-| P-7   | ⬜   | Editor2D 鍵盤刪除 effect 依賴穩定化：store actions 用穩定 ref，減少 effect 重掛             |
-| P-8   | ⬜   | Dirty Rect 區域重繪：雙 framebuffer（static/dynamic）+ scissor test，只重算拖曳中 AP 影響區；SINR / Data Rate 模式 fallback 全畫面 |
+| P-3   | ⬜   | WebGL Heatmap dirty-check 閾值放寬：座標精度由 .toFixed(1) 改為位移 >= 1px 才視為 dirty      |
+| P-4   | ⬜   | History store snapshot 非阻塞化：structuredClone 改 async（或 Web Worker / 分層 lazy clone），避免放開操作時 50~100ms 卡頓；補 flushPending() 確保 Undo 正確性 |
+| P-5   | ⬜   | WallLayer snap 加 bounding box 快速過濾：避開 O(n) 全掃，並移除 EndpointHandle 重複掃描       |
+| P-6   | ⬜   | Editor2D 鍵盤刪除 effect 依賴穩定化：store actions 用穩定 ref，減少 effect 重掛             |
+| P-7   | ⬜   | Dirty Rect 區域重繪：雙 framebuffer（static/dynamic）+ scissor test，只重算拖曳中 AP 影響區；SINR / Data Rate 模式 fallback 全畫面 |
 
 ---
 
