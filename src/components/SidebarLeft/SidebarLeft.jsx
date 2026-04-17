@@ -4,6 +4,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorImport } from '@/features/importer/useFloorImport'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import './SidebarLeft.sass'
@@ -19,6 +20,8 @@ function SidebarLeft() {
   const clearAPs        = useAPStore((s) => s.clearFloor)
   const clearScopes     = useScopeStore((s) => s.clearFloor)
   const clearHoles      = useFloorHoleStore((s) => s.clearFloor)
+  const setEditorMode   = useEditorStore((s) => s.setEditorMode)
+  const setSelected     = useEditorStore((s) => s.setSelected)
 
   const { processFile, isLoading, loadingMsg } = useFloorImport()
   const fileInputRef = useRef(null)
@@ -33,6 +36,37 @@ function SidebarLeft() {
 
   // Pending removal — null = no dialog open, otherwise the floor object to remove.
   const [pendingRemove, setPendingRemove] = useState(null)
+
+  // Pending floor switch while in align mode — holds { id, keepAlign }.
+  // keepAlign=true means user chose "Align another floor" from that floor's
+  // menu, so we stay in align mode on the new floor after confirmation.
+  const [pendingSwitch, setPendingSwitch] = useState(null)
+
+  const editorMode = useEditorStore((s) => s.editorMode)
+  const isAlignMode = editorMode === EDITOR_MODE.ALIGN_FLOOR
+
+  const requestSetActive = (id) => {
+    if (id === activeFloorId) return
+    if (isAlignMode) {
+      setPendingSwitch({ id, keepAlign: false })
+      return
+    }
+    setActiveFloor(id)
+  }
+
+  const confirmSwitch = () => {
+    const s = pendingSwitch
+    setPendingSwitch(null)
+    if (!s) return
+    if (s.keepAlign) {
+      setActiveFloor(s.id)
+      setEditorMode(EDITOR_MODE.ALIGN_FLOOR)
+      setSelected(s.id, 'floor_align')
+    } else {
+      setEditorMode(EDITOR_MODE.SELECT)
+      setActiveFloor(s.id)
+    }
+  }
 
   // Drag-and-drop reorder.
   const [dragIndex, setDragIndex] = useState(null)
@@ -82,6 +116,20 @@ function SidebarLeft() {
     setPendingRemove(floor)
   }
 
+  const startAlign = (floor) => {
+    setMenuOpenId(null)
+    // If already aligning a different floor, ask for confirmation before
+    // switching the align target.
+    if (isAlignMode && floor.id !== activeFloorId) {
+      setPendingSwitch({ id: floor.id, keepAlign: true })
+      return
+    }
+    setActiveFloor(floor.id)
+    setEditorMode(EDITOR_MODE.ALIGN_FLOOR)
+    // Open right-panel context for the align panel (dispatched by PanelRight).
+    setSelected(floor.id, 'floor_align')
+  }
+
   const confirmRemove = () => {
     const floor = pendingRemove
     if (!floor) return
@@ -94,6 +142,11 @@ function SidebarLeft() {
     clearScopes(floor.id)
     clearHoles(floor.id)
     removeFloor(floor.id)
+    // Removing the active floor while aligning would leave the panel orphaned;
+    // drop back to SELECT so the UI stays consistent.
+    if (isAlignMode && floor.id === activeFloorId) {
+      setEditorMode(EDITOR_MODE.SELECT)
+    }
     setPendingRemove(null)
   }
 
@@ -160,7 +213,7 @@ function SidebarLeft() {
                   isActive ? 'sidebar-left__floor-item--active' : '',
                   isDragOver ? 'sidebar-left__floor-item--drop-target' : '',
                 ].filter(Boolean).join(' ')}
-                onClick={() => !isEditing && setActiveFloor(floor.id)}
+                onClick={() => !isEditing && requestSetActive(floor.id)}
                 draggable={!isEditing}
                 onDragStart={(e) => handleDragStart(e, idx)}
                 onDragOver={(e) => handleDragOver(e, idx)}
@@ -202,6 +255,7 @@ function SidebarLeft() {
                     onClick={(e) => e.stopPropagation()}
                   >
                     <button className="sidebar-left__menu-item" onClick={() => startRename(floor)}>重新命名</button>
+                    <button className="sidebar-left__menu-item" onClick={() => startAlign(floor)}>對齊樓層</button>
                     <button className="sidebar-left__menu-item sidebar-left__menu-item--danger" onClick={() => requestRemove(floor)}>刪除樓層</button>
                   </div>
                 )}
@@ -220,6 +274,21 @@ function SidebarLeft() {
           danger
           onConfirm={confirmRemove}
           onCancel={() => setPendingRemove(null)}
+        />
+      )}
+
+      {pendingSwitch && (
+        <ConfirmDialog
+          title={pendingSwitch.keepAlign ? '切換對齊目標？' : '離開樓層對齊？'}
+          message={
+            pendingSwitch.keepAlign
+              ? '切換到另一個樓層繼續對齊。目前樓層已調整的偏移/縮放/旋轉會保留。要繼續嗎？'
+              : '你正在對齊樓層，切換到其他樓層會結束對齊模式（已調整的偏移/縮放/旋轉會保留）。確定要離開嗎？'
+          }
+          confirmLabel={pendingSwitch.keepAlign ? '切換' : '離開對齊'}
+          cancelLabel="繼續對齊"
+          onConfirm={confirmSwitch}
+          onCancel={() => setPendingSwitch(null)}
         />
       )}
     </aside>

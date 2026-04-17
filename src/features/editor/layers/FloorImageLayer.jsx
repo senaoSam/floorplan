@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Layer, Image as KonvaImage } from 'react-konva'
 
-function FloorImageLayer({ floor, isSelectMode, onFloorImageClick }) {
+function FloorImageLayer({ floor, isSelectMode, onFloorImageClick, layerProps }) {
   const [image, setImage] = useState(null)
 
   useEffect(() => {
@@ -32,7 +32,7 @@ function FloorImageLayer({ floor, isSelectMode, onFloorImageClick }) {
     : undefined
 
   return (
-    <Layer clipFunc={clipFunc}>
+    <Layer clipFunc={clipFunc} {...(layerProps ?? {})}>
       <KonvaImage
         image={image}
         x={cx}

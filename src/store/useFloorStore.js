@@ -54,12 +54,27 @@ export const useFloorStore = create((set, get) => ({
     return floors.find((f) => f.id === activeFloorId) ?? null
   },
 
+  // Inter-floor alignment transform (applied as a Konva Layer transform,
+  // pivot = image center). Does not rewrite object coordinates.
+  setAlignTransform: (id, patch) =>
+    set((state) => ({
+      floors: state.floors.map((f) => (f.id === id ? { ...f, ...patch } : f)),
+    })),
+
+  resetAlignTransform: (id) =>
+    set((state) => ({
+      floors: state.floors.map((f) =>
+        f.id === id ? { ...f, alignOffsetX: 0, alignOffsetY: 0, alignScale: 1, alignRotation: 0 } : f,
+      ),
+    })),
+
   importFloorFromUrl: (imageUrl, imageWidth, imageHeight, name) => {
     const id = generateId('floor')
     const floorName = name ?? `${get().floors.length + 1}F`
     const floor = {
       id, name: floorName, imageUrl, imageWidth, imageHeight,
       opacity: 1, rotation: 0, scale: null, offsetX: 0, offsetY: 0,
+      alignOffsetX: 0, alignOffsetY: 0, alignScale: 1, alignRotation: 0,
       cropX: null, cropY: null, cropWidth: null, cropHeight: null,
     }
     set((state) => ({
@@ -76,6 +91,7 @@ export const useFloorStore = create((set, get) => ({
     const floor = {
       id, name, imageUrl, imageWidth, imageHeight,
       opacity: 1, rotation: 0, scale: null, offsetX: 0, offsetY: 0,
+      alignOffsetX: 0, alignOffsetY: 0, alignScale: 1, alignRotation: 0,
       cropX: null, cropY: null, cropWidth: null, cropHeight: null,
     }
     set((state) => ({
@@ -94,6 +110,7 @@ export const useFloorStore = create((set, get) => ({
       imageWidth: page.width,
       imageHeight: page.height,
       opacity: 1, rotation: 0, scale: null, offsetX: 0, offsetY: 0,
+      alignOffsetX: 0, alignOffsetY: 0, alignScale: 1, alignRotation: 0,
       cropX: null, cropY: null, cropWidth: null, cropHeight: null,
     }))
     set((state) => ({

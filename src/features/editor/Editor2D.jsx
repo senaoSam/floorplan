@@ -92,6 +92,7 @@ function Editor2D() {
   const isScopeMode     = editorMode === EDITOR_MODE.DRAW_SCOPE
   const isFloorHoleMode = editorMode === EDITOR_MODE.DRAW_FLOOR_HOLE
   const isCropMode      = editorMode === EDITOR_MODE.CROP_IMAGE
+  const isAlignMode     = editorMode === EDITOR_MODE.ALIGN_FLOOR
 
   const floors         = useFloorStore((s) => s.floors)
   const activeFloorId  = useFloorStore((s) => s.activeFloorId)
@@ -99,6 +100,24 @@ function Editor2D() {
   const updateFloor    = useFloorStore((s) => s.updateFloor)
   const setFloorScale  = useFloorStore((s) => s.setFloorScale)
   const activeFloor    = getActiveFloor()
+
+  // Per-floor align transform props (Konva Layer), pivot = image center.
+  // Applied only in ALIGN_FLOOR mode so editing/heatmap stays in floor-local
+  // coords the rest of the time.
+  const alignLayerProps = useCallback((f) => {
+    if (!f) return {}
+    const cx = f.imageWidth / 2
+    const cy = f.imageHeight / 2
+    const ox = f.alignOffsetX ?? 0
+    const oy = f.alignOffsetY ?? 0
+    const sc = f.alignScale   ?? 1
+    const rt = f.alignRotation ?? 0
+    return {
+      x: cx + ox, y: cy + oy,
+      offsetX: cx, offsetY: cy,
+      rotation: rt, scaleX: sc, scaleY: sc,
+    }
+  }, [])
 
   const addWall    = useWallStore((s) => s.addWall)
   const addOpening = useWallStore((s) => s.addOpening)
@@ -245,6 +264,7 @@ function Editor2D() {
           case 'scope':      return (useScopeStore.getState().scopesByFloor[fid] ?? []).some((s) => s.id === sid)
           case 'floor_hole': return (useFloorHoleStore.getState().floorHolesByFloor[fid] ?? []).some((h) => h.id === sid)
           case 'floor_image':return true
+          case 'floor_align':return true
           default:           return false
         }
       })()
@@ -270,6 +290,13 @@ function Editor2D() {
           clearSelectedIfMissing()
           return
         }
+      }
+
+      // In align mode, ignore ESC/Delete/Backspace so the panel stays open
+      // and alignment progress isn't lost. User must press the Done button
+      // (or switch tool/floor and confirm the dialog) to exit.
+      if (isAlignMode && (e.key === 'Escape' || e.key === 'Delete' || e.key === 'Backspace')) {
+        return
       }
 
       if (e.key === 'Escape') {
@@ -356,7 +383,7 @@ function Editor2D() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, selectedType, activeFloorId, isWallMode, isDoorWindowMode, removeWall, removeWalls, updateWall, removeAP, removeAPs, removeScope, removeScopes, removeFloorHole, removeFloorHoles, clearSelected])
+  }, [selectedId, selectedType, activeFloorId, isWallMode, isDoorWindowMode, isAlignMode, removeWall, removeWalls, updateWall, removeAP, removeAPs, removeScope, removeScopes, removeFloorHole, removeFloorHoles, clearSelected])
 
   // ── 切換模式時清除繪製狀態 ────────────────────────────
   useEffect(() => {
@@ -578,6 +605,9 @@ function Editor2D() {
   const handleStageClick = useCallback((e) => {
     if (e.evt.button !== 0) return
 
+    // In align mode, swallow clicks so the panel stays open.
+    if (isAlignMode) { return }
+
     // 框選模式下點擊不處理（交由 mouseDown/mouseUp 處理）
     if (isMarqueeMode) { return }
 
@@ -748,6 +778,7 @@ function Editor2D() {
     // 其他模式點擊空白 → 取消選取
     clearSelected()
   }, [
+    isAlignMode,
     isMarqueeMode, isDoorWindowMode,
     isScaleMode, showScaleDialog, scalePt1,
     isWallMode, wallDrawStart, activeFloorId, snapToWallEndpoint,
@@ -763,13 +794,15 @@ function Editor2D() {
   const handleContextMenu = useCallback((e) => {
     e.evt.preventDefault()
     if (suppressContextMenuRef.current) { suppressContextMenuRef.current = false; return }
+    // In align mode, don't let right-click collapse the panel.
+    if (isAlignMode) return
     if (isWallMode && wallDrawStart)           { setWallDrawStart(null); return }
     if (isScopeMode && scopePoints.length > 0) { setScopePoints([]);     return }
     if (isFloorHoleMode && floorHolePoints.length > 0) { setFloorHolePoints([]); return }
     if (isCropMode && cropStart) { setCropStart(null); return }
     if (isDoorWindowMode && dwWallId) { setDwWallId(null); setDwStartFrac(null); return }
     togglePanelCollapsed()
-  }, [isWallMode, wallDrawStart, isScopeMode, scopePoints, isFloorHoleMode, floorHolePoints, isCropMode, cropStart, isDoorWindowMode, dwWallId, togglePanelCollapsed])
+  }, [isAlignMode, isWallMode, wallDrawStart, isScopeMode, scopePoints, isFloorHoleMode, floorHolePoints, isCropMode, cropStart, isDoorWindowMode, dwWallId, togglePanelCollapsed])
 
   // ── 比例尺 helpers ─────────────────────────────────────
   const resetScale = () => {
@@ -879,6 +912,7 @@ function Editor2D() {
     [EDITOR_MODE.DRAW_SCOPE]:      { label: '熱圖範圍模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.DRAW_FLOOR_HOLE]: { label: '中庭模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.CROP_IMAGE]:      { label: '裁切模式', hint: '左鍵點擊兩點定義裁切區域；右鍵或 Esc 取消' },
+    [EDITOR_MODE.ALIGN_FLOOR]:     { label: '樓層對齊模式', hint: '使用右側面板的偏移/縮放/旋轉對齊本樓層；其他樓層以半透明疊影顯示' },
   }
   const modeHint = modeHintMap[editorMode]
 
@@ -931,16 +965,28 @@ function Editor2D() {
             <Rect x={-50000} y={-50000} width={100000} height={100000} fill="#1e1e2e" />
           </Layer>
 
+          {/* Align-mode: dim every other floor behind the active one so user can
+              match outlines. Each reference floor gets its own align transform. */}
+          {isAlignMode && floors.filter((f) => f.id !== activeFloorId).map((f) => (
+            <FloorImageLayer
+              key={`ref-${f.id}`}
+              floor={{ ...f, opacity: 0.3 }}
+              isSelectMode={false}
+              layerProps={{ ...alignLayerProps(f), listening: false }}
+            />
+          ))}
+
           {activeFloor && showFloorImage && (
             <FloorImageLayer
               floor={activeFloor}
               isSelectMode={isSelectMode}
               onFloorImageClick={() => setSelected(activeFloorId, 'floor_image')}
+              layerProps={isAlignMode ? alignLayerProps(activeFloor) : undefined}
             />
           )}
 
           {/* 所有向量元素合併為單一 Layer，內部用 Group 區隔 */}
-          <Layer>
+          <Layer {...(isAlignMode && activeFloor ? alignLayerProps(activeFloor) : {})}>
             {activeFloorId && showScopes && (
               <ScopeLayer
                 floorId={activeFloorId}
@@ -1092,16 +1138,18 @@ function Editor2D() {
         </div>
       )}
 
-      <HeatmapWebGL
-        width={size.width}
-        height={size.height}
-        stageRef={stageRef}
-        draggingAPRef={draggingAPRef}
-        draggingWallRef={draggingWallRef}
-        draggingScopeRef={draggingScopeRef}
-      />
+      {!isAlignMode && (
+        <HeatmapWebGL
+          width={size.width}
+          height={size.height}
+          stageRef={stageRef}
+          draggingAPRef={draggingAPRef}
+          draggingWallRef={draggingWallRef}
+          draggingScopeRef={draggingScopeRef}
+        />
+      )}
 
-      <HeatmapControl legends={LEGENDS} />
+      {!isAlignMode && <HeatmapControl legends={LEGENDS} />}
 
       {showScaleDialog && (
         <ScaleDialog

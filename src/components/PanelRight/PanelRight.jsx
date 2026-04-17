@@ -6,6 +6,7 @@ import APPanel from './APPanel'
 import ScopePanel from './ScopePanel'
 import FloorHolePanel from './FloorHolePanel'
 import FloorImagePanel from './FloorImagePanel'
+import AlignFloorPanel from './AlignFloorPanel'
 import BatchPanel from './BatchPanel'
 import './PanelRight.sass'
 
@@ -39,6 +40,9 @@ function PanelRight() {
       )}
       {!isBatch && selectedType === 'floor_image' && activeFloorId && (
         <FloorImagePanel floorId={activeFloorId} />
+      )}
+      {!isBatch && selectedType === 'floor_align' && activeFloorId && (
+        <AlignFloorPanel floorId={activeFloorId} />
       )}
     </aside>
   )

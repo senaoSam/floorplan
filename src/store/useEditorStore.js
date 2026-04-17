@@ -12,6 +12,7 @@ export const EDITOR_MODE = {
   CROP_IMAGE: 'crop_image',
   MARQUEE_SELECT: 'marquee_select',
   DOOR_WINDOW: 'door_window',
+  ALIGN_FLOOR: 'align_floor',
 }
 
 // 視角模式
@@ -50,7 +51,7 @@ export const useEditorStore = create((set, get) => ({
   viewMode: VIEW_MODE.TWO_D,
   selectedId: null,
   // [SELECTABLE-TYPE] 新增物件類型時在此 JSDoc 加字串
-  selectedType: null, // 'wall' | 'ap' | 'scope' | 'floor_hole' | 'floor_image' | null
+  selectedType: null, // 'wall' | 'ap' | 'scope' | 'floor_hole' | 'floor_image' | 'floor_align' | null
   // 批次選取 — [{ id, type }]
   selectedItems: [],
   showHeatmap: false,

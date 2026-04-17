@@ -1,6 +1,7 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useEditorStore, EDITOR_MODE, VIEW_MODE } from '@/store/useEditorStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
+import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import './Toolbar.sass'
 
 const TOOL_GROUPS = [
@@ -30,6 +31,17 @@ function Toolbar() {
   const redoLen = useHistoryStore((s) => s.redoStack.length)
   const undo = useHistoryStore((s) => s.undo)
   const redo = useHistoryStore((s) => s.redo)
+  const [pendingMode, setPendingMode] = useState(null)
+
+  const isAlignMode = editorMode === EDITOR_MODE.ALIGN_FLOOR
+
+  const handleToolClick = (mode) => {
+    if (isAlignMode && mode !== EDITOR_MODE.ALIGN_FLOOR) {
+      setPendingMode(mode)
+      return
+    }
+    setEditorMode(mode)
+  }
 
   return (
     <header className="toolbar">
@@ -42,7 +54,7 @@ function Toolbar() {
               <button
                 key={t.mode}
                 className={`toolbar__btn${editorMode === t.mode ? ' toolbar__btn--active' : ''}`}
-                onClick={() => setEditorMode(t.mode)}
+                onClick={() => handleToolClick(t.mode)}
                 title={t.label}
               >
                 <span className="toolbar__btn-icon">{t.icon}</span>
@@ -89,6 +101,17 @@ function Toolbar() {
           3D
         </button>
       </div>
+
+      {pendingMode && (
+        <ConfirmDialog
+          title="離開樓層對齊？"
+          message="你正在對齊樓層，切換工具會結束對齊模式（已調整的偏移/縮放/旋轉會保留）。確定要離開嗎？"
+          confirmLabel="離開對齊"
+          cancelLabel="繼續對齊"
+          onConfirm={() => { const m = pendingMode; setPendingMode(null); setEditorMode(m) }}
+          onCancel={() => setPendingMode(null)}
+        />
+      )}
     </header>
   )
 }

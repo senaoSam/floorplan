@@ -1,0 +1,139 @@
+@use '@/styles/variables' as *
+
+.align-floor-panel
+  display: flex
+  flex-direction: column
+  height: 100%
+
+  &__header
+    display: flex
+    align-items: center
+    justify-content: space-between
+    padding: 12px 14px 10px
+    border-bottom: 1px solid $border-color
+
+  &__title
+    font-size: 13px
+    font-weight: 600
+    color: $text-primary
+
+  &__meta
+    font-size: 11px
+    color: $text-secondary
+
+  &__intro
+    padding: 10px 14px
+    font-size: 11px
+    color: $text-secondary
+    line-height: 1.5
+    border-bottom: 1px solid $border-color
+    background: rgba(255, 255, 255, 0.02)
+
+  &__section
+    padding: 12px 14px
+    border-bottom: 1px solid $border-color
+
+  &__label
+    font-size: 11px
+    font-weight: 600
+    color: $text-secondary
+    text-transform: uppercase
+    letter-spacing: 0.4px
+    margin-bottom: 8px
+
+  &__row
+    display: flex
+    align-items: center
+    gap: 8px
+    margin-bottom: 6px
+
+    &:last-child
+      margin-bottom: 0
+
+  &__axis
+    width: 14px
+    font-size: 12px
+    color: $text-secondary
+    text-align: center
+
+  &__num
+    width: 68px
+    background: rgba(255, 255, 255, 0.07)
+    border: 1px solid $border-color
+    border-radius: 6px
+    color: $text-primary
+    font-size: 12px
+    padding: 5px 8px
+    outline: none
+    text-align: center
+
+    &:focus
+      border-color: $accent
+
+    &::-webkit-inner-spin-button,
+    &::-webkit-outer-spin-button
+      -webkit-appearance: none
+      margin: 0
+
+  &__unit
+    font-size: 12px
+    color: $text-secondary
+
+  &__slider
+    flex: 1
+    height: 4px
+    -webkit-appearance: none
+    appearance: none
+    background: rgba(255, 255, 255, 0.12)
+    border-radius: 2px
+    outline: none
+    cursor: pointer
+
+    &::-webkit-slider-thumb
+      -webkit-appearance: none
+      appearance: none
+      width: 14px
+      height: 14px
+      border-radius: 50%
+      background: $accent
+      cursor: pointer
+      border: 2px solid $bg-secondary
+
+    &::-moz-range-thumb
+      width: 14px
+      height: 14px
+      border-radius: 50%
+      background: $accent
+      cursor: pointer
+      border: 2px solid $bg-secondary
+
+  &__actions
+    margin-top: auto
+    display: flex
+    gap: 8px
+    padding: 12px 14px
+
+  &__btn
+    flex: 1
+    padding: 8px 0
+    border-radius: 6px
+    font-size: 12px
+    cursor: pointer
+    transition: background 0.12s, border-color 0.12s
+
+    &--ghost
+      background: transparent
+      border: 1px solid $border-color
+      color: $text-secondary
+
+      &:hover
+        background: rgba(255, 255, 255, 0.06)
+        color: $text-primary
+
+    &--primary
+      background: rgba($accent, 0.18)
+      border: 1px solid rgba($accent, 0.5)
+      color: $accent
+
+      &:hover
+        background: rgba($accent, 0.28)

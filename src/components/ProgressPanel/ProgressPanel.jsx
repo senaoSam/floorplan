@@ -113,7 +113,8 @@ const PHASES = [
         layer: 'Layer 9 — 多樓層管理',
         items: [
           { id: '9-1', done: true, text: '樓層切換' },
-          { id: '9-2', done: false, text: '樓層對齊（偏移、縮放、旋轉）' },
+          { id: '9-2a', done: true,  text: '樓層對齊模式（偏移、縮放、旋轉 + 疊影 + 離開確認）' },
+          { id: '9-2b', done: false, text: '參考樓層疊影（選層、顯示開關、透明度）' },
           { id: '9-3', done: false, text: '樓板衰減' },
         ],
       },
