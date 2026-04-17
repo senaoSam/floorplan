@@ -109,3 +109,27 @@
 
     &:hover
       color: $text-primary
+
+  &__toast
+    margin-top: 8px
+    padding: 6px 10px
+    background: rgba(46, 204, 113, 0.14)
+    border: 1px solid rgba(46, 204, 113, 0.45)
+    border-radius: 6px
+    color: #2ecc71
+    font-size: 11px
+    display: flex
+    align-items: center
+    gap: 6px
+    animation: device-planning-toast-in 0.2s ease-out
+
+  &__toast-check
+    font-weight: 700
+
+@keyframes device-planning-toast-in
+  from
+    opacity: 0
+    transform: translateY(-4px)
+  to
+    opacity: 1
+    transform: translateY(0)
