@@ -28,7 +28,7 @@ const TOOL_GROUPS = [
 ]
 
 function Toolbar() {
-  const { editorMode, viewMode, regulatoryDomain, setEditorMode, setViewMode } = useEditorStore()
+  const { editorMode, viewMode, regulatoryDomain, autoChannelOnPlace, setEditorMode, setViewMode, toggleAutoChannelOnPlace } = useEditorStore()
   const undoLen = useHistoryStore((s) => s.undoStack.length)
   const redoLen = useHistoryStore((s) => s.redoStack.length)
   const undo = useHistoryStore((s) => s.undo)
@@ -73,14 +73,27 @@ function Toolbar() {
       </div>
 
       <div className="toolbar__actions">
-        <button
-          className="toolbar__auto-ch-btn"
-          onClick={handleAutoChannel}
-          disabled={apsOnFloor === 0}
-          title="自動頻道規劃：對本樓層所有 AP 執行 greedy 最小干擾頻道指派"
-        >
-          ⚡ 自動頻道
-        </button>
+        <div className="toolbar__auto-ch-group">
+          <button
+            className="toolbar__auto-ch-btn"
+            onClick={handleAutoChannel}
+            disabled={apsOnFloor === 0}
+            title="自動頻道規劃：對本樓層所有 AP 執行 greedy 最小干擾頻道指派"
+          >
+            ⚡ 自動頻道
+          </button>
+          <label
+            className={`toolbar__auto-ch-toggle${autoChannelOnPlace ? ' toolbar__auto-ch-toggle--on' : ''}`}
+            title="放置新 AP 時自動挑選頻道"
+          >
+            <input
+              type="checkbox"
+              checked={autoChannelOnPlace}
+              onChange={toggleAutoChannelOnPlace}
+            />
+            自動
+          </label>
+        </div>
 
         <div className="toolbar__history">
           <button

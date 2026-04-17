@@ -10,6 +10,7 @@ import { useHistoryStore } from '@/store/useHistoryStore'
 import { MATERIALS, MATERIAL_LIST, OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
 import { generateId } from '@/utils/id'
+import { greedyChannelAssign } from '@/utils/autoChannelPlan'
 import FloorImageLayer from './layers/FloorImageLayer'
 import WallLayer from './layers/WallLayer'
 import APLayer from './layers/APLayer'
@@ -77,7 +78,8 @@ function Editor2D() {
 
   const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected, togglePanelCollapsed,
           selectedItems, setSelectedItems, toggleSelectedItem,
-          showFloorImage, showScopes, showFloorHoles, showWalls, showAPs } = useEditorStore()
+          showFloorImage, showScopes, showFloorHoles, showWalls, showAPs,
+          autoChannelOnPlace, regulatoryDomain } = useEditorStore()
   const isSelectMode    = editorMode === EDITOR_MODE.SELECT
   const isMarqueeMode   = editorMode === EDITOR_MODE.MARQUEE_SELECT
   const isDoorWindowMode = editorMode === EDITOR_MODE.DOOR_WINDOW
@@ -585,13 +587,26 @@ function Editor2D() {
 
     // AP 放置
     if (isAPMode) {
+      const newId = generateId('ap')
+      const defaultFreq = 5
+      const defaultChannel = 36
+
+      let channel = defaultChannel
+      if (autoChannelOnPlace) {
+        const existing = useAPStore.getState().apsByFloor[activeFloorId] ?? []
+        const probe = [...existing, { id: newId, x: pos.x, y: pos.y, frequency: defaultFreq }]
+        const assignments = greedyChannelAssign(probe, regulatoryDomain)
+        const picked = assignments.get(newId)
+        if (picked) channel = picked.channel
+      }
+
       addAP(activeFloorId, {
-        id: generateId('ap'),
+        id: newId,
         x: pos.x, y: pos.y,
         z: 2.4,
         txPower: 20,
-        frequency: 5,
-        channel: 36,
+        frequency: defaultFreq,
+        channel,
         antennaMode: 'omni',
         azimuth: 0,
         beamwidth: 60,
@@ -711,7 +726,7 @@ function Editor2D() {
     isMarqueeMode, isDoorWindowMode,
     isScaleMode, showScaleDialog, scalePt1,
     isWallMode, wallDrawStart, activeFloorId, snapToWallEndpoint,
-    isAPMode, nextAPName,
+    isAPMode, nextAPName, autoChannelOnPlace, regulatoryDomain,
     isScopeMode, scopePoints, viewport.scale, addScope,
     isFloorHoleMode, floorHolePoints, addFloorHole,
     isCropMode, cropStart, updateFloor, toImagePos, setSelected,

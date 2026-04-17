@@ -128,10 +128,44 @@
       border-color: #4fc3f7
       color: $text-primary
 
+  &__auto-ch-group
+    display: flex
+    align-items: center
+    gap: 0
+
+  &__auto-ch-toggle
+    display: flex
+    align-items: center
+    gap: 4px
+    padding: 4px 8px
+    border: 1px solid rgba(#4fc3f7, 0.4)
+    border-left: none
+    border-radius: 0 6px 6px 0
+    background: transparent
+    color: $text-secondary
+    font-size: 10px
+    cursor: pointer
+    transition: all 0.15s
+    white-space: nowrap
+
+    input[type="checkbox"]
+      width: 10px
+      height: 10px
+      accent-color: #4fc3f7
+      cursor: pointer
+      margin: 0
+
+    &--on
+      background: rgba(#4fc3f7, 0.1)
+      color: #4fc3f7
+
+    &:hover
+      color: #4fc3f7
+
   &__auto-ch-btn
     padding: 4px 12px
     border: 1px solid rgba(#4fc3f7, 0.4)
-    border-radius: 6px
+    border-radius: 6px 0 0 6px
     background: transparent
     color: #4fc3f7
     font-size: 11px
