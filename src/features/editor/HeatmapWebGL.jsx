@@ -17,6 +17,57 @@ const DEFAULT_CHAN = { 2.4: 1,    5: 36,   6: 1    }
 // 頻段索引：用於 wallLoss3 查表（0=2.4, 1=5, 2=6）
 const FREQ_BAND_INDEX = { 2.4: 0, 5: 1, 6: 2 }
 
+// 將點依樓層的 align transform 轉至共同「世界」坐標（以圖像中心為樞紐）。
+// transform: { imageWidth, imageHeight, alignOffsetX, alignOffsetY, alignScale, alignRotation }
+function alignFwd(pt, f) {
+  const cx = f.imageWidth / 2, cy = f.imageHeight / 2
+  const sc = f.alignScale ?? 1
+  const rad = ((f.alignRotation ?? 0) * Math.PI) / 180
+  const dx = pt.x - cx, dy = pt.y - cy
+  const rx = dx * Math.cos(rad) - dy * Math.sin(rad)
+  const ry = dx * Math.sin(rad) + dy * Math.cos(rad)
+  return {
+    x: cx + (f.alignOffsetX ?? 0) + rx * sc,
+    y: cy + (f.alignOffsetY ?? 0) + ry * sc,
+  }
+}
+
+// alignFwd 的反函數。
+function alignInv(pt, f) {
+  const cx = f.imageWidth / 2, cy = f.imageHeight / 2
+  const sc = f.alignScale ?? 1
+  const rad = ((f.alignRotation ?? 0) * Math.PI) / 180
+  const px = (pt.x - cx - (f.alignOffsetX ?? 0)) / sc
+  const py = (pt.y - cy - (f.alignOffsetY ?? 0)) / sc
+  // 反向旋轉
+  return {
+    x: cx + px * Math.cos(-rad) - py * Math.sin(-rad),
+    y: cy + px * Math.sin(-rad) + py * Math.cos(-rad),
+  }
+}
+
+// 將 AP 的本地座標（在 srcFloor）轉至 activeFloor 的本地座標，供熱圖渲染使用。
+function projectApToActive(apPos, srcFloor, activeFloor) {
+  if (!srcFloor || !activeFloor || srcFloor.id === activeFloor.id) return apPos
+  return alignInv(alignFwd(apPos, srcFloor), activeFloor)
+}
+
+// 跨樓層樓板累積衰減 (dB)：AP 由 srcFloor 到 activeFloor，跨越兩者間所有樓板。
+// Rule: sum of floorSlabAttenuationDb for each floor crossed. Adjacent floors = 1 slab.
+function computeFloorAttDb(floors, srcFloorId, activeFloorId) {
+  if (srcFloorId === activeFloorId) return 0
+  const srcIdx = floors.findIndex((f) => f.id === srcFloorId)
+  const actIdx = floors.findIndex((f) => f.id === activeFloorId)
+  if (srcIdx < 0 || actIdx < 0) return 0
+  const [lo, hi] = srcIdx < actIdx ? [srcIdx, actIdx] : [actIdx, srcIdx]
+  let total = 0
+  // 跨越的樓板 = lo..hi-1 範圍內每樓的樓板
+  for (let i = lo; i < hi; i++) {
+    total += floors[i].floorSlabAttenuationDb ?? 0
+  }
+  return total
+}
+
 // 頻道中心頻率 (MHz)：2.4 → 2407+5N，5 → 5000+5N，6 → 5950+5N
 function channelCenterMHz(band, channel) {
   if (band === 2.4) return 2407 + 5 * channel
@@ -61,6 +112,7 @@ uniform float u_apChannels[MAX_APS];
 uniform float u_apFreqBand[MAX_APS];   // 頻段索引 0=2.4, 1=5, 2=6
 uniform float u_apCenterMHz[MAX_APS];  // 該頻道+頻寬的中心頻率 (MHz)
 uniform float u_apWidthMHz[MAX_APS];   // 頻寬 (MHz)
+uniform float u_apFloorAttDb[MAX_APS]; // 跨樓層樓板累積衰減 (dB)，同樓層 = 0
 uniform vec4  u_apAnt[MAX_APS];        // x = mode(0=omni,1=dir,2=custom), y = azimuthRad, z = halfBeamwidthRad, w = frontBackDb
 uniform sampler2D u_apPattern;         // MAX_APS x PATTERN_SAMPLES, R32F, value = gain dB at (AP, angleBin)
 uniform vec4  u_walls[MAX_WALLS];
@@ -309,12 +361,12 @@ void main() {
       int   fIdx   = int(u_apFreqBand[i]);
       float dist   = length(canvas - apPos);
       if (dist < 0.5) {
-        rssi = txPow;
+        rssi = txPow - u_apFloorAttDb[i];
       } else {
         float distM = dist / u_floorScale;
         float fspl  = 10.0 * u_pathLossN * log10v(distM) + 20.0 * log10v(fMHz) - 27.55;
         float gain  = antennaGain(i, canvas, apPos, u_apAnt[i]);
-        rssi = txPow + gain - fspl - wallLoss(canvas, apPos, fIdx);
+        rssi = txPow + gain - fspl - wallLoss(canvas, apPos, fIdx) - u_apFloorAttDb[i];
       }
       if (rssi > bestRSSI) { bestRSSI = rssi; bestIdx = i; }
       if (rssi > -85.0) hearable++;
@@ -574,6 +626,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       apFreqBand:     gl.getUniformLocation(prog, 'u_apFreqBand[0]'),
       apCenterMHz:    gl.getUniformLocation(prog, 'u_apCenterMHz[0]'),
       apWidthMHz:     gl.getUniformLocation(prog, 'u_apWidthMHz[0]'),
+      apFloorAttDb:   gl.getUniformLocation(prog, 'u_apFloorAttDb[0]'),
       apAnt:          gl.getUniformLocation(prog, 'u_apAnt[0]'),
       apPattern:      gl.getUniformLocation(prog, 'u_apPattern'),
       walls:          gl.getUniformLocation(prog, 'u_walls[0]'),
@@ -593,6 +646,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
     const apFreqData    = new Float32Array(MAX_APS)
     const apCenterData  = new Float32Array(MAX_APS)
     const apWidthData   = new Float32Array(MAX_APS)
+    const apFloorAttData = new Float32Array(MAX_APS)
     const apAntData     = new Float32Array(MAX_APS       * 4)
     const apPatternData = new Float32Array(MAX_APS       * PATTERN_SAMPLES)
 
@@ -643,9 +697,29 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         return
       }
 
-      let aps = useAPStore.getState().apsByFloor[floorId] ?? []
-      const drag = draggingAPRef?.current
-      if (drag) aps = aps.map((a) => a.id === drag.id ? { ...a, x: drag.x, y: drag.y } : a)
+      // Cross-floor (9-3b): collect APs from all floors; project their positions
+      // into the active floor's local canvas space via align transforms, and
+      // precompute per-AP slab attenuation in dB.
+      const allFloors  = useFloorStore.getState().floors
+      const activeFlr  = allFloors.find((f) => f.id === floorId)
+      const apsByFloor = useAPStore.getState().apsByFloor
+      const drag       = draggingAPRef?.current
+      let aps = []
+      for (const f of allFloors) {
+        const fApsRaw = apsByFloor[f.id] ?? []
+        if (fApsRaw.length === 0) continue
+        const attDb = computeFloorAttDb(allFloors, f.id, floorId)
+        for (const a of fApsRaw) {
+          const isActive = f.id === floorId
+          let x = a.x, y = a.y
+          if (isActive && drag && drag.id === a.id) { x = drag.x; y = drag.y }
+          if (!isActive) {
+            const p = projectApToActive({ x, y }, f, activeFlr)
+            x = p.x; y = p.y
+          }
+          aps.push({ ...a, x, y, _floorAttDb: attDb })
+        }
+      }
 
       if (aps.length === 0) {
         if (prevKey !== null) {
@@ -749,13 +823,14 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
 
       const vp = { x: stage.x(), y: stage.y(), scale: stage.scaleX() }
 
-      const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0},${a.channelWidth ?? 0},${a.antennaMode ?? 'omni'},${a.azimuth ?? 0},${a.beamwidth ?? 60},${a.patternId ?? ''}`).join('|')
+      const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0},${a.channelWidth ?? 0},${a.antennaMode ?? 'omni'},${a.azimuth ?? 0},${a.beamwidth ?? 60},${a.patternId ?? ''},${(a._floorAttDb ?? 0).toFixed(1)}`).join('|')
       const wallKey  = rawWalls.map((wl) => `${wl.startX.toFixed(1)},${wl.startY.toFixed(1)},${wl.endX.toFixed(1)},${wl.endY.toFixed(1)},${wl.material?.id ?? ''},${wl.material?.dbLoss ?? 0}`).join('|')
       const scopeKey = [...inScopes, ...outScopes].map((sc) => {
         const d = dragScope && dragScope.id === sc.id ? `${dragScope.dx.toFixed(1)},${dragScope.dy.toFixed(1)}` : '0,0'
         return `${sc.id},${sc.type},${d}`
       }).join('|') || 'none'
-      const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${curMode},${plN},${apKey},${wallKey},${openingsKey},${scopeKey}`
+      const slabKey = allFloors.map((f) => `${f.id}:${(f.floorSlabAttenuationDb ?? 0).toFixed(1)},${(f.alignOffsetX ?? 0).toFixed(1)},${(f.alignOffsetY ?? 0).toFixed(1)},${(f.alignScale ?? 1).toFixed(3)},${(f.alignRotation ?? 0).toFixed(2)}`).join('|')
+      const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${curMode},${plN},${apKey},${wallKey},${openingsKey},${scopeKey},${slabKey}`
       if (key === prevKey) return
       prevKey = key
 
@@ -772,6 +847,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         apFreqData[i] = FREQ_BAND_INDEX[a.frequency] ?? 1
         apCenterData[i] = channelCenterMHz(a.frequency, ch)
         apWidthData[i] = bw
+        apFloorAttData[i] = a._floorAttDb ?? 0
         // Antenna: omni(0) / directional(1) / custom(2); custom AP fills its pattern row.
         const mode = a.antennaMode === 'directional' ? 1 : a.antennaMode === 'custom' ? 2 : 0
         const azDeg     = ((a.azimuth ?? 0) % 360 + 360) % 360
@@ -823,6 +899,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       gl.uniform1fv(locs.apFreqBand,   apFreqData)
       gl.uniform1fv(locs.apCenterMHz,  apCenterData)
       gl.uniform1fv(locs.apWidthMHz,   apWidthData)
+      gl.uniform1fv(locs.apFloorAttDb, apFloorAttData)
       gl.uniform4fv(locs.apAnt,        apAntData)
       gl.activeTexture(gl.TEXTURE0)
       gl.bindTexture(gl.TEXTURE_2D, patternTex)
