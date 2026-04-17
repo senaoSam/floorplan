@@ -112,8 +112,9 @@ uniform int   u_activeFloorIdx;
 uniform float u_floorSlabDb[MAX_FLOORS];
 uniform vec4  u_floorAlign[MAX_FLOORS];    // (offsetX, offsetY, scale, rotationRad)
 uniform vec2  u_floorImgCenter[MAX_FLOORS];// (imgW/2, imgH/2) — align pivot
-uniform vec2  u_holePts[MAX_HOLE_PTS];     // 所有樓層 hole 頂點（各自在 source 樓的 local 座標）
-uniform vec4  u_holeRanges[MAX_HOLES_TOTAL]; // (start, count, floorIdx, 0)
+uniform vec2  u_holePts[MAX_HOLE_PTS];     // 所有樓層 hole 頂點（存於 source 樓的 local 座標）
+uniform vec4  u_holeRanges[MAX_HOLES_TOTAL]; // (start, count, bottomFloorIdx, topFloorIdx) — 9-3e 垂直範圍
+uniform float u_holeSrcFloorIdx[MAX_HOLES_TOTAL]; // hole 多邊形所在樓層索引（頂點座標的參考系）
 uniform int   u_holeCount;
 uniform sampler2D u_apPattern;         // MAX_APS x PATTERN_SAMPLES, R32F, value = gain dB at (AP, angleBin)
 uniform vec4  u_walls[MAX_WALLS];
@@ -194,13 +195,19 @@ vec2 alignInvGL(vec2 pt, vec4 f, vec2 c) {
   return c + vec2(p.x * cs - p.y * sn, p.x * sn + p.y * cs);
 }
 
-// 點是否在某樓層的任何 floor hole 內（hole 頂點以該樓層 local 儲存）
-bool pointInFloorHoles(vec2 p, int floorIdx) {
+// 點是否在某樓層的任何 floor hole 內。9-3e: hole 有垂直延伸範圍
+// [bottomFloorIdx, topFloorIdx]，樓層 i 在此閉區間內即參與判定。
+// 輸入 pLocalFi 為樓 i 的 local 座標，內部會轉至 hole 所屬樓層的 local 再比對。
+bool pointInFloorHoles(vec2 pLocalFi, int floorIdx) {
+  vec2 pWorld = alignFwdGL(pLocalFi, u_floorAlign[floorIdx], u_floorImgCenter[floorIdx]);
   for (int k = 0; k < MAX_HOLES_TOTAL; k++) {
     if (k >= u_holeCount) break;
     vec4 r = u_holeRanges[k];
-    int fIdx = int(r.z + 0.5);
-    if (fIdx != floorIdx) continue;
+    int bottomIdx = int(r.z + 0.5);
+    int topIdx    = int(r.w + 0.5);
+    if (floorIdx < bottomIdx || floorIdx > topIdx) continue;
+    int holeSrc   = int(u_holeSrcFloorIdx[k] + 0.5);
+    vec2 p = alignInvGL(pWorld, u_floorAlign[holeSrc], u_floorImgCenter[holeSrc]);
     int start = int(r.x + 0.5);
     int n     = int(r.y + 0.5);
     // Ray-cast point-in-polygon
@@ -718,6 +725,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       floorImgCenter: gl.getUniformLocation(prog, 'u_floorImgCenter[0]'),
       holePts:        gl.getUniformLocation(prog, 'u_holePts[0]'),
       holeRanges:     gl.getUniformLocation(prog, 'u_holeRanges[0]'),
+      holeSrcFloorIdx: gl.getUniformLocation(prog, 'u_holeSrcFloorIdx[0]'),
       holeCount:      gl.getUniformLocation(prog, 'u_holeCount'),
       apPattern:      gl.getUniformLocation(prog, 'u_apPattern'),
       walls:          gl.getUniformLocation(prog, 'u_walls[0]'),
@@ -742,8 +750,9 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
     const floorSlabDbData    = new Float32Array(MAX_FLOORS)
     const floorAlignData     = new Float32Array(MAX_FLOORS * 4)
     const floorImgCenterData = new Float32Array(MAX_FLOORS * 2)
-    const holePtsData        = new Float32Array(MAX_HOLE_PTS * 2)
-    const holeRangesData     = new Float32Array(MAX_HOLES_TOTAL * 4)
+    const holePtsData         = new Float32Array(MAX_HOLE_PTS * 2)
+    const holeRangesData      = new Float32Array(MAX_HOLES_TOTAL * 4)
+    const holeSrcFloorIdxData = new Float32Array(MAX_HOLES_TOTAL)
     const apPatternData = new Float32Array(MAX_APS       * PATTERN_SAMPLES)
 
     // R32F 2D texture: width = PATTERN_SAMPLES, height = MAX_APS. Each row = one AP's pattern.
@@ -931,10 +940,11 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       }).join('|') || 'none'
       const slabKey = allFloors.map((f) => `${f.id}:${(f.floorSlabAttenuationDb ?? 0).toFixed(1)},${(f.alignOffsetX ?? 0).toFixed(1)},${(f.alignOffsetY ?? 0).toFixed(1)},${(f.alignScale ?? 1).toFixed(3)},${(f.alignRotation ?? 0).toFixed(2)}`).join('|')
       // 9-3c: Floor holes on every floor affect per-AP slab attenuation
+      // 9-3e: bottom/topFloorId 也納入 key
       const holesKey = allFloors.map((f) => {
         const holes = floorHolesByFl[f.id] ?? []
         if (holes.length === 0) return `${f.id}:none`
-        return `${f.id}:${holes.map((h) => `${h.id}[${h.points.map((p) => p.toFixed(1)).join(',')}]`).join(';')}`
+        return `${f.id}:${holes.map((h) => `${h.id}[${h.points.map((p) => p.toFixed(1)).join(',')}]b=${h.bottomFloorId ?? f.id}t=${h.topFloorId ?? f.id}`).join(';')}`
       }).join('|')
       const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${curMode},${plN},${apKey},${wallKey},${openingsKey},${scopeKey},${slabKey},${holesKey}`
       if (key === prevKey) return
@@ -1002,6 +1012,8 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         floorImgCenterData[i*2+1] = (f.imageHeight ?? 0) / 2
       }
 
+      // 9-3e: 每個 hole 可設垂直延伸範圍 (bottomFloorId, topFloorId)
+      // 預設 = hole 所屬樓層（單層行為）
       let holePtCount = 0
       let holeCount   = 0
       for (let fi = 0; fi < floorCount && holeCount < MAX_HOLES_TOTAL; fi++) {
@@ -1010,10 +1022,17 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
           if (holeCount >= MAX_HOLES_TOTAL) break
           const n = Math.min(h.points.length / 2, MAX_HOLE_PTS - holePtCount)
           if (n < 3) continue
+          const bottomId = h.bottomFloorId ?? allFloors[fi].id
+          const topId    = h.topFloorId    ?? allFloors[fi].id
+          const bIdxRaw  = allFloors.findIndex((f) => f.id === bottomId)
+          const tIdxRaw  = allFloors.findIndex((f) => f.id === topId)
+          const bIdx = bIdxRaw >= 0 ? bIdxRaw : fi
+          const tIdx = tIdxRaw >= 0 ? tIdxRaw : fi
           holeRangesData[holeCount*4]   = holePtCount
           holeRangesData[holeCount*4+1] = n
-          holeRangesData[holeCount*4+2] = fi
-          holeRangesData[holeCount*4+3] = 0
+          holeRangesData[holeCount*4+2] = Math.min(bIdx, tIdx)
+          holeRangesData[holeCount*4+3] = Math.max(bIdx, tIdx)
+          holeSrcFloorIdxData[holeCount] = fi
           for (let k = 0; k < n; k++) {
             holePtsData[(holePtCount + k)*2]   = h.points[k*2]
             holePtsData[(holePtCount + k)*2+1] = h.points[k*2+1]
@@ -1048,6 +1067,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       gl.uniform2fv(locs.floorImgCenter, floorImgCenterData)
       gl.uniform2fv(locs.holePts,       holePtsData)
       gl.uniform4fv(locs.holeRanges,    holeRangesData)
+      gl.uniform1fv(locs.holeSrcFloorIdx, holeSrcFloorIdxData)
       gl.uniform1i(locs.holeCount,      holeCount)
       gl.activeTexture(gl.TEXTURE0)
       gl.bindTexture(gl.TEXTURE_2D, patternTex)

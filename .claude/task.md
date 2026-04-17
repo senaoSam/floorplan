@@ -99,7 +99,7 @@
 | 9-3b | ✅   | 樓板衰減納入熱圖：跨樓層 AP 訊號依樓板累積 dB 衰減        |
 | 9-3c | ✅   | 中庭穿透例外（v1）：AP 垂直投影落在中間樓層 Floor Hole 內時略過該層樓板 |
 | 9-3d | ✅   | 中庭穿透例外（v2）：訊號 3D 斜線穿越點落在 Hole 內即 bypass（per-pixel、shader 判定） |
-| 9-3e | ⬜   | 中庭垂直延伸範圍：Floor Hole 新增 topFloorId/bottomFloorId，貫穿多層自動生效 |
+| 9-3e | ✅   | 中庭垂直延伸範圍：Floor Hole 新增 topFloorId/bottomFloorId，貫穿多層自動生效 |
 
 ---
 

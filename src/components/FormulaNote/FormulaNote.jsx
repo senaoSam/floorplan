@@ -32,7 +32,7 @@ const SECTIONS = [
       { label: 'Bypass', value: '9-3d per-pixel：AP↔pixel 3D 斜線在 floor i+0.5 的水平穿越點若落在該樓 Floor Hole 內 → slab_i 視為 0' },
       { label: '穿越點', value: 'crossWorld = mix(apWorld, pxWorld, t)，t = (i + 0.5 − srcIdx) / (actIdx − srcIdx)' },
       { label: '座標空間', value: '世界座標經各樓 align transform 換算；AP 與 pixel 先用 active 樓的 align 推到共用基準' },
-      { label: '限制', value: '中庭目前需逐層畫 Floor Hole；9-3e 預計支援垂直貫穿多層' },
+      { label: '垂直範圍', value: '9-3e：每個 Floor Hole 可設 bottomFloorId / topFloorId，貫穿多層自動生效（預設僅本樓層）' },
     ],
   },
   {

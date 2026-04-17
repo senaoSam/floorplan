@@ -121,7 +121,7 @@ const PHASES = [
           { id: '9-3b', done: true,  text: '樓板衰減納入熱圖（跨樓層）' },
           { id: '9-3c', done: true,  text: '中庭穿透例外 v1（AP 正投影）' },
           { id: '9-3d', done: true,  text: '中庭穿透例外 v2（3D 斜線 per-pixel）' },
-          { id: '9-3e', done: false, text: '中庭垂直延伸範圍（貫穿多層）' },
+          { id: '9-3e', done: true,  text: '中庭垂直延伸範圍（貫穿多層）' },
         ],
       },
     ],
