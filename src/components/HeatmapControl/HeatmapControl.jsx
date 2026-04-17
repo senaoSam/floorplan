@@ -15,6 +15,7 @@ const HEATMAP_OPTIONS = [
 const ENV_OPTIONS = Object.entries(ENVIRONMENT_PRESETS).map(([key, val]) => ({
   key,
   label: val.label,
+  hint: val.hint,
   n: val.n,
 }))
 
@@ -38,6 +39,19 @@ function HeatmapControl({ legends }) {
   const [focusIdx, setFocusIdx] = useState(-1)  // keyboard-highlighted index; -1 = none
   const modeRef = useRef(null)
   const headerRef = useRef(null)
+
+  const [envOpen, setEnvOpen] = useState(false)
+  const envRef = useRef(null)
+  const currentEnv = ENV_OPTIONS.find((x) => x.key === envKey) ?? ENV_OPTIONS[1]
+
+  useEffect(() => {
+    if (!envOpen) return
+    const onDown = (e) => {
+      if (envRef.current && !envRef.current.contains(e.target)) setEnvOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [envOpen])
 
   const currentIdx = HEATMAP_OPTIONS.findIndex((o) => o.mode === heatmapMode)
 
@@ -174,19 +188,46 @@ function HeatmapControl({ legends }) {
       )}
 
       {showHeatmap && (
-        <select
-          className="heatmap-control__env-select"
-          value={envKey}
-          onChange={(e) => {
-            const preset = ENVIRONMENT_PRESETS[e.target.value]
-            if (preset) setPathLossExp(preset.n)
-          }}
-          title="環境類型（路徑損耗指數）"
-        >
-          {ENV_OPTIONS.map((x) => (
-            <option key={x.key} value={x.key}>{x.label} (n={x.n})</option>
-          ))}
-        </select>
+        <div className="heatmap-control__env" ref={envRef}>
+          <button
+            type="button"
+            className={`heatmap-control__env-header${envOpen ? ' heatmap-control__env-header--open' : ''}`}
+            onClick={() => setEnvOpen((v) => !v)}
+            title="環境類型（影響訊號衰減計算）"
+          >
+            <span className="heatmap-control__env-text">
+              <span className="heatmap-control__env-label">{currentEnv.label}</span>
+              <span className="heatmap-control__env-meta">
+                {currentEnv.hint} <span className="heatmap-control__env-n">n={currentEnv.n}</span>
+              </span>
+            </span>
+            <span className={`heatmap-control__env-arrow${envOpen ? ' heatmap-control__env-arrow--open' : ''}`}>▾</span>
+          </button>
+          {envOpen && (
+            <ul className="heatmap-control__env-list" role="listbox">
+              {ENV_OPTIONS.map((opt) => {
+                const isActive = opt.key === envKey
+                return (
+                  <li
+                    key={opt.key}
+                    role="option"
+                    aria-selected={isActive}
+                    className={`heatmap-control__env-item${isActive ? ' heatmap-control__env-item--active' : ''}`}
+                    onClick={() => {
+                      setPathLossExp(opt.n)
+                      setEnvOpen(false)
+                    }}
+                  >
+                    <span className="heatmap-control__env-label">{opt.label}</span>
+                    <span className="heatmap-control__env-meta">
+                      {opt.hint} <span className="heatmap-control__env-n">n={opt.n}</span>
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
       )}
 
       <button

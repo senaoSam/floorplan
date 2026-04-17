@@ -31,11 +31,12 @@ export const HEATMAP_MODE = {
 }
 
 // 環境路徑損耗預設
+// hint 為情境描述，讓使用者依「場域像什麼」選擇；n 值保留給工程師校正參考。
 export const ENVIRONMENT_PRESETS = {
-  FREE_SPACE:  { label: '開放空間',   n: 2.0 },
-  OFFICE:      { label: '辦公室',     n: 3.0 },
-  DENSE:       { label: '密集隔間',   n: 3.5 },
-  CORRIDOR:    { label: '走廊',       n: 1.8 },
+  FREE_SPACE:  { label: '開放空間', hint: '大廳、中庭，訊號穿透性佳',  n: 2.0 },
+  OFFICE:      { label: '辦公室',   hint: '一般隔間與家具',             n: 3.0 },
+  DENSE:       { label: '密集隔間', hint: '小房間多、實牆多、機房',     n: 3.5 },
+  CORRIDOR:    { label: '走廊',     hint: '波導效應，訊號沿通道延伸',   n: 1.8 },
 }
 
 // ⚠️ 新增可選取物件類型時的聯動點（grep 'SELECTABLE-TYPE' 可找到所有需要一起改的地方）：
