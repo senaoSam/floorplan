@@ -4,6 +4,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useScopeStore } from '@/store/useScopeStore'
+import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { getPatternById, DEFAULT_PATTERN_ID, PATTERN_SAMPLES } from '@/constants/antennaPatterns'
 import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
 
@@ -52,18 +53,48 @@ function projectApToActive(apPos, srcFloor, activeFloor) {
   return alignInv(alignFwd(apPos, srcFloor), activeFloor)
 }
 
+// Ray-cast point-in-polygon: polyPoints 為 flat array [x0,y0,x1,y1,...]
+function pointInPolygonFlat(x, y, pts) {
+  let inside = false
+  const n = pts.length / 2
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = pts[i * 2], yi = pts[i * 2 + 1]
+    const xj = pts[j * 2], yj = pts[j * 2 + 1]
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+      inside = !inside
+    }
+  }
+  return inside
+}
+
 // 跨樓層樓板累積衰減 (dB)：AP 由 srcFloor 到 activeFloor，跨越兩者間所有樓板。
 // Rule: sum of floorSlabAttenuationDb for each floor crossed. Adjacent floors = 1 slab.
-function computeFloorAttDb(floors, srcFloorId, activeFloorId) {
+// 9-3c: 若 AP 的垂直投影點落在中間樓層的 Floor Hole 多邊形內，該層樓板 dB 視為 0（訊號穿過中庭/挑高）。
+function computeFloorAttDb(floors, srcFloorId, activeFloorId, apSrcPos, floorHolesByFloor) {
   if (srcFloorId === activeFloorId) return 0
   const srcIdx = floors.findIndex((f) => f.id === srcFloorId)
   const actIdx = floors.findIndex((f) => f.id === activeFloorId)
   if (srcIdx < 0 || actIdx < 0) return 0
   const [lo, hi] = srcIdx < actIdx ? [srcIdx, actIdx] : [actIdx, srcIdx]
+  const srcFloor = floors[srcIdx]
+  // 先把 AP 座標轉到世界空間（共用 align 基準），再推到各中間樓層的 local
+  const apWorld = apSrcPos ? alignFwd(apSrcPos, srcFloor) : null
   let total = 0
-  // 跨越的樓板 = lo..hi-1 範圍內每樓的樓板
   for (let i = lo; i < hi; i++) {
-    total += floors[i].floorSlabAttenuationDb ?? 0
+    const f = floors[i]
+    const slabDb = f.floorSlabAttenuationDb ?? 0
+    if (slabDb === 0) continue
+
+    // 檢查 AP 投影點是否落在本樓的某個 floor hole 內
+    if (apWorld && floorHolesByFloor) {
+      const holes = floorHolesByFloor[f.id] ?? []
+      if (holes.length > 0) {
+        const apLocal = alignInv(apWorld, f)
+        const bypass = holes.some((h) => pointInPolygonFlat(apLocal.x, apLocal.y, h.points))
+        if (bypass) continue
+      }
+    }
+    total += slabDb
   }
   return total
 }
@@ -700,23 +731,28 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       // Cross-floor (9-3b): collect APs from all floors; project their positions
       // into the active floor's local canvas space via align transforms, and
       // precompute per-AP slab attenuation in dB.
-      const allFloors  = useFloorStore.getState().floors
-      const activeFlr  = allFloors.find((f) => f.id === floorId)
-      const apsByFloor = useAPStore.getState().apsByFloor
-      const drag       = draggingAPRef?.current
+      // 9-3c: pass each AP's source-local position + all floors' holes so
+      // computeFloorAttDb can skip slabs bypassed by a floor hole.
+      const allFloors      = useFloorStore.getState().floors
+      const activeFlr      = allFloors.find((f) => f.id === floorId)
+      const apsByFloor     = useAPStore.getState().apsByFloor
+      const floorHolesByFl = useFloorHoleStore.getState().floorHolesByFloor
+      const drag           = draggingAPRef?.current
       let aps = []
       for (const f of allFloors) {
         const fApsRaw = apsByFloor[f.id] ?? []
         if (fApsRaw.length === 0) continue
-        const attDb = computeFloorAttDb(allFloors, f.id, floorId)
         for (const a of fApsRaw) {
           const isActive = f.id === floorId
           let x = a.x, y = a.y
           if (isActive && drag && drag.id === a.id) { x = drag.x; y = drag.y }
+          // AP source-local position (對 hole bypass 判定用，永遠是 source 樓層的 local)
+          const srcLocal = { x, y }
           if (!isActive) {
             const p = projectApToActive({ x, y }, f, activeFlr)
             x = p.x; y = p.y
           }
+          const attDb = computeFloorAttDb(allFloors, f.id, floorId, srcLocal, floorHolesByFl)
           aps.push({ ...a, x, y, _floorAttDb: attDb })
         }
       }
@@ -830,7 +866,13 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         return `${sc.id},${sc.type},${d}`
       }).join('|') || 'none'
       const slabKey = allFloors.map((f) => `${f.id}:${(f.floorSlabAttenuationDb ?? 0).toFixed(1)},${(f.alignOffsetX ?? 0).toFixed(1)},${(f.alignOffsetY ?? 0).toFixed(1)},${(f.alignScale ?? 1).toFixed(3)},${(f.alignRotation ?? 0).toFixed(2)}`).join('|')
-      const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${curMode},${plN},${apKey},${wallKey},${openingsKey},${scopeKey},${slabKey}`
+      // 9-3c: Floor holes on every floor affect per-AP slab attenuation
+      const holesKey = allFloors.map((f) => {
+        const holes = floorHolesByFl[f.id] ?? []
+        if (holes.length === 0) return `${f.id}:none`
+        return `${f.id}:${holes.map((h) => `${h.id}[${h.points.map((p) => p.toFixed(1)).join(',')}]`).join(';')}`
+      }).join('|')
+      const key = `${w},${h},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${curMode},${plN},${apKey},${wallKey},${openingsKey},${scopeKey},${slabKey},${holesKey}`
       if (key === prevKey) return
       prevKey = key
 
