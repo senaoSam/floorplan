@@ -917,7 +917,12 @@ function Editor2D() {
   const modeHint = modeHintMap[editorMode]
 
   return (
-    <div ref={containerRef} className="editor-2d" style={{ cursor: stageCursor }}>
+    <div
+      ref={containerRef}
+      className="editor-2d"
+      style={{ cursor: stageCursor }}
+      onContextMenu={(e) => e.preventDefault()}
+    >
       {modeHint && (
         <div className="editor-2d__mode-hint">
           <span className="editor-2d__mode-hint-label">{modeHint.label}</span>
