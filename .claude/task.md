@@ -108,7 +108,7 @@
 ### Layer PERF — 拖曳流暢度 & 熱圖即時性
 | #     | 狀態 | Task                                                                                         |
 | ----- | ---- | -------------------------------------------------------------------------------------------- |
-| P-1   | ⬜   | AP 拖曳 RAF buffer：拖曳中座標暫存於 ref，以 requestAnimationFrame 更新視覺，放開才提交 store |
+| P-1   | ✅   | AP 拖曳 RAF buffer：拖曳中座標暫存於 ref，以 requestAnimationFrame 更新視覺，放開才提交 store |
 | P-2   | ⬜   | LOD 拖曳降解析度：拖曳期間 framebuffer 以 renderScale=0.7 渲染（放開恢復 full-res），可調參數 |
 | P-3   | ⬜   | AP 拖曳時 Heatmap 低頻 preview：每 100~150ms 用暫存座標重算一次（保持即時更新體感）          |
 | P-4   | ⬜   | WebGL Heatmap dirty-check 閾值放寬：座標精度由 .toFixed(1) 改為位移 >= 1px 才視為 dirty      |

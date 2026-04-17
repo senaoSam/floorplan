@@ -41,7 +41,9 @@ const SNAP_PX     = 12   // screen pixels for first-point snap
 function Editor2D() {
   const containerRef  = useRef(null)
   const stageRef      = useRef(null)
-  const draggingAPRef          = useRef(null)   // { id, x, y } AP 拖移中暫存位置
+  const draggingAPRef          = useRef(null)   // { id, x, y } AP 拖移中暫存位置（heatmap RAF loop 讀取）
+  const apDragPendingRef       = useRef(null)   // { id, x, y } mousemove 寫入；RAF flush 到 draggingAPRef
+  const apDragRafRef           = useRef(0)      // RAF id，0 代表未排程
   const draggingWallRef        = useRef(null)   // { id, dx, dy } 牆體拖移中暫存偏移
   const draggingScopeRef       = useRef(null)   // { id, dx, dy } Scope 拖移中暫存偏移
   const rightDragPendingRef    = useRef(null)   // { node, startX, startY } 右鍵等待拖曳
@@ -1096,8 +1098,20 @@ function Editor2D() {
                   if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'ap'); return }
                   setSelected(id, 'ap')
                 }}
-                onAPDragMove={(id, x, y) => { draggingAPRef.current = { id, x, y } }}
-                onAPDragEnd={() => { draggingAPRef.current = null }}
+                onAPDragMove={(id, x, y) => {
+                  apDragPendingRef.current = { id, x, y }
+                  if (apDragRafRef.current === 0) {
+                    apDragRafRef.current = requestAnimationFrame(() => {
+                      apDragRafRef.current = 0
+                      if (apDragPendingRef.current) draggingAPRef.current = apDragPendingRef.current
+                    })
+                  }
+                }}
+                onAPDragEnd={() => {
+                  if (apDragRafRef.current !== 0) { cancelAnimationFrame(apDragRafRef.current); apDragRafRef.current = 0 }
+                  apDragPendingRef.current = null
+                  draggingAPRef.current = null
+                }}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode}
                 onRightMouseDown={handleRightMouseDown}
                 viewportScale={viewport.scale}
