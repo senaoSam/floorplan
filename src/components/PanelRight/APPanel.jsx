@@ -4,6 +4,7 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { AP_MODEL_LIST, DEFAULT_AP_MODEL_ID, getAPModelById } from '@/constants/apModels'
 import { ANTENNA_PATTERN_LIST, DEFAULT_PATTERN_ID, getPatternById } from '@/constants/antennaPatterns'
 import { channelEntries, isChannelAllowed, allowedChannels } from '@/constants/regulatoryDomains'
+import { CHANNEL_WIDTHS, DEFAULT_CHANNEL_WIDTH, allowedWidthsForBand } from '@/constants/channelWidths'
 import PatternPreview from './PatternPreview'
 import './APPanel.sass'
 
@@ -56,6 +57,7 @@ function APPanel({ floorId, apId }) {
     if (!bandOk) {
       patch.frequency = targetFreq
       patch.channel = firstAllowedChannel(targetFreq)
+      patch.channelWidth = DEFAULT_CHANNEL_WIDTH[targetFreq]
     }
     // Clamp txPower to new model's max for the target band.
     const maxTx = newModel.maxTxPower[targetFreq] ?? 23
@@ -67,7 +69,11 @@ function APPanel({ floorId, apId }) {
     if (field === 'frequency') {
       if (!model.supportedBands.includes(value)) return
       const maxTx = model.maxTxPower[value] ?? 23
-      const patch = { frequency: value, channel: firstAllowedChannel(value) }
+      const patch = {
+        frequency: value,
+        channel: firstAllowedChannel(value),
+        channelWidth: DEFAULT_CHANNEL_WIDTH[value],
+      }
       if (ap.txPower > maxTx) patch.txPower = maxTx
       updateAP(floorId, apId, patch)
     } else {
@@ -220,6 +226,37 @@ function APPanel({ floorId, apId }) {
                 </option>
               ))}
             </select>
+          </section>
+        )
+      })()}
+
+      {/* 頻寬 */}
+      {(() => {
+        const allowedWidths = allowedWidthsForBand(ap.frequency)
+        const curWidth = ap.channelWidth ?? DEFAULT_CHANNEL_WIDTH[ap.frequency] ?? 20
+        return (
+          <section className="ap-panel__section">
+            <p className="ap-panel__label">頻寬</p>
+            <div className="ap-panel__btn-group">
+              {CHANNEL_WIDTHS.map((w) => {
+                const supported = allowedWidths.includes(w)
+                const active = curWidth === w
+                return (
+                  <button
+                    key={w}
+                    className={`ap-panel__btn${active ? ' ap-panel__btn--active' : ''}${supported ? '' : ' ap-panel__btn--disabled'}`}
+                    onClick={() => supported && handleField('channelWidth', w)}
+                    disabled={!supported}
+                    title={supported ? '' : `${ap.frequency} GHz 不建議使用 ${w} MHz`}
+                  >
+                    {w}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="ap-panel__hint">
+              Cisco 建議：2.4G 固定 20、5G 多用 20/40、6G 可開 80
+            </p>
           </section>
         )
       })()}

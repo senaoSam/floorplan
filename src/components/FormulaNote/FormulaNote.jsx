@@ -52,9 +52,21 @@ const SECTIONS = [
     rows: [
       { label: '公式', value: 'SINR(dB) = 10·log₁₀( S / (I + N) )' },
       { label: 'S', value: '最佳服務 AP 的線性接收功率（mW）' },
-      { label: 'I', value: 'Σ 同頻道干擾 AP 的線性功率（mW）' },
-      { label: 'N', value: '底噪 −95 dBm → 線性功率' },
-      { label: '同頻條件', value: '相同 channel 編號 且 相同頻段（2.4 / 5 / 6 GHz）' },
+      { label: 'I', value: 'Σ 頻率範圍重疊的干擾 AP 線性功率（mW）' },
+      { label: 'N', value: '底噪 = −95 dBm + 10·log₁₀(W/20)（寬頻收進更多噪聲）' },
+      { label: '重疊條件', value: '相同頻段 且 [中心 ± W/2] 頻率範圍相交' },
+    ],
+  },
+
+  {
+    title: '頻寬（Channel Width）',
+    rows: [
+      { label: '可選', value: '20 / 40 / 80 / 160 MHz' },
+      { label: 'Cisco 建議', value: '2.4G→20（唯一）、5G→20 或 40、6G→80' },
+      { label: '中心頻率', value: '2.4G: 2407+5N　5G: 5000+5N　6G: 5950+5N（MHz）' },
+      { label: '頻寬佔用', value: '[中心 − W/2, 中心 + W/2] MHz，範圍相交即同頻干擾' },
+      { label: '底噪修正', value: '+10·log₁₀(W/20)：40→+3、80→+6、160→+9 dB' },
+      { label: '速率倍率', value: '20→×1、40→×2.1、80→×4.5、160→×9（相對 20 MHz）' },
     ],
   },
   {

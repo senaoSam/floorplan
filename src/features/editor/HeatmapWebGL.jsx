@@ -5,6 +5,7 @@ import { useAPStore } from '@/store/useAPStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { getPatternById, DEFAULT_PATTERN_ID, PATTERN_SAMPLES } from '@/constants/antennaPatterns'
+import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
 
 const MAX_APS        = 32
 const MAX_WALLS      = 64
@@ -15,6 +16,14 @@ const DEFAULT_CHAN = { 2.4: 1,    5: 36,   6: 1    }
 
 // 頻段索引：用於 wallLoss3 查表（0=2.4, 1=5, 2=6）
 const FREQ_BAND_INDEX = { 2.4: 0, 5: 1, 6: 2 }
+
+// 頻道中心頻率 (MHz)：2.4 → 2407+5N，5 → 5000+5N，6 → 5950+5N
+function channelCenterMHz(band, channel) {
+  if (band === 2.4) return 2407 + 5 * channel
+  if (band === 5)   return 5000 + 5 * channel
+  if (band === 6)   return 5950 + 5 * channel
+  return 5500
+}
 
 // ── Vertex Shader：全螢幕四邊形 ──────────────────────────────────────
 const VERT_SRC = `#version 300 es
@@ -50,6 +59,8 @@ uniform int   u_wallCount;
 uniform vec4  u_aps[MAX_APS];          // xy = pos, z = txPower, w = freqMHz
 uniform float u_apChannels[MAX_APS];
 uniform float u_apFreqBand[MAX_APS];   // 頻段索引 0=2.4, 1=5, 2=6
+uniform float u_apCenterMHz[MAX_APS];  // 該頻道+頻寬的中心頻率 (MHz)
+uniform float u_apWidthMHz[MAX_APS];   // 頻寬 (MHz)
 uniform vec4  u_apAnt[MAX_APS];        // x = mode(0=omni,1=dir,2=custom), y = azimuthRad, z = halfBeamwidthRad, w = frontBackDb
 uniform sampler2D u_apPattern;         // MAX_APS x PATTERN_SAMPLES, R32F, value = gain dB at (AP, angleBin)
 uniform vec4  u_walls[MAX_WALLS];
@@ -326,31 +337,41 @@ void main() {
   }
 
   // Pass 2：共用 — 計算 SINR / SNR
-  float servingChan = u_apChannels[bestIdx];
-  float servingFreq = u_aps[bestIdx].w;
-  float signalLin   = pow(10.0, bestRSSI / 10.0);
-  float intfLinear  = NOISE_LIN;
+  float servingBand   = u_apFreqBand[bestIdx];
+  float servingCenter = u_apCenterMHz[bestIdx];
+  float servingWidth  = u_apWidthMHz[bestIdx];
+  float servingLo     = servingCenter - servingWidth * 0.5;
+  float servingHi     = servingCenter + servingWidth * 0.5;
 
-  // Channel overlap 計數
+  // 底噪依頻寬修正：+10·log10(W/20) dB（寬頻吃進更多噪聲）
+  float noiseDbm = NOISE_DBM + 10.0 * log10v(servingWidth / 20.0);
+  float noiseLin = pow(10.0, noiseDbm / 10.0);
+
+  float signalLin   = pow(10.0, bestRSSI / 10.0);
+  float intfLinear  = noiseLin;
+
+  // Channel overlap 計數（含部分重疊）
   int overlapCount = 0;
 
   for (int i = 0; i < MAX_APS; i++) {
     if (i >= u_apCount) break;
     if (rssis[i] < -100.0) continue;
 
-    // 同頻段、同頻道判斷
-    bool sameChan = abs(u_apChannels[i] - servingChan) < 0.5 &&
-                    abs(u_aps[i].w - servingFreq) < 100.0;
+    // 同頻段 + 頻率範圍有交集 = 干擾候選
+    float iLo = u_apCenterMHz[i] - u_apWidthMHz[i] * 0.5;
+    float iHi = u_apCenterMHz[i] + u_apWidthMHz[i] * 0.5;
+    bool sameBand = abs(u_apFreqBand[i] - servingBand) < 0.5;
+    bool freqOverlap = sameBand && (iLo < servingHi) && (servingLo < iHi);
 
-    if (sameChan && rssis[i] > -85.0) overlapCount++;
+    if (freqOverlap && rssis[i] > -85.0) overlapCount++;
 
     if (i == bestIdx) continue;
-    if (!sameChan) continue;
+    if (!freqOverlap) continue;
     intfLinear += pow(10.0, rssis[i] / 10.0);
   }
 
   float sinr = 10.0 * log10v(signalLin / intfLinear);
-  float snr  = bestRSSI - NOISE_DBM;
+  float snr  = bestRSSI - noiseDbm;
 
   // ── Mode: SINR ──
   if (u_mode == MODE_SINR) {
@@ -375,6 +396,12 @@ void main() {
     float rate = sinrToRate(sinr);
     // 假設 2 spatial streams → ×2
     rate *= 2.0;
+    // 頻寬倍率：20→×1、40→×2.1、80→×4.5、160→×9
+    float bwMul = 1.0;
+    if (servingWidth >= 160.0)     bwMul = 9.0;
+    else if (servingWidth >= 80.0) bwMul = 4.5;
+    else if (servingWidth >= 40.0) bwMul = 2.1;
+    rate *= bwMul;
     outColor = dataRateColor(rate);
     return;
   }
@@ -545,6 +572,8 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       aps:            gl.getUniformLocation(prog, 'u_aps[0]'),
       apChannels:     gl.getUniformLocation(prog, 'u_apChannels[0]'),
       apFreqBand:     gl.getUniformLocation(prog, 'u_apFreqBand[0]'),
+      apCenterMHz:    gl.getUniformLocation(prog, 'u_apCenterMHz[0]'),
+      apWidthMHz:     gl.getUniformLocation(prog, 'u_apWidthMHz[0]'),
       apAnt:          gl.getUniformLocation(prog, 'u_apAnt[0]'),
       apPattern:      gl.getUniformLocation(prog, 'u_apPattern'),
       walls:          gl.getUniformLocation(prog, 'u_walls[0]'),
@@ -562,6 +591,8 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
     const apData        = new Float32Array(MAX_APS       * 4)
     const apChanData    = new Float32Array(MAX_APS)
     const apFreqData    = new Float32Array(MAX_APS)
+    const apCenterData  = new Float32Array(MAX_APS)
+    const apWidthData   = new Float32Array(MAX_APS)
     const apAntData     = new Float32Array(MAX_APS       * 4)
     const apPatternData = new Float32Array(MAX_APS       * PATTERN_SAMPLES)
 
@@ -718,7 +749,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
 
       const vp = { x: stage.x(), y: stage.y(), scale: stage.scaleX() }
 
-      const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0},${a.antennaMode ?? 'omni'},${a.azimuth ?? 0},${a.beamwidth ?? 60},${a.patternId ?? ''}`).join('|')
+      const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0},${a.channelWidth ?? 0},${a.antennaMode ?? 'omni'},${a.azimuth ?? 0},${a.beamwidth ?? 60},${a.patternId ?? ''}`).join('|')
       const wallKey  = rawWalls.map((wl) => `${wl.startX.toFixed(1)},${wl.startY.toFixed(1)},${wl.endX.toFixed(1)},${wl.endY.toFixed(1)},${wl.material?.id ?? ''},${wl.material?.dbLoss ?? 0}`).join('|')
       const scopeKey = [...inScopes, ...outScopes].map((sc) => {
         const d = dragScope && dragScope.id === sc.id ? `${dragScope.dx.toFixed(1)},${dragScope.dy.toFixed(1)}` : '0,0'
@@ -735,8 +766,12 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         apData[i*4+1] = a.y
         apData[i*4+2] = a.txPower
         apData[i*4+3] = FREQ_MHZ[a.frequency] ?? 5500
-        apChanData[i] = a.channel ?? DEFAULT_CHAN[a.frequency] ?? 1
+        const ch = a.channel ?? DEFAULT_CHAN[a.frequency] ?? 1
+        const bw = a.channelWidth ?? DEFAULT_CHANNEL_WIDTH[a.frequency] ?? 20
+        apChanData[i] = ch
         apFreqData[i] = FREQ_BAND_INDEX[a.frequency] ?? 1
+        apCenterData[i] = channelCenterMHz(a.frequency, ch)
+        apWidthData[i] = bw
         // Antenna: omni(0) / directional(1) / custom(2); custom AP fills its pattern row.
         const mode = a.antennaMode === 'directional' ? 1 : a.antennaMode === 'custom' ? 2 : 0
         const azDeg     = ((a.azimuth ?? 0) % 360 + 360) % 360
@@ -786,6 +821,8 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       gl.uniform4fv(locs.aps,          apData)
       gl.uniform1fv(locs.apChannels,   apChanData)
       gl.uniform1fv(locs.apFreqBand,   apFreqData)
+      gl.uniform1fv(locs.apCenterMHz,  apCenterData)
+      gl.uniform1fv(locs.apWidthMHz,   apWidthData)
       gl.uniform4fv(locs.apAnt,        apAntData)
       gl.activeTexture(gl.TEXTURE0)
       gl.bindTexture(gl.TEXTURE_2D, patternTex)

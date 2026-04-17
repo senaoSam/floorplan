@@ -212,7 +212,7 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
             cornerRadius={4 * s}
           />
           <Text
-            text={`${ap.name}\n${FREQ_LABEL[ap.frequency] || ap.frequency + 'G'} CH${ap.channel}\n${ap.txPower} dBm`}
+            text={`${ap.name}\n${FREQ_LABEL[ap.frequency] || ap.frequency + 'G'} CH${ap.channel}/${ap.channelWidth ?? 20}\n${ap.txPower} dBm`}
             fontSize={11 * s}
             fill="#fff"
             x={0}

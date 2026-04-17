@@ -9,6 +9,7 @@ import { MATERIAL_LIST } from '@/constants/materials'
 import { AP_MODEL_LIST, getAPModelById } from '@/constants/apModels'
 import { ANTENNA_PATTERN_LIST, getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
 import { allowedChannels, channelEntries } from '@/constants/regulatoryDomains'
+import { CHANNEL_WIDTHS, DEFAULT_CHANNEL_WIDTH, allowedWidthsForBand } from '@/constants/channelWidths'
 import PatternPreview from './PatternPreview'
 import './BatchPanel.sass'
 
@@ -78,6 +79,7 @@ function BatchPanel() {
   const selectedAPs = aps.filter((a) => apIds.includes(a.id))
   const apFreq     = uniformValue(selectedAPs, 'frequency')
   const apChannel  = uniformValue(selectedAPs, 'channel')
+  const apWidth    = uniformValue(selectedAPs, 'channelWidth')
   const apMode     = uniformValue(selectedAPs, 'antennaMode')
   const apModel    = uniformValue(selectedAPs, 'modelId')
   const apTxPower  = uniformValue(selectedAPs, 'txPower')
@@ -108,12 +110,20 @@ function BatchPanel() {
   const handleAPFrequency = useCallback((freq) => {
     const allowed = allowedChannels(domainId, freq)
     const ch = allowed[0] ?? DEFAULT_CHANNEL[freq] ?? 1
-    updateAPs(activeFloorId, apIds, { frequency: freq, channel: ch })
+    updateAPs(activeFloorId, apIds, {
+      frequency: freq,
+      channel: ch,
+      channelWidth: DEFAULT_CHANNEL_WIDTH[freq],
+    })
   }, [activeFloorId, apIds, updateAPs, domainId])
 
   const handleAPChannel = useCallback((raw) => {
     if (raw === MIXED || raw === '') return
     updateAPs(activeFloorId, apIds, { channel: Number(raw) })
+  }, [activeFloorId, apIds, updateAPs])
+
+  const handleAPChannelWidth = useCallback((width) => {
+    updateAPs(activeFloorId, apIds, { channelWidth: width })
   }, [activeFloorId, apIds, updateAPs])
 
   const handleAPAntennaMode = useCallback((mode) => {
@@ -140,6 +150,7 @@ function BatchPanel() {
         patch.frequency = targetFreq
         const allowed = allowedChannels(domainId, targetFreq)
         patch.channel = allowed[0] ?? DEFAULT_CHANNEL[targetFreq] ?? 1
+        patch.channelWidth = DEFAULT_CHANNEL_WIDTH[targetFreq]
       }
       const maxTx = newModel.maxTxPower[targetFreq] ?? 23
       if (a.txPower > maxTx) patch.txPower = maxTx
@@ -318,6 +329,32 @@ function BatchPanel() {
                 </option>
               ))}
             </select>
+          </section>
+
+          {/* 頻寬 */}
+          <section className="batch-panel__section">
+            <p className="batch-panel__label">
+              AP 頻寬（批次變更）
+              {apFreq === MIXED && <span className="batch-panel__hint">所選 AP 頻段不一致，請先統一</span>}
+              {apFreq !== MIXED && apWidth === MIXED && <span className="batch-panel__hint">多個值</span>}
+            </p>
+            <div className="batch-panel__btn-group">
+              {CHANNEL_WIDTHS.map((w) => {
+                const supported = apFreq !== MIXED && allowedWidthsForBand(apFreq).includes(w)
+                const active = apWidth === w
+                return (
+                  <button
+                    key={w}
+                    className={`batch-panel__btn${active ? ' batch-panel__btn--active' : ''}`}
+                    onClick={() => supported && handleAPChannelWidth(w)}
+                    disabled={!supported}
+                    title={supported ? '' : `當前頻段不建議使用 ${w} MHz`}
+                  >
+                    {w}
+                  </button>
+                )
+              })}
+            </div>
           </section>
 
           {/* 發射功率 */}

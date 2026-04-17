@@ -101,7 +101,7 @@ const PHASES = [
           { id: '8-3b', done: false, text: '自動頻道規劃演算法（批次）' },
           { id: '8-3c', done: false, text: '放置新 AP 自動挑頻道' },
           { id: '8-4', done: false, text: '自動功率規劃' },
-          { id: '8-5', done: false, text: '頻寬設定（20/40/80/160 MHz）' },
+          { id: '8-5', done: true, text: '頻寬設定（20/40/80/160 MHz）' },
         ],
       },
     ],

@@ -11,6 +11,7 @@ import { MATERIALS, MATERIAL_LIST, OPENING_TYPES, getMaterialById } from '@/cons
 import { DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
 import { generateId } from '@/utils/id'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
+import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
 import FloorImageLayer from './layers/FloorImageLayer'
 import WallLayer from './layers/WallLayer'
 import APLayer from './layers/APLayer'
@@ -607,6 +608,7 @@ function Editor2D() {
         txPower: 20,
         frequency: defaultFreq,
         channel,
+        channelWidth: DEFAULT_CHANNEL_WIDTH[defaultFreq],
         antennaMode: 'omni',
         azimuth: 0,
         beamwidth: 60,
