@@ -143,6 +143,58 @@ const PHASES = [
     ],
   },
   {
+    // 詳細背景見 .claude/rf-propagation-research.md
+    // 建議順序：RF-A → 再評估 RF-B / RF-C / P-6 要不要做
+    phase: 'Phase 5.5 — RF 物理模型強化',
+    groups: [
+      {
+        // 階段 A：不換演算法，在現有 Ray-casting 上補強（相似度 45% → 70%，🟢 無卡頓）
+        layer: 'Layer RF-A — 階段 A（相似度 45% → 70%）',
+        items: [
+          { id: 'RF-A1', done: false, text: '入射角修正（斜射 → 路徑 / cos θ）' },
+          { id: 'RF-A2', done: false, text: '牆厚納入計算（dB × thickness factor）' },
+          { id: 'RF-A3', done: false, text: 'Knife-edge diffraction（牆邊繞射漸層）' },
+          { id: 'RF-A4', done: false, text: '高斯模糊後處理（1~2 px blur）' },
+          { id: 'RF-A5', done: false, text: '射線密度提升（360 → 720 條）' },
+          { id: 'RF-A6', done: false, text: '頻率相關穿透損失（2.4/5/6 GHz 各自 dB 表）' },
+        ],
+      },
+      {
+        // 階段 B：波場傳播（Grid-based Wave Propagation），相似度 70% → 85%，🟠 中等卡頓
+        // RF-A 完成後評估是否需要
+        layer: 'Layer RF-B — 階段 B（相似度 70% → 85%）',
+        items: [
+          { id: 'RF-B1', done: false, text: '波場網格資料結構（10~20 cm 格距）' },
+          { id: 'RF-B2', done: false, text: '擴散方程迭代（8 格加權平均）' },
+          { id: 'RF-B3', done: false, text: '牆邊界條件（穿透率 + 反射係數）' },
+          { id: 'RF-B4', done: false, text: 'Web Worker 計算（避免卡 UI）' },
+          { id: 'RF-B5', done: false, text: '拖曳降級策略（mousedown 降到 RF-A）' },
+          { id: 'RF-B6', done: false, text: '跨樓層波場（樓板邊界條件）' },
+        ],
+      },
+      {
+        // 階段 C：WebGPU + Gaussian Beam / SBR，相似度 85% → 90%，🟡 GPU 加速反而順
+        // RF-B 完成後評估是否需要
+        layer: 'Layer RF-C — 階段 C（相似度 85% → 90%）',
+        items: [
+          { id: 'RF-C1', done: false, text: 'WebGPU compute pipeline + fallback' },
+          { id: 'RF-C2', done: false, text: 'Gaussian Beam Tracing（光束有寬度）' },
+          { id: 'RF-C3', done: false, text: 'SBR（1~2 次反射）' },
+          { id: 'RF-C4', done: false, text: '多路徑疊加（Small-scale fading）' },
+          { id: 'RF-C5', done: false, text: 'GPU 熱圖合成（避免 CPU round-trip）' },
+        ],
+      },
+      {
+        // 純 UX 裝飾，不改物理模型（穩態下熱圖應定格）
+        // 決策保留，等 RF-A 完成後評估
+        layer: 'Layer RF-UX — UX 提案（未決）',
+        items: [
+          { id: 'RF-UX1', done: false, text: '水波漣漪動畫（AP 放置 / 計算中時）' },
+        ],
+      },
+    ],
+  },
+  {
     phase: 'Phase 6 — 3D 視圖',
     groups: [
       {
