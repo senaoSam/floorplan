@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect } from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
+import { getFloorColor } from '@/utils/floorColor'
 import './AlignFloorPanel.sass'
 
 function AlignFloorPanel({ floorId }) {
@@ -59,16 +60,21 @@ function AlignFloorPanel({ floorId }) {
         ) : (
           <>
             <div className="align-floor-panel__ref-list">
-              {otherFloors.map((f) => (
-                <label key={f.id} className="align-floor-panel__ref-item">
-                  <input
-                    type="checkbox"
-                    checked={refIds.includes(f.id)}
-                    onChange={() => toggleAlignRefFloor(f.id)}
-                  />
-                  <span>{f.name}</span>
-                </label>
-              ))}
+              {otherFloors.map((f) => {
+                const idx = floors.findIndex((x) => x.id === f.id)
+                const color = getFloorColor(idx)
+                return (
+                  <label key={f.id} className="align-floor-panel__ref-item">
+                    <input
+                      type="checkbox"
+                      checked={refIds.includes(f.id)}
+                      onChange={() => toggleAlignRefFloor(f.id)}
+                    />
+                    <span className="align-floor-panel__ref-swatch" style={{ background: color }} />
+                    <span>{f.name}</span>
+                  </label>
+                )
+              })}
             </div>
             <div className="align-floor-panel__row">
               <span className="align-floor-panel__axis">不透明度</span>

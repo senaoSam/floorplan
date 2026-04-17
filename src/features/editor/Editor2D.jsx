@@ -13,7 +13,9 @@ import { generateId } from '@/utils/id'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
 import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
 import FloorImageLayer from './layers/FloorImageLayer'
+import RefWallLayer from './layers/RefWallLayer'
 import WallLayer from './layers/WallLayer'
+import { getFloorColor } from '@/utils/floorColor'
 import APLayer from './layers/APLayer'
 import ScopeLayer from './layers/ScopeLayer'
 import FloorHoleLayer from './layers/FloorHoleLayer'
@@ -973,17 +975,26 @@ function Editor2D() {
 
           {/* Align-mode: dim selected reference floors behind the active one so
               user can match outlines. Each reference floor gets its own align
-              transform. Visibility + opacity controlled via AlignFloorPanel. */}
+              transform. Visibility + opacity controlled via AlignFloorPanel.
+              Tinted wall outlines sit on top of each ref image for alignment cues. */}
           {isAlignMode && floors
             .filter((f) => f.id !== activeFloorId && (alignRefFloors ?? []).includes(f.id))
-            .map((f) => (
-              <FloorImageLayer
-                key={`ref-${f.id}`}
-                floor={{ ...f, opacity: alignRefOpacity }}
-                isSelectMode={false}
-                layerProps={{ ...alignLayerProps(f), listening: false }}
-              />
-            ))}
+            .map((f) => {
+              const idx = floors.findIndex((x) => x.id === f.id)
+              const color = getFloorColor(idx)
+              return (
+                <React.Fragment key={`ref-${f.id}`}>
+                  <FloorImageLayer
+                    floor={{ ...f, opacity: alignRefOpacity }}
+                    isSelectMode={false}
+                    layerProps={{ ...alignLayerProps(f), listening: false }}
+                  />
+                  <Layer {...alignLayerProps(f)} listening={false}>
+                    <RefWallLayer floorId={f.id} color={color} opacity={Math.min(1, alignRefOpacity + 0.3)} />
+                  </Layer>
+                </React.Fragment>
+              )
+            })}
 
           {activeFloor && showFloorImage && (
             <FloorImageLayer
