@@ -108,38 +108,67 @@ export const useHistoryStore = create((set, get) => ({
   clearHistory: () => set({ undoStack: [], redoStack: [] }),
 }))
 
-// ── Debounce 機制：拖曳等連續操作合併為一次 undo 步驟 ──────────
-// 當偵測到第一次變化時，記住「變化前」快照但先不推入 stack，
-// 等 DEBOUNCE_MS 內沒有新變化才真正推入。
-// 若持續變化（拖曳中），只保留最初的那份快照。
+// ── Debounce + idle 機制：拖曳等連續操作合併為一次 undo 步驟 ──────────
+// P-3 優化：不在事件發生的當下 structuredClone，而是先記下「變化前」的 raw
+// reference（連續操作只保留最初那份），等 DEBOUNCE_MS 沒有新變化後，在
+// requestIdleCallback 裡才真正 clone + push，讓放開拖曳那一幀保持順暢。
+//
+// pendingRaw 結構：{ floorId, walls, aps, scopes, floorHoles } — 全是原始 array reference
 
-let _pendingSnap = null
+let _pendingRaw = null
 let _debounceTimer = null
+let _idleHandle = null
+
+const requestIdle =
+  typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
+    ? (cb) => window.requestIdleCallback(cb, { timeout: 500 })
+    : (cb) => setTimeout(cb, 0)
+const cancelIdle =
+  typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function'
+    ? (id) => window.cancelIdleCallback(id)
+    : (id) => clearTimeout(id)
+
+function commitPending() {
+  if (!_pendingRaw) return
+  const raw = _pendingRaw
+  _pendingRaw = null
+  // 此刻才真正 clone（在 idle 時間 / undo 前同步補 flush）
+  pushToUndo({
+    floorId: raw.floorId,
+    walls: structuredClone(raw.walls),
+    aps: structuredClone(raw.aps),
+    scopes: structuredClone(raw.scopes),
+    floorHoles: structuredClone(raw.floorHoles),
+  })
+}
 
 function flushPending() {
   if (_debounceTimer) {
     clearTimeout(_debounceTimer)
     _debounceTimer = null
   }
-  if (_pendingSnap) {
-    pushToUndo(_pendingSnap)
-    _pendingSnap = null
+  if (_idleHandle !== null) {
+    cancelIdle(_idleHandle)
+    _idleHandle = null
   }
+  commitPending()
 }
 
-function schedulePush(snap) {
-  // 第一次觸發：記住「變化前」快照
-  if (!_pendingSnap) {
-    _pendingSnap = snap
+function schedulePushRaw(raw) {
+  // 第一次觸發：記住「變化前」raw reference（不 clone）
+  if (!_pendingRaw) {
+    _pendingRaw = raw
   }
   // 重設 debounce timer
   if (_debounceTimer) clearTimeout(_debounceTimer)
   _debounceTimer = setTimeout(() => {
-    if (_pendingSnap) {
-      pushToUndo(_pendingSnap)
-      _pendingSnap = null
-    }
     _debounceTimer = null
+    // 把實際 clone + push 推到 idle，避免放開拖曳那一幀卡頓
+    if (_idleHandle !== null) cancelIdle(_idleHandle)
+    _idleHandle = requestIdle(() => {
+      _idleHandle = null
+      commitPending()
+    })
   }, DEBOUNCE_MS)
 }
 
@@ -156,16 +185,23 @@ function onStoreChange(storeName, prevRef, currentRef) {
   if (!floorId) return
   if (prevRef[floorId] === currentRef[floorId]) return
 
-  // 用「變化前」的資料組合快照
-  const snap = {
-    floorId,
-    walls: structuredClone(storeName === 'walls' ? (prevRef[floorId] ?? []) : (useWallStore.getState().wallsByFloor[floorId] ?? [])),
-    aps: structuredClone(storeName === 'aps' ? (prevRef[floorId] ?? []) : (useAPStore.getState().apsByFloor[floorId] ?? [])),
-    scopes: structuredClone(storeName === 'scopes' ? (prevRef[floorId] ?? []) : (useScopeStore.getState().scopesByFloor[floorId] ?? [])),
-    floorHoles: structuredClone(storeName === 'holes' ? (prevRef[floorId] ?? []) : (useFloorHoleStore.getState().floorHolesByFloor[floorId] ?? [])),
+  // P-3：只記錄「變化前」的 raw array reference，延到 idle 才 clone。
+  // 連續變化時 _pendingRaw 已存在就直接忽略（保留最初那份 = 正確的 undo 目標）。
+  if (_pendingRaw) {
+    // 仍要重設 debounce timer，讓連續操作延後 commit
+    schedulePushRaw(_pendingRaw)
+    return
   }
 
-  schedulePush(snap)
+  const raw = {
+    floorId,
+    walls:      storeName === 'walls'  ? (prevRef[floorId] ?? []) : (useWallStore.getState().wallsByFloor[floorId] ?? []),
+    aps:        storeName === 'aps'    ? (prevRef[floorId] ?? []) : (useAPStore.getState().apsByFloor[floorId] ?? []),
+    scopes:     storeName === 'scopes' ? (prevRef[floorId] ?? []) : (useScopeStore.getState().scopesByFloor[floorId] ?? []),
+    floorHoles: storeName === 'holes'  ? (prevRef[floorId] ?? []) : (useFloorHoleStore.getState().floorHolesByFloor[floorId] ?? []),
+  }
+
+  schedulePushRaw(raw)
 }
 
 useWallStore.subscribe((state) => {
