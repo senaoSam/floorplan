@@ -22,6 +22,7 @@ import CropLayer from './layers/CropLayer'
 import HeatmapWebGL from './HeatmapWebGL'
 import ScaleDialog from './ScaleDialog'
 import LayerToggle from '@/components/LayerToggle/LayerToggle'
+import DevicePlanningPanel from '@/components/DevicePlanningPanel/DevicePlanningPanel'
 import RegulatorySelector from '@/components/RegulatorySelector/RegulatorySelector'
 import HeatmapControl from '@/components/HeatmapControl/HeatmapControl'
 import { LEGENDS } from './HeatmapWebGL'
@@ -1081,8 +1082,12 @@ function Editor2D() {
           display: 'flex',
           flexDirection: 'column',
           gap: 8,
+          alignItems: 'flex-start',
         }}>
-          <LayerToggle />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <LayerToggle />
+            <DevicePlanningPanel />
+          </div>
           <RegulatorySelector />
         </div>
       )}

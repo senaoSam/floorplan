@@ -1,10 +1,6 @@
 import React from 'react'
 import { useEditorStore, EDITOR_MODE, VIEW_MODE } from '@/store/useEditorStore'
-import { useFloorStore } from '@/store/useFloorStore'
-import { useAPStore } from '@/store/useAPStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
-import { greedyChannelAssign } from '@/utils/autoChannelPlan'
-import { greedyPowerAssign } from '@/utils/autoPowerPlan'
 import './Toolbar.sass'
 
 const TOOL_GROUPS = [
@@ -29,39 +25,11 @@ const TOOL_GROUPS = [
 ]
 
 function Toolbar() {
-  const { editorMode, viewMode, regulatoryDomain, autoChannelOnPlace, pathLossExponent, setEditorMode, setViewMode, toggleAutoChannelOnPlace } = useEditorStore()
+  const { editorMode, viewMode, setEditorMode, setViewMode } = useEditorStore()
   const undoLen = useHistoryStore((s) => s.undoStack.length)
   const redoLen = useHistoryStore((s) => s.redoStack.length)
   const undo = useHistoryStore((s) => s.undo)
   const redo = useHistoryStore((s) => s.redo)
-  const activeFloorId = useFloorStore((s) => s.activeFloorId)
-  const floorScale = useFloorStore((s) => s.floors.find((f) => f.id === s.activeFloorId)?.scale ?? null)
-  const apsByFloor = useAPStore((s) => s.apsByFloor)
-  const setAPs = useAPStore((s) => s.setAPs)
-
-  function handleAutoChannel() {
-    const aps = apsByFloor[activeFloorId] ?? []
-    if (aps.length === 0) return
-    const assignments = greedyChannelAssign(aps, regulatoryDomain)
-    const updated = aps.map((ap) => {
-      const a = assignments.get(ap.id)
-      return a ? { ...ap, channel: a.channel } : ap
-    })
-    setAPs(activeFloorId, updated)
-  }
-
-  function handleAutoPower() {
-    const aps = apsByFloor[activeFloorId] ?? []
-    if (aps.length === 0 || !floorScale) return
-    const assignments = greedyPowerAssign(aps, floorScale, pathLossExponent)
-    const updated = aps.map((ap) => {
-      const a = assignments.get(ap.id)
-      return a ? { ...ap, txPower: a.txPower } : ap
-    })
-    setAPs(activeFloorId, updated)
-  }
-
-  const apsOnFloor = (apsByFloor[activeFloorId] ?? []).length
 
   return (
     <header className="toolbar">
@@ -86,41 +54,6 @@ function Toolbar() {
       </div>
 
       <div className="toolbar__actions">
-        <div className="toolbar__auto-ch-group">
-          <button
-            className="toolbar__auto-ch-btn"
-            onClick={handleAutoChannel}
-            disabled={apsOnFloor === 0}
-            title="自動頻道規劃：對本樓層所有 AP 執行 greedy 最小干擾頻道指派"
-          >
-            ⚡ 自動頻道
-          </button>
-          <label
-            className={`toolbar__auto-ch-toggle${autoChannelOnPlace ? ' toolbar__auto-ch-toggle--on' : ''}`}
-            title="放置新 AP 時自動挑選頻道"
-          >
-            <input
-              type="checkbox"
-              checked={autoChannelOnPlace}
-              onChange={toggleAutoChannelOnPlace}
-            />
-            自動
-          </label>
-        </div>
-
-        <button
-          className="toolbar__auto-pw-btn"
-          onClick={handleAutoPower}
-          disabled={apsOnFloor === 0 || !floorScale}
-          title={
-            !floorScale
-              ? '需先設定比例尺才能進行功率規劃'
-              : '自動功率規劃：依最近鄰 AP 距離反推最小覆蓋功率（目標 −67 dBm）'
-          }
-        >
-          ⚡ 自動功率
-        </button>
-
         <div className="toolbar__history">
           <button
             className="toolbar__btn toolbar__btn--history"
