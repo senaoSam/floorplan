@@ -187,7 +187,52 @@
 
 ---
 
-## Phase 6 — 3D 視圖
+## Phase 6 — Heatmap Grid 重構（對齊 .tmp-heatmap §5/§6）
+
+> **目標**：從 per-pixel 直算改成「稀疏 grid 計算 + shader 插值顯示」，對齊規格架構
+> **不在範圍**：wasm / Web Worker / WebGPU（保留 WebGL 2.0 fragment shader 內做 render-to-texture）
+> **動機**：
+> 1. 規格 §5.1 動態 grid 解析度 + §5.3 clientHeightMeters + §6 正三角形網格是 NPv1 基礎架構
+> 2. 鋪路 env-learning (`AttenuatingTriangleField`) 的 per-cell 衰減值儲存
+> 3. 降低 fragment shader uniform loop 壓力（grid 像素數 << viewport 像素數）
+>
+> **架構**：
+> - **Pass 1 (compute)**：quad 渲染到 Float32 texture（如 250×250），每 texel = 對應 grid cell 的 `(RSSI_primary, RSSI_secondary, SNR, …)` 多通道結果
+> - **Pass 2 (display)**：quad 讀 grid texture + bilinear 插值 + 色階映射 → 輸出 canvas
+
+### Layer GRID — 計算 grid 化（WebGL FBO render-to-texture）
+
+| #     | 狀態 | Task |
+| ----- | ---- | ---- |
+| GRID-1 | ⬜ | **Framebuffer 與 Float32 Texture 建置**：`EXT_color_buffer_float` 已啟用；建 R32F 或 RGBA32F texture（RGBA 可一次存 4 通道：primary/secondary RSSI + SNR + Rate hint） |
+| GRID-2 | ⬜ | **Pass 1 compute shader**：將現有 main() 重寫為「輸出 RSSI 到 texture」；viewport 設為 grid 解析度（不是 canvas 解析度） |
+| GRID-3 | ⬜ | **動態 grid 解析度**：HeatmapSettings 新增 `gridCellSizeMeters`（規格 §5.1 預設 0.5m）；grid 大小 = scope bbox / cellSize（clamp 到 [64, 512]）|
+| GRID-4 | ⬜ | **Pass 2 display shader**：讀 grid texture、依 canvas pixel 對應位置做 bilinear，再做色階；mode 切換不需重算 grid（換色階即可） |
+| GRID-5 | ⬜ | **多通道輸出**：grid texture R/G/B/A 各存一個值（RSSI_primary / RSSI_secondary / SNR_serving / data_rate_hint），顯示 pass 依 mode 取對應通道 |
+| GRID-6 | ⬜ | **Scope clamp**：grid texture 外（scope-out）輸出 sentinel 值（如 −999），顯示 pass 見 sentinel 輸出透明 |
+
+### Layer GRID-TRI — 正三角形網格（§6，選做）
+
+| #     | 狀態 | Task |
+| ----- | ---- | ---- |
+| TRI-1 | ⬜ | **三角網格生成**：依 cellSize 產生正三角形網格（而非方形）；每 cell 頂點座標存 texture |
+| TRI-2 | ⬜ | **射線切片累加**：射線從 AP 到 rx 切成三角 cell 片段，每 cell 查 attTriangleField 累加衰減 |
+| TRI-3 | ⬜ | **env-learning hook**：預留 `AttenuatingTriangleField` 資料結構，每 triangle 存 per-band 修正 dB |
+
+<!--
+==============================================================================
+Phase 6 先做 Layer GRID（方形 grid），視覺應與 Phase 5 per-pixel 幾乎一致。
+Layer GRID-TRI 是 §6 規格要求的「正三角形」變體 + env-learning 接點，可延後。
+
+完成 Phase 6 後的效能評估決策點：
+  - 若 JS 主執行緒算 grid 還是卡 → 評估 Phase 6.5 wasm/worker
+  - 若 GPU pass 1 已足夠快 → 繼續 Phase 7 (3D)
+==============================================================================
+-->
+
+---
+
+## Phase 6.5 — 3D 視圖
 
 ### Layer 10 — 3D 視覺化
 | #    | 狀態 | Task                                                         |

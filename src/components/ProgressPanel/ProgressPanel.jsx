@@ -191,7 +191,33 @@ const PHASES = [
     ],
   },
   {
-    phase: 'Phase 6 — 3D 視圖',
+    // Phase 6：Heatmap Grid 重構（對齊 .tmp-heatmap §5/§6），純 WebGL 2.0 FBO
+    // 不引入 wasm/worker/WebGPU；目標是讓計算與顯示分離、鋪路 env-learning
+    phase: 'Phase 6 — Heatmap Grid 重構',
+    groups: [
+      {
+        layer: 'Layer GRID — 計算 grid 化',
+        items: [
+          { id: 'GRID-1', done: false, text: 'FBO + Float32 texture 建置（RGBA32F 存多通道）' },
+          { id: 'GRID-2', done: false, text: 'Pass 1 compute shader（RSSI 寫入 grid texture）' },
+          { id: 'GRID-3', done: false, text: '動態 grid 解析度（gridCellSizeMeters 預設 0.5m）' },
+          { id: 'GRID-4', done: false, text: 'Pass 2 display shader（texture lookup + bilinear + 色階）' },
+          { id: 'GRID-5', done: false, text: '多通道輸出（primary/secondary/SNR/rate）' },
+          { id: 'GRID-6', done: false, text: 'Scope clamp（grid 外透明 sentinel）' },
+        ],
+      },
+      {
+        layer: 'Layer GRID-TRI — 正三角形網格（規格 §6）',
+        items: [
+          { id: 'TRI-1', done: false, text: '三角網格生成（正三角形替代方格）' },
+          { id: 'TRI-2', done: false, text: '射線切片累加（per-triangle 衰減）' },
+          { id: 'TRI-3', done: false, text: 'env-learning hook（AttenuatingTriangleField）' },
+        ],
+      },
+    ],
+  },
+  {
+    phase: 'Phase 6.5 — 3D 視圖',
     groups: [
       {
         layer: 'Layer 10 — 3D 視覺化',
