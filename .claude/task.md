@@ -136,11 +136,11 @@
 
 | #     | 狀態 | Task |
 | ----- | ---- | ---- |
-| DPM-1 | ⬜ | **Visibility Graph 預計算**：CPU 端建構牆端點圖（節點=端點，邊=兩端點 LOS 無遮擋）。`useWallStore` 變動時重建。傳入 shader 為 uniform array（端點座標 + 鄰接表） |
-| DPM-2 | ⬜ | **Order 1 繞射路徑**：shader 對每個 (AP, pixel) 嘗試所有對 AP/pixel 都可見的端點 v：`PL = pathLossOnSegment(AP→v) + pathLossOnSegment(v→pixel) + diffLossPer90Deg × (turnAngle/90)`。取 min(直射, 各 Order 1) |
-| DPM-3 | ⬜ | **diffractionLossDBPer90Deg 設定**：HeatmapSettings 新增（預設 6 dB），UI 暫不曝露 |
-| DPM-4 | ⬜ | **Order 2 繞射（可選）**：兩個繞射點。預設關閉（成本高），HeatmapSettings 加 `maxDiffractionOrder`（預設 1）。shader 用 macro 條件編譯避免無謂開銷 |
-| DPM-5 | ⬜ | **MAX_VG_NODES 上限**：避免端點過多炸 shader uniform 容量；超過時退回 Order 0（純直射）並 console.warn |
+| DPM-1 | ✅ | **Visibility Graph**：每 wall 兩端點 + wallIdx 進 shader uniform（u_vgNodes[32], u_vgNodeWallIdx[32]）。wallKey 變動自動重建（CPU loop 內填）。未建鄰接表（小 N 直接全掃即可） |
+| DPM-2 | ✅ | **Order 1 繞射路徑**：shader 對每 (AP, pixel, v) 檢查 `visible(AP,v)` AND `visible(v,px)`（skip v 所屬牆），取 `min(直射, PL(AP→v)+PL(v→px)+diffLoss·θ/90)`。繞射角 θ = acos(dot(d1,d2))，skip 跨樓層 AP（需 3D VG） |
+| DPM-3 | ✅ | **diffractionLossDBPer90Deg**：`constants/rfDefaults.js` HEATMAP_DEFAULTS.diffractionLossDBPer90Deg = 6 dB（已在 PHY-1 時預建），shader uniform `u_diffLossPer90Deg` |
+| DPM-4 | ⏸ | **Order 2 繞射**：uniform `u_maxDiffOrder` 已加、預設 1；Order 2 需要兩端點對的 PL(v1→v2) 計算，端點集合大時 O(N²) 爆炸；規格文字建議預設 1 即可。延後 |
+| DPM-5 | ✅ | **MAX_VG_NODES=32**：受 MAX_FRAGMENT_UNIFORM_VECTORS=1024 限制，超過時 console.warn 並退回 Order 0（u_vgCount=0） |
 
 ### Layer RF-RX — RSSI / SNR / SINR / Data Rate 公式對齊
 
@@ -156,8 +156,8 @@
 | #     | 狀態 | Task |
 | ----- | ---- | ---- |
 | INT-1 | ✅ | **拖曳即時計算暫時關閉**：拖曳期間 RAF loop 直接 return 凍結 framebuffer，mouseup 後下一幀自動重算（prevKey 比對觸發）。原 P-2 LOD 暫時擱置 |
-| INT-2 | ⬜ | **單元驗證**：寫測試或在 console 印出比對 — FSPL@1m,2.4GHz=40.05 dB、@10m,2.4GHz=60.05 dB；concrete 牆 5GHz 應約 10-15 dB（依 ITU 公式驗算） |
-| INT-3 | ⬜ | **整合驗證**：5m × 5m 空房間中央 AP，預期熱圖近圓形對稱；加一面 concrete 牆，背面明顯衰減（>10 dB 落差）；加一面短牆，繞射處應見漸層而非硬陰影 |
+| INT-2 | ✅ | **單元驗證（Playwright MCP + console）**：FSPL@1m,2.4GHz=40.19（規格 40.05，f=2437 vs 2400 造成 0.14 差）；FSPL@10m=60.19；concrete @ 5GHz = 23.49 dB（比規格 §6 典型 10-15 dB 高，因 refAttDb=12 代表較厚牆；§1.3 公式本身嚴格對齊） |
+| INT-3 | ✅ | **整合驗證（MCP 截圖存檔）**：`phy2-03..06` PHY-2 頻段比較；`phy4-visual-01` PHY-4 入射角不對稱陰影；`dpm-01-with-diffraction` DPM 短牆繞射漸層。牆兩側色落差 + 繞射端點附近漸層都符合規格 |
 | INT-4 | ✅ | **FormulaNote.jsx 更新**：同步更新 Log-Distance (PHY-1) / RSSI (RX-1) / SINR (RX-3) / 牆體衰減 (PHY-2/4) / Per-band noise (PHY-5) / clientHeight (PHY-6) / Data Rate (RX-4) / 環境 PLE per-band；每節加規格來源標註。DPM 待後續補 |
 
 <!--

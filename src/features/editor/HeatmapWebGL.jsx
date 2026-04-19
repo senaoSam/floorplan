@@ -17,6 +17,9 @@ const MAX_SCOPE_PTS  = 256
 const MAX_FLOORS     = 16
 const MAX_HOLES_TOTAL = 32
 const MAX_HOLE_PTS   = 128
+// DPM-5: 牆端點上限（visibility graph nodes）。超過時 shader 退回 Order 0（純直射）
+// 受 WebGL2 MAX_FRAGMENT_UNIFORM_VECTORS=1024 限制；其他 uniform 已近額滿
+const MAX_VG_NODES   = 32
 
 const FREQ_MHZ    = { 2.4: 2437, 5: 5500, 6: 6000 }
 const DEFAULT_CHAN = { 2.4: 1,    5: 36,   6: 1    }
@@ -84,6 +87,7 @@ precision highp float;
 #define MAX_FLOORS       ${MAX_FLOORS}
 #define MAX_HOLES_TOTAL  ${MAX_HOLES_TOTAL}
 #define MAX_HOLE_PTS     ${MAX_HOLE_PTS}
+#define MAX_VG_NODES     ${MAX_VG_NODES}
 #define PATTERN_SAMPLES ${PATTERN_SAMPLES}
 
 // 模式常數
@@ -135,6 +139,17 @@ uniform float u_noiseFloorByBand[3];
 uniform float u_cutoutDistMeters;
 // PHY-6: heatmap 接收平面高度 (m，0.5~2.0 典型)
 uniform float u_clientHeightMeters;
+
+// DPM: Dominant Path Model 繞射資料
+//   u_vgNodes: 牆端點座標（canvas-local，visibility graph nodes）
+//   u_vgCount: 實際節點數（> MAX_VG_NODES 則退回純直射）
+//   u_diffLossPer90Deg: §4 規格 6 dB/90°
+//   u_maxDiffOrder: 0=純直射, 1=Order 1 繞射（預設）, 2=Order 2（成本高，預設不用）
+uniform vec2  u_vgNodes[MAX_VG_NODES];
+uniform float u_vgNodeWallIdx[MAX_VG_NODES];  // 該端點所屬的牆 index（用於 skip）
+uniform int   u_vgCount;
+uniform float u_diffLossPer90Deg;
+uniform int   u_maxDiffOrder;
 
 out vec4 outColor;
 
@@ -300,25 +315,53 @@ float slabAttDb(vec2 apActiveLocal, vec2 pxActiveLocal, int srcIdx, int actIdx) 
 //   等效厚度 = width / cos(θ_inc)
 //   refAttDb 對應正射入射 → 斜射時 loss *= 1/cos(θ)
 //   clamp cos(θ) ≥ 0.1 避免擦邊路徑爆值（對應 84° 入射角上限）
-float wallLoss(vec2 px, vec2 ap, int freqIdx) {
+// DPM: skipWallIdx 用於繞射——端點所屬牆不應視為擋住自己的路徑
+float wallLossSkip(vec2 px, vec2 ap, int freqIdx, int skipWallIdx) {
   float loss = 0.0;
-  vec2 rayDir = normalize(ap - px);  // 射線方向（單位向量）
+  vec2 rayDir = normalize(ap - px);
   for (int i = 0; i < MAX_WALLS; i++) {
     if (i >= u_wallCount) break;
+    if (i == skipWallIdx) continue;
     vec4 w = u_walls[i];
     if (segHit(px, ap, w.xy, w.zw)) {
       float baseDb = (freqIdx == 0) ? u_wallLoss3[i].x
                    : (freqIdx == 1) ? u_wallLoss3[i].y
                    :                  u_wallLoss3[i].z;
-      // 牆法線（2D 中垂直於牆向量）
       vec2 wallVec = w.zw - w.xy;
       vec2 n = normalize(vec2(-wallVec.y, wallVec.x));
-      // cos(θ) = |ray · normal|（射線方向與法線夾角的餘弦絕對值）
       float cosTheta = max(abs(dot(rayDir, n)), 0.1);
       loss += baseDb / cosTheta;
     }
   }
   return loss;
+}
+float wallLoss(vec2 px, vec2 ap, int freqIdx) {
+  return wallLossSkip(px, ap, freqIdx, -1);
+}
+
+// DPM: 端點是否對兩端點都可見（同 floor，不考慮樓板）
+// 繞射點 v 所屬的兩面牆 (endWallA/B) 不視為擋路（端點剛好在牆頭）
+bool visibleFrom(vec2 a, vec2 b, int skipWallA, int skipWallB) {
+  for (int i = 0; i < MAX_WALLS; i++) {
+    if (i >= u_wallCount) break;
+    if (i == skipWallA || i == skipWallB) continue;
+    vec4 w = u_walls[i];
+    if (segHit(a, b, w.xy, w.zw)) return false;
+  }
+  return true;
+}
+
+// DPM: 路徑段的 dB（距離損耗 + 穿牆，不含 slab / antenna gain）
+// skipWall 用於繞射：端點所屬的牆不視為擋路
+float segPathLossDb(vec2 a, vec2 b, int fIdx, float fMHz, float ple,
+                    int skipWall, float dzMeters) {
+  float d2DPx = length(a - b);
+  float d2DM  = d2DPx / u_floorScale;
+  float dM    = max(sqrt(d2DM * d2DM + dzMeters * dzMeters), 0.1);
+  float fspl1m = 20.0 * log10v(fMHz) - 27.55;
+  float pl     = fspl1m + 10.0 * ple * log10v(dM);
+  pl += wallLossSkip(a, b, fIdx, skipWall);
+  return pl;
 }
 
 // 多 scope 聯集：u_scopeRanges[k] = (start, count)，每組為一個多邊形
@@ -510,25 +553,49 @@ void main() {
       int   fIdx   = int(u_apFreqBand[i]);
       float distPx = length(canvas - apPos);
       // PHY-6: 3D 距離納入 AP 安裝高度與 client 平面高度差
-      //   d_3D = sqrt(d_2D² + (z_ap - z_client)²)
       float dist2DM = distPx / u_floorScale;
       float dz = u_apInstallHeight[i] - u_clientHeightMeters;
       float distMRaw = sqrt(dist2DM * dist2DM + dz * dz);
-      // PHY-7: 超距 AP 跳過，省 wallLoss / slabAttDb / antennaGain 迴圈
+      // PHY-7: 超距 AP 跳過
       if (distMRaw <= u_cutoutDistMeters) {
         int apSrc = int(u_apSrcFloorIdx[i] + 0.5);
         float slabDb = slabAttDb(apPos, canvas, apSrc, u_activeFloorIdx);
-        // PHY-1: NPv1 規格（08-implementation-guide.md §3.2）
-        //   d_m = max(distance_m, 0.1)              // 避免 log(0)，與規格 1:1
-        //   PL = FSPL(1m, f) + 10·n·log10(d_m)
-        //   FSPL(1m, f) = 20·log10(f_MHz) - 27.55   // d=1m 代入 FSPL 通式
-        //   n 取 per-band（fIdx: 0=2.4G, 1=5G, 2=6G）
-        float distM = max(distMRaw, 0.1);
         float ple    = u_pleByBand[fIdx];
-        float fspl1m = 20.0 * log10v(fMHz) - 27.55;
-        float pl     = fspl1m + 10.0 * ple * log10v(distM);
         float gain   = antennaGain(i, canvas, apPos, u_apAnt[i]);
-        rssi = txPow + gain - pl - wallLoss(canvas, apPos, fIdx) - slabDb;
+
+        // Order 0：直射 PL（含 PHY-1 公式 + ITU-R 牆損 + 入射角）
+        float plOrder0 = segPathLossDb(apPos, canvas, fIdx, fMHz, ple, -1, dz);
+
+        // DPM: Order 1 繞射路徑搜尋（§01 路徑階數 + §4 diffractionLossDBPer90Deg）
+        //   best = min(直射, ∀ v: PL(AP→v) + PL(v→px) + L_90·(θ_turn/90°))
+        //   其中 v 對 AP 與 px 都可見（除了 v 所屬的牆）
+        // 跨樓層 AP (apSrc != active) 的繞射不處理（需 3D visibility graph，超範圍）
+        float bestPl = plOrder0;
+        if (u_maxDiffOrder >= 1 && u_vgCount <= MAX_VG_NODES && apSrc == u_activeFloorIdx) {
+          for (int k = 0; k < MAX_VG_NODES; k++) {
+            if (k >= u_vgCount) break;
+            vec2 v = u_vgNodes[k];
+            int skipW = int(u_vgNodeWallIdx[k] + 0.5);
+            if (!visibleFrom(apPos, v, skipW, -1)) continue;
+            if (!visibleFrom(v, canvas, skipW, -1)) continue;
+            // 繞射端點假設在 client 高度平面 → 只算 2D 段；dz 分別拆給兩段
+            //   AP→v 爬到 AP 高度差之半，v→px 再到 client 平面；
+            //   簡化：直接把 dz 加到 AP→v 段（v 近似在 client 平面）
+            float pl1 = segPathLossDb(apPos, v,      fIdx, fMHz, ple, skipW, dz);
+            float pl2 = segPathLossDb(v,      canvas, fIdx, fMHz, ple, skipW, 0.0);
+            // 繞射角 θ_turn = π − angle(AP-v-px) 的外角（路徑轉折角）
+            vec2 d1 = normalize(v - apPos);
+            vec2 d2 = normalize(canvas - v);
+            float cosT = clamp(dot(d1, d2), -1.0, 1.0);
+            float turnRad = acos(cosT);          // 與直線差多少（0=完全不轉 → 無損失）
+            float turnDeg = turnRad * 57.29578;  // 180/π
+            float diffDb  = u_diffLossPer90Deg * (turnDeg / 90.0);
+            float candidate = pl1 + pl2 + diffDb;
+            if (candidate < bestPl) bestPl = candidate;
+          }
+        }
+
+        rssi = txPow + gain - bestPl - slabDb;
       }
       if (rssi > bestRSSI) { bestRSSI = rssi; bestIdx = i; }
       if (rssi > -85.0) hearable++;
@@ -815,6 +882,11 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       noiseFloorByBand: gl.getUniformLocation(prog, 'u_noiseFloorByBand[0]'),
       cutoutDistMeters: gl.getUniformLocation(prog, 'u_cutoutDistMeters'),
       clientHeightMeters: gl.getUniformLocation(prog, 'u_clientHeightMeters'),
+      vgNodes:        gl.getUniformLocation(prog, 'u_vgNodes[0]'),
+      vgNodeWallIdx:  gl.getUniformLocation(prog, 'u_vgNodeWallIdx[0]'),
+      vgCount:        gl.getUniformLocation(prog, 'u_vgCount'),
+      diffLossPer90Deg: gl.getUniformLocation(prog, 'u_diffLossPer90Deg'),
+      maxDiffOrder:   gl.getUniformLocation(prog, 'u_maxDiffOrder'),
     }
 
     const apData        = new Float32Array(MAX_APS       * 4)
@@ -846,6 +918,8 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, PATTERN_SAMPLES, MAX_APS, 0, gl.RED, gl.FLOAT, null)
     const wallPosData   = new Float32Array(MAX_WALLS     * 4)
     const wallLoss3Data = new Float32Array(MAX_WALLS     * 3)
+    const vgNodesData        = new Float32Array(MAX_VG_NODES * 2)
+    const vgNodeWallIdxData  = new Float32Array(MAX_VG_NODES)
     const scopePtsData    = new Float32Array(MAX_SCOPE_PTS * 2)
     const scopeRangesData    = new Float32Array(8 * 2)  // MAX_SCOPES=8, vec2 each
     const outScopeRangesData = new Float32Array(8 * 2)
@@ -1098,12 +1172,30 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       }
 
       const wallCount = Math.min(rawWalls.length, MAX_WALLS)
+      // DPM-1: 建 visibility graph nodes（每牆兩端點；超上限則退回純直射）
+      // DPM-5: 超出 MAX_VG_NODES 時 shader 會 fallback 到 Order 0
+      if (rawWalls.length * 2 > MAX_VG_NODES && !HeatmapWebGL._vgWarned) {
+        console.warn(`[HeatmapWebGL] Wall endpoints ${rawWalls.length * 2} > MAX_VG_NODES ${MAX_VG_NODES}; diffraction (DPM) disabled for this frame`)
+        HeatmapWebGL._vgWarned = true
+      }
+      let vgCount = 0
       for (let i = 0; i < wallCount; i++) {
         const wl = rawWalls[i]
         wallPosData[i*4]   = wl.startX
         wallPosData[i*4+1] = wl.startY
         wallPosData[i*4+2] = wl.endX
         wallPosData[i*4+3] = wl.endY
+        // DPM-1: 填入兩端點
+        if (vgCount + 2 <= MAX_VG_NODES) {
+          vgNodesData[vgCount*2]     = wl.startX
+          vgNodesData[vgCount*2 + 1] = wl.startY
+          vgNodeWallIdxData[vgCount] = i
+          vgCount++
+          vgNodesData[vgCount*2]     = wl.endX
+          vgNodesData[vgCount*2 + 1] = wl.endY
+          vgNodeWallIdxData[vgCount] = i
+          vgCount++
+        }
         // PHY-2: ITU-R P.2040-3 頻率外推（取代手調 freqFactor 乘數）
         // 從材質 (a,b,c,d) + refAttDb @ refFreqMHz 算各頻段對應 dB
         const m = wl.material
@@ -1209,6 +1301,13 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       gl.uniform1f(locs.cutoutDistMeters, HEATMAP_DEFAULTS.cutoutDistanceMeters)
       // PHY-6: client 接收平面高度（meter）
       gl.uniform1f(locs.clientHeightMeters, HEATMAP_DEFAULTS.clientHeightMeters)
+      // DPM: visibility graph nodes + 繞射參數
+      gl.uniform2fv(locs.vgNodes,       vgNodesData)
+      gl.uniform1fv(locs.vgNodeWallIdx, vgNodeWallIdxData)
+      // DPM-5: 端點數若超過上限，shader 端會 fallback 到 Order 0
+      gl.uniform1i(locs.vgCount, vgCount <= MAX_VG_NODES ? vgCount : 0)
+      gl.uniform1f(locs.diffLossPer90Deg, HEATMAP_DEFAULTS.diffractionLossDBPer90Deg)
+      gl.uniform1i(locs.maxDiffOrder,     HEATMAP_DEFAULTS.maxDiffractionOrder)
 
       gl.bindVertexArray(vao)
       gl.drawArrays(gl.TRIANGLES, 0, 6)

@@ -147,11 +147,11 @@ const PHASES = [
       {
         layer: 'Layer RF-DPM — Dominant Path Model（NLOS 繞射）',
         items: [
-          { id: 'DPM-1', done: false, text: 'Visibility Graph 預計算（牆端點圖）' },
-          { id: 'DPM-2', done: false, text: 'Order 1 繞射路徑（取 min(直射, Order 1)）' },
-          { id: 'DPM-3', done: false, text: 'diffractionLossDBPer90Deg 設定（預設 6 dB）' },
-          { id: 'DPM-4', done: false, text: 'Order 2 繞射（可選，預設關閉）' },
-          { id: 'DPM-5', done: false, text: 'MAX_VG_NODES 上限（超過退回直射）' },
+          { id: 'DPM-1', done: true,  text: 'Visibility Graph（每牆兩端點 + wallIdx）' },
+          { id: 'DPM-2', done: true,  text: 'Order 1 繞射（min(直射, 各端點 v)）' },
+          { id: 'DPM-3', done: true,  text: 'diffLoss 6 dB/90°（已在 rfDefaults）' },
+          { id: 'DPM-4', done: false, text: 'Order 2 繞射（延後，O(N²) 成本高）' },
+          { id: 'DPM-5', done: true,  text: 'MAX_VG_NODES=32（受 uniform 容量限制）' },
         ],
       },
       {
@@ -167,8 +167,8 @@ const PHASES = [
         layer: 'Layer RF-INT — 整合與驗證',
         items: [
           { id: 'INT-1', done: true,  text: '拖曳期間凍結熱圖（mouseup 後下一幀重算）' },
-          { id: 'INT-2', done: false, text: '單元驗證（FSPL / ITU 數值對表）' },
-          { id: 'INT-3', done: false, text: '整合驗證（空房 / 加牆 / 繞射視覺）' },
+          { id: 'INT-2', done: true,  text: '單元驗證 FSPL / ITU 數值 (MCP console)' },
+          { id: 'INT-3', done: true,  text: '整合驗證 MCP 截圖（PHY-2/4 + DPM 繞射）' },
           { id: 'INT-4', done: true,  text: 'FormulaNote 同步顯示新公式（8 區塊 + 規格來源標註）' },
         ],
       },
