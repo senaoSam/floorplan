@@ -146,10 +146,10 @@
 
 | #     | 狀態 | Task |
 | ----- | ---- | ---- |
-| RX-1 | ⬜ | **RSSI 公式**：`RSSI = TxPower + G_tx(θ,φ) - PL(AP→p)`。確認天線增益已包含（目前 `antennaGain` 已實作，檢查無誤） |
-| RX-2 | ⬜ | **SNR 公式**：`SNR = RSSI_primary - N_floor(band, BW)`，`N_floor(BW) = wifiNoiseFloor[band] + 10·log10(BW/20)`（已對，但需切到 per-band noise） |
+| RX-1 | ✅ | **RSSI 公式**：`RSSI = TxPower + G_tx(θ,φ) - PL(AP→p)`。確認天線增益已包含（目前 `antennaGain` 已實作，檢查無誤）—— shader 公式 `txPow + gain - pl - wallLoss - slabDb` 與規格 §2.1 1:1 對齊 |
+| RX-2 | ✅ | **SNR 公式**：`SNR = RSSI_primary - N_floor(band, BW)`，`N_floor(BW) = wifiNoiseFloor[band] + 10·log10(BW/20)`（PHY-5 完成後已 per-band，公式與規格 §2.3 1:1 對齊） |
 | RX-3 | ✅ | **SINR 公式（線性疊加）**：`N_eff = 10·log10(10^(N_floor/10) + Σ 10^(RSSI_intf/10))`，SINR = RSSI_primary - N_eff。check 同/部分頻道重疊 overlap_factor（完全重疊 1.0、部分 0.3~0.7、不重疊 0）。2.4G 相鄰頻道：diff1=0.72, diff2=0.27, diff3=0.04, diff4=0.004, ≥5=0（IEEE 802.11 共識）；5G/6G 僅 primary channel 相同算 1.0 |
-| RX-4 | ⬜ | **Data Rate MCS 表重寫**：以 `04-heatmap-pipeline.md §2.4` 802.11ax 表為準，建 `(MCS, minSNR, 20MHz/80MHz/160MHz × 1SS/4SS)` 查表。考慮 AP 的 `streamCount` 與 `channelWidth`，輸出 Mbps |
+| RX-4 | ✅ | **Data Rate MCS 表重寫**：以 `04-heatmap-pipeline.md §2.4` 802.11ax 表為準，建 `(MCS, minSNR, 20MHz/80MHz/160MHz × 1SS/4SS)` 查表。考慮 AP 的 `streamCount` 與 `channelWidth`，輸出 Mbps。實作：IEEE 802.11-2020 §27.5 完整 MCS 0-11 表（0.8μs GI），20/40/80/160 MHz 倍率 1/2/4/8，streams 線性倍率（apModels 加 streamCount per-band） |
 
 ### Layer RF-INT — 整合與驗證
 

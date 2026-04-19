@@ -9,6 +9,7 @@ import { getPatternById, DEFAULT_PATTERN_ID, PATTERN_SAMPLES } from '@/constants
 import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
 import { NOISE_FLOOR_DBM_PER_BAND, HEATMAP_DEFAULTS } from '@/constants/rfDefaults'
 import { wallAttAtFreq } from '@/utils/ituR2040'
+import { getAPModelById, DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
 
 const MAX_APS        = 32
 const MAX_WALLS      = 64
@@ -107,6 +108,7 @@ uniform float u_apCenterMHz[MAX_APS];  // 該頻道+頻寬的中心頻率 (MHz)
 uniform float u_apWidthMHz[MAX_APS];   // 頻寬 (MHz)
 uniform float u_apSrcFloorIdx[MAX_APS];// AP 所在樓層索引 (float for uniform typing)
 uniform float u_apInstallHeight[MAX_APS]; // PHY-6: AP 安裝高度 (m)
+uniform float u_apStreamCount[MAX_APS];   // RX-4: MIMO spatial streams (per AP，per band from model)
 uniform vec4  u_apAnt[MAX_APS];        // x = mode(0=omni,1=dir,2=custom), y = azimuthRad, z = halfBeamwidthRad, w = frontBackDb
 
 // 9-3d: 多樓層 slab + floor hole 資料，供 per-pixel 跨樓層 bypass 判定
@@ -447,20 +449,40 @@ vec4 apCountColor(int count) {
   return                 vec4(1.0,  0.85, 0.10, 0.75);  // 黃 — 4+（過多）
 }
 
-// SINR → 預估 Data Rate (Mbps)，簡化 MCS 映射
-float sinrToRate(float sinr) {
-  if (sinr < 2.0)  return 0.0;
-  if (sinr < 5.0)  return 6.5;     // MCS 0
-  if (sinr < 9.0)  return 13.0;    // MCS 1
-  if (sinr < 11.0) return 19.5;    // MCS 2
-  if (sinr < 15.0) return 26.0;    // MCS 3
-  if (sinr < 18.0) return 39.0;    // MCS 4
-  if (sinr < 20.0) return 52.0;    // MCS 5
-  if (sinr < 22.0) return 58.5;    // MCS 6
-  if (sinr < 25.0) return 65.0;    // MCS 7
-  if (sinr < 29.0) return 78.0;    // MCS 8
-  return 86.5;                      // MCS 9
-  // 多 spatial streams 倍率由顯示端換算
+// RX-4: 802.11ax Data Rate (嚴格遵守 .tmp-heatmap §2.4 sample 表)
+//   規格給三個 MCS 錨點（0 / 7 / 11）搭配 SNR 閾值與各頻寬/SS 的 Mbps：
+//     MCS  Min SNR  20/1SS  80/1SS  80/4SS
+//       0      2     8.6     36      144
+//       7     19    72      309     1200
+//      11     30   143      600     2400
+//   其他 MCS 在兩錨點間 SNR 線性內插；SNR<2 → 0。
+//   頻寬轉換比（規格隱含）：80/20 ≈ 4.29（=309/72 或 36/8.6），
+//     40 ≈ 2.14、160 ≈ 8.57；以這些比例自規格 20MHz 值外推。
+//   SS 線性倍率（§2.4 表：1200/309 ≈ 3.88 ≈ 4，符合 4SS=4×1SS）。
+//
+// 回傳 (snr, widthMHz, streamCount) 對應 Mbps。
+float dataRateMbps(float snr, float widthMHz, float streamCount) {
+  if (snr < 2.0) return 0.0;
+
+  // 規格錨點：20MHz × 1SS 的 Mbps 與對應 SNR 閾值（§2.4）
+  // MCS 0 (SNR 2) = 8.6；MCS 7 (SNR 19) = 72；MCS 11 (SNR 30) = 143
+  float base20;
+  if      (snr <= 2.0)  base20 =   8.6;
+  else if (snr <= 19.0) base20 = mix(8.6, 72.0,  (snr -  2.0) / 17.0);
+  else if (snr <= 30.0) base20 = mix(72.0, 143.0, (snr - 19.0) / 11.0);
+  else                  base20 = 143.0;
+
+  // 頻寬倍率（自規格 sample 推得 80/20 = 309/72 ≈ 4.29；線性外推到 40/160）
+  float bwMul;
+  if      (widthMHz >= 160.0) bwMul = 8.58;   // 160 = 2 × 80
+  else if (widthMHz >=  80.0) bwMul = 4.29;   // 規格 sample
+  else if (widthMHz >=  40.0) bwMul = 2.14;   //  40 = 80/2
+  else                        bwMul = 1.0;
+
+  // streams 線性（規格 4SS/1SS = 1200/309 ≈ 3.88 ≈ 4）
+  float ss = clamp(streamCount, 1.0, 4.0);
+
+  return base20 * bwMul * ss;
 }
 
 void main() {
@@ -587,15 +609,8 @@ void main() {
 
   // ── Mode: Data Rate ──
   if (u_mode == MODE_DATA_RATE) {
-    float rate = sinrToRate(sinr);
-    // 假設 2 spatial streams → ×2
-    rate *= 2.0;
-    // 頻寬倍率：20→×1、40→×2.1、80→×4.5、160→×9
-    float bwMul = 1.0;
-    if (servingWidth >= 160.0)     bwMul = 9.0;
-    else if (servingWidth >= 80.0) bwMul = 4.5;
-    else if (servingWidth >= 40.0) bwMul = 2.1;
-    rate *= bwMul;
+    // RX-4: 嚴格對齊 §2.4 — 查 (MCS, bandwidth, streamCount) 表
+    float rate = dataRateMbps(sinr, servingWidth, u_apStreamCount[bestIdx]);
     outColor = dataRateColor(rate);
     return;
   }
@@ -775,6 +790,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       apWidthMHz:     gl.getUniformLocation(prog, 'u_apWidthMHz[0]'),
       apSrcFloorIdx:  gl.getUniformLocation(prog, 'u_apSrcFloorIdx[0]'),
       apInstallHeight: gl.getUniformLocation(prog, 'u_apInstallHeight[0]'),
+      apStreamCount:  gl.getUniformLocation(prog, 'u_apStreamCount[0]'),
       apAnt:          gl.getUniformLocation(prog, 'u_apAnt[0]'),
       floorCount:     gl.getUniformLocation(prog, 'u_floorCount'),
       activeFloorIdx: gl.getUniformLocation(prog, 'u_activeFloorIdx'),
@@ -808,6 +824,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
     const apWidthData   = new Float32Array(MAX_APS)
     const apSrcFloorIdxData = new Float32Array(MAX_APS)
     const apInstallHeightData = new Float32Array(MAX_APS)
+    const apStreamCountData   = new Float32Array(MAX_APS)
     const apAntData     = new Float32Array(MAX_APS       * 4)
     const floorSlabDbData    = new Float32Array(MAX_FLOORS)
     const floorAlignData     = new Float32Array(MAX_FLOORS * 4)
@@ -1017,7 +1034,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       const vpYScaled     = vp.y     * renderScale
       const vpScaleScaled = vp.scale * renderScale
 
-      const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.z ?? 2.4},${a.txPower},${a.frequency},${a.channel ?? 0},${a.channelWidth ?? 0},${a.antennaMode ?? 'omni'},${a.azimuth ?? 0},${a.beamwidth ?? 60},${a.patternId ?? ''},${a._srcFloorIdx ?? 0}`).join('|')
+      const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.z ?? 2.4},${a.txPower},${a.frequency},${a.channel ?? 0},${a.channelWidth ?? 0},${a.antennaMode ?? 'omni'},${a.azimuth ?? 0},${a.beamwidth ?? 60},${a.patternId ?? ''},${a._srcFloorIdx ?? 0},${a.modelId ?? ''}`).join('|')
       // PHY-2: cache key 用材質 id + refAttDb（ITU 係數變動會帶不同 id 或 refAttDb）
       const wallKey  = rawWalls.map((wl) => `${wl.startX.toFixed(1)},${wl.startY.toFixed(1)},${wl.endX.toFixed(1)},${wl.endY.toFixed(1)},${wl.material?.id ?? ''},${wl.material?.refAttDb ?? wl.material?.dbLoss ?? 0}`).join('|')
       const scopeKey = [...inScopes, ...outScopes].map((sc) => {
@@ -1053,6 +1070,9 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         apWidthData[i] = bw
         apSrcFloorIdxData[i] = a._srcFloorIdx ?? 0
         apInstallHeightData[i] = a.z ?? 2.4
+        // RX-4: 依 AP modelId 取該頻段 streamCount（fallback 2SS）
+        const model = getAPModelById(a.modelId ?? DEFAULT_AP_MODEL_ID)
+        apStreamCountData[i] = model.streamCount?.[a.frequency] ?? 2
         // Antenna: omni(0) / directional(1) / custom(2); custom AP fills its pattern row.
         const mode = a.antennaMode === 'directional' ? 1 : a.antennaMode === 'custom' ? 2 : 0
         const azDeg     = ((a.azimuth ?? 0) % 360 + 360) % 360
@@ -1150,6 +1170,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       gl.uniform1fv(locs.apWidthMHz,   apWidthData)
       gl.uniform1fv(locs.apSrcFloorIdx, apSrcFloorIdxData)
       gl.uniform1fv(locs.apInstallHeight, apInstallHeightData)
+      gl.uniform1fv(locs.apStreamCount,   apStreamCountData)
       gl.uniform4fv(locs.apAnt,        apAntData)
       gl.uniform1i(locs.floorCount,     floorCount)
       gl.uniform1i(locs.activeFloorIdx, activeIdx >= 0 ? activeIdx : 0)

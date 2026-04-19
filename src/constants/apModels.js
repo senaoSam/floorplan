@@ -1,5 +1,6 @@
-// AP model database — vendor specs used for default txPower caps, supported bands and antenna gains.
-// maxTxPower 為各頻段可設定上限 (dBm)；antennaGain 為天線增益 (dBi)。
+// AP model database — vendor specs used for default txPower caps, supported bands, antenna gains.
+// maxTxPower 為各頻段可設定上限 (dBm)；antennaGain 為天線增益 (dBi)；
+// streamCount 為 MIMO spatial stream 數（per-band，用於 802.11ax data rate 查表，RX-4）。
 export const AP_MODELS = {
   GENERIC_WIFI6: {
     id: 'generic-wifi6',
@@ -9,6 +10,7 @@ export const AP_MODELS = {
     supportedBands: [2.4, 5],
     maxTxPower: { 2.4: 23, 5: 23 },
     antennaGain: { 2.4: 3, 5: 4 },
+    streamCount: { 2.4: 2, 5: 2 },
   },
   CISCO_C9166: {
     id: 'cisco-c9166',
@@ -18,6 +20,7 @@ export const AP_MODELS = {
     supportedBands: [2.4, 5, 6],
     maxTxPower: { 2.4: 26, 5: 26, 6: 24 },
     antennaGain: { 2.4: 4, 5: 5, 6: 6 },
+    streamCount: { 2.4: 4, 5: 4, 6: 4 },
   },
   ARUBA_AP635: {
     id: 'aruba-ap635',
@@ -27,6 +30,7 @@ export const AP_MODELS = {
     supportedBands: [2.4, 5, 6],
     maxTxPower: { 2.4: 24, 5: 24, 6: 24 },
     antennaGain: { 2.4: 3, 5: 5, 6: 6 },
+    streamCount: { 2.4: 2, 5: 4, 6: 2 },
   },
   RUCKUS_R770: {
     id: 'ruckus-r770',
@@ -36,6 +40,7 @@ export const AP_MODELS = {
     supportedBands: [2.4, 5, 6],
     maxTxPower: { 2.4: 27, 5: 27, 6: 24 },
     antennaGain: { 2.4: 4, 5: 6, 6: 6 },
+    streamCount: { 2.4: 4, 5: 4, 6: 4 },
   },
   UBIQUITI_U6_PRO: {
     id: 'ubiquiti-u6-pro',
@@ -45,6 +50,7 @@ export const AP_MODELS = {
     supportedBands: [2.4, 5],
     maxTxPower: { 2.4: 22, 5: 23 },
     antennaGain: { 2.4: 4, 5: 5.5 },
+    streamCount: { 2.4: 2, 5: 4 },
   },
   UBIQUITI_U6_LITE: {
     id: 'ubiquiti-u6-lite',
@@ -54,6 +60,7 @@ export const AP_MODELS = {
     supportedBands: [2.4, 5],
     maxTxPower: { 2.4: 20, 5: 20 },
     antennaGain: { 2.4: 3, 5: 3 },
+    streamCount: { 2.4: 2, 5: 2 },
   },
 }
 
