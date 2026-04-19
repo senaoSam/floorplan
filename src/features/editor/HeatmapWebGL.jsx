@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react'
-import { useEditorStore, HEATMAP_MODE } from '@/store/useEditorStore'
+import { useEditorStore, HEATMAP_MODE, plePerBandFromBase } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useWallStore } from '@/store/useWallStore'
@@ -7,6 +7,7 @@ import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { getPatternById, DEFAULT_PATTERN_ID, PATTERN_SAMPLES } from '@/constants/antennaPatterns'
 import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
+import { NOISE_FLOOR_DBM_PER_BAND, HEATMAP_DEFAULTS } from '@/constants/rfDefaults'
 
 const MAX_APS        = 32
 const MAX_WALLS      = 64
@@ -104,6 +105,7 @@ uniform float u_apFreqBand[MAX_APS];   // 頻段索引 0=2.4, 1=5, 2=6
 uniform float u_apCenterMHz[MAX_APS];  // 該頻道+頻寬的中心頻率 (MHz)
 uniform float u_apWidthMHz[MAX_APS];   // 頻寬 (MHz)
 uniform float u_apSrcFloorIdx[MAX_APS];// AP 所在樓層索引 (float for uniform typing)
+uniform float u_apInstallHeight[MAX_APS]; // PHY-6: AP 安裝高度 (m)
 uniform vec4  u_apAnt[MAX_APS];        // x = mode(0=omni,1=dir,2=custom), y = azimuthRad, z = halfBeamwidthRad, w = frontBackDb
 
 // 9-3d: 多樓層 slab + floor hole 資料，供 per-pixel 跨樓層 bypass 判定
@@ -122,12 +124,16 @@ uniform vec3  u_wallLoss3[MAX_WALLS];  // xyz = 2.4GHz / 5GHz / 6GHz 衰減
 uniform vec2  u_scopePts[MAX_SCOPE_PTS];
 uniform int   u_scopePtCount;
 uniform int   u_mode;
-uniform float u_pathLossN;
+// PHY-1: per-band PLE，索引 [0]=2.4G, [1]=5G, [2]=6G（與 u_apFreqBand 對齊）
+uniform float u_pleByBand[3];
+// PHY-5: per-band wifi noise floor (dBm @ 20MHz)，索引同上
+uniform float u_noiseFloorByBand[3];
+// PHY-7: 超距 AP 不算（meter）。RSSI 直接設為 -1e10 跳過
+uniform float u_cutoutDistMeters;
+// PHY-6: heatmap 接收平面高度 (m，0.5~2.0 典型)
+uniform float u_clientHeightMeters;
 
 out vec4 outColor;
-
-const float NOISE_DBM = -95.0;
-const float NOISE_LIN = 3.1623e-10;  // pow(10, -95/10)
 
 float log10v(float x) { return log(x) * 0.4342944819; }
 
@@ -447,16 +453,27 @@ void main() {
       float txPow  = u_aps[i].z;
       float fMHz   = u_aps[i].w;
       int   fIdx   = int(u_apFreqBand[i]);
-      float dist   = length(canvas - apPos);
-      int apSrc = int(u_apSrcFloorIdx[i] + 0.5);
-      float slabDb = slabAttDb(apPos, canvas, apSrc, u_activeFloorIdx);
-      if (dist < 0.5) {
-        rssi = txPow - slabDb;
-      } else {
-        float distM = dist / u_floorScale;
-        float fspl  = 10.0 * u_pathLossN * log10v(distM) + 20.0 * log10v(fMHz) - 27.55;
-        float gain  = antennaGain(i, canvas, apPos, u_apAnt[i]);
-        rssi = txPow + gain - fspl - wallLoss(canvas, apPos, fIdx) - slabDb;
+      float distPx = length(canvas - apPos);
+      // PHY-6: 3D 距離納入 AP 安裝高度與 client 平面高度差
+      //   d_3D = sqrt(d_2D² + (z_ap - z_client)²)
+      float dist2DM = distPx / u_floorScale;
+      float dz = u_apInstallHeight[i] - u_clientHeightMeters;
+      float distMRaw = sqrt(dist2DM * dist2DM + dz * dz);
+      // PHY-7: 超距 AP 跳過，省 wallLoss / slabAttDb / antennaGain 迴圈
+      if (distMRaw <= u_cutoutDistMeters) {
+        int apSrc = int(u_apSrcFloorIdx[i] + 0.5);
+        float slabDb = slabAttDb(apPos, canvas, apSrc, u_activeFloorIdx);
+        // PHY-1: NPv1 規格（08-implementation-guide.md §3.2）
+        //   d_m = max(distance_m, 0.1)              // 避免 log(0)，與規格 1:1
+        //   PL = FSPL(1m, f) + 10·n·log10(d_m)
+        //   FSPL(1m, f) = 20·log10(f_MHz) - 27.55   // d=1m 代入 FSPL 通式
+        //   n 取 per-band（fIdx: 0=2.4G, 1=5G, 2=6G）
+        float distM = max(distMRaw, 0.1);
+        float ple    = u_pleByBand[fIdx];
+        float fspl1m = 20.0 * log10v(fMHz) - 27.55;
+        float pl     = fspl1m + 10.0 * ple * log10v(distM);
+        float gain   = antennaGain(i, canvas, apPos, u_apAnt[i]);
+        rssi = txPow + gain - pl - wallLoss(canvas, apPos, fIdx) - slabDb;
       }
       if (rssi > bestRSSI) { bestRSSI = rssi; bestIdx = i; }
       if (rssi > -85.0) hearable++;
@@ -485,8 +502,10 @@ void main() {
   float servingLo     = servingCenter - servingWidth * 0.5;
   float servingHi     = servingCenter + servingWidth * 0.5;
 
-  // 底噪依頻寬修正：+10·log10(W/20) dB（寬頻吃進更多噪聲）
-  float noiseDbm = NOISE_DBM + 10.0 * log10v(servingWidth / 20.0);
+  // PHY-5: 底噪依 serving AP 頻段取對應 wifiNoiseFloor，再依頻寬修正
+  //   N(BW) = wifiNoiseFloor[band] + 10·log10(BW/20)
+  int servingBandIdx = int(servingBand + 0.5);
+  float noiseDbm = u_noiseFloorByBand[servingBandIdx] + 10.0 * log10v(servingWidth / 20.0);
   float noiseLin = pow(10.0, noiseDbm / 10.0);
 
   float signalLin   = pow(10.0, bestRSSI / 10.0);
@@ -722,6 +741,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       apCenterMHz:    gl.getUniformLocation(prog, 'u_apCenterMHz[0]'),
       apWidthMHz:     gl.getUniformLocation(prog, 'u_apWidthMHz[0]'),
       apSrcFloorIdx:  gl.getUniformLocation(prog, 'u_apSrcFloorIdx[0]'),
+      apInstallHeight: gl.getUniformLocation(prog, 'u_apInstallHeight[0]'),
       apAnt:          gl.getUniformLocation(prog, 'u_apAnt[0]'),
       floorCount:     gl.getUniformLocation(prog, 'u_floorCount'),
       activeFloorIdx: gl.getUniformLocation(prog, 'u_activeFloorIdx'),
@@ -742,7 +762,10 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       outScopeRanges: gl.getUniformLocation(prog, 'u_outScopeRanges[0]'),
       outScopeCount:  gl.getUniformLocation(prog, 'u_outScopeCount'),
       mode:           gl.getUniformLocation(prog, 'u_mode'),
-      pathLossN:      gl.getUniformLocation(prog, 'u_pathLossN'),
+      pleByBand:      gl.getUniformLocation(prog, 'u_pleByBand[0]'),
+      noiseFloorByBand: gl.getUniformLocation(prog, 'u_noiseFloorByBand[0]'),
+      cutoutDistMeters: gl.getUniformLocation(prog, 'u_cutoutDistMeters'),
+      clientHeightMeters: gl.getUniformLocation(prog, 'u_clientHeightMeters'),
     }
 
     const apData        = new Float32Array(MAX_APS       * 4)
@@ -751,6 +774,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
     const apCenterData  = new Float32Array(MAX_APS)
     const apWidthData   = new Float32Array(MAX_APS)
     const apSrcFloorIdxData = new Float32Array(MAX_APS)
+    const apInstallHeightData = new Float32Array(MAX_APS)
     const apAntData     = new Float32Array(MAX_APS       * 4)
     const floorSlabDbData    = new Float32Array(MAX_FLOORS)
     const floorAlignData     = new Float32Array(MAX_FLOORS * 4)
@@ -960,7 +984,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       const vpYScaled     = vp.y     * renderScale
       const vpScaleScaled = vp.scale * renderScale
 
-      const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.txPower},${a.frequency},${a.channel ?? 0},${a.channelWidth ?? 0},${a.antennaMode ?? 'omni'},${a.azimuth ?? 0},${a.beamwidth ?? 60},${a.patternId ?? ''},${a._srcFloorIdx ?? 0}`).join('|')
+      const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.z ?? 2.4},${a.txPower},${a.frequency},${a.channel ?? 0},${a.channelWidth ?? 0},${a.antennaMode ?? 'omni'},${a.azimuth ?? 0},${a.beamwidth ?? 60},${a.patternId ?? ''},${a._srcFloorIdx ?? 0}`).join('|')
       const wallKey  = rawWalls.map((wl) => `${wl.startX.toFixed(1)},${wl.startY.toFixed(1)},${wl.endX.toFixed(1)},${wl.endY.toFixed(1)},${wl.material?.id ?? ''},${wl.material?.dbLoss ?? 0}`).join('|')
       const scopeKey = [...inScopes, ...outScopes].map((sc) => {
         const d = dragScope && dragScope.id === sc.id ? `${dragScope.dx.toFixed(1)},${dragScope.dy.toFixed(1)}` : '0,0'
@@ -993,6 +1017,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         apCenterData[i] = channelCenterMHz(a.frequency, ch)
         apWidthData[i] = bw
         apSrcFloorIdxData[i] = a._srcFloorIdx ?? 0
+        apInstallHeightData[i] = a.z ?? 2.4
         // Antenna: omni(0) / directional(1) / custom(2); custom AP fills its pattern row.
         const mode = a.antennaMode === 'directional' ? 1 : a.antennaMode === 'custom' ? 2 : 0
         const azDeg     = ((a.azimuth ?? 0) % 360 + 360) % 360
@@ -1088,6 +1113,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       gl.uniform1fv(locs.apCenterMHz,  apCenterData)
       gl.uniform1fv(locs.apWidthMHz,   apWidthData)
       gl.uniform1fv(locs.apSrcFloorIdx, apSrcFloorIdxData)
+      gl.uniform1fv(locs.apInstallHeight, apInstallHeightData)
       gl.uniform4fv(locs.apAnt,        apAntData)
       gl.uniform1i(locs.floorCount,     floorCount)
       gl.uniform1i(locs.activeFloorIdx, activeIdx >= 0 ? activeIdx : 0)
@@ -1111,7 +1137,19 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       gl.uniform2fv(locs.outScopeRanges, outScopeRangesData)
       gl.uniform1i(locs.outScopeCount,   outScopeCount)
       gl.uniform1i(locs.mode,          MODE_INT[curMode] ?? 1)
-      gl.uniform1f(locs.pathLossN,     plN)
+      // PHY-1: per-band PLE，索引對齊 FREQ_BAND_INDEX
+      const ple3 = plePerBandFromBase(plN)
+      gl.uniform1fv(locs.pleByBand,    new Float32Array([ple3[2.4], ple3[5], ple3[6]]))
+      // PHY-5: per-band noise floor (dBm @ 20MHz)
+      gl.uniform1fv(locs.noiseFloorByBand, new Float32Array([
+        NOISE_FLOOR_DBM_PER_BAND[2.4],
+        NOISE_FLOOR_DBM_PER_BAND[5],
+        NOISE_FLOOR_DBM_PER_BAND[6],
+      ]))
+      // PHY-7: cutout 距離（meter）
+      gl.uniform1f(locs.cutoutDistMeters, HEATMAP_DEFAULTS.cutoutDistanceMeters)
+      // PHY-6: client 接收平面高度（meter）
+      gl.uniform1f(locs.clientHeightMeters, HEATMAP_DEFAULTS.clientHeightMeters)
 
       gl.bindVertexArray(vao)
       gl.drawArrays(gl.TRIANGLES, 0, 6)

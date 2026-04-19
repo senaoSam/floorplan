@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { DEFAULT_PLE_PER_BAND } from '@/constants/rfDefaults'
 
 // 編輯器模式
 export const EDITOR_MODE = {
@@ -33,12 +34,26 @@ export const HEATMAP_MODE = {
 
 // 環境路徑損耗預設
 // hint 為情境描述，讓使用者依「場域像什麼」選擇；n 值保留給工程師校正參考。
+// PHY-1: 對齊 NPv1 規格，per-band PLE。preset 給的是 2.4G 基準 n，5G/6G 依
+// rfDefaults 預設偏移（典型 5G +0.3、6G +0.5）。
 export const ENVIRONMENT_PRESETS = {
   FREE_SPACE:  { label: '開放空間', hint: '大廳、中庭，訊號穿透性佳',  n: 2.0 },
   OFFICE:      { label: '辦公室',   hint: '一般隔間與家具',             n: 3.0 },
   DENSE:       { label: '密集隔間', hint: '小房間多、實牆多、機房',     n: 3.5 },
   CORRIDOR:    { label: '走廊',     hint: '波導效應，訊號沿通道延伸',   n: 1.8 },
 }
+
+// 由「2.4G 基準 n」推三頻段 PLE：保持各頻段相對偏移（典型 5G > 2.4G、6G > 5G）
+const BAND_OFFSET = {
+  2.4: 0,
+  5:   DEFAULT_PLE_PER_BAND[5]   - DEFAULT_PLE_PER_BAND[2.4],
+  6:   DEFAULT_PLE_PER_BAND[6]   - DEFAULT_PLE_PER_BAND[2.4],
+}
+export const plePerBandFromBase = (baseN) => ({
+  2.4: baseN + BAND_OFFSET[2.4],
+  5:   baseN + BAND_OFFSET[5],
+  6:   baseN + BAND_OFFSET[6],
+})
 
 // ⚠️ 新增可選取物件類型時的聯動點（grep 'SELECTABLE-TYPE' 可找到所有需要一起改的地方）：
 //   [SELECTABLE-TYPE] 此處 `selectedType` 的 JSDoc 列舉
