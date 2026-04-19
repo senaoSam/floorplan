@@ -8,6 +8,7 @@ import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { getPatternById, DEFAULT_PATTERN_ID, PATTERN_SAMPLES } from '@/constants/antennaPatterns'
 import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
 import { NOISE_FLOOR_DBM_PER_BAND, HEATMAP_DEFAULTS } from '@/constants/rfDefaults'
+import { wallAttAtFreq } from '@/utils/ituR2040'
 
 const MAX_APS        = 32
 const MAX_WALLS      = 64
@@ -985,7 +986,8 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       const vpScaleScaled = vp.scale * renderScale
 
       const apKey    = aps.map((a) => `${a.id}:${a.x.toFixed(1)},${a.y.toFixed(1)},${a.z ?? 2.4},${a.txPower},${a.frequency},${a.channel ?? 0},${a.channelWidth ?? 0},${a.antennaMode ?? 'omni'},${a.azimuth ?? 0},${a.beamwidth ?? 60},${a.patternId ?? ''},${a._srcFloorIdx ?? 0}`).join('|')
-      const wallKey  = rawWalls.map((wl) => `${wl.startX.toFixed(1)},${wl.startY.toFixed(1)},${wl.endX.toFixed(1)},${wl.endY.toFixed(1)},${wl.material?.id ?? ''},${wl.material?.dbLoss ?? 0}`).join('|')
+      // PHY-2: cache key 用材質 id + refAttDb（ITU 係數變動會帶不同 id 或 refAttDb）
+      const wallKey  = rawWalls.map((wl) => `${wl.startX.toFixed(1)},${wl.startY.toFixed(1)},${wl.endX.toFixed(1)},${wl.endY.toFixed(1)},${wl.material?.id ?? ''},${wl.material?.refAttDb ?? wl.material?.dbLoss ?? 0}`).join('|')
       const scopeKey = [...inScopes, ...outScopes].map((sc) => {
         const d = dragScope && dragScope.id === sc.id ? `${dragScope.dx.toFixed(1)},${dragScope.dy.toFixed(1)}` : '0,0'
         return `${sc.id},${sc.type},${d}`
@@ -1047,11 +1049,12 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         wallPosData[i*4+1] = wl.startY
         wallPosData[i*4+2] = wl.endX
         wallPosData[i*4+3] = wl.endY
-        const baseLoss = wl.material?.dbLoss ?? 0
-        const ff = wl.material?.freqFactor ?? { 2.4: 1, 5: 1, 6: 1 }
-        wallLoss3Data[i*3]   = baseLoss * (ff[2.4] ?? 1)
-        wallLoss3Data[i*3+1] = baseLoss * (ff[5]   ?? 1)
-        wallLoss3Data[i*3+2] = baseLoss * (ff[6]   ?? 1)
+        // PHY-2: ITU-R P.2040-3 頻率外推（取代手調 freqFactor 乘數）
+        // 從材質 (a,b,c,d) + refAttDb @ refFreqMHz 算各頻段對應 dB
+        const m = wl.material
+        wallLoss3Data[i*3]   = wallAttAtFreq(m, FREQ_MHZ[2.4])
+        wallLoss3Data[i*3+1] = wallAttAtFreq(m, FREQ_MHZ[5])
+        wallLoss3Data[i*3+2] = wallAttAtFreq(m, FREQ_MHZ[6])
       }
 
       // 9-3d: per-floor slab/align + floor hole data for shader-side per-pixel bypass

@@ -1,48 +1,72 @@
-// 牆體材質與衰減係數 (dB)
-// dbLoss 為 2.4 GHz 基準值，freqFactor 為各頻段乘數
+// 牆體材質與衰減係數
+// PHY-2: 對齊 .tmp-heatmap §1.2 ITU-R P.2040-3 規格
+//   refAttDb     — 使用者輸入「在 refFreqMHz 下此牆 = X dB」(.tmp §1.3 註解)
+//   refFreqMHz   — 對應參考頻率
+//   a, b, c, d   — ITU-R P.2040-3 §1.2 表格四參數（複介電常數頻率關係）
+//   isConductor  — 金屬旗標（true = 不做頻率外推）
+//
+// 各頻段實際 dB 由 utils/ituR2040.js wallAttAtFreq() 用 (a,b,c,d) 即時外推。
+// 既有 freqFactor 欄位已被 ITU-R 取代並移除。
 export const MATERIALS = {
   GLASS: {
     id: 'glass',
     label: '玻璃',
-    dbLoss: 2,
-    freqFactor: { 2.4: 1.0, 5: 1.5, 6: 2.0 },
+    refAttDb: 2,
+    refFreqMHz: 2400,
+    a: 6.27, b: 0, c: 0.0043, d: 1.1925,
+    isConductor: false,
     color: '#48c9b0',   // 青綠
   },
   DRYWALL: {
     id: 'drywall',
     label: '輕隔間 (石膏板)',
-    dbLoss: 3,
-    freqFactor: { 2.4: 1.0, 5: 1.3, 6: 1.7 },
+    refAttDb: 3,
+    refFreqMHz: 2400,
+    a: 2.94, b: 0, c: 0.0116, d: 0.7076,
+    isConductor: false,
     color: '#f39c12',   // 琥珀橘
   },
   WOOD: {
     id: 'wood',
     label: '木板',
-    dbLoss: 4,
-    freqFactor: { 2.4: 1.0, 5: 1.25, 6: 1.5 },
+    refAttDb: 4,
+    refFreqMHz: 2400,
+    a: 1.99, b: 0, c: 0.0047, d: 1.0718,
+    isConductor: false,
     color: '#a04000',   // 深棕
   },
   BRICK: {
     id: 'brick',
     label: '磚牆',
-    dbLoss: 8,
-    freqFactor: { 2.4: 1.0, 5: 1.4, 6: 1.6 },
+    refAttDb: 8,
+    refFreqMHz: 2400,
+    a: 3.75, b: 0, c: 0.038, d: 0,
+    isConductor: false,
     color: '#cb4335',   // 磚紅
   },
   CONCRETE: {
     id: 'concrete',
     label: '混凝土',
-    dbLoss: 12,
-    freqFactor: { 2.4: 1.0, 5: 1.5, 6: 1.8 },
+    refAttDb: 12,
+    refFreqMHz: 2400,
+    a: 5.31, b: 0, c: 0.0326, d: 0.8095,
+    isConductor: false,
     color: '#2e86c1',   // 藍灰
   },
   METAL: {
     id: 'metal',
     label: '金屬',
-    dbLoss: 20,
-    freqFactor: { 2.4: 1.0, 5: 1.25, 6: 1.4 },
+    refAttDb: 20,
+    refFreqMHz: 2400,
+    a: 1, b: 0, c: 1e7, d: 0,
+    isConductor: true,
     color: '#6c3483',   // 深紫
   },
+}
+
+// 向後相容：仍提供 dbLoss 給未經 ITU 計算的程式碼路徑（如 cache key）
+for (const m of Object.values(MATERIALS)) {
+  m.dbLoss = m.refAttDb
 }
 
 // 依 dB 由小到大排序

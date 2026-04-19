@@ -145,3 +145,13 @@ Default wall material: `MATERIALS.CONCRETE`.
 | `.claude/task.md` | 任務進度追蹤 |
 | `.claude/spec.md` | 產品規格書 |
 | `.claude/youtube.md` | Hamina Network Planner 影片筆記 |
+| `.claude/playwright-mcp-notes.md` | Playwright MCP 操作本專案的踩坑筆記（Konva/Zustand/base path） |
+
+---
+
+## Playwright MCP 驗證
+
+用 MCP 在瀏覽器驗證功能前，**務必**先讀 `.claude/playwright-mcp-notes.md`。本專案有三個陷阱會讓直覺寫法失敗：
+- Konva 不吃原生 `MouseEvent`，要用 `Konva.stages[0]._fire(...)` 搭配 `evt.button`
+- Base path 是 `/floorplan/`，漏掉會 404
+- Zustand store 可透過 `await import()` 直接注入場景（比模擬點擊可靠）
