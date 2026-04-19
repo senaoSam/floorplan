@@ -59,7 +59,7 @@ const PHASES = [
           { id: '5-3', done: true, text: 'WebGL Fragment Shader 即時渲染' },
           { id: '5-4', done: true, text: 'Co-channel 干擾 SINR 熱圖' },
           { id: '5-5', done: true, text: '多模式熱圖（RSSI/SINR/SNR/頻道重疊/速率/AP數）' },
-          { id: '5-6', done: true, text: '柔和色階 + 頻段牆體衰減 + 環境路徑損耗' },
+          { id: '5-6', done: true, text: '柔和色階 + 頻段牆體衰減 + 環境路徑損耗（v1，公式已被 Phase 5 PHY-1/2 取代）' },
         ],
       },
     ],
@@ -127,7 +127,55 @@ const PHASES = [
     ],
   },
   {
-    phase: 'Phase 5 — 效能優化',
+    // 對齊 NPv1 / .tmp-heatmap 規格的 heatmap 公式重寫（優先於效能優化）
+    // 真相來源：.tmp-heatmap/01,02,04,08
+    // 範圍：純 WebGL fragment shader，不含 wasm / Worker / WebGPU
+    phase: 'Phase 5 — Heatmap 公式改寫（NPv1 對齊）🔥 優先',
+    groups: [
+      {
+        layer: 'Layer RF-PHY — 物理公式對齊',
+        items: [
+          { id: 'PHY-1', done: false, text: 'PLE 距離損耗公式重寫（FSPL(1m) + 10n·log10(d/d₀)）' },
+          { id: 'PHY-2', done: false, text: 'ITU-R P.2040 材料模型（a/b/c/d 頻率外推）' },
+          { id: 'PHY-3', done: false, text: '牆厚屬性（width，預設依材質）' },
+          { id: 'PHY-4', done: false, text: '入射角修正（thickness / cos θ）' },
+          { id: 'PHY-5', done: false, text: 'Per-band noise floor（2.4/5/6 GHz 各自）' },
+          { id: 'PHY-6', done: false, text: 'clientHeightMeters（3D 距離 = √(d² + Δh²)）' },
+          { id: 'PHY-7', done: false, text: 'cutoutDistanceMeters（超距 AP skip）' },
+        ],
+      },
+      {
+        layer: 'Layer RF-DPM — Dominant Path Model（NLOS 繞射）',
+        items: [
+          { id: 'DPM-1', done: false, text: 'Visibility Graph 預計算（牆端點圖）' },
+          { id: 'DPM-2', done: false, text: 'Order 1 繞射路徑（取 min(直射, Order 1)）' },
+          { id: 'DPM-3', done: false, text: 'diffractionLossDBPer90Deg 設定（預設 6 dB）' },
+          { id: 'DPM-4', done: false, text: 'Order 2 繞射（可選，預設關閉）' },
+          { id: 'DPM-5', done: false, text: 'MAX_VG_NODES 上限（超過退回直射）' },
+        ],
+      },
+      {
+        layer: 'Layer RF-RX — RSSI / SNR / SINR / Data Rate 對齊',
+        items: [
+          { id: 'RX-1', done: false, text: 'RSSI 公式檢查（含天線增益）' },
+          { id: 'RX-2', done: false, text: 'SNR 切換到 per-band noise floor' },
+          { id: 'RX-3', done: false, text: 'SINR 線性疊加 + overlap_factor' },
+          { id: 'RX-4', done: false, text: 'Data Rate MCS 表重寫（802.11ax 標準）' },
+        ],
+      },
+      {
+        layer: 'Layer RF-INT — 整合與驗證',
+        items: [
+          { id: 'INT-1', done: false, text: '拖曳即時計算暫時關閉（mouseup 後重算）' },
+          { id: 'INT-2', done: false, text: '單元驗證（FSPL / ITU 數值對表）' },
+          { id: 'INT-3', done: false, text: '整合驗證（空房 / 加牆 / 繞射視覺）' },
+          { id: 'INT-4', done: false, text: 'FormulaNote 同步顯示新公式' },
+        ],
+      },
+    ],
+  },
+  {
+    phase: 'Phase 5.5 — 效能優化',
     groups: [
       {
         layer: 'Layer PERF — 拖曳流暢度 & 熱圖即時性',
@@ -137,59 +185,7 @@ const PHASES = [
           { id: 'P-3', done: true,  text: 'History snapshot 非阻塞 + flushPending' },
           { id: 'P-4', done: false, text: 'WallLayer snap bounding box 過濾' },
           { id: 'P-5', done: false, text: 'Editor2D 鍵盤 effect 依賴穩定化' },
-          { id: 'P-6', done: false, text: 'Dirty Rect 區域重繪（雙 FBO + scissor）' },
-        ],
-      },
-    ],
-  },
-  {
-    // 詳細背景見 .claude/rf-propagation-research.md
-    // 建議順序：RF-A → 再評估 RF-B / RF-C / P-6 要不要做
-    phase: 'Phase 5.5 — RF 物理模型強化',
-    groups: [
-      {
-        // 階段 A：不換演算法，在現有 Ray-casting 上補強（相似度 45% → 70%，🟢 無卡頓）
-        layer: 'Layer RF-A — 階段 A（相似度 45% → 70%）',
-        items: [
-          { id: 'RF-A1', done: false, text: '入射角修正（斜射 → 路徑 / cos θ）' },
-          { id: 'RF-A2', done: false, text: '牆厚納入計算（dB × thickness factor）' },
-          { id: 'RF-A3', done: false, text: 'Knife-edge diffraction（牆邊繞射漸層）' },
-          { id: 'RF-A4', done: false, text: '高斯模糊後處理（1~2 px blur）' },
-          { id: 'RF-A5', done: false, text: '射線密度提升（360 → 720 條）' },
-          { id: 'RF-A6', done: false, text: '頻率相關穿透損失（2.4/5/6 GHz 各自 dB 表）' },
-        ],
-      },
-      {
-        // 階段 B：波場傳播（Grid-based Wave Propagation），相似度 70% → 85%，🟠 中等卡頓
-        // RF-A 完成後評估是否需要
-        layer: 'Layer RF-B — 階段 B（相似度 70% → 85%）',
-        items: [
-          { id: 'RF-B1', done: false, text: '波場網格資料結構（10~20 cm 格距）' },
-          { id: 'RF-B2', done: false, text: '擴散方程迭代（8 格加權平均）' },
-          { id: 'RF-B3', done: false, text: '牆邊界條件（穿透率 + 反射係數）' },
-          { id: 'RF-B4', done: false, text: 'Web Worker 計算（避免卡 UI）' },
-          { id: 'RF-B5', done: false, text: '拖曳降級策略（mousedown 降到 RF-A）' },
-          { id: 'RF-B6', done: false, text: '跨樓層波場（樓板邊界條件）' },
-        ],
-      },
-      {
-        // 階段 C：WebGPU + Gaussian Beam / SBR，相似度 85% → 90%，🟡 GPU 加速反而順
-        // RF-B 完成後評估是否需要
-        layer: 'Layer RF-C — 階段 C（相似度 85% → 90%）',
-        items: [
-          { id: 'RF-C1', done: false, text: 'WebGPU compute pipeline + fallback' },
-          { id: 'RF-C2', done: false, text: 'Gaussian Beam Tracing（光束有寬度）' },
-          { id: 'RF-C3', done: false, text: 'SBR（1~2 次反射）' },
-          { id: 'RF-C4', done: false, text: '多路徑疊加（Small-scale fading）' },
-          { id: 'RF-C5', done: false, text: 'GPU 熱圖合成（避免 CPU round-trip）' },
-        ],
-      },
-      {
-        // 純 UX 裝飾，不改物理模型（穩態下熱圖應定格）
-        // 決策保留，等 RF-A 完成後評估
-        layer: 'Layer RF-UX — UX 提案（未決）',
-        items: [
-          { id: 'RF-UX1', done: false, text: '水波漣漪動畫（AP 放置 / 計算中時）' },
+          { id: 'P-6', done: false, text: 'Dirty Rect 區域重繪（雙 FBO + scissor）⚠ 等 Phase 5 DPM 後重評估' },
         ],
       },
     ],
@@ -255,9 +251,9 @@ const PHASES = [
         layer: 'Layer 15 — Client 體驗模擬',
         items: [
           { id: '15-1', done: false, text: 'Client 裝置類型設定' },
-          { id: '15-2', done: false, text: 'Client 連線品質模擬（MCS）' },
+          { id: '15-2', done: false, text: 'Client uplink 視角（用 RX-4 MCS 表，client TX 弱 5-10 dB）' },
           { id: '15-3', done: false, text: 'Client 漫遊路徑視覺化' },
-          { id: '15-4', done: false, text: 'Wi-Fi 6E / Wi-Fi 7 模擬' },
+          { id: '15-4', done: false, text: 'Wi-Fi 6E / 7 模擬（在 RX-4 ax 表上擴 be MCS 12-13、320 MHz）' },
         ],
       },
     ],

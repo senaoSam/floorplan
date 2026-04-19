@@ -44,7 +44,7 @@
 | 5-3 | ✅   | WebGL Fragment Shader 即時渲染（取代 CPU Canvas）             |
 | 5-4 | ✅   | Co-channel 干擾計算：AP 加入 channel 屬性，改以 SINR 顯示熱圖 |
 | 5-5 | ✅   | 多模式熱圖切換（RSSI / SINR / SNR / 頻道重疊 / 預估速率 / AP 數量） |
-| 5-6 | ✅   | 柔和色階 + 頻段相關牆體衰減 + 可調環境路徑損耗指數 |
+| 5-6 | ✅   | 柔和色階 + 頻段相關牆體衰減 + 可調環境路徑損耗指數（v1，公式部分已被 Phase 5 PHY-1/2 取代並改寫）|
 
 ---
 
@@ -103,7 +103,77 @@
 
 ---
 
-## Phase 5 — 效能優化
+## Phase 5 — Heatmap 公式改寫（對齊 NPv1 / .tmp-heatmap 規格）🔥 優先
+
+> **絕對真相來源**：`.tmp-heatmap/`（特別是 01/02/04/08）—— 所有公式、係數、流程以該文件為準
+> **目標**：把目前的 heatmap 公式全部改成 NPv1 等價算法，提升真實性
+> **不在範圍**：wasm / Web Worker / WebGPU（未來才做，這裡先用既有 WebGL fragment shader）
+> **拖曳即時計算**：可暫時關閉（拖曳期間隱藏熱圖或凍結舊結果），mouseup 後再算
+>
+> **目前實作差距摘要（對照 .tmp-heatmap）**
+> 1. 距離損耗公式錯：缺 PL(d₀=1m) 基準；應為 `FSPL(1m,f) + 10·n·log10(d/d₀)`
+> 2. 牆體衰減用「手調 freqFactor 乘數」而非 ITU-R P.2040 (a,b,c,d) 頻率外推
+> 3. 牆無厚度 / 無入射角修正（斜射等同正射）
+> 4. NLOS 完全無繞射（硬切陰影）—— 缺 Order 1/2 dominant-path search
+> 5. 缺 cutoutDistanceMeters（每點都對全部 AP 跑迴圈）
+> 6. 缺 clientHeightMeters（接收平面假設 = 地面）
+> 7. Noise floor 全頻段共用單值；應 per-band（2.4/5/6 各自）
+> 8. Data Rate MCS 表過簡，未對應 802.11ax 標準
+
+### Layer RF-PHY — 物理公式對齊（必做、無卡頓）
+
+| #     | 狀態 | Task |
+| ----- | ---- | ---- |
+| PHY-1 | ⬜ | **PLE 距離損耗公式重寫**：改為 `PL(d) = FSPL(1m, f) + 10·n·log10(d/d₀)`，d₀=1m。FSPL(1m,f) = `20·log10(f_MHz) - 27.55`。每頻段各自 PLE（2.4G default 3.0、5G 3.3、6G 3.5），可被環境 preset 覆蓋 |
+| PHY-2 | ⬜ | **ITU-R P.2040 材料模型**：`materials.js` 每材質補 `(a, b, c, d, refFreqMHz, isConductor)`，用 `02-material-models.md §1.2` 表格係數（concrete/brick/drywall/wood/glass/metal）。新增 `wallAttAtFreq(material, freqMHz)` 工具：依公式做頻率外推，取代目前 `dbLoss × freqFactor` |
+| PHY-3 | ⬜ | **牆厚屬性**：Wall 資料模型新增 `width`（公尺，預設取材質 width，concrete 0.2m、drywall 0.1m 等），UI 暫不曝露（後續再加）。傳進 shader |
+| PHY-4 | ⬜ | **入射角修正**：shader 算射線與牆法向的夾角 θ，等效厚度 = `width / max(cos(θ), 0.1)`，wall_dB *= eff_thickness / width |
+| PHY-5 | ⬜ | **Per-band noise floor**：`-95/-95/-95 dBm` 三頻段獨立常數放 `constants/rfDefaults.js`，shader 依 serving AP 頻段選對應值（取代目前單一 `NOISE_DBM`） |
+| PHY-6 | ⬜ | **clientHeightMeters**：HeatmapSettings 新增 `clientHeightMeters`（預設 1.0m）。AP `installHeight` 已存在；3D 距離 = `sqrt(d_2D² + (apZ - clientH)²)`。納入 PLE 計算（取代純 2D distance） |
+| PHY-7 | ⬜ | **cutoutDistanceMeters**：HeatmapSettings 新增 `cutoutDistanceMeters`（預設 50m）。shader 內 `if (dist_2D > cutoff) skip AP`，省迴圈 |
+
+### Layer RF-DPM — Dominant Path Model（NLOS 繞射）
+
+| #     | 狀態 | Task |
+| ----- | ---- | ---- |
+| DPM-1 | ⬜ | **Visibility Graph 預計算**：CPU 端建構牆端點圖（節點=端點，邊=兩端點 LOS 無遮擋）。`useWallStore` 變動時重建。傳入 shader 為 uniform array（端點座標 + 鄰接表） |
+| DPM-2 | ⬜ | **Order 1 繞射路徑**：shader 對每個 (AP, pixel) 嘗試所有對 AP/pixel 都可見的端點 v：`PL = pathLossOnSegment(AP→v) + pathLossOnSegment(v→pixel) + diffLossPer90Deg × (turnAngle/90)`。取 min(直射, 各 Order 1) |
+| DPM-3 | ⬜ | **diffractionLossDBPer90Deg 設定**：HeatmapSettings 新增（預設 6 dB），UI 暫不曝露 |
+| DPM-4 | ⬜ | **Order 2 繞射（可選）**：兩個繞射點。預設關閉（成本高），HeatmapSettings 加 `maxDiffractionOrder`（預設 1）。shader 用 macro 條件編譯避免無謂開銷 |
+| DPM-5 | ⬜ | **MAX_VG_NODES 上限**：避免端點過多炸 shader uniform 容量；超過時退回 Order 0（純直射）並 console.warn |
+
+### Layer RF-RX — RSSI / SNR / SINR / Data Rate 公式對齊
+
+| #     | 狀態 | Task |
+| ----- | ---- | ---- |
+| RX-1 | ⬜ | **RSSI 公式**：`RSSI = TxPower + G_tx(θ,φ) - PL(AP→p)`。確認天線增益已包含（目前 `antennaGain` 已實作，檢查無誤） |
+| RX-2 | ⬜ | **SNR 公式**：`SNR = RSSI_primary - N_floor(band, BW)`，`N_floor(BW) = wifiNoiseFloor[band] + 10·log10(BW/20)`（已對，但需切到 per-band noise） |
+| RX-3 | ⬜ | **SINR 公式（線性疊加）**：`N_eff = 10·log10(10^(N_floor/10) + Σ 10^(RSSI_intf/10))`，SINR = RSSI_primary - N_eff。check 同/部分頻道重疊 overlap_factor（完全重疊 1.0、部分 0.3~0.7、不重疊 0） |
+| RX-4 | ⬜ | **Data Rate MCS 表重寫**：以 `04-heatmap-pipeline.md §2.4` 802.11ax 表為準，建 `(MCS, minSNR, 20MHz/80MHz/160MHz × 1SS/4SS)` 查表。考慮 AP 的 `streamCount` 與 `channelWidth`，輸出 Mbps |
+
+### Layer RF-INT — 整合與驗證
+
+| #     | 狀態 | Task |
+| ----- | ---- | ---- |
+| INT-1 | ⬜ | **拖曳即時計算暫時關閉**：AP/牆 mousedown 期間隱藏熱圖（或凍結 framebuffer 不重算），mouseup 後重算一次。先把公式對清楚再恢復即時 |
+| INT-2 | ⬜ | **單元驗證**：寫測試或在 console 印出比對 — FSPL@1m,2.4GHz=40.05 dB、@10m,2.4GHz=60.05 dB；concrete 牆 5GHz 應約 10-15 dB（依 ITU 公式驗算） |
+| INT-3 | ⬜ | **整合驗證**：5m × 5m 空房間中央 AP，預期熱圖近圓形對稱；加一面 concrete 牆，背面明顯衰減（>10 dB 落差）；加一面短牆，繞射處應見漸層而非硬陰影 |
+| INT-4 | ⬜ | **FormulaNote.jsx 更新**：右側公式說明面板同步顯示新公式（PLE / ITU-R / DPM） |
+
+<!--
+==============================================================================
+未來範圍（不在 Phase 5 內）：
+  - wasm + Web Worker：把 DPM CPU 計算搬出主執行緒
+  - WebGPU compute pipeline：取代 WebGL fragment shader
+  - 拖曳降採樣（renderScale）+ Dirty Rect：恢復即時拖曳
+  - Triangle Grid 校正（env-learning）：需 survey 資料
+  - Reflection / multipath：DPM 不做，需 SBR / ray tracing
+==============================================================================
+-->
+
+---
+
+## Phase 5.5 — 效能優化
 
 ### Layer PERF — 拖曳流暢度 & 熱圖即時性
 | #     | 狀態 | Task                                                                                         |
@@ -113,82 +183,7 @@
 | P-3   | ✅   | History store snapshot 非阻塞化：structuredClone 改 async（或 Web Worker / 分層 lazy clone），避免放開操作時 50~100ms 卡頓；補 flushPending() 確保 Undo 正確性 |
 | P-4   | ⬜   | WallLayer snap 加 bounding box 快速過濾：避開 O(n) 全掃，並移除 EndpointHandle 重複掃描       |
 | P-5   | ⬜   | Editor2D 鍵盤刪除 effect 依賴穩定化：store actions 用穩定 ref，減少 effect 重掛             |
-| P-6   | ⬜   | Dirty Rect 區域重繪：雙 framebuffer（static/dynamic）+ scissor test，只重算拖曳中 AP 影響區；SINR / Data Rate 模式 fallback 全畫面 |
-
----
-
-## Phase 5.5 — RF 物理模型強化
-
-> 詳細背景見 `.claude/rf-propagation-research.md`
-> 目標：熱圖視覺從「直線三角陰影」逼近「真實水波擴散」。
-
-### Layer RF-A — 階段 A（相似度 45% → 70%，🟢 無卡頓）
-| #     | 狀態 | Task                                                                                         |
-| ----- | ---- | -------------------------------------------------------------------------------------------- |
-| RF-A1 | ⬜   | 入射角修正：斜射穿牆時路徑放大為 thickness / cos(θ)，累加至 dB 損失                            |
-| RF-A2 | ⬜   | 牆厚納入計算：牆體新增 thickness 屬性（或用既有視覺厚度），dB 損失 × thickness factor         |
-| RF-A3 | ⬜   | Knife-edge diffraction：牆邊繞射漸層衰減（取代硬切邊陰影）                                   |
-| RF-A4 | ⬜   | 高斯模糊後處理：WebGL shader 加 1~2 px blur，整體視覺柔化                                    |
-| RF-A5 | ⬜   | 射線密度提升：360 → 720 條（邊緣鋸齒減半）                                                   |
-| RF-A6 | ⬜   | 頻率相關穿透損失：2.4 / 5 / 6 GHz 各自的材質 dB 表（取代單一值）                              |
-
-<!--
-==============================================================================
-RF-A 完成後的決策點：
-  1. 若視覺已達預期 → 停在階段 A，資源轉做 Phase 6 (3D) / P-4~P-6 (效能)
-  2. 若想進一步逼近真實 → 評估階段 B 或直接跳階段 C
-  3. P-6 (Dirty Rect) 與 RF-A 無衝突，可並行或 RF-A 後再做
-==============================================================================
--->
-
-### Layer RF-B — 階段 B（相似度 70% → 85%，🟠 中等卡頓）
-| #     | 狀態 | Task                                                                                         |
-| ----- | ---- | -------------------------------------------------------------------------------------------- |
-| RF-B1 | ⬜   | 波場網格資料結構：空間切成 10~20 cm 格距，每格儲存訊號強度                                    |
-| RF-B2 | ⬜   | 擴散方程迭代：每格訊號 = 周圍 8 格加權平均 − 距離衰減                                         |
-| RF-B3 | ⬜   | 牆邊界條件：牆面扣穿透率 + 反射係數                                                           |
-| RF-B4 | ⬜   | Web Worker 計算：避免卡 UI，結果寫回 framebuffer                                              |
-| RF-B5 | ⬜   | 拖曳降級策略：mousedown 期間自動降級到 RF-A，mouseup 才跑 RF-B                                |
-| RF-B6 | ⬜   | 跨樓層波場：垂直方向也納入擴散（樓板材質邊界條件）                                           |
-
-<!--
-==============================================================================
-RF-B 完成後的決策點：
-  1. 波場 + 拖曳降級策略若順暢 → 可停在 B
-  2. 若需要反射 / 多路徑干涉 → 進階段 C
-  3. RF-B 完成後 P-6 (Dirty Rect) 可能需要重寫或作廢（演算法已換）
-==============================================================================
--->
-
-### Layer RF-C — 階段 C（相似度 85% → 90%，🟡 WebGPU 反而順）
-| #     | 狀態 | Task                                                                                         |
-| ----- | ---- | -------------------------------------------------------------------------------------------- |
-| RF-C1 | ⬜   | WebGPU compute pipeline 建置 + 相容性偵測（不支援時 fallback 到 RF-A）                        |
-| RF-C2 | ⬜   | Gaussian Beam Tracing：光線改為有寬度的高斯光束，自然柔邊                                    |
-| RF-C3 | ⬜   | SBR (Shooting and Bouncing Rays)：支援 1~2 次反射                                             |
-| RF-C4 | ⬜   | 多路徑疊加：干涉效應（Small-scale fading 視覺）                                              |
-| RF-C5 | ⬜   | GPU 熱圖合成：AP 貢獻直接在 GPU 疊加，避免 CPU round-trip                                    |
-
-<!--
-==============================================================================
-RF-C 完成後可考慮的後續：
-  1. Neural RF Model（AI 代理模型）— 2025 商用未普及，先觀望
-  2. 完整多次反射 Ray Tracing — 投資報酬率低，不建議
-  3. FDTD / MoM — 前端不可行，不考慮
-==============================================================================
--->
-
-### Layer RF-UX — UX 提案（未決）
-| #     | 狀態 | Task                                                                                         |
-| ----- | ---- | -------------------------------------------------------------------------------------------- |
-| RF-UX1 | 📋   | 水波漣漪動畫：AP 放置 / 計算中時，從 AP 向外擴散一次圓弧（純裝飾，不改物理模型）             |
-
-<!--
-==============================================================================
-水波動畫是純 UX 糖，不是物理真實（穩態下熱圖應該定格）。
-決策保留給未來，等 RF-A 完成後評估是否需要。
-==============================================================================
--->
+| P-6   | ⬜   | Dirty Rect 區域重繪：雙 framebuffer（static/dynamic）+ scissor test，只重算拖曳中 AP 影響區；SINR / Data Rate 模式 fallback 全畫面 ⚠ 等 Phase 5 (DPM) 完成後重評估，可能因「AP 影響區」形狀改變而需重做或廢棄 |
 
 ---
 
@@ -245,9 +240,9 @@ RF-C 完成後可考慮的後續：
 | #    | 狀態 | Task                                                         |
 | ---- | ---- | ------------------------------------------------------------ |
 | 15-1 | ⬜   | Client 裝置類型設定（手機/筆電/IoT，頻段支援、噪聲水平）    |
-| 15-2 | ⬜   | Client 連線品質模擬（MCS、空間串流、頻寬、上行/下行）        |
+| 15-2 | ⬜   | Client 連線品質模擬：以 Phase 5 RX-4 MCS 表為基礎，加 client uplink 視角（client TX 較低，比 downlink 弱 5-10 dB）|
 | 15-3 | ⬜   | Client 漫遊路徑視覺化（路徑上連線品質變化）                  |
-| 15-4 | ⬜   | Wi-Fi 6E / Wi-Fi 7 模擬支援                                  |
+| 15-4 | ⬜   | Wi-Fi 6E / Wi-Fi 7 模擬支援：在 Phase 5 RX-4 802.11ax 表上擴 802.11be（MCS 12-13、320 MHz 頻寬）|
 
 ---
 
