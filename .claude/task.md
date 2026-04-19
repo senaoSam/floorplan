@@ -126,8 +126,8 @@
 | ----- | ---- | ---- |
 | PHY-1 | ✅ | **PLE 距離損耗公式重寫**：改為 `PL(d) = FSPL(1m, f) + 10·n·log10(d/d₀)`，d₀=1m。FSPL(1m,f) = `20·log10(f_MHz) - 27.55`。每頻段各自 PLE（2.4G default 3.0、5G 3.3、6G 3.5），可被環境 preset 覆蓋 |
 | PHY-2 | ✅ | **ITU-R P.2040 材料模型**：`materials.js` 每材質補 `(a, b, c, d, refFreqMHz, isConductor)`，用 `02-material-models.md §1.2` 表格係數（concrete/brick/drywall/wood/glass/metal）。新增 `wallAttAtFreq(material, freqMHz)` 工具：依公式做頻率外推，取代目前 `dbLoss × freqFactor` |
-| PHY-3 | ⬜ | **牆厚屬性**：Wall 資料模型新增 `width`（公尺，預設取材質 width，concrete 0.2m、drywall 0.1m 等），UI 暫不曝露（後續再加）。傳進 shader |
-| PHY-4 | ⬜ | **入射角修正**：shader 算射線與牆法向的夾角 θ，等效厚度 = `width / max(cos(θ), 0.1)`，wall_dB *= eff_thickness / width |
+| PHY-3 | ⏸ | **牆厚屬性**：延後。規格 §1.3 `L = α × d` 的 `α × d` 積分型衰減才需實際 width；目前 refAttDb 已是「典型厚度下總 dB」，PHY-4 用比例修正即可。未來做 zone attenuation（`attenuationDBPerM × travel`）時再加 |
+| PHY-4 | ✅ | **入射角修正**：shader 算射線與牆法向的夾角 θ，wall_dB *= 1/max(cos(θ), 0.1) 對應等效厚度 width/cos(θ)。refAttDb 視為正射基準 |
 | PHY-5 | ✅ | **Per-band noise floor**：`-95/-95/-95 dBm` 三頻段獨立常數放 `constants/rfDefaults.js`，shader 依 serving AP 頻段選對應值（取代目前單一 `NOISE_DBM`） |
 | PHY-6 | ✅ | **clientHeightMeters**：HeatmapSettings 新增 `clientHeightMeters`（預設 1.0m）。AP `installHeight` 已存在；3D 距離 = `sqrt(d_2D² + (apZ - clientH)²)`。納入 PLE 計算（取代純 2D distance） |
 | PHY-7 | ✅ | **cutoutDistanceMeters**：HeatmapSettings 新增 `cutoutDistanceMeters`（預設 50m）。shader 內 `if (dist_2D > cutoff) skip AP`，省迴圈 |

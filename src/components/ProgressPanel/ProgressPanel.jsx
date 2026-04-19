@@ -137,8 +137,8 @@ const PHASES = [
         items: [
           { id: 'PHY-1', done: true,  text: 'PLE 距離損耗公式重寫（FSPL(1m) + 10n·log10(d/d₀)）' },
           { id: 'PHY-2', done: true,  text: 'ITU-R P.2040 材料模型（a/b/c/d 頻率外推）' },
-          { id: 'PHY-3', done: false, text: '牆厚屬性（width，預設依材質）' },
-          { id: 'PHY-4', done: false, text: '入射角修正（thickness / cos θ）' },
+          { id: 'PHY-3', done: false, text: '牆厚屬性（延後至 zone attenuation 時再做）' },
+          { id: 'PHY-4', done: true,  text: '入射角修正（1/cos θ，clamp cosθ≥0.1）' },
           { id: 'PHY-5', done: true,  text: 'Per-band noise floor（2.4/5/6 GHz 各自）' },
           { id: 'PHY-6', done: true,  text: 'clientHeightMeters（3D 距離 = √(d² + Δh²)）' },
           { id: 'PHY-7', done: true,  text: 'cutoutDistanceMeters（超距 AP skip）' },

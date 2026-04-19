@@ -121,9 +121,19 @@ for (const f of [2.4, 5, 6]) {
 }
 ```
 
-## 9. HMR 副作用
+## 9. HMR 副作用 ⚠ 重要
 
-跑 evaluate 時如果 source 有改，Vite 可能 HMR 重載元件 → stage 可能換實例。重跑 `Konva.stages[0]` 取最新。
+**改 source code 後**（如剛寫完 shader）：
+- Vite HMR 會 hot-reload 元件與 Zustand store 模組
+- 瀏覽器頁面**仍持有舊 instance**，但 `await import()` 會拿到**新 instance**
+- 結果：store 分裂，改了不影響 React，`getState()` 看起來空空
+
+解法：
+1. **改完 code 先 `browser_navigate` 重新載頁**（乾淨的一份 store）
+2. 或整場用 UI 點擊（不信任 store instance）
+3. 驗證優先用「純 JS 數值驗證」（第 7 節），不受 HMR 影響
+
+Stage 同理：改完 code 後先重跑 `Konva.stages[0]` 取最新。
 
 ## 10. Screenshot 路徑
 

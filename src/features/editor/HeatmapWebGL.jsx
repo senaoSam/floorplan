@@ -274,14 +274,26 @@ float slabAttDb(vec2 apActiveLocal, vec2 pxActiveLocal, int srcIdx, int actIdx) 
 }
 
 // 頻段相關的牆體衰減
+// PHY-4: 入射角修正（.tmp-heatmap §2.2）
+//   等效厚度 = width / cos(θ_inc)
+//   refAttDb 對應正射入射 → 斜射時 loss *= 1/cos(θ)
+//   clamp cos(θ) ≥ 0.1 避免擦邊路徑爆值（對應 84° 入射角上限）
 float wallLoss(vec2 px, vec2 ap, int freqIdx) {
   float loss = 0.0;
+  vec2 rayDir = normalize(ap - px);  // 射線方向（單位向量）
   for (int i = 0; i < MAX_WALLS; i++) {
     if (i >= u_wallCount) break;
-    if (segHit(px, ap, u_walls[i].xy, u_walls[i].zw)) {
-      loss += (freqIdx == 0) ? u_wallLoss3[i].x
-            : (freqIdx == 1) ? u_wallLoss3[i].y
-            :                  u_wallLoss3[i].z;
+    vec4 w = u_walls[i];
+    if (segHit(px, ap, w.xy, w.zw)) {
+      float baseDb = (freqIdx == 0) ? u_wallLoss3[i].x
+                   : (freqIdx == 1) ? u_wallLoss3[i].y
+                   :                  u_wallLoss3[i].z;
+      // 牆法線（2D 中垂直於牆向量）
+      vec2 wallVec = w.zw - w.xy;
+      vec2 n = normalize(vec2(-wallVec.y, wallVec.x));
+      // cos(θ) = |ray · normal|（射線方向與法線夾角的餘弦絕對值）
+      float cosTheta = max(abs(dot(rayDir, n)), 0.1);
+      loss += baseDb / cosTheta;
     }
   }
   return loss;
