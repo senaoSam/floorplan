@@ -159,7 +159,7 @@ const PHASES = [
         items: [
           { id: 'RX-1', done: false, text: 'RSSI 公式檢查（含天線增益）' },
           { id: 'RX-2', done: false, text: 'SNR 切換到 per-band noise floor' },
-          { id: 'RX-3', done: false, text: 'SINR 線性疊加 + overlap_factor' },
+          { id: 'RX-3', done: true,  text: 'SINR 線性疊加 + overlap_factor（2.4G adjacent rejection 表）' },
           { id: 'RX-4', done: false, text: 'Data Rate MCS 表重寫（802.11ax 標準）' },
         ],
       },

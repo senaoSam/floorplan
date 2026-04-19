@@ -138,6 +138,26 @@ out vec4 outColor;
 
 float log10v(float x) { return log(x) * 0.4342944819; }
 
+// RX-3: Channel overlap factor（對應 .tmp-heatmap §2.5）
+//   完全重疊（同 primary channel）：1.0
+//   部分重疊（僅 2.4G 相鄰頻道有意義）：IEEE 802.11 rejection 表
+//   完全不重疊：0
+// 2.4G 頻道間距=5MHz、頻寬=22MHz → 間距 ≥5 完全不重疊
+float channelOverlapFactor(float bandA, float chA, float bandB, float chB) {
+  if (abs(bandA - bandB) > 0.5) return 0.0;      // 不同頻段
+  float sameBand = bandA;  // already equal
+  int diff = int(abs(chA - chB) + 0.5);
+  if (diff == 0) return 1.0;
+  // 5G / 6G 原生非重疊頻道設計：只看 primary channel
+  if (sameBand > 0.5) return 0.0;
+  // 2.4G 相鄰頻道 rejection 表（IEEE 802.11 / 業界共識）
+  if (diff == 1) return 0.72;
+  if (diff == 2) return 0.27;
+  if (diff == 3) return 0.04;
+  if (diff == 4) return 0.004;
+  return 0.0;
+}
+
 bool segHit(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
   vec2 r   = p2 - p1;
   vec2 s   = p4 - p3;
@@ -510,10 +530,7 @@ void main() {
 
   // Pass 2：共用 — 計算 SINR / SNR
   float servingBand   = u_apFreqBand[bestIdx];
-  float servingCenter = u_apCenterMHz[bestIdx];
   float servingWidth  = u_apWidthMHz[bestIdx];
-  float servingLo     = servingCenter - servingWidth * 0.5;
-  float servingHi     = servingCenter + servingWidth * 0.5;
 
   // PHY-5: 底噪依 serving AP 頻段取對應 wifiNoiseFloor，再依頻寬修正
   //   N(BW) = wifiNoiseFloor[band] + 10·log10(BW/20)
@@ -526,22 +543,25 @@ void main() {
 
   // Channel overlap 計數（含部分重疊）
   int overlapCount = 0;
+  float servingChannel = u_apChannels[bestIdx];
 
+  // RX-3: 干擾功率線性疊加，乘 overlap_factor
+  //   I = Σ (10^(RSSI/10)) × overlap_factor
   for (int i = 0; i < MAX_APS; i++) {
     if (i >= u_apCount) break;
     if (rssis[i] < -100.0) continue;
 
-    // 同頻段 + 頻率範圍有交集 = 干擾候選
-    float iLo = u_apCenterMHz[i] - u_apWidthMHz[i] * 0.5;
-    float iHi = u_apCenterMHz[i] + u_apWidthMHz[i] * 0.5;
-    bool sameBand = abs(u_apFreqBand[i] - servingBand) < 0.5;
-    bool freqOverlap = sameBand && (iLo < servingHi) && (servingLo < iHi);
+    float olFactor = channelOverlapFactor(
+      u_apFreqBand[i], u_apChannels[i],
+      servingBand,      servingChannel
+    );
 
-    if (freqOverlap && rssis[i] > -85.0) overlapCount++;
+    // overlap 計數（for Channel Overlap mode）：任何有重疊（factor > 0）且能收到的 AP 都算
+    if (olFactor > 0.0 && rssis[i] > -85.0) overlapCount++;
 
     if (i == bestIdx) continue;
-    if (!freqOverlap) continue;
-    intfLinear += pow(10.0, rssis[i] / 10.0);
+    if (olFactor <= 0.0) continue;
+    intfLinear += pow(10.0, rssis[i] / 10.0) * olFactor;
   }
 
   float sinr = 10.0 * log10v(signalLin / intfLinear);
