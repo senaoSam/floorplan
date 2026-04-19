@@ -75,12 +75,12 @@ export const useFloorStore = create((set, get) => ({
       floors: state.floors.map((f) => (f.id === id ? { ...f, ...patch } : f)),
     })),
 
-  importFloorFromUrl: (imageUrl, imageWidth, imageHeight, name) => {
+  importFloorFromUrl: (imageUrl, imageWidth, imageHeight, name, defaultScale = null) => {
     const id = generateId('floor')
     const floorName = name ?? `${get().floors.length + 1}F`
     const floor = {
       id, name: floorName, imageUrl, imageWidth, imageHeight,
-      opacity: 1, rotation: 0, scale: null, offsetX: 0, offsetY: 0,
+      opacity: 1, rotation: 0, scale: defaultScale, offsetX: 0, offsetY: 0,
       alignOffsetX: 0, alignOffsetY: 0, alignScale: 1, alignRotation: 0,
       cropX: null, cropY: null, cropWidth: null, cropHeight: null,
       floorSlabMaterialId: DEFAULT_FLOOR_SLAB_MATERIAL_ID,

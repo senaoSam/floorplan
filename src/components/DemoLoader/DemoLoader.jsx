@@ -25,7 +25,7 @@ function DemoLoader() {
     try {
       const img = new window.Image()
       img.onload = () => {
-        importFloorFromUrl(DEMO_SRC, img.naturalWidth, img.naturalHeight, nextDemoName(floors))
+        importFloorFromUrl(DEMO_SRC, img.naturalWidth, img.naturalHeight, nextDemoName(floors), 200 / 20)
         setLoading(false)
       }
       img.onerror = () => setLoading(false)
