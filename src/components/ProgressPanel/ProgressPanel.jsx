@@ -166,10 +166,10 @@ const PHASES = [
       {
         layer: 'Layer RF-INT — 整合與驗證',
         items: [
-          { id: 'INT-1', done: false, text: '拖曳即時計算暫時關閉（mouseup 後重算）' },
+          { id: 'INT-1', done: true,  text: '拖曳期間凍結熱圖（mouseup 後下一幀重算）' },
           { id: 'INT-2', done: false, text: '單元驗證（FSPL / ITU 數值對表）' },
           { id: 'INT-3', done: false, text: '整合驗證（空房 / 加牆 / 繞射視覺）' },
-          { id: 'INT-4', done: false, text: 'FormulaNote 同步顯示新公式' },
+          { id: 'INT-4', done: true,  text: 'FormulaNote 同步顯示新公式（8 區塊 + 規格來源標註）' },
         ],
       },
     ],

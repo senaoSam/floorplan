@@ -725,8 +725,8 @@ export const LEGENDS = {
 
 
 // ── 主元件 ────────────────────────────────────────────────────────────
-// P-2 LOD：拖曳期間 framebuffer 以此倍率渲染（CSS 尺寸不變，只降取樣解析度）
-const DRAG_RENDER_SCALE = 0.3
+// INT-1: 拖曳期間凍結熱圖；Phase 5 公式對齊期間暫時關閉即時計算
+// （原 P-2 LOD 暫時擱置，DPM + wasm/worker 完成後再開啟）
 
 function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef, draggingScopeRef }) {
   const canvasRef = useRef(null)
@@ -868,12 +868,15 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       const curMode  = heatmapModeRef.current
       const ple3     = pleByBandRef.current
 
-      // P-2 LOD：判斷是否正在拖曳任一物件，拖曳期間降低 framebuffer 解析度
+      // INT-1: 拖曳期間凍結熱圖（Phase 5 公式改寫階段暫時關閉即時計算）
+      //   放開後下一幀會依正常流程重算（prevKey 未更新 → key 不同 → 重繪）
+      // 原 P-2 LOD 降解析度暫時擱置，等 DPM 完成 + wasm/worker 後再開啟即時
       const isDragging =
         !!(draggingAPRef?.current)   ||
         !!(draggingWallRef?.current) ||
         !!(draggingScopeRef?.current)
-      const renderScale = isDragging ? DRAG_RENDER_SCALE : 1
+      if (isDragging) return  // 直接跳過本幀：保留上一幀 framebuffer
+      const renderScale = 1
 
       // CSS 尺寸永遠為 logical size；framebuffer 尺寸隨 renderScale 變動
       // 不能讀 canvas.clientWidth/width（我們每幀在改 canvas.width，會形成自我反饋迴圈）

@@ -155,10 +155,10 @@
 
 | #     | 狀態 | Task |
 | ----- | ---- | ---- |
-| INT-1 | ⬜ | **拖曳即時計算暫時關閉**：AP/牆 mousedown 期間隱藏熱圖（或凍結 framebuffer 不重算），mouseup 後重算一次。先把公式對清楚再恢復即時 |
+| INT-1 | ✅ | **拖曳即時計算暫時關閉**：拖曳期間 RAF loop 直接 return 凍結 framebuffer，mouseup 後下一幀自動重算（prevKey 比對觸發）。原 P-2 LOD 暫時擱置 |
 | INT-2 | ⬜ | **單元驗證**：寫測試或在 console 印出比對 — FSPL@1m,2.4GHz=40.05 dB、@10m,2.4GHz=60.05 dB；concrete 牆 5GHz 應約 10-15 dB（依 ITU 公式驗算） |
 | INT-3 | ⬜ | **整合驗證**：5m × 5m 空房間中央 AP，預期熱圖近圓形對稱；加一面 concrete 牆，背面明顯衰減（>10 dB 落差）；加一面短牆，繞射處應見漸層而非硬陰影 |
-| INT-4 | ⬜ | **FormulaNote.jsx 更新**：右側公式說明面板同步顯示新公式（PLE / ITU-R / DPM） |
+| INT-4 | ✅ | **FormulaNote.jsx 更新**：同步更新 Log-Distance (PHY-1) / RSSI (RX-1) / SINR (RX-3) / 牆體衰減 (PHY-2/4) / Per-band noise (PHY-5) / clientHeight (PHY-6) / Data Rate (RX-4) / 環境 PLE per-band；每節加規格來源標註。DPM 待後續補 |
 
 <!--
 ==============================================================================
