@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react'
-import { useEditorStore, HEATMAP_MODE, plePerBandFromBase } from '@/store/useEditorStore'
+import { useEditorStore, HEATMAP_MODE } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useWallStore } from '@/store/useWallStore'
@@ -685,20 +685,20 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
 
   const showHeatmap      = useEditorStore((s) => s.showHeatmap)
   const heatmapMode      = useEditorStore((s) => s.heatmapMode)
-  const pathLossExponent = useEditorStore((s) => s.pathLossExponent)
+  const pleByBand        = useEditorStore((s) => s.pleByBand)
   const activeFloorId    = useFloorStore((s) => s.activeFloorId)
   const floorScale       = useFloorStore((s) => s.floors.find((f) => f.id === s.activeFloorId)?.scale ?? null)
 
   const showHeatmapRef      = useRef(showHeatmap)
   const heatmapModeRef      = useRef(heatmapMode)
-  const pathLossExponentRef = useRef(pathLossExponent)
+  const pleByBandRef        = useRef(pleByBand)
   const activeFloorIdRef    = useRef(activeFloorId)
   const floorScaleRef       = useRef(floorScale)
   const cssSizeRef          = useRef({ w: width, h: height })
 
   useEffect(() => { showHeatmapRef.current      = showHeatmap      }, [showHeatmap])
   useEffect(() => { heatmapModeRef.current      = heatmapMode      }, [heatmapMode])
-  useEffect(() => { pathLossExponentRef.current = pathLossExponent  }, [pathLossExponent])
+  useEffect(() => { pleByBandRef.current        = pleByBand         }, [pleByBand])
   useEffect(() => { activeFloorIdRef.current    = activeFloorId     }, [activeFloorId])
   useEffect(() => { floorScaleRef.current       = floorScale        }, [floorScale])
   useEffect(() => { cssSizeRef.current          = { w: width, h: height } }, [width, height])
@@ -816,7 +816,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       const floorId  = activeFloorIdRef.current
       const floorS   = floorScaleRef.current
       const curMode  = heatmapModeRef.current
-      const plN      = pathLossExponentRef.current
+      const ple3     = pleByBandRef.current
 
       // P-2 LOD：判斷是否正在拖曳任一物件，拖曳期間降低 framebuffer 解析度
       const isDragging =
@@ -998,7 +998,8 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
         if (holes.length === 0) return `${f.id}:none`
         return `${f.id}:${holes.map((h) => `${h.id}[${h.points.map((p) => p.toFixed(1)).join(',')}]b=${h.bottomFloorId ?? f.id}t=${h.topFloorId ?? f.id}`).join(';')}`
       }).join('|')
-      const key = `${w},${h},${renderScale},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${curMode},${plN},${apKey},${wallKey},${openingsKey},${scopeKey},${slabKey},${holesKey}`
+      const pleKey = `${ple3[2.4]},${ple3[5]},${ple3[6]}`
+      const key = `${w},${h},${renderScale},${vp.x.toFixed(1)},${vp.y.toFixed(1)},${vp.scale.toFixed(4)},${floorS},${curMode},${pleKey},${apKey},${wallKey},${openingsKey},${scopeKey},${slabKey},${holesKey}`
       if (key === prevKey && renderScale === prevRenderScale) return
       prevKey = key
       prevRenderScale = renderScale
@@ -1137,8 +1138,7 @@ function HeatmapWebGL({ width, height, stageRef, draggingAPRef, draggingWallRef,
       gl.uniform2fv(locs.outScopeRanges, outScopeRangesData)
       gl.uniform1i(locs.outScopeCount,   outScopeCount)
       gl.uniform1i(locs.mode,          MODE_INT[curMode] ?? 1)
-      // PHY-1: per-band PLE，索引對齊 FREQ_BAND_INDEX
-      const ple3 = plePerBandFromBase(plN)
+      // PHY-1: per-band PLE，索引對齊 FREQ_BAND_INDEX，三值來自 store（獨立可調）
       gl.uniform1fv(locs.pleByBand,    new Float32Array([ple3[2.4], ple3[5], ple3[6]]))
       // PHY-5: per-band noise floor (dBm @ 20MHz)
       gl.uniform1fv(locs.noiseFloorByBand, new Float32Array([

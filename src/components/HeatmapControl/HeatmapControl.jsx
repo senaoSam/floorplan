@@ -16,22 +16,34 @@ const ENV_OPTIONS = Object.entries(ENVIRONMENT_PRESETS).map(([key, val]) => ({
   key,
   label: val.label,
   hint: val.hint,
-  n: val.n,
+  n: val.n,        // { 2.4, 5, 6 } per-band
 }))
+
+// 三頻段是否都等同 preset（容差 0.05）
+const matchesPreset = (ple, presetN) =>
+  Math.abs(ple[2.4] - presetN[2.4]) < 0.05 &&
+  Math.abs(ple[5]   - presetN[5])   < 0.05 &&
+  Math.abs(ple[6]   - presetN[6])   < 0.05
+
+// 顯示用：把三頻段 n 化為簡短字串
+const formatN = (presetN) =>
+  presetN[2.4] === presetN[5] && presetN[5] === presetN[6]
+    ? `${presetN[2.4]}`
+    : `${presetN[2.4]}/${presetN[5]}/${presetN[6]}`
 
 // Render-order hint: inside the stack, items at the top of JSX appear at the top visually.
 // Because the stack uses `flex-direction: column`, first child = top. The toggle button sits last.
 function HeatmapControl({ legends }) {
   const showHeatmap       = useEditorStore((s) => s.showHeatmap)
   const heatmapMode       = useEditorStore((s) => s.heatmapMode)
-  const pathLossExponent  = useEditorStore((s) => s.pathLossExponent)
+  const pleByBand         = useEditorStore((s) => s.pleByBand)
   const toggleHeatmap     = useEditorStore((s) => s.toggleHeatmap)
   const setHeatmapMode    = useEditorStore((s) => s.setHeatmapMode)
-  const setPathLossExp    = useEditorStore((s) => s.setPathLossExponent)
+  const applyEnvPreset    = useEditorStore((s) => s.applyEnvironmentPreset)
   const floorScale        = useFloorStore((s) => s.floors.find((f) => f.id === s.activeFloorId)?.scale ?? null)
   const hasScale = !!floorScale
 
-  const envKey = ENV_OPTIONS.find((x) => Math.abs(x.n - pathLossExponent) < 0.05)?.key || 'OFFICE'
+  const envKey = ENV_OPTIONS.find((x) => matchesPreset(pleByBand, x.n))?.key || 'OFFICE'
   const legend = legends?.[heatmapMode]
   const currentMode = HEATMAP_OPTIONS.find((o) => o.mode === heatmapMode) ?? HEATMAP_OPTIONS[0]
 
@@ -198,7 +210,7 @@ function HeatmapControl({ legends }) {
             <span className="heatmap-control__env-text">
               <span className="heatmap-control__env-label">{currentEnv.label}</span>
               <span className="heatmap-control__env-meta">
-                {currentEnv.hint} <span className="heatmap-control__env-n">n={currentEnv.n}</span>
+                {currentEnv.hint} <span className="heatmap-control__env-n">n={formatN(currentEnv.n)}</span>
               </span>
             </span>
             <span className={`heatmap-control__env-arrow${envOpen ? ' heatmap-control__env-arrow--open' : ''}`}>▾</span>
@@ -214,13 +226,13 @@ function HeatmapControl({ legends }) {
                     aria-selected={isActive}
                     className={`heatmap-control__env-item${isActive ? ' heatmap-control__env-item--active' : ''}`}
                     onClick={() => {
-                      setPathLossExp(opt.n)
+                      applyEnvPreset(opt.key)
                       setEnvOpen(false)
                     }}
                   >
                     <span className="heatmap-control__env-label">{opt.label}</span>
                     <span className="heatmap-control__env-meta">
-                      {opt.hint} <span className="heatmap-control__env-n">n={opt.n}</span>
+                      {opt.hint} <span className="heatmap-control__env-n">n={formatN(opt.n)}</span>
                     </span>
                   </li>
                 )

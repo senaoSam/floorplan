@@ -18,7 +18,7 @@ function DevicePlanningPanel() {
 
   const regulatoryDomain      = useEditorStore((s) => s.regulatoryDomain)
   const autoChannelOnPlace    = useEditorStore((s) => s.autoChannelOnPlace)
-  const pathLossExponent      = useEditorStore((s) => s.pathLossExponent)
+  const pleByBand             = useEditorStore((s) => s.pleByBand)
   const toggleAutoChannelOnPlace = useEditorStore((s) => s.toggleAutoChannelOnPlace)
 
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
@@ -43,7 +43,7 @@ function DevicePlanningPanel() {
   const runAutoPower = () => {
     const aps = apsByFloor[activeFloorId] ?? []
     if (aps.length === 0 || !floorScale) return
-    const assignments = greedyPowerAssign(aps, floorScale, pathLossExponent)
+    const assignments = greedyPowerAssign(aps, floorScale, pleByBand)
     const updated = aps.map((ap) => {
       const a = assignments.get(ap.id)
       return a ? { ...ap, txPower: a.txPower } : ap

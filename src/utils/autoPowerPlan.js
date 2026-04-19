@@ -12,12 +12,14 @@ const MIN_TX_POWER = 5
 // excessive co-channel interference.
 export const DEFAULT_TARGET_RSSI = -67
 
-// Log-distance path loss (same formula as HeatmapWebGL):
-//   PL(dB) = 10·n·log10(d) + 20·log10(f_MHz) − 27.55
+// PHY-1: Log-distance path loss (same formula as HeatmapWebGL shader)
+//   PL(dB) = FSPL(1m, f) + 10·n·log10(max(d_m, 0.1))
+//   FSPL(1m, f) = 20·log10(f_MHz) − 27.55
 function pathLoss(distanceMeters, freqGHz, n) {
   const d = Math.max(distanceMeters, 0.1)
   const fMhz = FREQ_MHZ[freqGHz] ?? 5500
-  return 10 * n * Math.log10(d) + 20 * Math.log10(fMhz) - 27.55
+  const fspl1m = 20 * Math.log10(fMhz) - 27.55
+  return fspl1m + 10 * n * Math.log10(d)
 }
 
 // For each AP, find the nearest same-band neighbour and derive the minimum
@@ -27,11 +29,11 @@ function pathLoss(distanceMeters, freqGHz, n) {
 // Parameters:
 //   aps           — array of AP objects (id, x, y, frequency, modelId, …)
 //   scalePxPerM   — floor.scale in px/m (required; caller must check)
-//   pathLossN     — environment path-loss exponent (useEditorStore.pathLossExponent)
+//   pleByBand     — per-band PLE { 2.4, 5, 6 } (useEditorStore.pleByBand)
 //   targetRSSI    — cell-edge target in dBm (default -67)
 //
 // Returns: Map<apId, { txPower }>
-export function greedyPowerAssign(aps, scalePxPerM, pathLossN, targetRSSI = DEFAULT_TARGET_RSSI) {
+export function greedyPowerAssign(aps, scalePxPerM, pleByBand, targetRSSI = DEFAULT_TARGET_RSSI) {
   const result = new Map()
   if (!scalePxPerM || scalePxPerM <= 0) return result
 
@@ -40,6 +42,7 @@ export function greedyPowerAssign(aps, scalePxPerM, pathLossN, targetRSSI = DEFA
     const band = ap.frequency
     const maxTx = model.maxTxPower?.[band] ?? 23
     const gain  = model.antennaGain?.[band] ?? 0
+    const ple   = pleByBand?.[band] ?? 3.0
 
     // Nearest same-band neighbour (canvas-px Euclidean distance).
     let nearestPx = Infinity
@@ -56,7 +59,7 @@ export function greedyPowerAssign(aps, scalePxPerM, pathLossN, targetRSSI = DEFA
       txPower = maxTx
     } else {
       const distM = nearestPx / scalePxPerM
-      const pl = pathLoss(distM, band, pathLossN)
+      const pl = pathLoss(distM, band, ple)
       // RSSI = P_tx + G_ant − PL   →   P_tx = RSSI − G_ant + PL
       txPower = targetRSSI - gain + pl
     }
