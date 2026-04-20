@@ -21,31 +21,6 @@ export const VIEW_MODE = {
   THREE_D: '3d',
 }
 
-// 熱力圖模式
-export const HEATMAP_MODE = {
-  RSSI: 'rssi',
-  SINR: 'sinr',
-  SNR: 'snr',
-  CHANNEL_OVERLAP: 'channel_overlap',
-  DATA_RATE: 'data_rate',
-  AP_COUNT: 'ap_count',
-}
-
-// 環境路徑損耗預設
-// PHY-1 修訂：對齊 NPv1 規格 `pathLossExponent[3]` —— per-band 為三個獨立值，
-// 不再用「2.4G 基準 + 偏移」派生。每個 preset 直接提供三頻段 n。
-// hint 為情境描述，讓使用者依「場域像什麼」選擇。
-export const ENVIRONMENT_PRESETS = {
-  FREE_SPACE:  { label: '開放空間', hint: '大廳、中庭，訊號穿透性佳',
-                 n: { 2.4: 2.0, 5: 2.0, 6: 2.0 } },
-  OFFICE:      { label: '辦公室',   hint: '一般隔間與家具',
-                 n: { 2.4: 3.0, 5: 3.3, 6: 3.5 } },
-  DENSE:       { label: '密集隔間', hint: '小房間多、實牆多、機房',
-                 n: { 2.4: 3.5, 5: 3.8, 6: 4.0 } },
-  CORRIDOR:    { label: '走廊',     hint: '波導效應，訊號沿通道延伸',
-                 n: { 2.4: 1.8, 5: 1.8, 6: 1.8 } },
-}
-
 // ⚠️ 新增可選取物件類型時的聯動點（grep 'SELECTABLE-TYPE' 可找到所有需要一起改的地方）：
 //   [SELECTABLE-TYPE] 此處 `selectedType` 的 JSDoc 列舉
 //   [SELECTABLE-TYPE] PanelRight.jsx 的 selectedType 分派
@@ -60,11 +35,6 @@ export const useEditorStore = create((set, get) => ({
   selectedType: null, // 'wall' | 'ap' | 'scope' | 'floor_hole' | 'floor_image' | 'floor_align' | null
   // 批次選取 — [{ id, type }]
   selectedItems: [],
-  showHeatmap: false,
-  heatmapMode: HEATMAP_MODE.RSSI,
-  // PHY-1: per-band PLE，三個獨立值（規格 pathLossExponent[3]）
-  // 預設取 ENVIRONMENT_PRESETS.OFFICE
-  pleByBand: { ...ENVIRONMENT_PRESETS.OFFICE.n },
   regulatoryDomain: 'TW',
   autoChannelOnPlace: true,
   panelCollapsed: false,
@@ -117,16 +87,6 @@ export const useEditorStore = create((set, get) => ({
     return s.selectedItems.some((it) => it.id === id)
   },
 
-  toggleHeatmap: () => set((s) => ({ showHeatmap: !s.showHeatmap })),
-  setHeatmapMode: (mode) => set({ heatmapMode: mode }),
-  // PHY-1: per-band 設定。傳入 { 2.4, 5, 6 } 三值（缺欄位保留現值）
-  setPleByBand: (next) => set((s) => ({ pleByBand: { ...s.pleByBand, ...next } })),
-  // 套用環境 preset：一鍵把三頻段都設成該 preset 的對應值
-  applyEnvironmentPreset: (presetKey) => set(() => {
-    const preset = ENVIRONMENT_PRESETS[presetKey]
-    if (!preset) return {}
-    return { pleByBand: { ...preset.n } }
-  }),
   setRegulatoryDomain: (id) => set({ regulatoryDomain: id }),
   toggleAutoChannelOnPlace: () => set((s) => ({ autoChannelOnPlace: !s.autoChannelOnPlace })),
   togglePanelCollapsed: () => set((s) => ({ panelCollapsed: !s.panelCollapsed })),

@@ -1,7 +1,6 @@
 import React, { useCallback } from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
-import { MATERIAL_LIST, FLOOR_SLAB_DEFAULT_DB, DEFAULT_FLOOR_SLAB_MATERIAL_ID, DEFAULT_FLOOR_SLAB_DB } from '@/constants/materials'
 import './FloorImagePanel.sass'
 
 function FloorImagePanel({ floorId }) {
@@ -165,42 +164,6 @@ function FloorImagePanel({ floorId }) {
             ✂ 開始裁切
           </button>
         )}
-      </section>
-
-      {/* 樓板衰減（影響跨樓層訊號穿透，熱圖實作於 9-3b） */}
-      <section className="floor-image-panel__section">
-        <p className="floor-image-panel__label">樓板衰減</p>
-        <div className="floor-image-panel__slab-row">
-          <select
-            className="floor-image-panel__slab-select"
-            value={floor.floorSlabMaterialId ?? DEFAULT_FLOOR_SLAB_MATERIAL_ID}
-            onChange={(e) => {
-              const matId = e.target.value
-              updateFloor(floorId, {
-                floorSlabMaterialId: matId,
-                floorSlabAttenuationDb: FLOOR_SLAB_DEFAULT_DB[matId] ?? DEFAULT_FLOOR_SLAB_DB,
-              })
-            }}
-          >
-            {MATERIAL_LIST.map((m) => (
-              <option key={m.id} value={m.id}>{m.label}</option>
-            ))}
-          </select>
-          <input
-            type="number"
-            className="floor-image-panel__slab-db"
-            value={floor.floorSlabAttenuationDb ?? DEFAULT_FLOOR_SLAB_DB}
-            min={0}
-            max={60}
-            step={0.5}
-            onChange={(e) => {
-              const v = parseFloat(e.target.value)
-              if (!isNaN(v)) updateFloor(floorId, { floorSlabAttenuationDb: Math.max(0, Math.min(60, v)) })
-            }}
-          />
-          <span className="floor-image-panel__slab-unit">dB</span>
-        </div>
-        <p className="floor-image-panel__slab-hint">跨樓層訊號每穿透本樓層樓板會衰減此 dB 值（9-3b 納入熱圖計算）</p>
       </section>
 
       <button className="floor-image-panel__close" onClick={clearSelected}>

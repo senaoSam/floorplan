@@ -3,12 +3,11 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
-import { greedyPowerAssign } from '@/utils/autoPowerPlan'
 import './DevicePlanningPanel.sass'
 
 function DevicePlanningPanel() {
   const [collapsed, setCollapsed] = useState(true)
-  const [toast, setToast] = useState(null) // { kind: 'channel'|'power', count }
+  const [toast, setToast] = useState(null) // { kind: 'channel', count }
 
   useEffect(() => {
     if (!toast) return
@@ -18,11 +17,9 @@ function DevicePlanningPanel() {
 
   const regulatoryDomain      = useEditorStore((s) => s.regulatoryDomain)
   const autoChannelOnPlace    = useEditorStore((s) => s.autoChannelOnPlace)
-  const pleByBand             = useEditorStore((s) => s.pleByBand)
   const toggleAutoChannelOnPlace = useEditorStore((s) => s.toggleAutoChannelOnPlace)
 
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
-  const floorScale    = useFloorStore((s) => s.floors.find((f) => f.id === s.activeFloorId)?.scale ?? null)
 
   const apsByFloor = useAPStore((s) => s.apsByFloor)
   const setAPs     = useAPStore((s) => s.setAPs)
@@ -38,18 +35,6 @@ function DevicePlanningPanel() {
     })
     setAPs(activeFloorId, updated)
     setToast({ kind: 'channel', count: assignments.size })
-  }
-
-  const runAutoPower = () => {
-    const aps = apsByFloor[activeFloorId] ?? []
-    if (aps.length === 0 || !floorScale) return
-    const assignments = greedyPowerAssign(aps, floorScale, pleByBand)
-    const updated = aps.map((ap) => {
-      const a = assignments.get(ap.id)
-      return a ? { ...ap, txPower: a.txPower } : ap
-    })
-    setAPs(activeFloorId, updated)
-    setToast({ kind: 'power', count: assignments.size })
   }
 
   return (
@@ -86,14 +71,6 @@ function DevicePlanningPanel() {
                 title="對本樓層所有 AP 執行 greedy 最小干擾頻道指派"
               >
                 📻 自動頻道
-              </button>
-              <button
-                className="device-planning__btn"
-                onClick={runAutoPower}
-                disabled={apsOnFloor === 0 || !floorScale}
-                title={!floorScale ? '需先設定比例尺' : '依最近鄰 AP 距離反推最小覆蓋功率（目標 −67 dBm）'}
-              >
-                ⚡ 自動功率
               </button>
             </div>
           </section>

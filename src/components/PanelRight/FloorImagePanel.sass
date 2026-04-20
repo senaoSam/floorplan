@@ -181,61 +181,6 @@
       border-radius: 4px
       text-align: center
 
-  // 樓板衰減
-  &__slab-row
-    display: flex
-    align-items: center
-    gap: 6px
-    margin-bottom: 6px
-
-  &__slab-select
-    flex: 1
-    background: rgba(255, 255, 255, 0.07)
-    border: 1px solid $border-color
-    border-radius: 6px
-    color: $text-primary
-    font-size: 12px
-    padding: 5px 8px
-    outline: none
-    cursor: pointer
-
-    &:focus
-      border-color: $accent
-
-    // 下拉展開時的 option 在深色主題下需明確指定配色，否則系統預設白底白字不可見
-    option
-      background: #1e1e2e
-      color: $text-primary
-
-  &__slab-db
-    width: 56px
-    background: rgba(255, 255, 255, 0.07)
-    border: 1px solid $border-color
-    border-radius: 6px
-    color: $text-primary
-    font-size: 12px
-    padding: 5px 8px
-    outline: none
-    text-align: center
-
-    &:focus
-      border-color: $accent
-
-    &::-webkit-inner-spin-button,
-    &::-webkit-outer-spin-button
-      -webkit-appearance: none
-      margin: 0
-
-  &__slab-unit
-    font-size: 12px
-    color: $text-secondary
-
-  &__slab-hint
-    font-size: 10.5px
-    color: $text-secondary
-    line-height: 1.4
-    margin-top: 4px
-
   // 關閉按鈕
   &__close
     margin: 12px 14px

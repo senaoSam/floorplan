@@ -30,7 +30,7 @@ floorplan/
 ```
 src/
   main.jsx                    # ReactDOM.render() 進入點，掛載 <App /> 到 #root
-  App.jsx                     # 根元件，組合 Toolbar + SidebarLeft + CanvasArea + PanelRight + FormulaNote + DemoLoader + ProgressPanel
+  App.jsx                     # 根元件，組合 Toolbar + SidebarLeft + CanvasArea + PanelRight + DemoLoader + ProgressPanel
 ```
 
 ### Store（Zustand 狀態管理）
@@ -40,11 +40,12 @@ src/
 ```
 src/store/
   useEditorStore.js           # 編輯器 UI 狀態
-                              #   - EDITOR_MODE: select / pan / draw_scale / draw_wall / place_ap / draw_scope / draw_floor_hole / crop_image / marquee_select / door_window
+                              #   - EDITOR_MODE: select / pan / draw_scale / draw_wall / place_ap / draw_scope / draw_floor_hole / crop_image / marquee_select / door_window / align_floor
                               #   - VIEW_MODE: 2d / 3d
-                              #   - HEATMAP_MODE: rssi / sinr / snr / channel_overlap / data_rate / ap_count
-                              #   - ENVIRONMENT_PRESETS: free_space(n=2.0) / office(n=3.0) / dense(n=3.5) / corridor(n=1.8)
-                              #   - selectedId, selectedType, selectedItems[], showHeatmap, heatmapMode, pathLossExponent
+                              #   - selectedId, selectedType, selectedItems[]
+                              #   - regulatoryDomain, autoChannelOnPlace
+                              #   - showFloorImage / showScopes / showFloorHoles / showWalls / showAPs / showAPInfo（圖層可見度）
+                              #   - alignRefFloors / alignRefOpacity（對齊模式參考樓層疊影）
 
   useFloorStore.js            # 樓層管理
                               #   - floors[], activeFloorId, scale (px/m)
@@ -86,10 +87,15 @@ src/store/
 src/constants/
   materials.js                # 牆體材質定義
                               #   - MATERIALS: GLASS(2dB) / DRYWALL(3dB) / WOOD(4dB) / BRICK(8dB) / CONCRETE(12dB) / METAL(20dB)
-                              #   - 各材質含 freqFactor { 2.4, 5, 6 } 頻段乘數
+                              #   - 每材質欄位：{ id, label, dbLoss, color }
                               #   - MATERIAL_LIST: 依 dB 排序
                               #   - OPENING_TYPES: DOOR(預設 wood) / WINDOW(預設 glass)
+                              #   - FLOOR_SLAB_DEFAULT_DB / DEFAULT_FLOOR_SLAB_MATERIAL_ID / DEFAULT_FLOOR_SLAB_DB（樓板衰減資料預設）
                               #   - getMaterialById(id)
+  apModels.js                 # AP 型號資料庫（廠商規格、per-band 增益、maxTxPower、streamCount）
+  antennaPatterns.js          # 內建天線模式（Patch / Sector 90° / Sector 120°）
+  channelWidths.js            # 頻寬常數與中心頻率換算
+  regulatoryDomains.js        # 國家頻段規範（頻道清單過濾）
 ```
 
 ### Utils
@@ -99,6 +105,7 @@ src/utils/
   id.js                       # generateId(prefix) → `${prefix}-${timestamp}-${counter}`
   pdfUtils.js                 # renderPdfPageToBlob(), renderAllPdfPages() — PDF.js 渲染
   floorColor.js               # getFloorColor(index) — 參考樓層疊影用色盤（對齊模式）
+  autoChannelPlan.js          # greedyChannelAssign() — 同頻最小干擾頻道指派
 ```
 
 ### Services
@@ -124,7 +131,7 @@ src/mock/
 ```
 src/components/
   Toolbar/
-    Toolbar.jsx               # 頂部工具列：編輯模式按鈕、視圖切換(2D/3D)、熱圖模式選擇器、環境預設下拉
+    Toolbar.jsx               # 頂部工具列：編輯模式按鈕、視圖切換(2D/3D)、Undo/Redo
     Toolbar.sass
 
   SidebarLeft/
@@ -158,13 +165,20 @@ src/components/
     DemoLoader.jsx            # Demo 按鈕：載入 test-floorplan.png
     DemoLoader.sass
 
-  FormulaNote/
-    FormulaNote.jsx           # f(x) 公式參考面板：FSPL、RSSI、牆體衰減、SINR、SNR、Data Rate 等
-    FormulaNote.sass
-
   LayerToggle/
-    LayerToggle.jsx           # 圖層可見度開關：平面圖/範圍/中庭/牆體/AP/AP資訊/熱圖
+    LayerToggle.jsx           # 圖層可見度開關：平面圖/範圍/中庭/牆體/AP/AP資訊
     LayerToggle.sass
+
+  DevicePlanningPanel/
+    DevicePlanningPanel.jsx   # 設備規劃：自動頻道、新AP自動選頻開關
+    DevicePlanningPanel.sass
+
+  RegulatorySelector/
+    RegulatorySelector.jsx    # 國家頻段規範下拉（影響可用頻道）
+    RegulatorySelector.sass
+
+  ConfirmDialog/
+    ConfirmDialog.jsx         # 通用確認對話框（離開對齊模式等）
 ```
 
 ### Features（核心功能）
@@ -172,20 +186,12 @@ src/components/
 ```
 src/features/
   editor/
-    Editor2D.jsx              # 主畫布元件 (~500+ 行)
+    Editor2D.jsx              # 主畫布元件
                               #   - Konva Stage 管理：viewport (pan/zoom)
                               #   - 所有繪製模式的滑鼠/鍵盤事件處理
                               #   - 端點吸附 (snap-to-grid, 12px threshold)
-                              #   - 整合 DropZone、LayerToggle、ScaleDialog、HeatmapWebGL
-    Editor2D.sass
-
-    HeatmapWebGL.jsx          # WebGL 2.0 熱圖渲染器
-                              #   - Fragment Shader 逐像素計算 RSSI/SINR/SNR/Channel Overlap/Data Rate/AP Count
-                              #   - Ray-casting 牆體碰撞 + 頻段衰減查表
-                              #   - 門窗 openings 展開為獨立子段
-                              #   - Cisco 風格色階 (紅=強, 藍=弱)
-                              #   - HeatmapLegend 圖例元件
-                              #   - MAX_APS=32, MAX_WALLS=64, MAX_SCOPE_PTS=256
+                              #   - 整合 DropZone、LayerToggle、DevicePlanningPanel、RegulatorySelector、ScaleDialog
+                              #   - Heatmap 已於 2026-04-21 移除；新版依 heatmap_sample 演算法重寫（待規劃）
 
     ScaleDialog.jsx           # 比例尺對話框：輸入像素距離 + 實際公尺數 → 計算 px/m
     ScaleDialog.sass

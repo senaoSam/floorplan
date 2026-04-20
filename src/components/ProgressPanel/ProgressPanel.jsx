@@ -6,10 +6,8 @@ const FEATURES = [
   { icon: '📐', text: '比例尺設定：在圖上點兩點並輸入實際距離，自動建立 px/m 換算' },
   { icon: '🧱', text: '牆體繪製：連續線段繪製，支援端點吸附，可設定材質（玻璃到混凝土）與高度' },
   { icon: '📍', text: 'AP 放置：點擊畫布放置，左鍵或右鍵按住可拖曳，支援頻段、發射功率、天線模式設定' },
-  { icon: '🟩', text: '範圍區域：繪製建築覆蓋範圍多邊形，區分涵蓋內／外區域；熱力圖自動遮罩至範圍內' },
+  { icon: '🟩', text: '範圍區域：繪製建築覆蓋範圍多邊形，區分涵蓋內／外區域' },
   { icon: '⬛', text: '挑高區域：標記中庭、挑高等信號可跨樓層穿透的區域' },
-  { icon: '🔥', text: '多模式熱力圖：RSSI / SINR / SNR / 頻道重疊 / 預估速率 / AP 數量，WebGL 即時渲染' },
-  { icon: '🎨', text: '柔和色階（Ekahau 風格）+ 頻段相關牆體衰減 + 可調路徑損耗指數（環境類型）' },
   { icon: '🖱', text: '右鍵操作：對任意物件按下右鍵可顯示屬性面板（停止繪製），按住右鍵可拖曳物件' },
 ]
 
@@ -51,17 +49,6 @@ const PHASES = [
           { id: '4-3', done: true, text: '拖曳牆體、Scope、Floor Hole、AP' },
         ],
       },
-      {
-        layer: 'Layer 5 — Heatmap',
-        items: [
-          { id: '5-1', done: true, text: '基礎 RSSI 計算（FSPL）' },
-          { id: '5-2', done: true, text: 'Ray-casting 牆體衰減（Web Worker）' },
-          { id: '5-3', done: true, text: 'WebGL Fragment Shader 即時渲染' },
-          { id: '5-4', done: true, text: 'Co-channel 干擾 SINR 熱圖' },
-          { id: '5-5', done: true, text: '多模式熱圖（RSSI/SINR/SNR/頻道重疊/速率/AP數）' },
-          { id: '5-6', done: true, text: '柔和色階 + 頻段牆體衰減 + 環境路徑損耗（v1，公式已被 Phase 5 PHY-1/2 取代）' },
-        ],
-      },
     ],
   },
   {
@@ -100,7 +87,6 @@ const PHASES = [
           { id: '8-3a', done: true, text: '國家頻段資料庫 + 頻道選單過濾' },
           { id: '8-3b', done: true,  text: '自動頻道規劃演算法（批次）' },
           { id: '8-3c', done: true,  text: '放置新 AP 自動挑頻道' },
-          { id: '8-4', done: true,  text: '自動功率規劃' },
           { id: '8-5', done: true, text: '頻寬設定（20/40/80/160 MHz）' },
         ],
       },
@@ -127,91 +113,14 @@ const PHASES = [
     ],
   },
   {
-    // 對齊 NPv1 / .tmp-heatmap 規格的 heatmap 公式重寫（優先於效能優化）
-    // 真相來源：.tmp-heatmap/01,02,04,08
-    // 範圍：純 WebGL fragment shader，不含 wasm / Worker / WebGPU
-    phase: 'Phase 5 — Heatmap 公式改寫（NPv1 對齊）🔥 優先',
+    // 依 heatmap_sample/ 演算法（ITU-R P.1238 + image-source 反射 + UTD 繞射）
+    // 重新實作。先前 Phase 5/5.5/6 的 NPv1 方案已於 2026-04-21 全數移除。
+    phase: 'Phase 5 — Heatmap 重寫（依 heatmap_sample 演算法）',
     groups: [
       {
-        layer: 'Layer RF-PHY — 物理公式對齊',
+        layer: '規劃中',
         items: [
-          { id: 'PHY-1', done: true,  text: 'PLE 距離損耗公式重寫（FSPL(1m) + 10n·log10(d/d₀)）' },
-          { id: 'PHY-2', done: true,  text: 'ITU-R P.2040 材料模型（a/b/c/d 頻率外推）' },
-          { id: 'PHY-3', done: false, text: '牆厚屬性（延後至 zone attenuation 時再做）' },
-          { id: 'PHY-4', done: true,  text: '入射角修正（1/cos θ，clamp cosθ≥0.1）' },
-          { id: 'PHY-5', done: true,  text: 'Per-band noise floor（2.4/5/6 GHz 各自）' },
-          { id: 'PHY-6', done: true,  text: 'clientHeightMeters（3D 距離 = √(d² + Δh²)）' },
-          { id: 'PHY-7', done: true,  text: 'cutoutDistanceMeters（超距 AP skip）' },
-        ],
-      },
-      {
-        layer: 'Layer RF-DPM — Dominant Path Model（NLOS 繞射）',
-        items: [
-          { id: 'DPM-1', done: true,  text: 'Visibility Graph（每牆兩端點 + wallIdx）' },
-          { id: 'DPM-2', done: true,  text: 'Order 1 繞射（min(直射, 各端點 v)）' },
-          { id: 'DPM-3', done: true,  text: 'diffLoss 6 dB/90°（已在 rfDefaults）' },
-          { id: 'DPM-4', done: false, text: 'Order 2 繞射（延後，O(N²) 成本高）' },
-          { id: 'DPM-5', done: true,  text: 'MAX_VG_NODES=32（受 uniform 容量限制）' },
-        ],
-      },
-      {
-        layer: 'Layer RF-RX — RSSI / SNR / SINR / Data Rate 對齊',
-        items: [
-          { id: 'RX-1', done: true,  text: 'RSSI 公式檢查（含天線增益）✓ 與規格 1:1' },
-          { id: 'RX-2', done: true,  text: 'SNR 公式 per-band noise ✓ 與規格 1:1' },
-          { id: 'RX-3', done: true,  text: 'SINR 線性疊加 + overlap_factor（2.4G adjacent rejection 表）' },
-          { id: 'RX-4', done: true,  text: 'Data Rate MCS 表（IEEE 802.11ax MCS 0-11，0.8μs GI）' },
-        ],
-      },
-      {
-        layer: 'Layer RF-INT — 整合與驗證',
-        items: [
-          { id: 'INT-1', done: true,  text: '拖曳期間凍結熱圖（mouseup 後下一幀重算）' },
-          { id: 'INT-2', done: true,  text: '單元驗證 FSPL / ITU 數值 (MCP console)' },
-          { id: 'INT-3', done: true,  text: '整合驗證 MCP 截圖（PHY-2/4 + DPM 繞射）' },
-          { id: 'INT-4', done: true,  text: 'FormulaNote 同步顯示新公式（8 區塊 + 規格來源標註）' },
-        ],
-      },
-    ],
-  },
-  {
-    phase: 'Phase 5.5 — 效能優化',
-    groups: [
-      {
-        layer: 'Layer PERF — 拖曳流暢度 & 熱圖即時性',
-        items: [
-          { id: 'P-1', done: true,  text: 'AP 拖曳 RAF buffer（放開才提交 store）' },
-          { id: 'P-2', done: true,  text: 'LOD 拖曳降解析度（renderScale 0.3，放開 full-res）' },
-          { id: 'P-3', done: true,  text: 'History snapshot 非阻塞 + flushPending' },
-          { id: 'P-4', done: false, text: 'WallLayer snap bounding box 過濾' },
-          { id: 'P-5', done: false, text: 'Editor2D 鍵盤 effect 依賴穩定化' },
-          { id: 'P-6', done: false, text: 'Dirty Rect 區域重繪（雙 FBO + scissor）⚠ 等 Phase 5 DPM 後重評估' },
-        ],
-      },
-    ],
-  },
-  {
-    // Phase 6：Heatmap Grid 重構（對齊 .tmp-heatmap §5/§6），純 WebGL 2.0 FBO
-    // 不引入 wasm/worker/WebGPU；目標是讓計算與顯示分離、鋪路 env-learning
-    phase: 'Phase 6 — Heatmap Grid 重構',
-    groups: [
-      {
-        layer: 'Layer GRID — 計算 grid 化',
-        items: [
-          { id: 'GRID-1', done: false, text: 'FBO + Float32 texture 建置（RGBA32F 存多通道）' },
-          { id: 'GRID-2', done: false, text: 'Pass 1 compute shader（RSSI 寫入 grid texture）' },
-          { id: 'GRID-3', done: false, text: '動態 grid 解析度（gridCellSizeMeters 預設 0.5m）' },
-          { id: 'GRID-4', done: false, text: 'Pass 2 display shader（texture lookup + bilinear + 色階）' },
-          { id: 'GRID-5', done: false, text: '多通道輸出（primary/secondary/SNR/rate）' },
-          { id: 'GRID-6', done: false, text: 'Scope clamp（grid 外透明 sentinel）' },
-        ],
-      },
-      {
-        layer: 'Layer GRID-TRI — 正三角形網格（規格 §6）',
-        items: [
-          { id: 'TRI-1', done: false, text: '三角網格生成（正三角形替代方格）' },
-          { id: 'TRI-2', done: false, text: '射線切片累加（per-triangle 衰減）' },
-          { id: 'TRI-3', done: false, text: 'env-learning hook（AttenuatingTriangleField）' },
+          { id: 'HM-0', done: false, text: '任務尚待規劃（輸入端資料保留：walls / APs / scope / floor hole / scale）' },
         ],
       },
     ],

@@ -80,35 +80,6 @@
     flex: 1
     justify-content: flex-end
 
-  &__heatmap-btn
-    padding: 4px 14px
-    border: 1px solid $border-color
-    border-radius: 6px
-    background: transparent
-    color: $text-secondary
-    font-size: 12px
-    font-weight: 600
-    cursor: pointer
-    transition: all 0.15s
-
-    &:hover:not(:disabled):not(.toolbar__heatmap-btn--active)
-      border-color: #ff6d00
-      color: #ff6d00
-
-    &--active
-      background: #ff6d00
-      border-color: #ff6d00
-      color: #fff
-
-      &:hover
-        background: #e05500
-        border-color: #e05500
-        color: #fff
-
-    &:disabled
-      opacity: 0.35
-      cursor: not-allowed
-
   &__select
     padding: 3px 6px
     border: 1px solid $border-color

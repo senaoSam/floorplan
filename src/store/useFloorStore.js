@@ -69,7 +69,7 @@ export const useFloorStore = create((set, get) => ({
       ),
     })),
 
-  // 樓板衰減（影響跨樓層訊號傳播）— 9-3a 資料模型，9-3b 才會用於熱圖
+  // 樓板衰減資料欄位（供未來 heatmap 重寫時使用；UI 目前不暴露）
   setFloorSlab: (id, patch) =>
     set((state) => ({
       floors: state.floors.map((f) => (f.id === id ? { ...f, ...patch } : f)),

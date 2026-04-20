@@ -21,7 +21,7 @@ const TOOL_GROUPS = [
   ],
   [
     { mode: EDITOR_MODE.PLACE_AP,       label: 'AP',       icon: '\uD83D\uDCE1' },
-    { mode: EDITOR_MODE.DRAW_SCOPE,     label: '熱圖範圍', icon: '\u2B21' },
+    { mode: EDITOR_MODE.DRAW_SCOPE,     label: '範圍',     icon: '\u2B21' },
   ],
 ]
 

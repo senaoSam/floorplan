@@ -22,13 +22,10 @@ import ScopeLayer from './layers/ScopeLayer'
 import FloorHoleLayer from './layers/FloorHoleLayer'
 import ScaleLayer from './layers/ScaleLayer'
 import CropLayer from './layers/CropLayer'
-import HeatmapWebGL from './HeatmapWebGL'
 import ScaleDialog from './ScaleDialog'
 import LayerToggle from '@/components/LayerToggle/LayerToggle'
 import DevicePlanningPanel from '@/components/DevicePlanningPanel/DevicePlanningPanel'
 import RegulatorySelector from '@/components/RegulatorySelector/RegulatorySelector'
-import HeatmapControl from '@/components/HeatmapControl/HeatmapControl'
-import { LEGENDS } from './HeatmapWebGL'
 import DropZone from '@/features/importer/DropZone'
 import './Editor2D.sass'
 
@@ -41,7 +38,7 @@ const SNAP_PX     = 12   // screen pixels for first-point snap
 function Editor2D() {
   const containerRef  = useRef(null)
   const stageRef      = useRef(null)
-  const draggingAPRef          = useRef(null)   // { id, x, y } AP 拖移中暫存位置（heatmap RAF loop 讀取）
+  const draggingAPRef          = useRef(null)   // { id, x, y } AP 拖移中暫存位置
   const apDragPendingRef       = useRef(null)   // { id, x, y } mousemove 寫入；RAF flush 到 draggingAPRef
   const apDragRafRef           = useRef(0)      // RAF id，0 代表未排程
   const draggingWallRef        = useRef(null)   // { id, dx, dy } 牆體拖移中暫存偏移
@@ -108,8 +105,8 @@ function Editor2D() {
   const activeFloor    = getActiveFloor()
 
   // Per-floor align transform props (Konva Layer), pivot = image center.
-  // Applied only in ALIGN_FLOOR mode so editing/heatmap stays in floor-local
-  // coords the rest of the time.
+  // Applied only in ALIGN_FLOOR mode so editing stays in floor-local coords
+  // the rest of the time.
   const alignLayerProps = useCallback((f) => {
     if (!f) return {}
     const cx = f.imageWidth / 2
@@ -915,7 +912,7 @@ function Editor2D() {
     [EDITOR_MODE.DRAW_WALL]:       { label: '畫牆模式', hint: '左鍵點擊設定端點，右鍵或 Esc 結束｜數字鍵 1~6 切換材質' },
     [EDITOR_MODE.DOOR_WINDOW]:     { label: '門窗模式', hint: '點擊牆體兩點設定門/窗位置；D 切換門、W 切換窗；右鍵或 Esc 取消' },
     [EDITOR_MODE.PLACE_AP]:        { label: '放置 AP 模式', hint: '左鍵點擊放置 AP' },
-    [EDITOR_MODE.DRAW_SCOPE]:      { label: '熱圖範圍模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
+    [EDITOR_MODE.DRAW_SCOPE]:      { label: '範圍模式',     hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.DRAW_FLOOR_HOLE]: { label: '中庭模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.CROP_IMAGE]:      { label: '裁切模式', hint: '左鍵點擊兩點定義裁切區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.ALIGN_FLOOR]:     { label: '樓層對齊模式', hint: '使用右側面板的偏移/縮放/旋轉對齊本樓層；其他樓層以半透明疊影顯示' },
@@ -1177,19 +1174,6 @@ function Editor2D() {
           <div style={{ pointerEvents: 'auto' }}><RegulatorySelector /></div>
         </div>
       )}
-
-      {!isAlignMode && (
-        <HeatmapWebGL
-          width={size.width}
-          height={size.height}
-          stageRef={stageRef}
-          draggingAPRef={draggingAPRef}
-          draggingWallRef={draggingWallRef}
-          draggingScopeRef={draggingScopeRef}
-        />
-      )}
-
-      {!isAlignMode && <HeatmapControl legends={LEGENDS} />}
 
       {showScaleDialog && (
         <ScaleDialog
