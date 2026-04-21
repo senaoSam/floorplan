@@ -1,5 +1,9 @@
 import React, { useState } from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
+import { useWallStore } from '@/store/useWallStore'
+import { useAPStore } from '@/store/useAPStore'
+import { useHeatmapStore } from '@/store/useHeatmapStore'
+import { buildDemoSampleObjects } from '@/mock/demoSampleScenario'
 import './DemoLoader.sass'
 
 const DEMO_SRC = import.meta.env.BASE_URL + 'test-floorplan.png'
@@ -18,6 +22,9 @@ function DemoLoader() {
   const [loading, setLoading] = useState(false)
   const floors             = useFloorStore((s) => s.floors)
   const importFloorFromUrl = useFloorStore((s) => s.importFloorFromUrl)
+  const setWalls           = useWallStore((s) => s.setWalls)
+  const setAPs             = useAPStore((s) => s.setAPs)
+  const setHeatmapEnabled  = useHeatmapStore((s) => s.setEnabled)
 
   const handleLoad = async () => {
     if (loading) return
@@ -25,7 +32,16 @@ function DemoLoader() {
     try {
       const img = new window.Image()
       img.onload = () => {
-        importFloorFromUrl(DEMO_SRC, img.naturalWidth, img.naturalHeight, nextDemoName(floors), 200 / 20)
+        // Treat the whole Demo image as the sample's 30 x 18 m office so the
+        // heatmap grid count matches sample and dragging stays smooth.
+        const pxPerM = img.naturalWidth / 30
+        const floor = importFloorFromUrl(DEMO_SRC, img.naturalWidth, img.naturalHeight, nextDemoName(floors), pxPerM)
+        // Seed this new Demo floor with the heatmap_sample scenario: same wall
+        // layout + 2 APs at (4,4) / (4,14) m, mapped 1:1 via px/m scale.
+        const { walls, aps } = buildDemoSampleObjects(pxPerM)
+        setWalls(floor.id, walls)
+        setAPs(floor.id, aps)
+        setHeatmapEnabled(true)
         setLoading(false)
       }
       img.onerror = () => setLoading(false)
