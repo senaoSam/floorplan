@@ -145,7 +145,7 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems
             <Line
               points={[wall.startX, wall.startY, wall.endX, wall.endY]}
               stroke="#000"
-              strokeWidth={isHovered ? 14 : isSelected ? 10 : 7}
+              strokeWidth={isHovered ? 10 : isSelected ? 7 : 4}
               lineCap="round"
               opacity={0.4}
               listening={false}
@@ -153,7 +153,7 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems
             <Line
               points={[wall.startX, wall.startY, wall.endX, wall.endY]}
               stroke={isHovered ? '#fff' : wall.material.color}
-              strokeWidth={isHovered ? 8 : isSelected ? 6 : 4}
+              strokeWidth={isHovered ? 6 : isSelected ? 5 : 3}
               lineCap="round"
               hitStrokeWidth={14}
               onClick={(e) => {

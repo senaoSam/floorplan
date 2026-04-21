@@ -17,12 +17,31 @@
     color: $accent
     letter-spacing: 0.5px
     white-space: nowrap
-    flex: 1
+
+  &__sample-link
+    display: inline-flex
+    align-items: center
+    height: 24px
+    padding: 0 10px
+    border: 1px solid rgba(255, 255, 255, 0.18)
+    border-radius: 12px
+    background: rgba(30, 41, 59, 0.6)
+    color: $text-secondary
+    font-size: 11px
+    text-decoration: none
+    white-space: nowrap
+    transition: border-color 0.15s, color 0.15s, background 0.15s
+
+    &:hover
+      border-color: rgba(255, 255, 255, 0.35)
+      color: $text-primary
+      background: rgba(51, 65, 85, 0.75)
 
   &__tools
     display: flex
     align-items: center
     justify-content: center
+    flex: 1
 
   &__group
     display: flex

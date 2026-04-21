@@ -35,24 +35,6 @@ function App() {
       </div>
       <DemoLoader />
       <ProgressPanel />
-      <a
-        href="#/heatmap-sample"
-        style={{
-          position: 'fixed',
-          bottom: 12,
-          left: 12,
-          padding: '6px 12px',
-          background: '#1e293b',
-          color: '#e2e8f0',
-          border: '1px solid #334155',
-          borderRadius: 6,
-          fontSize: 12,
-          textDecoration: 'none',
-          zIndex: 9999,
-        }}
-      >
-        → Heatmap Sample
-      </a>
     </div>
   )
 }

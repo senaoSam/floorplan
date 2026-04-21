@@ -85,7 +85,7 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
       }}
     >
       {/* 透明 hit circle — 唯一接收滑鼠事件的子元素，其餘全部 listening={false} */}
-      <Circle radius={20 * inverseScale} fill="transparent" />
+      <Circle radius={14 * inverseScale} fill="transparent" />
       {/* 定向覆蓋扇形（僅指示方向與波瓣寬度，不代表真實距離） */}
       {isDirectional && (
         <>
@@ -134,53 +134,35 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
           listening={false}
         />
       )}
-      {/* 外環 */}
+      {/* 圓形主體 — 外圍藍、裡面白（sample 風格，radius 10） */}
       <Circle
-        radius={16 * s}
-        fill="rgba(0,0,0,0.35)"
-        stroke={isSelected ? '#e74c3c' : isHovered ? '#fff' : ringColor}
+        radius={10 * s}
+        fill="#ffffff"
+        stroke={isSelected ? '#e74c3c' : isHovered ? '#1e3a8a' : '#1e3a8a'}
         strokeWidth={(isSelected ? 3 : isHovered ? 2.5 : 2) * s}
         listening={false}
       />
-      {/* 中央圖示：omni → WiFi 三層弧；directional / custom → 方位箭頭 */}
-      {!isOriented ? (
-        [11, 7, 3].map((r, i) => (
-          <Arc
-            key={r}
-            innerRadius={(r - 2) * s}
-            outerRadius={r * s}
-            angle={180}
-            rotation={-180}
-            fill={color}
-            opacity={1 - i * 0.2}
-            offsetY={2 * s}
-            listening={false}
-          />
-        ))
-      ) : (
+      {/* 方位指示：directional / custom 用箭頭；omni 無內部圖示（保持全白） */}
+      {isOriented && (
         <Group rotation={azimuth} listening={false}>
-          {/* 箭身 */}
           <Line
-            points={[-6 * s, 0, 6 * s, 0]}
-            stroke={color}
-            strokeWidth={2 * s}
+            points={[-4 * s, 0, 4 * s, 0]}
+            stroke="#1e3a8a"
+            strokeWidth={1.5 * s}
             lineCap="round"
           />
-          {/* 箭頭 */}
           <Line
-            points={[11 * s, 0, 5 * s, -4 * s, 5 * s, 4 * s]}
+            points={[7 * s, 0, 3 * s, -3 * s, 3 * s, 3 * s]}
             closed
-            fill={color}
+            fill="#1e3a8a"
           />
         </Group>
       )}
-      {/* 中心點 */}
-      <Circle radius={2.5 * s} fill={color} offsetY={isOriented ? 0 : 2 * s} listening={false} />
       {/* 快速刪除按鈕 */}
       {isHovered && onDelete && (
         <DeleteButton
-          x={13 * s}
-          y={-13 * s}
+          x={9 * s}
+          y={-9 * s}
           scale={s}
           onClick={() => onDelete(ap.id)}
           setHoverCursor={setHoverCursor}
@@ -193,7 +175,7 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
         fill="#fff"
         align="center"
         offsetX={22 * s}
-        offsetY={-22 * s}
+        offsetY={-16 * s}
         width={44 * s}
         shadowColor="#000"
         shadowBlur={4}
