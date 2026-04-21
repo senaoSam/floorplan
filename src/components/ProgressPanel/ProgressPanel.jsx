@@ -118,9 +118,29 @@ const PHASES = [
     phase: 'Phase 5 — Heatmap 重寫（依 heatmap_sample 演算法）',
     groups: [
       {
-        layer: '規劃中',
+        layer: 'MVP — CPU 實作',
         items: [
-          { id: 'HM-0', done: false, text: '任務尚待規劃（輸入端資料保留：walls / APs / scope / floor hole / scale）' },
+          { id: 'HM-1',  done: true, text: 'buildScenario 橋接層（px→m、openings 展開、scope mask）' },
+          { id: 'HM-2',  done: true, text: '引擎整合 + 頻率 per-AP 參數化（band+channel+width）' },
+          { id: 'HM-3',  done: true, text: '同頻 SINR — 只加頻譜重疊的 AP' },
+          { id: 'HM-4',  done: true, text: '門窗穿透用 opening.material.dbLoss' },
+          { id: 'HM-5',  done: true, text: 'Scope 過濾（out-of-scope 透明）' },
+          { id: 'HM-6',  done: true, text: 'HeatmapLayer（跟隨 floor 旋轉/裁切）' },
+          { id: 'HM-7',  done: true, text: 'useHeatmapStore（開關 + 參數）' },
+          { id: 'HM-8',  done: true, text: '拖曳中即時重算（useDragOverlayStore live overrides）' },
+          { id: 'HM-9',  done: true, text: 'Canvas 左下 Heatmap 按鈕 + hover RSSI/SINR 讀值' },
+          { id: 'HM-10', done: true, text: 'FormulaNote 更新（新演算法公式說明）' },
+        ],
+      },
+      {
+        layer: '未來擴充',
+        items: [
+          { id: 'HM-F1', done: false, text: '天線方向性（antennaPattern 進計算）' },
+          { id: 'HM-F2', done: false, text: 'FloorHole 跨樓層訊號穿透' },
+          { id: 'HM-F3', done: false, text: '樓板衰減（跨樓層）' },
+          { id: 'HM-F4', done: false, text: 'autoPowerPlan 自動功率規劃重建' },
+          { id: 'HM-F5', done: false, text: 'CPU → WebGL fragment shader 移植' },
+          { id: 'HM-F6', done: false, text: '拖曳凍結 heatmap 的效能優化' },
         ],
       },
     ],

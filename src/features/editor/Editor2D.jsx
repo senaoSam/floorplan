@@ -13,6 +13,7 @@ import { generateId } from '@/utils/id'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
 import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
 import FloorImageLayer from './layers/FloorImageLayer'
+import HeatmapLayer from './layers/HeatmapLayer'
 import RefWallLayer from './layers/RefWallLayer'
 import RefVectorLayer from './layers/RefVectorLayer'
 import WallLayer from './layers/WallLayer'
@@ -27,6 +28,11 @@ import LayerToggle from '@/components/LayerToggle/LayerToggle'
 import DevicePlanningPanel from '@/components/DevicePlanningPanel/DevicePlanningPanel'
 import RegulatorySelector from '@/components/RegulatorySelector/RegulatorySelector'
 import DropZone from '@/features/importer/DropZone'
+import HeatmapControl from '@/components/HeatmapControl/HeatmapControl'
+import { useHeatmapStore } from '@/store/useHeatmapStore'
+import { useDragOverlayStore } from '@/store/useDragOverlayStore'
+import { buildScenario } from '@/features/heatmap/buildScenario'
+import { probeAt } from '@/features/heatmap/hoverProbe'
 import './Editor2D.sass'
 
 const SCALE_BY    = 1.08
@@ -602,7 +608,34 @@ function Editor2D() {
 
     const canvasPos = toCanvasPos(pos)
     setMousePos(isWallMode ? snapToWallEndpoint(canvasPos) : canvasPos)
-  }, [toCanvasPos, isWallMode, snapToWallEndpoint, viewport.scale])
+
+    // Heatmap hover probe — one RSSI/SINR read per mousemove when enabled.
+    const heat = useHeatmapStore.getState()
+    if (heat.enabled) {
+      const floor = useFloorStore.getState().floors.find((f) => f.id === activeFloorId)
+      if (floor?.scale) {
+        const walls  = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
+        const aps    = useAPStore.getState().apsByFloor[activeFloorId] ?? []
+        const scopes = useScopeStore.getState().scopesByFloor[activeFloorId] ?? []
+        const scenario = buildScenario(floor, walls, aps, scopes)
+        if (scenario) {
+          const pxToM = 1 / floor.scale
+          const rx = { x: canvasPos.x * pxToM, y: canvasPos.y * pxToM }
+          if (rx.x >= 0 && rx.x <= scenario.size.w && rx.y >= 0 && rx.y <= scenario.size.h) {
+            const reading = probeAt(scenario, rx, {
+              reflections: heat.reflections,
+              diffraction: heat.diffraction,
+            })
+            heat.setHoverReading(reading)
+          } else {
+            heat.setHoverReading(null)
+          }
+        }
+      }
+    } else if (heat.hoverReading) {
+      heat.setHoverReading(null)
+    }
+  }, [toCanvasPos, isWallMode, snapToWallEndpoint, viewport.scale, activeFloorId])
 
   // ── 點擊：分流到各模式 ─────────────────────────────────
   const handleStageClick = useCallback((e) => {
@@ -1006,6 +1039,10 @@ function Editor2D() {
             />
           )}
 
+          {activeFloorId && !isAlignMode && (
+            <HeatmapLayer floorId={activeFloorId} />
+          )}
+
           {/* 所有向量元素合併為單一 Layer，內部用 Group 區隔 */}
           <Layer {...(isAlignMode && activeFloor ? alignLayerProps(activeFloor) : {})}>
             {activeFloorId && showScopes && (
@@ -1022,8 +1059,14 @@ function Editor2D() {
                 }}
                 isSelectMode={isSelectMode}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode}
-                onScopeDragMove={(id, dx, dy) => { draggingScopeRef.current = { id, dx, dy } }}
-                onScopeDragEnd={() => { draggingScopeRef.current = null }}
+                onScopeDragMove={(id, dx, dy) => {
+                  draggingScopeRef.current = { id, dx, dy }
+                  useDragOverlayStore.getState().setScope({ id, dx, dy })
+                }}
+                onScopeDragEnd={() => {
+                  draggingScopeRef.current = null
+                  useDragOverlayStore.getState().setScope(null)
+                }}
                 onRightMouseDown={handleRightMouseDown}
                 onDelete={(id) => { removeScope(activeFloorId, id); clearSelected() }}
                 viewportScale={viewport.scale}
@@ -1065,8 +1108,14 @@ function Editor2D() {
                   if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'wall'); return }
                   setSelected(id, 'wall')
                 }}
-                onWallDragMove={(id, dx, dy) => { draggingWallRef.current = { id, dx, dy } }}
-                onWallDragEnd={() => { draggingWallRef.current = null }}
+                onWallDragMove={(id, dx, dy) => {
+                  draggingWallRef.current = { id, dx, dy }
+                  useDragOverlayStore.getState().setWall({ id, dx, dy })
+                }}
+                onWallDragEnd={() => {
+                  draggingWallRef.current = null
+                  useDragOverlayStore.getState().setWall(null)
+                }}
                 isDrawMode={isWallMode}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode}
                 snapRadius={SNAP_PX / viewport.scale}
@@ -1100,7 +1149,10 @@ function Editor2D() {
                   if (apDragRafRef.current === 0) {
                     apDragRafRef.current = requestAnimationFrame(() => {
                       apDragRafRef.current = 0
-                      if (apDragPendingRef.current) draggingAPRef.current = apDragPendingRef.current
+                      if (apDragPendingRef.current) {
+                        draggingAPRef.current = apDragPendingRef.current
+                        useDragOverlayStore.getState().setAP(apDragPendingRef.current)
+                      }
                     })
                   }
                 }}
@@ -1108,6 +1160,7 @@ function Editor2D() {
                   if (apDragRafRef.current !== 0) { cancelAnimationFrame(apDragRafRef.current); apDragRafRef.current = 0 }
                   apDragPendingRef.current = null
                   draggingAPRef.current = null
+                  useDragOverlayStore.getState().setAP(null)
                 }}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode}
                 onRightMouseDown={handleRightMouseDown}
@@ -1182,6 +1235,8 @@ function Editor2D() {
           onCancel={handleScaleCancel}
         />
       )}
+
+      {floors.length > 0 && <HeatmapControl />}
     </div>
   )
 }

@@ -68,6 +68,10 @@ src/store/
                               #   - floorHolesByFloor {}
                               #   - addFloorHole(), updateFloorHole(), removeFloorHole(), removeFloorHoles()
 
+  useHeatmapStore.js          # Heatmap 開關與計算參數
+                              #   - enabled, reflections, diffraction, gridStepM, blur, showContours
+                              #   - hoverReading（當前游標位置的 RSSI/SINR 讀值）
+
   useHistoryStore.js          # Undo/Redo 歷史管理
                               #   - undoStack[], redoStack[] (snapshot-based)
                               #   - undo(), redo(), canUndo(), canRedo(), clearHistory()
@@ -173,6 +177,17 @@ src/components/
     DevicePlanningPanel.jsx   # 設備規劃：自動頻道、新AP自動選頻開關
     DevicePlanningPanel.sass
 
+  HeatmapControl/
+    HeatmapControl.jsx        # 熱圖開關按鈕 + 設定面板（反射/繞射/grid/blur/contour）
+                              # + hover RSSI/SINR 讀值顯示（按鈕上方）
+                              # 位置：畫布左下、DemoLoader 右邊
+    HeatmapControl.sass
+
+  FormulaNote/
+    FormulaNote.jsx           # 熱圖公式說明（ITU-R P.1238 / Friis / 鏡像反射 / UTD / SINR）
+                              # 嵌在 HeatmapControl 設定面板裡
+    FormulaNote.sass
+
   RegulatorySelector/
     RegulatorySelector.jsx    # 國家頻段規範下拉（影響可用頻道）
     RegulatorySelector.sass
@@ -198,6 +213,8 @@ src/features/
 
     layers/
       FloorImageLayer.jsx     # 平面圖圖層：旋轉/透明度/裁切 clipping，點擊選取
+      HeatmapLayer.jsx        # 熱圖圖層：跟隨 floor 旋轉/裁切；吃 heatmapGL 產生的 canvas
+                              #   依 useHeatmapStore + walls/APs/scopes 任意變動即重算
       RefWallLayer.jsx        # 對齊模式：參考樓層的牆體輪廓（tint、不互動）
       RefVectorLayer.jsx      # 對齊模式：參考樓層的 AP / Scope / Floor Hole 輪廓（tint、不互動）
       WallLayer.jsx           # 牆體圖層：線段繪製 + 端點把手 + 材質顏色、拖曳吸附、刪除按鈕
@@ -215,6 +232,26 @@ src/features/
 
   viewer3d/
     Viewer3D.jsx              # React Three Fiber 3D 場景（佔位，未來 3D 視覺化）
+
+  heatmap/
+    buildScenario.js          # 主系統 state → heatmap_sample scenario 格式
+                              #   - px → m（用 floor.scale）
+                              #   - walls 依 openings 展成多段（各段帶自己的 dbLoss）
+                              #   - scopes 轉成 scopeMaskFn(x,y) → true/false
+                              #   - AP 帶 centerMHz（依 band + channel 算）
+    frequency.js              # channelCenterMHz / channelRangeMHz / apsShareSpectrum
+                              #   供 propagation.js SINR 判斷同頻重疊
+    propagation.js            # Per-AP 傳播模型（ITU-R P.1238 + Friis blend / image-source
+                              #   / UTD 繞射 / secant 斜入射）
+                              #   算法同 heatmap_sample 但頻率參數化、SINR 加入頻譜重疊過濾
+    sampleField.js            # 在粗網格上取樣 rssi/sinr；out-of-scope 設 NaN
+    hoverProbe.js             # 單點 probeAt(scenario, rx) — 供 hover 讀值使用
+
+src/heatmap_sample/           # 從根目錄 heatmap_sample/ 完整複製的獨立演算法包
+                              # （保留原始結構；propagation/geometry/constants/render 都在）
+                              # 由 hash route #/heatmap-sample 獨立檢視
+                              # 主系統的 src/features/heatmap/ 直接 import 此資料夾的
+                              # physics/constants.js 與 physics/geometry.js 及 render/heatmapGL.js
 ```
 
 ### Styles

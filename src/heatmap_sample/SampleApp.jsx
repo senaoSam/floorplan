@@ -3,8 +3,9 @@ import FloorCanvas from './components/FloorCanvas.jsx';
 import ControlPanel from './components/ControlPanel.jsx';
 import Legend from './components/Legend.jsx';
 import { defaultScenario } from './physics/scenario.js';
+import './styles.css';
 
-export default function App() {
+export default function SampleApp() {
   const [scenario, setScenario] = useState(() => defaultScenario());
   const [options, setOptions] = useState({
     reflections: true,
@@ -30,9 +31,20 @@ export default function App() {
   const resetScenario = () => setScenario(defaultScenario());
 
   return (
+    <div className="heatmap-sample-root">
     <div className="app-root">
       <header className="app-header">
         <div className="brand">
+          <a
+            className="back-link"
+            href="#/"
+            onClick={(e) => {
+              e.preventDefault();
+              window.location.hash = '';
+            }}
+          >
+            ← 回主系統
+          </a>
           <div className="brand-mark" />
           <div>
             <h1>RSSI Heatmap Simulator</h1>
@@ -80,6 +92,7 @@ export default function App() {
       <footer className="app-footer">
         <span>Propagation: ITU-R P.1238 + Friis blend · Image-source reflections · UTD knife-edge diffraction · Oblique wall penetration</span>
       </footer>
+    </div>
     </div>
   );
 }

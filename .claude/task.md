@@ -123,9 +123,31 @@
 > - FormulaNote 公式說明面板
 > - Toolbar 環境類型下拉、HeatmapControl 熱圖模式選擇
 
+### MVP — 把 heatmap_sample 演算法接進主系統（CPU 版，先不 GLSL）
+
 | #    | 狀態 | Task |
 | ---- | ---- | ---- |
-| HM-0 | ⬜   | 任務尚待規劃（先決定：GLSL 移植的先後順序、UI 重建範圍、新公式說明面板） |
+| HM-1 | ✅   | 橋接層 `src/features/heatmap/buildScenario.js`：把 floor/walls/APs/scopes 轉成 sample 的 scenario 格式（px→m 用 floor.scale；walls 展成 segments 並合併 openings；APs 帶 pos/txDbm/channel/frequency/channelWidth） |
+| HM-2 | ✅   | 引擎整合：把 `src/heatmap_sample/render/heatmap.js` + `propagation.js` 改成可被主系統呼叫；頻率改讀 AP `frequency + channel + channelWidth` 算真實中心頻率（取代 sample 寫死 5190 MHz） |
+| HM-3 | ✅   | 同頻干擾：只有「頻道實際重疊」的 AP 才計入 SINR（依 channel + channelWidth 計算重疊範圍） |
+| HM-4 | ✅   | 門窗穿透：walls 有 openings 時，線段穿越用 opening.material.dbLoss；牆剩餘段用 wall.material.dbLoss |
+| HM-5 | ✅   | Scope 過濾：out-of-scope 區域不渲染（alpha=0）；FloorHole 第一版忽略 |
+| HM-6 | ✅   | HeatmapLayer：在 Editor2D 的 FloorImageLayer 之上、WallLayer 之下插入 Konva Image 圖層，吃 heatmapGL 的 canvas |
+| HM-7 | ✅   | `useHeatmapStore`：enabled、reflections、diffraction、gridStepM、blur、showContours；預設 enabled=false |
+| HM-8 | ✅   | 變動驅動重算：監聽 walls / APs / scopes / floor.scale 任何變動即重算（含拖曳中——透過 useDragOverlayStore 把 live 位置套進 scenario） |
+| HM-9 | ✅   | Canvas 左下角 Heatmap 開關按鈕 + 懸浮設定面板；hover RSSI/SINR 數值顯示在按鈕上方 |
+| HM-10 | ✅  | 更新 FormulaNote：套用新演算法（ITU-R P.1238 + Friis / image-source 反射 / UTD 繞射 / 同頻 SINR） |
+
+### 未來擴充（第一版 MVP 不做，後續再迭代）
+
+| #     | 狀態 | Task |
+| ----- | ---- | ---- |
+| HM-F1 | ⬜   | 天線方向性：納入 AP `antennaPattern`（patch/sector）的方位角 + 波瓣增益進計算；目前 MVP 當 omni |
+| HM-F2 | ⬜   | FloorHole 跨樓層訊號穿透（含垂直範圍判斷） |
+| HM-F3 | ⬜   | 樓板衰減（`floor.floorSlab*` 資料欄位已保留） |
+| HM-F4 | ⬜   | autoPowerPlan 自動功率規劃重建（依賴新 heatmap 完成） |
+| HM-F5 | ⬜   | 把 CPU 引擎移植到 WebGL fragment shader（GPU 即時性） |
+| HM-F6 | ⬜   | 拖曳中凍結 heatmap 的效能優化（目前任何變動即重算；大場景卡時再加） |
 
 ---
 
