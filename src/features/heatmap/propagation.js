@@ -66,7 +66,7 @@ function cornerDiffractionDb(tx, rx, corner, wavelengthM) {
   const h = seg.d
   if (seg.t <= 0 || seg.t >= 1) return Infinity
   const v = h * Math.sqrt((2 / wavelengthM) * ((d1 + d2) / (d1 * d2)))
-  return Math.abs(knifeEdgeLossDb(-v))
+  return knifeEdgeLossDb(v)
 }
 
 function pathPhasor(txPowerDbm, totalLossDb, distanceM, kWavenum, extraPhaseRad = 0) {

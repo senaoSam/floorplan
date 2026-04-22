@@ -36,17 +36,23 @@ function FormulaNote() {
       </section>
 
       <section>
-        <h4>4. UTD Knife-Edge 繞射</h4>
-        <p>直射路徑被擋時，對每個牆端點（corner）計算 Fresnel-Kirchhoff 參數：</p>
+        <h4>4. Knife-Edge 繞射（Lee 近似）</h4>
+        <p>直射路徑被牆擋住時，對每個牆端點（corner）計算 Fresnel-Kirchhoff 參數：</p>
         <p><code>v = h · √(2/λ · (d₁+d₂)/(d₁·d₂))</code></p>
-        <p className="muted">用 Lee 近似公式 (knifeEdgeLossDb) 換算成額外 dB 損失。</p>
+        <p className="muted">
+          用 Lee 分段近似換算額外 dB 損失（ITU-R P.526 系列 knife-edge）。
+          注意這是薄刀口近似，不是完整 UTD wedge 繞射。
+          corner 兩段路徑各自只允許穿過 ≤1 道牆，且繞射損失 &gt;40 dB 的路徑會捨棄。
+        </p>
       </section>
 
       <section>
         <h4>5. 多路徑相干疊加</h4>
         <p>
-          每條路徑都轉為 <code>複數電壓 = √(P_rx) · e^(j·(k·d + φ))</code>，
-          全部加總後取功率。
+          每條路徑都轉為複數電壓 <code>V = √(P_rx) · e^(j·(k·d + φ))</code>，
+          其中 <code>P_rx = P_tx + G_tx + G_rx − PL_total</code>（dBm），
+          G_tx、G_rx 分別是 AP 與接收端天線增益（<code>AP_ANT_GAIN_DBI</code>、
+          <code>RX_ANT_GAIN_DBI</code>）。全部加總後取 |V|² 作為功率。
         </p>
       </section>
 
@@ -55,22 +61,28 @@ function FormulaNote() {
         <ul>
           <li>RSSI 取最強 AP (client 會 associate 到它)</li>
           <li>SINR 分母只加入「頻譜真的重疊」的其他 AP（依 band + channel + channelWidth 判斷）</li>
-          <li>SINR = 訊號 − 10·log₁₀(noise + ΣI_k)，noise floor = −95 dBm</li>
+          <li>
+            雜訊與干擾在線性功率 (mW) 域相加：<br />
+            <code>SINR_dB = S_dBm − 10·log₁₀(10^(N/10) + Σ 10^(I_k/10))</code><br />
+            noise floor N = −95 dBm
+          </li>
         </ul>
       </section>
 
       <section>
         <h4>7. Scope 遮罩</h4>
         <p>
-          In-scope 多邊形外 + Out-of-scope 多邊形內的網格點不計算 (NaN)，
-          在 shader 被丟棄成透明，避免誤導。
+          若存在至少一個 in-scope 多邊形，網格點必須落在其中之一才算；
+          落在任一 out-scope 多邊形內的點也會被剔除。被剔除的點標成 NaN，
+          在 shader 丟棄成透明。無 in-scope 時則全部點都計算，僅受 out-scope 剔除。
         </p>
       </section>
 
       <section className="muted small">
-        演算法來源：<code>heatmap_sample/</code>（ITU-R P.1238 + Friis blend / image-source /
-        UTD / secant 穿透）。本系統的 propagation adapter 保持同樣公式，僅把固定 5190 MHz
-        參數化為 per-AP，並把 SINR 改成頻譜重疊過濾。
+        演算法來源：<code>heatmap_sample/</code>（ITU-R P.1238 + Friis blend / image-source
+        reflection / knife-edge 繞射 / secant 穿透）。本系統的 propagation adapter 保持同樣公式，
+        僅把固定 5190 MHz 參數化為 per-AP（<code>ap.centerMHz</code>，缺值 fallback 5190），
+        並把 SINR 改成頻譜重疊過濾。
       </section>
     </div>
   )

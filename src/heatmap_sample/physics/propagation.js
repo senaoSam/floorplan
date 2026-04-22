@@ -80,7 +80,7 @@ function cornerDiffractionDb(tx, rx, corner) {
   // Only apply if corner projects inside the segment (i.e. it's "in the way").
   if (seg.t <= 0 || seg.t >= 1) return Infinity;
   const v = h * Math.sqrt((2 / WAVELENGTH) * ((d1 + d2) / (d1 * d2)));
-  return Math.abs(knifeEdgeLossDb(-v)); // negative v => shadow region
+  return knifeEdgeLossDb(v);
 }
 
 // --- Build phasor contribution for one propagation path ---
