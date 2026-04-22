@@ -12,7 +12,7 @@
 // knife-edge diffraction, secant-law oblique wall loss) is identical.
 
 import {
-  AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, ITU_N_OFFICE_5G, NOISE_FLOOR_DBM,
+  AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, NOISE_FLOOR_DBM,
 } from '@/heatmap_sample/physics/constants.js'
 import {
   sub, dot, len, dist, norm, segSegIntersect,
@@ -24,12 +24,13 @@ const C = 299792458
 const dbToLin = (db) => Math.pow(10, db / 10)
 const linToDb = (lin) => 10 * Math.log10(Math.max(lin, 1e-30))
 
-// Free-space + ITU-R P.1238 indoor path loss, parameterised by frequency.
+// Free-space (Friis) path loss, parameterised by frequency.
+// Indoor attenuation comes from explicit per-wall dbLoss accumulated along the
+// ray; we do NOT layer an ITU-R P.1238 site-general term on top, because that
+// model already averages in wall losses — stacking them would double-count.
 function pathLossDb(d, freqMhz) {
   const dEff = Math.max(d, 0.5)
-  const friis = 20 * Math.log10(dEff) + 20 * Math.log10(freqMhz) - 27.55
-  const itu   = 20 * Math.log10(freqMhz) + ITU_N_OFFICE_5G * Math.log10(dEff) - 28
-  return Math.max(friis, itu)
+  return 20 * Math.log10(dEff) + 20 * Math.log10(freqMhz) - 27.55
 }
 
 function wallLossOblique(wall, rayDir) {

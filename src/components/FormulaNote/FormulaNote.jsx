@@ -8,12 +8,13 @@ function FormulaNote() {
     <div className="formula-note">
       <section>
         <h4>1. 路徑損失（每台 AP 按自身頻率）</h4>
-        <p>取下列兩者較悲觀值（較大者）：</p>
-        <ul>
-          <li><b>Friis (自由空間)</b>：<code>PL = 20·log₁₀(d) + 20·log₁₀(f_MHz) − 27.55</code></li>
-          <li><b>ITU-R P.1238 (室內)</b>：<code>PL = 20·log₁₀(f_MHz) + 31·log₁₀(d) − 28</code></li>
-        </ul>
-        <p className="muted">f_MHz 由 AP 的 band + channel + channelWidth 算出中心頻率，不再寫死 5 GHz。</p>
+        <p>使用 Friis 自由空間公式：</p>
+        <p><code>PL = 20·log₁₀(d) + 20·log₁₀(f_MHz) − 27.55</code></p>
+        <p className="muted">
+          d 取 max(d, 0.5 m) 避免近場奇異。f_MHz 由 AP 的 band + channel 算出中心頻率，
+          不寫死 5 GHz。室內衰減靠第 2 點顯式逐牆累加，不再混合 ITU-R P.1238
+          site-general 模型以避免與顯式牆損雙重計損。
+        </p>
       </section>
 
       <section>
@@ -79,10 +80,11 @@ function FormulaNote() {
       </section>
 
       <section className="muted small">
-        演算法來源：<code>heatmap_sample/</code>（ITU-R P.1238 + Friis blend / image-source
-        reflection / knife-edge 繞射 / secant 穿透）。本系統的 propagation adapter 保持同樣公式，
-        僅把固定 5190 MHz 參數化為 per-AP（<code>ap.centerMHz</code>，缺值 fallback 5190），
-        並把 SINR 改成頻譜重疊過濾。
+        演算法來源：<code>heatmap_sample/</code>（image-source reflection / knife-edge 繞射 /
+        secant 穿透）。本系統的 propagation adapter 相對 sample 有兩點差異：
+        (1) 路徑損失改為純 Friis，不再與 ITU-R P.1238 取 max；
+        (2) 頻率參數化為 per-AP（<code>ap.centerMHz</code>，缺值 fallback 5190 MHz），
+        SINR 只累計頻譜重疊的 AP。
       </section>
     </div>
   )
