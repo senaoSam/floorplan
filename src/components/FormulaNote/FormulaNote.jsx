@@ -27,13 +27,24 @@ function FormulaNote() {
       </section>
 
       <section>
-        <h4>3. 一階鏡面反射（Image-Source）</h4>
-        <ul>
-          <li>對每道牆建立 AP 鏡像點，與接收點連線交於反射點</li>
-          <li>反射損失：<code>R = |Γ| · (0.5 + 0.5·cos θ_i) · e^(−2(k·σ·cos θ_i)²)</code></li>
-          <li>σ 是表面粗糙度 (Rayleigh)；<code>|Γ|</code> 由材質決定</li>
-          <li>反射引入 π 相位</li>
-        </ul>
+        <h4>3. 一階鏡面反射（複數 Fresnel）</h4>
+        <p>對每道牆建立 AP 鏡像點，與接收點連線交於反射點。材質用 ITU-R P.2040-3 係數
+          <code>(a, b, c, d)</code>，按 AP 的中心頻率推出複數相對介電常數：</p>
+        <p>
+          <code>η′ = a · f_GHz^b</code>、<code>σ = c · f_GHz^d</code> (S/m)<br />
+          <code>ε_c = η′ − j · σ / (2π · f · ε₀)</code>
+        </p>
+        <p>Fresnel 複數反射係數（TE / TM 極化）：</p>
+        <p>
+          <code>Γ_⊥ = (cosθ − √(ε_c − sin²θ)) / (cosθ + √(ε_c − sin²θ))</code><br />
+          <code>Γ_∥ = (ε_c·cosθ − √(ε_c − sin²θ)) / (ε_c·cosθ + √(ε_c − sin²θ))</code>
+        </p>
+        <p className="muted">
+          粗糙度因子 <code>e^(−2(k·σ_r·cosθ)²)</code> 作為實數衰減另外乘入（與 Rayleigh 準則一致）。
+          金屬視為完美導體 <code>Γ → −1</code>。
+          不再額外乘 <code>(0.5 + 0.5·cosθ)</code>（Fresnel 本身已含角度依賴），也不再固定加 π 相位
+          （相位由 Fresnel 複數值自然帶出）。
+        </p>
       </section>
 
       <section>
@@ -48,23 +59,37 @@ function FormulaNote() {
       </section>
 
       <section>
-        <h4>5. 多路徑寬頻相干疊加</h4>
+        <h4>5. 多路徑寬頻相干疊加（雙極化通道）</h4>
         <p>
-          每條路徑轉為複數增益 <code>aₙ = √(P_rx,n)·e^(j·φₙ)</code> 與延遲
-          <code>τₙ = dₙ / c</code>，其中
-          <code>P_rx,n = P_tx + G_tx + G_rx − PL_total,n</code>（dBm），
-          φₙ 吸收反射等額外相位（反射取 π）。
+          為了保留正交極化的獨立性，把 scalar 通道拆成兩個互相獨立的極化通道
+          <code>H_⊥(f)</code>、<code>H_∥(f)</code>。每條路徑在兩通道各自攜帶複數增益
+          <code>aₙ,⊥</code>、<code>aₙ,∥</code> 與共同延遲 <code>τₙ = dₙ / c</code>：
+        </p>
+        <ul>
+          <li>
+            直射 / 繞射：<code>aₙ,⊥ = aₙ,∥ = (1/√2) · √(P_rx,n)</code>，其中
+            <code>P_rx,n = P_tx + G_tx + G_rx − PL_total,n</code>（dBm）。
+            1/√2 代表發射端以兩個正交極化基底等功率激發。
+          </li>
+          <li>
+            反射：<code>aₙ,p = (1/√2) · √(P_rx,n) · roughness · Γ_p</code>，
+            <code>Γ_p</code> 取第 3 點的 Fresnel 複數係數（p 為 ⊥ 或 ∥）。
+          </li>
+        </ul>
+        <p>
+          在 channel 有效頻寬（BW × 0.9，避開 guard band）內取 N 個等距頻點，
+          兩通道各自相干疊加後在功率域合成：
         </p>
         <p>
-          在 channel 有效頻寬（BW × 0.9，避開 guard band）內取 N 個等距頻點：
-        </p>
-        <p>
-          <code>H(fᵢ) = Σ aₙ · e^(−j·2π·fᵢ·τₙ)</code>，
-          <code>P = (1/N)·Σᵢ |H(fᵢ)|²</code>
+          <code>H_p(fᵢ) = Σ aₙ,p · e^(−j·2π·fᵢ·τₙ)</code>，
+          <code>P(fᵢ) = |H_⊥(fᵢ)|² + |H_∥(fᵢ)|²</code><br />
+          <code>RSSI = 10·log₁₀( (1/N)·Σᵢ P(fᵢ) )</code>
         </p>
         <p className="muted">
           N = max(5, ⌈BW_MHz / 4⌉)，Δf ≲ 4 MHz 足以涵蓋室內典型延遲擴展 (~125 ns)。
-          對單中心頻率相干和而言，這會避免窄頻 null 被當作整個 channel 的黑洞。
+          頻域取樣避免窄頻 null 被當作整個 channel 的黑洞；
+          雙通道合成是 polarization-agnostic receiver 的近似，
+          不代表特定單極化天線的瞬時複數通道。
         </p>
       </section>
 
@@ -92,10 +117,12 @@ function FormulaNote() {
 
       <section className="muted small">
         演算法來源：<code>heatmap_sample/</code>（image-source reflection / knife-edge 繞射 /
-        secant 穿透）。本系統的 propagation adapter 相對 sample 有兩點差異：
+        secant 穿透）。本系統的 propagation adapter 相對 sample 有幾點差異：
         (1) 路徑損失改為純 Friis，不再與 ITU-R P.1238 取 max；
-        (2) 頻率參數化為 per-AP（<code>ap.centerMHz</code>，缺值 fallback 5190 MHz），
-        SINR 只累計頻譜重疊的 AP。
+        (2) 頻率參數化為 per-AP（<code>ap.centerMHz</code>，缺值 fallback 5190 MHz）；
+        (3) 反射改用 ITU-R P.2040-3 材質係數 + 複數 Fresnel，並拆成兩個正交極化通道在功率域合成；
+        (4) 多路徑在整個 channel 頻寬內取 N 個頻點做寬頻平均；
+        (5) SINR 只累計頻譜重疊的 AP。
       </section>
     </div>
   )

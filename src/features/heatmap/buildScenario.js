@@ -6,33 +6,22 @@
 
 import { channelCenterMHz } from './frequency'
 
-// Fresnel |Γ| magnitudes keyed by material id.
-// Values are rough averages at 5 GHz indoor; they don't need to be tight because
-// the reflected path is a small correction on top of the direct path. The chief
-// knob that drives the heatmap is dbLoss (penetration), which comes from the
-// material definition unchanged.
-const REFLECTION_MAG_BY_MATERIAL = {
-  glass:    0.35,
-  drywall:  0.30,
-  wood:     0.25,
-  brick:    0.45,
-  concrete: 0.55,
-  metal:    0.90,
-}
+// ITU-R P.2040-3 Table 3 coefficients. Reflection uses full complex Fresnel
+// based on (eps_r, sigma) derived from these per-AP frequency. Fallback ~ concrete.
+const ITU_FALLBACK = { a: 5.24, b: 0, c: 0.0462, d: 0.7822 }
 
-function reflectionMagFor(material) {
-  if (!material) return 0.45
-  return REFLECTION_MAG_BY_MATERIAL[material.id] ?? 0.45
+function ituFor(material) {
+  return material?.itu ?? ITU_FALLBACK
 }
 
 // Expand a wall with openings into N sub-segments, each with its own dbLoss.
 // Openings are stored as fractional ranges [startFrac, endFrac] along the wall.
-// Returns segments in meters: [{ a, b, lossDb, reflectionMag, roughnessM, kind }]
+// Returns segments in meters: [{ a, b, lossDb, itu, roughnessM, kind }]
 function expandWall(wall, pxToM) {
   const ax = wall.startX, ay = wall.startY
   const bx = wall.endX,   by = wall.endY
   const wallLoss = wall.material?.dbLoss ?? 8
-  const wallRefl = reflectionMagFor(wall.material)
+  const wallItu = ituFor(wall.material)
 
   const openings = (wall.openings ?? []).slice().sort((a, b) => a.startFrac - b.startFrac)
   if (openings.length === 0) {
@@ -40,7 +29,7 @@ function expandWall(wall, pxToM) {
       a: { x: ax * pxToM, y: ay * pxToM },
       b: { x: bx * pxToM, y: by * pxToM },
       lossDb: wallLoss,
-      reflectionMag: wallRefl,
+      itu: wallItu,
       roughnessM: 0.01,
       kind: 'interior',
     }]
@@ -61,18 +50,18 @@ function expandWall(wall, pxToM) {
         a: pointAt(cursor),
         b: pointAt(s),
         lossDb: wallLoss,
-        reflectionMag: wallRefl,
+        itu: wallItu,
         roughnessM: 0.01,
         kind: 'interior',
       })
     }
     const opLoss = op.material?.dbLoss ?? wallLoss
-    const opRefl = reflectionMagFor(op.material)
+    const opItu = ituFor(op.material)
     segs.push({
       a: pointAt(s),
       b: pointAt(e),
       lossDb: opLoss,
-      reflectionMag: opRefl,
+      itu: opItu,
       roughnessM: 0.01,
       kind: op.type === 'window' ? 'window' : 'door',
     })
@@ -83,7 +72,7 @@ function expandWall(wall, pxToM) {
       a: pointAt(cursor),
       b: pointAt(1),
       lossDb: wallLoss,
-      reflectionMag: wallRefl,
+      itu: wallItu,
       roughnessM: 0.01,
       kind: 'interior',
     })
