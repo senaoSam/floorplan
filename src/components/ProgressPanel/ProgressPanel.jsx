@@ -141,6 +141,7 @@ const PHASES = [
           { id: 'HM-F4', done: false, text: 'autoPowerPlan 自動功率規劃重建' },
           { id: 'HM-F5', done: false, text: 'CPU → WebGL fragment shader 移植' },
           { id: 'HM-F6', done: false, text: '拖曳凍結 heatmap 的效能優化' },
+          { id: 'HM-F7', done: false, text: '熱圖指標切換：SNR / CCI 模式' },
         ],
       },
     ],

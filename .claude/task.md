@@ -148,6 +148,7 @@
 | HM-F4 | ⬜   | autoPowerPlan 自動功率規劃重建（依賴新 heatmap 完成） |
 | HM-F5 | ⬜   | 把 CPU 引擎移植到 WebGL fragment shader（GPU 即時性） |
 | HM-F6 | ⬜   | 拖曳中凍結 heatmap 的效能優化（目前任何變動即重算；大場景卡時再加） |
+| HM-F7 | ⬜   | 熱圖指標切換：新增 SNR 與 CCI 模式（目前有 RSSI / SINR）。SNR = S − N（忽略干擾）、CCI = 10·log₁₀(ΣI_k)（純同頻干擾強度）。HeatmapControl 加 mode 選單 + 對應色階圖例 |
 
 ---
 
