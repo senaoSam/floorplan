@@ -48,12 +48,23 @@ function FormulaNote() {
       </section>
 
       <section>
-        <h4>5. 多路徑相干疊加</h4>
+        <h4>5. 多路徑寬頻相干疊加</h4>
         <p>
-          每條路徑都轉為複數電壓 <code>V = √(P_rx) · e^(j·(k·d + φ))</code>，
-          其中 <code>P_rx = P_tx + G_tx + G_rx − PL_total</code>（dBm），
-          G_tx、G_rx 分別是 AP 與接收端天線增益（<code>AP_ANT_GAIN_DBI</code>、
-          <code>RX_ANT_GAIN_DBI</code>）。全部加總後取 |V|² 作為功率。
+          每條路徑轉為複數增益 <code>aₙ = √(P_rx,n)·e^(j·φₙ)</code> 與延遲
+          <code>τₙ = dₙ / c</code>，其中
+          <code>P_rx,n = P_tx + G_tx + G_rx − PL_total,n</code>（dBm），
+          φₙ 吸收反射等額外相位（反射取 π）。
+        </p>
+        <p>
+          在 channel 有效頻寬（BW × 0.9，避開 guard band）內取 N 個等距頻點：
+        </p>
+        <p>
+          <code>H(fᵢ) = Σ aₙ · e^(−j·2π·fᵢ·τₙ)</code>，
+          <code>P = (1/N)·Σᵢ |H(fᵢ)|²</code>
+        </p>
+        <p className="muted">
+          N = max(5, ⌈BW_MHz / 4⌉)，Δf ≲ 4 MHz 足以涵蓋室內典型延遲擴展 (~125 ns)。
+          對單中心頻率相干和而言，這會避免窄頻 null 被當作整個 channel 的黑洞。
         </p>
       </section>
 

@@ -5,11 +5,16 @@
 // wavelength. We re-implement the same model here but parameterised by AP.
 //
 // Differences vs. sample:
-//   - FREQ_MHZ / WAVELENGTH / K_WAVENUM are computed per AP from ap.centerMHz
-//   - SINR aggregation only counts interferers that share spectrum (same band +
-//     overlapping frequency range)
-// All other math (ITU-R P.1238 + Friis blend, image-source reflection, UTD
-// knife-edge diffraction, secant-law oblique wall loss) is identical.
+//   - Per-AP centre frequency (derived from ap.centerMHz) drives wavelength,
+//     path loss and phasor wavenumber.
+//   - Path loss uses pure Friis; wall losses are applied explicitly per ray
+//     (no ITU-R P.1238 blend — that model would double-count wall loss).
+//   - Multipath sum is evaluated at N frequency samples across the AP's
+//     channel bandwidth (not just the centre), then power-averaged. Each path
+//     is represented as a complex gain aₙ and delay τₙ = dₙ/c so the channel
+//     response H(f) = Σ aₙ·e^(−j2πf·τₙ) can be sampled cleanly.
+//   - SINR aggregation only counts interferers that share spectrum (same
+//     band + overlapping frequency range).
 
 import {
   AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, NOISE_FLOOR_DBM,
@@ -70,11 +75,25 @@ function cornerDiffractionDb(tx, rx, corner, wavelengthM) {
   return knifeEdgeLossDb(v)
 }
 
-function pathPhasor(txPowerDbm, totalLossDb, distanceM, kWavenum, extraPhaseRad = 0) {
+// Build a path descriptor: complex baseband gain aₙ (voltage) and delay τₙ.
+// aₙ already carries the path's RX power in voltage units plus any extra phase
+// (e.g. π for a reflection). τₙ = d/c lets us evaluate H(f) = Σ aₙ·e^(−j2πf·τₙ)
+// at arbitrary frequencies without re-deriving geometry.
+function makePath(txPowerDbm, totalLossDb, distanceM, extraPhaseRad = 0) {
   const rxPowerDb = txPowerDbm + AP_ANT_GAIN_DBI + RX_ANT_GAIN_DBI - totalLossDb
   const amp = Math.sqrt(dbToLin(rxPowerDb))
-  const phase = kWavenum * distanceM + extraPhaseRad
-  return { re: amp * Math.cos(phase), im: amp * Math.sin(phase) }
+  return {
+    aRe: amp * Math.cos(extraPhaseRad),
+    aIm: amp * Math.sin(extraPhaseRad),
+    tau: distanceM / C,
+  }
+}
+
+// Pick frequency sample count for the channel-wide coherent sum.
+// Δf ≲ 4 MHz keeps aliasing safe up to ~125 ns delay spread (typical indoor
+// upper bound). Minimum 5 points so even 20 MHz channels get useful averaging.
+function chooseFreqSamples(bwMhz) {
+  return Math.max(5, Math.ceil(bwMhz / 4))
 }
 
 // Received power at rx from one AP. ap must carry centerMHz (see buildScenario).
@@ -86,15 +105,13 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   const wavelength = C / (freqMhz * 1e6)
   const kWave = (2 * Math.PI) / wavelength
 
-  let Re = 0, Im = 0
-  let pathsUsed = 0
+  const paths = []
 
   // Direct
   const dDir = Math.max(dist(ap.pos, rx), 0.25)
   const wallScan = accumulateWallLoss(ap.pos, rx, walls)
   const plDir = pathLossDb(dDir, freqMhz) + wallScan.totalLoss
-  const phDir = pathPhasor(ap.txDbm, plDir, dDir, kWave)
-  Re += phDir.re; Im += phDir.im; pathsUsed++
+  paths.push(makePath(ap.txDbm, plDir, dDir))
 
   // 1st-order image-source reflections
   if (maxReflOrder >= 1) {
@@ -119,12 +136,11 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
 
       const reflLossDb = -20 * Math.log10(Math.max(rFactor, 1e-3))
       const plRef = pathLossDb(dTot, freqMhz) + leg1.totalLoss + leg2.totalLoss + reflLossDb
-      const ph = pathPhasor(ap.txDbm, plRef, dTot, kWave, Math.PI)
-      Re += ph.re; Im += ph.im; pathsUsed++
+      paths.push(makePath(ap.txDbm, plRef, dTot, Math.PI))
     }
   }
 
-  // UTD knife-edge diffraction around corners (only when direct is blocked)
+  // Knife-edge diffraction around corners (only when direct is blocked)
   if (enableDiffraction && wallScan.hits > 0) {
     for (const c of corners) {
       const s1 = accumulateWallLoss(ap.pos, c, walls)
@@ -136,14 +152,35 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       const d2 = dist(c, rx)
       const dTot = d1 + d2
       const plDiff = pathLossDb(dTot, freqMhz) + s1.totalLoss + s2.totalLoss + diff
-      const ph = pathPhasor(ap.txDbm, plDiff, dTot, kWave)
-      Re += ph.re; Im += ph.im; pathsUsed++
+      paths.push(makePath(ap.txDbm, plDiff, dTot))
     }
   }
 
-  const powerLin = Re * Re + Im * Im
-  const rssiDbm = linToDb(powerLin)
-  return { rssiDbm, pathsUsed }
+  // Coherent sum across N frequency samples spanning the channel, then power
+  // average. This approximates an OFDM receiver integrating across sub-carriers
+  // and keeps narrowband nulls from punching through as full-channel dropouts.
+  const bwMhz = ap.channelWidth || 20
+  const bwHz = bwMhz * 1e6 * 0.9          // drop 5% guard on each edge
+  const centerHz = freqMhz * 1e6
+  const N = chooseFreqSamples(bwMhz)
+  const startHz = centerHz - bwHz / 2
+  const stepHz = N > 1 ? bwHz / (N - 1) : 0
+
+  let powerSum = 0
+  for (let i = 0; i < N; i++) {
+    const f = startHz + i * stepHz
+    const twoPiF = 2 * Math.PI * f
+    let Re = 0, Im = 0
+    for (const p of paths) {
+      const ph = -twoPiF * p.tau
+      const cs = Math.cos(ph), sn = Math.sin(ph)
+      Re += p.aRe * cs - p.aIm * sn
+      Im += p.aRe * sn + p.aIm * cs
+    }
+    powerSum += Re * Re + Im * Im
+  }
+  const rssiDbm = linToDb(powerSum / N)
+  return { rssiDbm, pathsUsed: paths.length }
 }
 
 // SINR-aware aggregation: strongest AP is the signal; other APs contribute to
