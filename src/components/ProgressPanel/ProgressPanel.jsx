@@ -153,7 +153,9 @@ const PHASES = [
         layer: 'Layer 10 — 3D 視覺化',
         items: [
           { id: '10-1', done: true, text: 'R3F 基礎場景（平面圖貼圖）' },
-          { id: '10-2', done: false, text: '3D 牆體生成' },
+          { id: '10-2', done: true, text: '3D 牆體生成（實心 Box）' },
+          { id: '10-2b', done: false, text: '3D 牆體 openings 鏤空' },
+          { id: '10-2c', done: false, text: '3D 牆體選取 / hover 視覺化' },
           { id: '10-3', done: false, text: '3D AP 標記' },
           { id: '10-4', done: false, text: '3D Scope / Floor Hole 視覺化' },
           { id: '10-5', done: false, text: '3D 多樓層堆疊 + 訊號穿透視覺化' },

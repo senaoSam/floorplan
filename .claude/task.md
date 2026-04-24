@@ -157,11 +157,13 @@
 ### Layer 10 — 3D 視覺化
 | #    | 狀態 | Task                                                         |
 | ---- | ---- | ------------------------------------------------------------ |
-| 10-1 | ✅   | R3F 基礎場景：平面圖貼圖到地板平面                           |
-| 10-2 | ⬜   | 3D 牆體:依 startX/Y → endX/Y 與 topHeight/bottomHeight 生成  |
-| 10-3 | ⬜   | 3D AP 標記：依 x/y/z 座標顯示，含安裝高度差異                |
-| 10-4 | ⬜   | 3D Scope / Floor Hole 視覺化                                 |
-| 10-5 | ⬜   | 3D 多樓層堆疊顯示，樓層間訊號穿透視覺化                     |
+| 10-1  | ✅   | R3F 基礎場景：平面圖貼圖到地板平面                           |
+| 10-2  | ✅   | 3D 牆體:依 startX/Y → endX/Y 與 topHeight/bottomHeight 生成（實心 Box，厚度 0.1 m，材質顏色） |
+| 10-2b | ⬜   | 3D 牆體 openings 鏤空：依 opening.startFrac/endFrac + bottom/topFrac 切出門窗洞 |
+| 10-2c | ⬜   | 3D 牆體選取 / hover 視覺化：與 2D 選取同步（selectedId 反白、hover 高亮） |
+| 10-3  | ⬜   | 3D AP 標記：依 x/y/z 座標顯示，含安裝高度差異                |
+| 10-4  | ⬜   | 3D Scope / Floor Hole 視覺化                                 |
+| 10-5  | ⬜   | 3D 多樓層堆疊顯示，樓層間訊號穿透視覺化                     |
 
 ---
 

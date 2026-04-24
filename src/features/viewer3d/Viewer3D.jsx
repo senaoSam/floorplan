@@ -3,6 +3,7 @@ import { Canvas, extend, useFrame, useLoader, useThree } from '@react-three/fibe
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { useFloorStore } from '@/store/useFloorStore'
+import WallLayer3D from './WallLayer3D'
 
 // r3f v7 doesn't include drei by default. Make OrbitControls available as a
 // JSX element by registering it with the reconciler.
@@ -114,6 +115,10 @@ function Viewer3D() {
       <Suspense fallback={null}>
         {floor?.imageUrl ? <FloorPlane floor={floor} /> : <EmptyScene />}
       </Suspense>
+
+      {floor && (
+        <WallLayer3D floorId={floor.id} pxToM={1 / (floor.scale || 100)} />
+      )}
 
       {/* Subtle ground grid for spatial reference (aligned to the floor). */}
       {floor && (
