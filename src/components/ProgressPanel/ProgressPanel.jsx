@@ -154,7 +154,7 @@ const PHASES = [
         items: [
           { id: '10-1', done: true, text: 'R3F 基礎場景（平面圖貼圖）' },
           { id: '10-2', done: true, text: '3D 牆體生成（實心 Box）' },
-          { id: '10-2b', done: false, text: '3D 牆體 openings 鏤空' },
+          { id: '10-2b', done: true, text: '3D 牆體 openings 鏤空 + 結構化門窗' },
           { id: '10-2c', done: false, text: '3D 牆體選取 / hover 視覺化' },
           { id: '10-3', done: true, text: '3D AP 標記（圓柱 + 環 + 垂直桿）' },
           { id: '10-3b', done: false, text: '3D AP 天線方向性視覺化' },

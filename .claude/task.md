@@ -159,7 +159,7 @@
 | ---- | ---- | ------------------------------------------------------------ |
 | 10-1  | ✅   | R3F 基礎場景：平面圖貼圖到地板平面                           |
 | 10-2  | ✅   | 3D 牆體:依 startX/Y → endX/Y 與 topHeight/bottomHeight 生成（實心 Box，厚度 0.1 m，材質顏色） |
-| 10-2b | ⬜   | 3D 牆體 openings 鏤空：依 opening.startFrac/endFrac + bottom/topFrac 切出門窗洞 |
+| 10-2b | ✅   | 3D 牆體 openings 鏤空（ExtrudeGeometry + 結構化門窗：門框 / 門扇 / 門把，窗框 / 玻璃 / 窗台） |
 | 10-2c | ⬜   | 3D 牆體選取 / hover 視覺化：與 2D 選取同步（selectedId 反白、hover 高亮） |
 | 10-3  | ✅   | 3D AP 標記：依 x/y/z 座標顯示，含安裝高度差異（圓柱+環+垂直桿） |
 | 10-3b | ⬜   | 3D AP 天線方向性視覺化：directional / custom pattern 的波束錐形 / 輪廓 |
