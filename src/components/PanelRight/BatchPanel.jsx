@@ -54,6 +54,7 @@ function BatchPanel() {
   const removeWalls      = useWallStore((s) => s.removeWalls)
   const updateWalls      = useWallStore((s) => s.updateWalls)
   const aps              = useAPStore((s) => s.apsByFloor[activeFloorId] ?? [])
+  const walls            = useWallStore((s) => s.wallsByFloor[activeFloorId] ?? [])
   const removeAPs        = useAPStore((s) => s.removeAPs)
   const updateAPs        = useAPStore((s) => s.updateAPs)
   const scopes           = useScopeStore((s) => s.scopesByFloor[activeFloorId] ?? [])
@@ -86,6 +87,12 @@ function BatchPanel() {
   const apAzimuth  = uniformValue(selectedAPs, 'azimuth')
   const apBeam     = uniformValue(selectedAPs, 'beamwidth')
   const apPattern  = uniformValue(selectedAPs, 'patternId')
+  const apZ        = uniformValue(selectedAPs, 'z')
+
+  // Walls: uniform values for height batch editing.
+  const selectedWalls  = walls.filter((w) => wallIds.includes(w.id))
+  const wallTop    = uniformValue(selectedWalls, 'topHeight')
+  const wallBottom = uniformValue(selectedWalls, 'bottomHeight')
 
   const selectedScopes = scopes.filter((z) => scopeIds.includes(z.id))
   const scopeType      = uniformValue(selectedScopes, 'type')
@@ -180,6 +187,16 @@ function BatchPanel() {
     updateAPs(activeFloorId, apIds, { patternId })
   }, [activeFloorId, apIds, updateAPs])
 
+  const handleAPZ = useCallback((raw) => {
+    const num = parseFloat(raw)
+    if (!isNaN(num) && num >= 0) updateAPs(activeFloorId, apIds, { z: num })
+  }, [activeFloorId, apIds, updateAPs])
+
+  const handleWallHeight = useCallback((field, raw) => {
+    const num = parseFloat(raw)
+    if (!isNaN(num) && num >= 0) updateWalls(activeFloorId, wallIds, { [field]: num })
+  }, [activeFloorId, wallIds, updateWalls])
+
   // Channel section: disabled when APs span multiple bands (they share one dropdown).
   const channelEntriesForBand = apFreq && apFreq !== MIXED
     ? channelEntries(domainId, apFreq)
@@ -235,21 +252,32 @@ function BatchPanel() {
             </div>
           </section>
 
-          {/* 牆體高度（3D 視圖開放後啟用，與 WallPanel 一致） */}
-          <section className="batch-panel__section batch-panel__section--disabled" title="3D 視圖開放後啟用">
-            <p className="batch-panel__label">
-              牆體高度（批次變更）
-              <span className="batch-panel__coming-soon">即將推出</span>
-            </p>
+          {/* 牆體高度（批次變更） */}
+          <section className="batch-panel__section">
+            <p className="batch-panel__label">牆體高度（批次變更）</p>
             <div className="batch-panel__height-row">
               <label className="batch-panel__height-field">
                 <span>頂部</span>
-                <input type="number" disabled />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={wallTop === MIXED ? '' : (wallTop ?? '')}
+                  placeholder={wallTop === MIXED ? '多個值' : ''}
+                  onChange={(e) => handleWallHeight('topHeight', e.target.value)}
+                />
                 <span>m</span>
               </label>
               <label className="batch-panel__height-field">
                 <span>底部</span>
-                <input type="number" disabled />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={wallBottom === MIXED ? '' : (wallBottom ?? '')}
+                  placeholder={wallBottom === MIXED ? '多個值' : ''}
+                  onChange={(e) => handleWallHeight('bottomHeight', e.target.value)}
+                />
                 <span>m</span>
               </label>
             </div>
@@ -380,14 +408,19 @@ function BatchPanel() {
             </div>
           </section>
 
-          {/* 安裝高度（3D 視圖開放後啟用） */}
-          <section className="batch-panel__section batch-panel__section--disabled" title="3D 視圖開放後啟用">
-            <p className="batch-panel__label">
-              安裝高度（批次變更）
-              <span className="batch-panel__coming-soon">即將推出</span>
-            </p>
+          {/* 安裝高度（批次變更） */}
+          <section className="batch-panel__section">
+            <p className="batch-panel__label">安裝高度（批次變更）</p>
             <div className="batch-panel__number-row">
-              <input className="batch-panel__input" type="number" disabled />
+              <input
+                className="batch-panel__input"
+                type="number"
+                min="0"
+                step="0.1"
+                value={apZ === MIXED ? '' : (apZ ?? '')}
+                placeholder={apZ === MIXED ? '多個值' : ''}
+                onChange={(e) => handleAPZ(e.target.value)}
+              />
               <span className="batch-panel__unit">m</span>
             </div>
           </section>

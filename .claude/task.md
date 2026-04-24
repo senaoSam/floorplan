@@ -161,7 +161,10 @@
 | 10-2  | ✅   | 3D 牆體:依 startX/Y → endX/Y 與 topHeight/bottomHeight 生成（實心 Box，厚度 0.1 m，材質顏色） |
 | 10-2b | ⬜   | 3D 牆體 openings 鏤空：依 opening.startFrac/endFrac + bottom/topFrac 切出門窗洞 |
 | 10-2c | ⬜   | 3D 牆體選取 / hover 視覺化：與 2D 選取同步（selectedId 反白、hover 高亮） |
-| 10-3  | ⬜   | 3D AP 標記：依 x/y/z 座標顯示，含安裝高度差異                |
+| 10-3  | ✅   | 3D AP 標記：依 x/y/z 座標顯示，含安裝高度差異（圓柱+環+垂直桿） |
+| 10-3b | ⬜   | 3D AP 天線方向性視覺化：directional / custom pattern 的波束錐形 / 輪廓 |
+| 10-3c | ⬜   | 3D AP 選取 / hover 視覺化 + AP 名稱 label（需引入 drei 或自寫 billboard） |
+| 10-3d | ⬜   | AP mountType（ceiling/wall）UI 啟用 + 3D 視覺差異（天花板 vs 壁掛姿勢） |
 | 10-4  | ⬜   | 3D Scope / Floor Hole 視覺化                                 |
 | 10-5  | ⬜   | 3D 多樓層堆疊顯示，樓層間訊號穿透視覺化                     |
 

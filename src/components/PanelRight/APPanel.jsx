@@ -278,15 +278,17 @@ function APPanel({ floorId, apId }) {
         </div>
       </section>
 
-      {/* 安裝高度（3D 視圖開放後啟用） */}
-      <section className="ap-panel__section ap-panel__section--disabled" title="3D 視圖開放後啟用">
-        <p className="ap-panel__label">安裝高度 <span className="ap-panel__coming-soon">即將推出</span></p>
+      {/* 安裝高度 — 影響 3D 視覺與未來的樓板 / 穿透計算 */}
+      <section className="ap-panel__section">
+        <p className="ap-panel__label">安裝高度</p>
         <div className="ap-panel__number-row">
           <input
             className="ap-panel__input ap-panel__input--number"
             type="number"
+            min="0"
+            step="0.1"
             value={ap.z}
-            disabled
+            onChange={(e) => handleNumber('z', e.target.value)}
           />
           <span className="ap-panel__unit">m</span>
         </div>
