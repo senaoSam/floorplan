@@ -2,6 +2,10 @@ import { create } from 'zustand'
 import { generateId } from '@/utils/id'
 import { DEFAULT_FLOOR_SLAB_MATERIAL_ID, DEFAULT_FLOOR_SLAB_DB } from '@/constants/materials'
 
+// Default inter-slab distance (meters). Equals the default wall topHeight so
+// a newly-imported floorplan stacks cleanly into a multi-storey 3D view.
+export const DEFAULT_FLOOR_HEIGHT_M = 3.0
+
 export const useFloorStore = create((set, get) => ({
   floors: [],
   activeFloorId: null,
@@ -85,6 +89,7 @@ export const useFloorStore = create((set, get) => ({
       cropX: null, cropY: null, cropWidth: null, cropHeight: null,
       floorSlabMaterialId: DEFAULT_FLOOR_SLAB_MATERIAL_ID,
       floorSlabAttenuationDb: DEFAULT_FLOOR_SLAB_DB,
+      floorHeight: DEFAULT_FLOOR_HEIGHT_M,
     }
     set((state) => ({
       floors: [...state.floors, floor],
@@ -104,6 +109,7 @@ export const useFloorStore = create((set, get) => ({
       cropX: null, cropY: null, cropWidth: null, cropHeight: null,
       floorSlabMaterialId: DEFAULT_FLOOR_SLAB_MATERIAL_ID,
       floorSlabAttenuationDb: DEFAULT_FLOOR_SLAB_DB,
+      floorHeight: DEFAULT_FLOOR_HEIGHT_M,
     }
     set((state) => ({
       floors: [...state.floors, floor],
@@ -125,6 +131,7 @@ export const useFloorStore = create((set, get) => ({
       cropX: null, cropY: null, cropWidth: null, cropHeight: null,
       floorSlabMaterialId: DEFAULT_FLOOR_SLAB_MATERIAL_ID,
       floorSlabAttenuationDb: DEFAULT_FLOOR_SLAB_DB,
+      floorHeight: DEFAULT_FLOOR_HEIGHT_M,
     }))
     set((state) => ({
       floors: [...state.floors, ...newFloors],

@@ -166,7 +166,11 @@
 | 10-3c | ⬜   | 3D AP 選取 / hover 視覺化 + AP 名稱 label（需引入 drei 或自寫 billboard） |
 | 10-3d | ⬜   | AP mountType（ceiling/wall）UI 啟用 + 3D 視覺差異（天花板 vs 壁掛姿勢） |
 | 10-4  | ✅   | 3D Scope / Floor Hole 視覺化（地板平鋪多邊形 + 外框）         |
-| 10-5  | ⬜   | 3D 多樓層堆疊顯示，樓層間訊號穿透視覺化                     |
+| 10-5a | ✅   | 3D 多樓層堆疊：floor.floorHeight（預設 3 m）+ computeFloorElevations，所有樓層同時渲染，切換 active 樓層時相機平滑上下移動 |
+| 10-5b | ⬜   | 非 active 樓層的牆 / AP / Scope 視覺弱化（目前只有底圖淡化，牆 AP 仍 100% 實體，多樓層會擠） |
+| 10-5c | ⬜   | 「只顯示 active 樓層」切換 + 單樓層 / 全樓層模式按鈕         |
+| 10-5d | ⬜   | `floor.floorHeight` 編輯 UI（目前都預設 3 m）                |
+| 10-5e | ⬜   | 樓層間訊號穿透視覺化（依賴 HM-F2/F3 完成）                   |
 
 ---
 
