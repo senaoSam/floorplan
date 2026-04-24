@@ -206,23 +206,43 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
     return true
   }
 
-  // Slab-crossing metadata for HM-F3a. `floorBoundaries` is a sorted list of
-  // the *upper* boundary Y of each floor; slabDb is the attenuation applied
-  // when a ray crosses that boundary. Active floor's rx lives at
-  // activeElevationM + rxHeightM (default: standing-height ≈ 1.0 m).
+  // Slab-crossing metadata for HM-F3a / F2a. `floorBoundaries` is a sorted
+  // list of the *upper* boundary Y of each floor; slabDb is the attenuation
+  // applied when a ray crosses that boundary. Each boundary also carries a
+  // list of "bypass holes" — FloorHole polygons (in meters, active-floor
+  // canvas frame) that, when a ray crosses the boundary inside the hole's
+  // XY footprint, zero out this slab's attenuation. Active floor's rx lives
+  // at activeElevationM + rxHeightM (default: standing-height ≈ 1.0 m).
   let floorBoundaries = null
   let rxElevationM = null
   if (crossFloor && crossFloor.floorStack && crossFloor.floorStack.length) {
     const stack = crossFloor.floorStack
     floorBoundaries = []
     for (let i = 0; i < stack.length - 1; i++) {
-      // Boundary between floor[i] and floor[i+1] is at floor[i+1]'s elevation.
-      // The attenuating slab belongs to floor[i] (its ceiling / floor above's
-      // floor slab). Either floor can hold the dB number; convention here is
-      // "slab belongs to the floor whose ceiling it is" (floor[i]).
+      // Boundary i sits at stack[i+1].elevationM and belongs to floor[i]
+      // (that floor's ceiling / the next floor's floor slab).
+      // A hole with floor-index range [fromIdx, toIdx] bypasses boundaries
+      // i such that fromIdx <= i <= toIdx − 1. The hole's points are stored
+      // in its own floor's canvas px; convert to meters using that floor's
+      // scale so the XY footprint is correct regardless of which floor
+      // authored the hole.
+      const bypassHoles = []
+      for (let k = 0; k < stack.length; k++) {
+        const f = stack[k]
+        for (const hole of (f.holes ?? [])) {
+          if (hole.fromIdx == null || hole.toIdx == null) continue
+          if (hole.fromIdx <= i && i <= hole.toIdx - 1) {
+            const holePxToM = f.scale ? 1 / f.scale : pxToM
+            const pts = new Array(hole.points.length)
+            for (let p = 0; p < hole.points.length; p++) pts[p] = hole.points[p] * holePxToM
+            bypassHoles.push(pts)
+          }
+        }
+      }
       floorBoundaries.push({
         yM: stack[i + 1].elevationM,
         slabDb: stack[i].slabDb ?? 0,
+        bypassHoles,
       })
     }
     rxElevationM = (crossFloor.activeElevationM ?? 0) + (crossFloor.rxHeightM ?? 1.0)

@@ -146,7 +146,7 @@
 | HM-F7 | ✅   | 熱圖指標切換：新增 SNR 與 CCI 模式（目前有 RSSI / SINR）。SNR = S − N（忽略干擾）、CCI = 10·log₁₀(ΣI_k)（純同頻干擾強度）。HeatmapControl 加 mode 選單 + 對應色階圖例 |
 | HM-F3a | ✅   | 樓板衰減計算：射線穿越 N 個樓層時加總 N × `floor.floorSlabAttenuationDb` |
 | HM-F2b | ✅   | Cross-floor 熱圖呈現：所有樓層 AP 都參與，帶各自 elevation + AP.z |
-| HM-F2a | ⬜   | FloorHole 跨樓層 bypass：射線穿越 slab 時若 (x,y) 落在 hole 多邊形內，該 slab 不計衰減；含 hole 的垂直範圍 (bottomFloorId/topFloorId) |
+| HM-F2a | ✅   | FloorHole 跨樓層 bypass：射線穿 slab 在 hole XY 範圍內 → 該 slab 不計衰減；含垂直範圍 (bottomFloorId/topFloorId) |
 | HM-F3c | ⬜   | Slab 斜入射放大：slab loss × sec(angle)，clamp ≤ 3.5（與 wallLossOblique 一致） |
 | HM-F2c | ⬜   | 跨樓層射線的牆穿透：射線 2D 投影穿過其他樓層的牆時也加牆損；牆僅對 Z 介於 wall.bottomHeight~topHeight 的射線段有效 |
 | HM-F2e | ⬜   | 牆 Z 範圍過濾：同樓層也應限制 wall 只對 AP/rx 在 wall.bottomHeight~topHeight 內的射線有效（矮隔間不該阻擋高處訊號） |

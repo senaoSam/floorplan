@@ -4,6 +4,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
+import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { buildScenario } from '@/features/heatmap/buildScenario'
@@ -27,6 +28,8 @@ export default function HeatmapLayer({ floorId }) {
   const scopes       = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
   // Subscribe to the full apsByFloor map so cross-floor APs drive recompute.
   const apsByFloor   = useAPStore((s) => s.apsByFloor)
+  // Same for floor holes — any floor's hole can bypass a slab boundary.
+  const holesByFloor = useFloorHoleStore((s) => s.floorHolesByFloor)
 
   const enabled     = useHeatmapStore((s) => s.enabled)
   const mode        = useHeatmapStore((s) => s.mode)
@@ -101,10 +104,23 @@ export default function HeatmapLayer({ floorId }) {
     //     appear at the wrong XY. Fixing this needs a canonical world frame
     //     (tracked as a future refinement).
     const elevations = computeFloorElevations(floors)
+    const floorIndexById = new Map(floors.map((f, i) => [f.id, i]))
     const floorStack = floors.map((f) => ({
       id: f.id,
       elevationM: elevations[f.id] ?? 0,
       slabDb: f.floorSlabAttenuationDb ?? 0,
+      // Canvas-px → m uses each floor's own scale; the hole polygon points
+      // convert per-hole in buildScenario.
+      scale: f.scale,
+      // Raw holes as stored (canvas px + vertical range). Filtering /
+      // conversion to meters happens in buildScenario.
+      holes: (holesByFloor[f.id] ?? []).map((h) => ({
+        points: h.points,
+        // Resolve vertical range to array-index form. Missing →
+        // treat the hole as "just this floor" (single slab bypass).
+        fromIdx: floorIndexById.get(h.bottomFloorId ?? f.id) ?? floorIndexById.get(f.id),
+        toIdx:   floorIndexById.get(h.topFloorId    ?? f.id) ?? floorIndexById.get(f.id),
+      })),
     }))
 
     // Collect APs across every floor, each with the elevation of its own
@@ -132,7 +148,7 @@ export default function HeatmapLayer({ floorId }) {
     }
 
     return buildScenario(floor, wallsLive, apsLive, scopesLive, crossFloor)
-  }, [enabled, floor, floorId, floors, walls, aps, scopes, apsByFloor, dragAP, dragWall, dragScope])
+  }, [enabled, floor, floorId, floors, walls, aps, scopes, apsByFloor, holesByFloor, dragAP, dragWall, dragScope])
 
   useEffect(() => {
     if (!enabled || !scenario || !floor?.scale) return

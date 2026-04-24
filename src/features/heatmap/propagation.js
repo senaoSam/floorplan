@@ -212,22 +212,52 @@ function chooseFreqSamples(bwMhz) {
   return Math.max(5, Math.ceil(bwMhz / 4))
 }
 
-// Sum the attenuation dB for every floor slab a ray between z1 and z2 crosses.
-// boundaries is a list of { yM, slabDb } pre-sorted ascending by yM. The rx /
-// AP world coordinates for this ray must include absolute Z (meters).
-function accumulateSlabLoss(z1, z2, boundaries) {
+// Point-in-polygon for a flat [x, y, x, y, ...] polygon (ray-casting).
+function pointInPolyFlat(x, y, pts) {
+  const n = pts.length / 2
+  let inside = false
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = pts[i * 2],     yi = pts[i * 2 + 1]
+    const xj = pts[j * 2],     yj = pts[j * 2 + 1]
+    const intersect = ((yi > y) !== (yj > y)) &&
+      (x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-12) + xi)
+    if (intersect) inside = !inside
+  }
+  return inside
+}
+
+// Sum the attenuation dB for every floor slab a ray crosses, honouring
+// FloorHole bypasses. The ray runs from (ap.pos.x, ap.pos.y, apZM) to
+// (rx.x, rx.y, rxZM) where pos.x/pos.y are the XY coordinates (meters) and
+// the Z-axis is vertical. For each boundary we solve for the t at which
+// the ray's vertical coordinate equals boundary.yM, look up (X(t), Y(t)),
+// and skip the slab's dB when that intersection falls inside any of the
+// boundary's bypassHoles polygons.
+function accumulateSlabLoss(apPos, apZM, rxPos, rxZM, boundaries) {
   if (!boundaries || boundaries.length === 0) return 0
-  const zLo = Math.min(z1, z2)
-  const zHi = Math.max(z1, z2)
+  const zLo = Math.min(apZM, rxZM)
+  const zHi = Math.max(apZM, rxZM)
+  const dz = rxZM - apZM
   let loss = 0
   for (const b of boundaries) {
-    if (b.yM > zLo && b.yM < zHi) loss += b.slabDb
+    if (!(b.yM > zLo && b.yM < zHi)) continue
+    // Parametric t along the ray where vertical crosses b.yM.
+    const t = Math.abs(dz) > 1e-9 ? (b.yM - apZM) / dz : 0
+    const xAt = apPos.x + (rxPos.x - apPos.x) * t
+    const yAt = apPos.y + (rxPos.y - apPos.y) * t
+    let bypassed = false
+    for (const poly of (b.bypassHoles ?? [])) {
+      if (pointInPolyFlat(xAt, yAt, poly)) { bypassed = true; break }
+    }
+    if (!bypassed) loss += b.slabDb
   }
   return loss
 }
 
-// Count how many slab boundaries a ray between z1 and z2 crosses, regardless
-// of each slab's attenuation. Used as the same-floor test (0 = same floor).
+// Count how many slab boundaries a ray crosses vertically (ignoring holes).
+// Used as the same-floor test (0 = same floor). Hole bypass doesn't change
+// "same floor"-ness — reflection/diffraction stay disabled across slabs even
+// when a hole zeros out their attenuation.
 function countSlabCrossings(z1, z2, boundaries) {
   if (!boundaries || boundaries.length === 0) return 0
   const zLo = Math.min(z1, z2)
@@ -256,7 +286,7 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   // Absolute Z of AP / rx; 0 when caller didn't provide elevation data.
   const apZM = ap.zM ?? 0
   const rxZM = rx.zM ?? 0
-  const slabLossDirect = accumulateSlabLoss(apZM, rxZM, boundaries)
+  const slabLossDirect = accumulateSlabLoss(ap.pos, apZM, rx, rxZM, boundaries)
   // Geometry-only same-floor test: "no slab between AP and rx". Distinct
   // from slabLossDirect === 0, which would also be true when all slabs
   // happen to have 0 dB attenuation.
