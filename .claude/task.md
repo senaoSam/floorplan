@@ -144,9 +144,11 @@
 | ----- | ---- | ---- |
 | HM-F1 | ✅   | 天線方向性：納入 AP `antennaPattern`（patch/sector）的方位角 + 波瓣增益進計算；目前 MVP 當 omni |
 | HM-F7 | ✅   | 熱圖指標切換：新增 SNR 與 CCI 模式（目前有 RSSI / SINR）。SNR = S − N（忽略干擾）、CCI = 10·log₁₀(ΣI_k)（純同頻干擾強度）。HeatmapControl 加 mode 選單 + 對應色階圖例 |
-| HM-F2 | ⬜   | FloorHole 跨樓層訊號穿透（含垂直範圍判斷）— 依賴樓層垂直模型（elevation），建議與 Phase 6.5 / HM-F3 一起做 |
-| HM-F3 | ⬜   | 樓板衰減（`floor.floorSlab*` 資料欄位已保留）— 與 HM-F2 耦合，一併做 |
-| HM-F4 | ⬜   | autoPowerPlan 自動功率規劃重建（依賴新 heatmap 完成） |
+| HM-F3a | ⬜   | 樓板衰減計算：射線穿越 N 個樓層時加總 N × `floor.floorSlabAttenuationDb`。propagation.js 接 elevation 並依 AP/rx 所屬樓層差計算穿越層數 |
+| HM-F3b | ⬜   | 樓板材質 UI：APPanel 或樓層設定暴露 floorSlabMaterialId + 自動同步 floorSlabAttenuationDb |
+| HM-F2a | ⬜   | FloorHole 跨樓層幾何判斷：射線穿越樓板時若 (x,y) 落在樓板對應的 FloorHole 內，bypass slab loss；含 hole 的垂直範圍 (bottomFloorId/topFloorId) |
+| HM-F2b | ⬜   | Cross-floor 熱圖呈現：buildScenario 納入上下樓層 AP（帶自身 elevation + AP.z），sampleField 目標 rx 也帶當前樓層 elevation |
+| HM-F4 | ⬜   | autoPowerPlan 自動功率規劃重建（依賴 F2/F3 完成的跨樓層 heatmap） |
 | HM-F5 | ⬜   | 把 CPU 引擎移植到 WebGL fragment shader（GPU 即時性） |
 | HM-F6 | ⬜   | 拖曳中凍結 heatmap 的效能優化（目前任何變動即重算；大場景卡時再加） |
 
@@ -170,7 +172,8 @@
 | 10-5b | ✅   | 非 active 樓層的牆 / AP / Scope 視覺弱化（dimOpacity 0.28 套到所有 material） |
 | 10-5c | ✅   | 單樓層 / 全樓層切換（Viewer3D 左上 toggle + useEditorStore.show3DAllFloors） |
 | 10-5d | ✅   | `floor.floorHeight` 編輯 UI（SidebarLeft active 樓層下方 inline 輸入） |
-| 10-5e | ⬜   | 樓層間訊號穿透視覺化（依賴 HM-F2/F3 完成）                   |
+| 10-5e | ⬜   | 3D heatmap 樓板貼圖：每個樓層的 heatmap canvas 貼到對應 elevation 的地板上（依賴 HM-F2/F3） |
+| 10-5f | ⬜   | 3D FloorHole 立體視覺化：把 hole 的垂直延伸範圍（bottomFloorId→topFloorId）畫成半透明柱體（依賴 HM-F2a 的資料欄位） |
 
 ---
 
