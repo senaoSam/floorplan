@@ -125,7 +125,10 @@ function collectCorners(segments) {
 //       { id, name, posPx:{x,y}, z, elevationM, floorScale,
 //         txPower, frequency, channel, channelWidth,
 //         antennaMode, azimuth, beamwidth, patternId }
-//     ]
+//     ],
+//     otherFloorWalls?: [                 non-active floors' walls (HM-F2c);
+//       { elevationM, scale, walls: Wall[] }    each floor keeps its own
+//     ]                                         px→m scale and elevation.
 //   }
 //
 // Returns: { size:{w,h}, walls, corners, aps, scopeMaskFn, floorStack?, rxElevationM? }
@@ -146,7 +149,24 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
   for (const wall of walls ?? []) {
     for (const seg of expandWall(wall, pxToM, activeElevationM)) wallSegs.push(seg)
   }
+  // Corners are for same-floor knife-edge diffraction only — derive from the
+  // active floor's walls before other-floor walls get appended.
   const corners = collectCorners(wallSegs)
+
+  // Other floors' walls (HM-F2c): included so cross-floor rays pick up wall
+  // attenuation on their 2D projection. Each floor uses its own px→m scale
+  // and its own elevation for the segment's absolute Z band. Same-floor rays
+  // won't match these walls' Z band, so F2e's Z filter keeps them inert.
+  if (crossFloor?.otherFloorWalls) {
+    for (const bucket of crossFloor.otherFloorWalls) {
+      const bucketPxToM = bucket.scale ? 1 / bucket.scale : pxToM
+      for (const wall of bucket.walls ?? []) {
+        for (const seg of expandWall(wall, bucketPxToM, bucket.elevationM ?? 0)) {
+          wallSegs.push(seg)
+        }
+      }
+    }
+  }
 
   // Build per-AP entries. By default these come from the active floor's AP
   // list (planar heatmap), converted from px to meters via pxToM. When

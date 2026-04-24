@@ -168,9 +168,13 @@ function FormulaNote() {
             預設只 bypass 自己樓層的天花板。
           </li>
           <li>
+            <b>其他樓層牆穿透</b>：射線 2D 投影穿過其他樓層的牆時也加牆損。
+            每道牆用自己樓層的 elevation 計算絕對 Z 範圍，搭配第 2 節的 Z 過濾 ——
+            射線在牆的 XY 交點 Z 須落在該牆 <code>[bottomHeight, topHeight]</code> 內才扣損。
+          </li>
+          <li>
             <b>跨樓層簡化</b>：當射線跨越 ≥ 1 層樓板時，
-            關閉反射 / 繞射（walls 是 2D segment，鏡像幾何在跨樓層沒物理意義），
-            也不計其他樓層的牆衰減。這些限制將在後續任務放寬。
+            關閉反射 / 繞射（walls 是 2D segment，鏡像幾何在跨樓層沒物理意義）。
           </li>
         </ul>
       </section>
@@ -193,7 +197,8 @@ function FormulaNote() {
         (4) 多路徑在整個 channel 頻寬內取 N 個頻點做寬頻平均；
         (5) SINR 只累計頻譜重疊的 AP；
         (6) 多樓層：所有樓層 AP 共用同一套 propagation，直射加 slab loss，
-        FloorHole 可 bypass，跨樓層射線關閉反射/繞射與其他樓層牆穿透。
+        FloorHole 可 bypass；所有樓層的牆都參與（靠 Z 範圍過濾自動選中射線穿過的高度）；
+        跨樓層射線關閉反射/繞射。
       </section>
     </div>
   )

@@ -28,6 +28,8 @@ export default function HeatmapLayer({ floorId }) {
   const scopes       = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
   // Subscribe to the full apsByFloor map so cross-floor APs drive recompute.
   const apsByFloor   = useAPStore((s) => s.apsByFloor)
+  // Same for walls — other floors' walls attenuate cross-floor rays (HM-F2c).
+  const wallsByFloor = useWallStore((s) => s.wallsByFloor)
   // Same for floor holes — any floor's hole can bypass a slab boundary.
   const holesByFloor = useFloorHoleStore((s) => s.floorHolesByFloor)
 
@@ -92,17 +94,16 @@ export default function HeatmapLayer({ floorId }) {
         })
       : scopes
 
-    // Cross-floor context for HM-F3a. Every other floor's APs are projected
-    // into the active floor's coordinate system so they contribute to this
-    // floor's heatmap (with per-floor slab attenuation on the AP→rx ray).
-    // Simplifications (iteration 1):
-    //   - Walls from other floors are ignored (they only attenuate same-floor
-    //     rays). Cross-floor rays pass through horizontal slabs only.
-    //   - XY alignment assumes each floor's canvas (0,0) refers to the same
-    //     world point. If the user has applied the 2D "align floor" transform
-    //     (alignOffset / scale / rotation), APs from misaligned floors will
-    //     appear at the wrong XY. Fixing this needs a canonical world frame
-    //     (tracked as a future refinement).
+    // Cross-floor context. Every other floor's APs are projected into the
+    // active floor's coordinate system so they contribute to this floor's
+    // heatmap (with per-floor slab attenuation on the AP→rx ray, and other
+    // floors' walls attenuating the ray's 2D projection when it passes
+    // through their Z band — HM-F2c).
+    // XY alignment assumes each floor's canvas (0,0) refers to the same
+    // world point. If the user has applied the 2D "align floor" transform
+    // (alignOffset / scale / rotation), cross-floor APs and walls will
+    // appear at the wrong XY. Fixing this needs a canonical world frame
+    // (tracked as a future refinement).
     const elevations = computeFloorElevations(floors)
     const floorIndexById = new Map(floors.map((f, i) => [f.id, i]))
     const floorStack = floors.map((f) => ({
@@ -140,15 +141,32 @@ export default function HeatmapLayer({ floorId }) {
       }
     }
 
+    // Other floors' walls. Active floor's walls stay in `wallsLive` and go
+    // into scenario.walls (corners also come from them — diffraction is same-
+    // floor only). Other-floor walls live in a separate bucket and only
+    // participate in wall-penetration loss, each with its own elevation + scale.
+    const otherFloorWalls = []
+    for (const f of floors) {
+      if (f.id === floorId) continue
+      const fws = wallsByFloor[f.id] ?? []
+      if (fws.length === 0) continue
+      otherFloorWalls.push({
+        elevationM: elevations[f.id] ?? 0,
+        scale: f.scale,
+        walls: fws,
+      })
+    }
+
     const crossFloor = {
       activeElevationM: elevations[floorId] ?? 0,
       rxHeightM: 1.0,
       floorStack,
       apsByFloor: apsAcrossFloors,
+      otherFloorWalls,
     }
 
     return buildScenario(floor, wallsLive, apsLive, scopesLive, crossFloor)
-  }, [enabled, floor, floorId, floors, walls, aps, scopes, apsByFloor, holesByFloor, dragAP, dragWall, dragScope])
+  }, [enabled, floor, floorId, floors, walls, aps, scopes, apsByFloor, wallsByFloor, holesByFloor, dragAP, dragWall, dragScope])
 
   useEffect(() => {
     if (!enabled || !scenario || !floor?.scale) return
