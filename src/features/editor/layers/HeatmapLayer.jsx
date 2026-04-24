@@ -195,7 +195,7 @@ export default function HeatmapLayer({ floorId }) {
     return () => { cancelled = true; clearTimeout(id) }
   }, [enabled, mode, scenario, reflections, diffraction, gridStepM, blur, showContours, floor?.scale])
 
-  if (!enabled || !floor?.scale || !glRef.current) return null
+  if (!enabled || !scenario || !floor?.scale || !glRef.current) return null
 
   const canvas = glRef.current.canvas
   const rotation = floor.rotation || 0
