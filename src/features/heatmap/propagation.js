@@ -52,13 +52,25 @@ function wallLossOblique(wall, rayDir) {
   return wall.lossDb * Math.min(sec, 3.5)
 }
 
-function accumulateWallLoss(a, b, walls) {
+// When aZM/bZM are supplied, each wall hit's Z is interpolated along the ray
+// at the hit's parametric t; hits whose Z falls outside [w.zLoM, w.zHiM] are
+// skipped. This makes half-height partitions transparent to rays that pass
+// over the top between an AP and a low receiver. Rays with unknown Z (legacy
+// planar mode with no elevation data) bypass the filter and count every hit.
+function accumulateWallLoss(a, b, walls, aZM, bZM) {
   const rayDir = sub(b, a)
+  const haveZ = aZM != null && bZM != null
   let totalLoss = 0
   let hits = 0
   for (const w of walls) {
     const hit = segSegIntersect(a, b, w.a, w.b)
-    if (hit) { totalLoss += wallLossOblique(w, rayDir); hits += 1 }
+    if (!hit) continue
+    if (haveZ && w.zLoM != null && w.zHiM != null) {
+      const zAt = aZM + (bZM - aZM) * hit.t
+      if (zAt < w.zLoM || zAt > w.zHiM) continue
+    }
+    totalLoss += wallLossOblique(w, rayDir)
+    hits += 1
   }
   return { totalLoss, hits }
 }
@@ -311,7 +323,7 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   const dxyDir = Math.max(dist(ap.pos, rx), 0.25)
   const dzDir  = apZM - rxZM
   const dDir   = Math.sqrt(dxyDir * dxyDir + dzDir * dzDir)
-  const wallScan = accumulateWallLoss(ap.pos, rx, walls)
+  const wallScan = accumulateWallLoss(ap.pos, rx, walls, apZM, rxZM)
   const plDir = pathLossDb(dDir, freqMhz) + wallScan.totalLoss + slabLossDirect
   paths.push(makeScalarPath(ap.txDbm, apGainDbi(ap, rx), plDir, dDir))
 
@@ -342,9 +354,15 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       if (Math.max(magPerp, magPara) * rough < 0.02) continue
 
       const wallsExcl = walls.filter((x) => x !== w)
-      const leg1 = accumulateWallLoss(ap.pos, reflPt, wallsExcl)
-      const leg2 = accumulateWallLoss(reflPt, rx, wallsExcl)
-      const dTot = dist(ap.pos, reflPt) + dist(reflPt, rx)
+      // Image-source ray apImage→rx maps to the reflected ray ap→reflPt→rx
+      // with matching path length. Reflection point's Z lies on that
+      // straight line, so interpolate by its fraction of total path length.
+      const d1 = dist(ap.pos, reflPt)
+      const d2 = dist(reflPt, rx)
+      const reflZM = apZM + (rxZM - apZM) * (d1 / Math.max(d1 + d2, 1e-9))
+      const leg1 = accumulateWallLoss(ap.pos, reflPt, wallsExcl, apZM, reflZM)
+      const leg2 = accumulateWallLoss(reflPt, rx, wallsExcl, reflZM, rxZM)
+      const dTot = d1 + d2
 
       const plRef = pathLossDb(dTot, freqMhz) + leg1.totalLoss + leg2.totalLoss
       paths.push(makeReflectedPath(ap.txDbm, apGainDbi(ap, reflPt), plRef, dTot, gPerp, gPara, rough))
@@ -356,13 +374,14 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   // cross-floor rays for the same reason reflections are.
   if (enableDiffraction && wallScan.hits > 0 && sameFloorRay) {
     for (const c of corners) {
-      const s1 = accumulateWallLoss(ap.pos, c, walls)
-      const s2 = accumulateWallLoss(c, rx, walls)
+      const d1 = dist(ap.pos, c)
+      const d2 = dist(c, rx)
+      const cZM = apZM + (rxZM - apZM) * (d1 / Math.max(d1 + d2, 1e-9))
+      const s1 = accumulateWallLoss(ap.pos, c, walls, apZM, cZM)
+      const s2 = accumulateWallLoss(c, rx, walls, cZM, rxZM)
       if (s1.hits > 1 || s2.hits > 1) continue
       const diff = cornerDiffractionDb(ap.pos, rx, c, wavelength)
       if (!isFinite(diff) || diff > 40) continue
-      const d1 = dist(ap.pos, c)
-      const d2 = dist(c, rx)
       const dTot = d1 + d2
       const plDiff = pathLossDb(dTot, freqMhz) + s1.totalLoss + s2.totalLoss + diff
       paths.push(makeScalarPath(ap.txDbm, apGainDbi(ap, c), plDiff, dTot))

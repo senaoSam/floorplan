@@ -16,12 +16,17 @@ function ituFor(material) {
 
 // Expand a wall with openings into N sub-segments, each with its own dbLoss.
 // Openings are stored as fractional ranges [startFrac, endFrac] along the wall.
-// Returns segments in meters: [{ a, b, lossDb, itu, roughnessM, kind }]
-function expandWall(wall, pxToM) {
+// Each segment carries an absolute Z range [zLoM, zHiM] (elevation + local
+// bottom/topHeight) so propagation can skip hits whose ray Z sits outside —
+// a half-height partition shouldn't attenuate rays passing over the top.
+// Returns segments in meters: [{ a, b, lossDb, itu, roughnessM, kind, zLoM, zHiM }]
+function expandWall(wall, pxToM, elevationM) {
   const ax = wall.startX, ay = wall.startY
   const bx = wall.endX,   by = wall.endY
   const wallLoss = wall.material?.dbLoss ?? 8
   const wallItu = ituFor(wall.material)
+  const wallZLo = elevationM + (wall.bottomHeight ?? 0)
+  const wallZHi = elevationM + (wall.topHeight ?? 3)
 
   const openings = (wall.openings ?? []).slice().sort((a, b) => a.startFrac - b.startFrac)
   if (openings.length === 0) {
@@ -32,6 +37,8 @@ function expandWall(wall, pxToM) {
       itu: wallItu,
       roughnessM: 0.01,
       kind: 'interior',
+      zLoM: wallZLo,
+      zHiM: wallZHi,
     }]
   }
 
@@ -53,10 +60,14 @@ function expandWall(wall, pxToM) {
         itu: wallItu,
         roughnessM: 0.01,
         kind: 'interior',
+        zLoM: wallZLo,
+        zHiM: wallZHi,
       })
     }
     const opLoss = op.material?.dbLoss ?? wallLoss
     const opItu = ituFor(op.material)
+    const opZLo = elevationM + (op.bottomHeight ?? 0)
+    const opZHi = elevationM + (op.topHeight ?? (wall.topHeight ?? 3))
     segs.push({
       a: pointAt(s),
       b: pointAt(e),
@@ -64,6 +75,8 @@ function expandWall(wall, pxToM) {
       itu: opItu,
       roughnessM: 0.01,
       kind: op.type === 'window' ? 'window' : 'door',
+      zLoM: opZLo,
+      zHiM: opZHi,
     })
     cursor = e
   }
@@ -75,6 +88,8 @@ function expandWall(wall, pxToM) {
       itu: wallItu,
       roughnessM: 0.01,
       kind: 'interior',
+      zLoM: wallZLo,
+      zHiM: wallZHi,
     })
   }
   return segs
@@ -124,9 +139,12 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
   const w = floor.imageWidth * pxToM
   const h = floor.imageHeight * pxToM
 
+  // Active-floor walls sit at the active elevation (provided via crossFloor).
+  // Single-floor planar mode has no crossFloor — treat as elevation 0.
+  const activeElevationM = crossFloor?.activeElevationM ?? 0
   const wallSegs = []
   for (const wall of walls ?? []) {
-    for (const seg of expandWall(wall, pxToM)) wallSegs.push(seg)
+    for (const seg of expandWall(wall, pxToM, activeElevationM)) wallSegs.push(seg)
   }
   const corners = collectCorners(wallSegs)
 

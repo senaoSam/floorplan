@@ -149,7 +149,7 @@
 | HM-F2a | ✅   | FloorHole 跨樓層 bypass：射線穿 slab 在 hole XY 範圍內 → 該 slab 不計衰減；含垂直範圍 (bottomFloorId/topFloorId) |
 | HM-F3c | ✅   | Slab 斜入射放大：slab loss × sec(θ_i)，clamp ≤ 3.5；cosθ = |Δz|/3D 距離 |
 | HM-F2c | ⬜   | 跨樓層射線的牆穿透：射線 2D 投影穿過其他樓層的牆時也加牆損；牆僅對 Z 介於 wall.bottomHeight~topHeight 的射線段有效 |
-| HM-F2e | ⬜   | 牆 Z 範圍過濾：同樓層也應限制 wall 只對 AP/rx 在 wall.bottomHeight~topHeight 內的射線有效（矮隔間不該阻擋高處訊號） |
+| HM-F2e | ✅   | 牆 Z 範圍過濾：同樓層也應限制 wall 只對 AP/rx 在 wall.bottomHeight~topHeight 內的射線有效（矮隔間不該阻擋高處訊號） |
 | HM-F3b | ⬜   | 樓板材質 UI：Sidebar 或 FloorPanel 暴露 floorSlabMaterialId + 自動同步 floorSlabAttenuationDb |
 | HM-F2d | ⬜   | 跨樓層反射/繞射（高成本；牆需升級成 3D 平面、image-source 在 3D 做；第一版貢獻小，先擱） |
 | HM-F4 | ⬜   | autoPowerPlan 自動功率規劃重建（依賴 F2/F3 完成的跨樓層 heatmap） |

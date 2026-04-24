@@ -24,6 +24,11 @@ function FormulaNote() {
           <code>θ_i</code> 為射線與牆面法線夾角，<code>sec</code> 上限 3.5（約 79°）避免掠射爆衝。
         </p>
         <p className="muted">L_wall 來自材質的 dbLoss；門窗則用 opening.material 的 dbLoss 取代該段牆。</p>
+        <p className="muted">
+          Z 範圍過濾：在 2D 交點處用 <code>Z(t) = Z_ap + t·(Z_rx − Z_ap)</code> 取得射線高度，
+          只有當 <code>Z(t)</code> 落在該牆/門窗的 <code>[bottomHeight, topHeight]</code>（加上樓層 elevation）內才計入衰減。
+          矮隔間不會阻擋從高處 AP 傳向站立接收機的訊號。
+        </p>
       </section>
 
       <section>
