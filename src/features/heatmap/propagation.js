@@ -30,6 +30,7 @@ import {
   pointSegDistance, mirrorPoint, segmentNormal,
 } from '@/heatmap_sample/physics/geometry.js'
 import { apsShareSpectrum } from './frequency'
+import { getPatternById, sampleGain } from '@/constants/antennaPatterns'
 
 const C = 299792458
 const dbToLin = (db) => Math.pow(10, db / 10)
@@ -146,8 +147,8 @@ function fresnelGamma(cosI, epsC) {
 // a_perp = a_para = (1/sqrt(2)) * sqrt(P_rx). Real-valued scalar; phase comes
 // from tau_n when H(f) is evaluated. The 1/sqrt(2) encodes equal-power
 // excitation of two orthogonal polarization basis channels.
-function makeScalarPath(txPowerDbm, totalLossDb, distanceM) {
-  const rxPowerDb = txPowerDbm + AP_ANT_GAIN_DBI + RX_ANT_GAIN_DBI - totalLossDb
+function makeScalarPath(txPowerDbm, apGainDbi, totalLossDb, distanceM) {
+  const rxPowerDb = txPowerDbm + apGainDbi + RX_ANT_GAIN_DBI - totalLossDb
   const amp = Math.sqrt(dbToLin(rxPowerDb)) / Math.SQRT2
   const a = { re: amp, im: 0 }
   return { perp: a, para: a, tau: distanceM / C }
@@ -156,8 +157,8 @@ function makeScalarPath(txPowerDbm, totalLossDb, distanceM) {
 // Build a reflected path: same 1/sqrt(2) excitation, but each polarization
 // picks up its own complex Fresnel coefficient plus the shared roughness
 // attenuation factor.
-function makeReflectedPath(txPowerDbm, pathLossDb, distanceM, gammaPerp, gammaPara, roughness) {
-  const rxPowerDb = txPowerDbm + AP_ANT_GAIN_DBI + RX_ANT_GAIN_DBI - pathLossDb
+function makeReflectedPath(txPowerDbm, apGainDbi, pathLossDb, distanceM, gammaPerp, gammaPara, roughness) {
+  const rxPowerDb = txPowerDbm + apGainDbi + RX_ANT_GAIN_DBI - pathLossDb
   const amp = Math.sqrt(dbToLin(rxPowerDb)) / Math.SQRT2
   const base = { re: amp * roughness, im: 0 }
   return {
@@ -165,6 +166,43 @@ function makeReflectedPath(txPowerDbm, pathLossDb, distanceM, gammaPerp, gammaPa
     para: cmul(base, gammaPara),
     tau: distanceM / C,
   }
+}
+
+// Per-ray AP antenna gain (dBi) at the departure direction from the AP.
+// - omni:        flat AP_ANT_GAIN_DBI
+// - directional: peak AP_ANT_GAIN_DBI within half-beamwidth, linearly tapered
+//                to a -20 dB back lobe outside an edge-taper zone.
+// - custom:      peak AP_ANT_GAIN_DBI + pattern sample at the ray offset angle.
+// Azimuth/angles are taken in the canvas frame (+x = 0°, +y = 90°) to match
+// APLayer's rendering convention. The pattern samples array is indexed in the
+// same +x-origin, clockwise direction, so no frame conversion is required.
+const DIRECTIONAL_BACK_DB = 20
+const DIRECTIONAL_EDGE_DEG = 15
+function apGainDbi(ap, targetPoint) {
+  const mode = ap.antennaMode ?? 'omni'
+  if (mode === 'omni') return AP_ANT_GAIN_DBI
+
+  const dx = targetPoint.x - ap.pos.x
+  const dy = targetPoint.y - ap.pos.y
+  if (dx === 0 && dy === 0) return AP_ANT_GAIN_DBI
+  const rayDeg = Math.atan2(dy, dx) * 180 / Math.PI
+  const az = ap.azimuthDeg ?? 0
+  let off = rayDeg - az
+  off = ((off + 540) % 360) - 180   // wrap to [-180, 180]
+  const absOff = Math.abs(off)
+
+  if (mode === 'custom') {
+    const pattern = getPatternById(ap.patternId)
+    const relDb = sampleGain(pattern, absOff * Math.PI / 180)
+    return AP_ANT_GAIN_DBI + relDb
+  }
+
+  // directional (built-in sector approximation)
+  const half = (ap.beamwidthDeg ?? 60) / 2
+  if (absOff <= half) return AP_ANT_GAIN_DBI
+  if (absOff >= half + DIRECTIONAL_EDGE_DEG) return AP_ANT_GAIN_DBI - DIRECTIONAL_BACK_DB
+  const t = (absOff - half) / DIRECTIONAL_EDGE_DEG
+  return AP_ANT_GAIN_DBI - DIRECTIONAL_BACK_DB * t
 }
 
 // Pick frequency sample count for the channel-wide coherent sum.
@@ -189,7 +227,7 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   const dDir = Math.max(dist(ap.pos, rx), 0.25)
   const wallScan = accumulateWallLoss(ap.pos, rx, walls)
   const plDir = pathLossDb(dDir, freqMhz) + wallScan.totalLoss
-  paths.push(makeScalarPath(ap.txDbm, plDir, dDir))
+  paths.push(makeScalarPath(ap.txDbm, apGainDbi(ap, rx), plDir, dDir))
 
   // 1st-order image-source reflections with per-polarization Fresnel.
   if (maxReflOrder >= 1) {
@@ -218,7 +256,7 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       const dTot = dist(ap.pos, reflPt) + dist(reflPt, rx)
 
       const plRef = pathLossDb(dTot, freqMhz) + leg1.totalLoss + leg2.totalLoss
-      paths.push(makeReflectedPath(ap.txDbm, plRef, dTot, gPerp, gPara, rough))
+      paths.push(makeReflectedPath(ap.txDbm, apGainDbi(ap, reflPt), plRef, dTot, gPerp, gPara, rough))
     }
   }
 
@@ -235,7 +273,7 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       const d2 = dist(c, rx)
       const dTot = d1 + d2
       const plDiff = pathLossDb(dTot, freqMhz) + s1.totalLoss + s2.totalLoss + diff
-      paths.push(makeScalarPath(ap.txDbm, plDiff, dTot))
+      paths.push(makeScalarPath(ap.txDbm, apGainDbi(ap, c), plDiff, dTot))
     }
   }
 

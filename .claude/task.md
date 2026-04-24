@@ -142,7 +142,7 @@
 
 | #     | 狀態 | Task |
 | ----- | ---- | ---- |
-| HM-F1 | ⬜   | 天線方向性：納入 AP `antennaPattern`（patch/sector）的方位角 + 波瓣增益進計算；目前 MVP 當 omni |
+| HM-F1 | ✅   | 天線方向性：納入 AP `antennaPattern`（patch/sector）的方位角 + 波瓣增益進計算；目前 MVP 當 omni |
 | HM-F2 | ⬜   | FloorHole 跨樓層訊號穿透（含垂直範圍判斷） |
 | HM-F3 | ⬜   | 樓板衰減（`floor.floorSlab*` 資料欄位已保留） |
 | HM-F4 | ⬜   | autoPowerPlan 自動功率規劃重建（依賴新 heatmap 完成） |

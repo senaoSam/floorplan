@@ -135,7 +135,7 @@ const PHASES = [
       {
         layer: '未來擴充',
         items: [
-          { id: 'HM-F1', done: false, text: '天線方向性（antennaPattern 進計算）' },
+          { id: 'HM-F1', done: true, text: '天線方向性（antennaPattern 進計算）' },
           { id: 'HM-F2', done: false, text: 'FloorHole 跨樓層訊號穿透' },
           { id: 'HM-F3', done: false, text: '樓板衰減（跨樓層）' },
           { id: 'HM-F4', done: false, text: 'autoPowerPlan 自動功率規劃重建' },

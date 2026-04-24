@@ -128,6 +128,14 @@ export function buildScenario(floor, walls, aps, scopes = []) {
     // Precomputed center frequency in MHz — propagation reads this to derive
     // wavelength / Friis path loss for this specific AP.
     centerMHz: channelCenterMHz(ap.frequency ?? 5, ap.channel ?? 36),
+    // Antenna directionality — propagation.js applies a per-ray gain based on
+    // the departure angle from the AP. Canvas Y grows downward, so azimuth is
+    // stored as a canvas-frame angle in degrees (+x = 0°, +y = 90°), matching
+    // APLayer's rendering convention.
+    antennaMode: ap.antennaMode ?? 'omni',
+    azimuthDeg: ap.azimuth ?? 0,
+    beamwidthDeg: ap.beamwidth ?? 60,
+    patternId: ap.patternId ?? null,
   }))
 
   // Build scope mask. If there are any in-scopes, a point must lie inside at
