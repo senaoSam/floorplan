@@ -88,6 +88,7 @@ function BatchPanel() {
   const apBeam     = uniformValue(selectedAPs, 'beamwidth')
   const apPattern  = uniformValue(selectedAPs, 'patternId')
   const apZ        = uniformValue(selectedAPs, 'z')
+  const apMount    = uniformValue(selectedAPs, 'mountType')
 
   // Walls: uniform values for height batch editing.
   const selectedWalls  = walls.filter((w) => wallIds.includes(w.id))
@@ -196,6 +197,10 @@ function BatchPanel() {
     const num = parseFloat(raw)
     if (!isNaN(num) && num >= 0) updateWalls(activeFloorId, wallIds, { [field]: num })
   }, [activeFloorId, wallIds, updateWalls])
+
+  const handleAPMount = useCallback((value) => {
+    updateAPs(activeFloorId, apIds, { mountType: value })
+  }, [activeFloorId, apIds, updateAPs])
 
   // Channel section: disabled when APs span multiple bands (they share one dropdown).
   const channelEntriesForBand = apFreq && apFreq !== MIXED
@@ -425,15 +430,19 @@ function BatchPanel() {
             </div>
           </section>
 
-          {/* 安裝方式（3D 視圖開放後啟用） */}
-          <section className="batch-panel__section batch-panel__section--disabled" title="3D 視圖開放後啟用">
+          {/* 安裝方式（批次變更） */}
+          <section className="batch-panel__section">
             <p className="batch-panel__label">
               安裝方式（批次變更）
-              <span className="batch-panel__coming-soon">即將推出</span>
+              {apMount === MIXED && <span className="batch-panel__hint">多個值</span>}
             </p>
             <div className="batch-panel__btn-group">
               {MOUNT_OPTIONS.map((o) => (
-                <button key={o.value} className="batch-panel__btn" disabled>
+                <button
+                  key={o.value}
+                  className={`batch-panel__btn${apMount === o.value ? ' batch-panel__btn--active' : ''}`}
+                  onClick={() => handleAPMount(o.value)}
+                >
                   {o.label}
                 </button>
               ))}

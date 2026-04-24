@@ -164,7 +164,7 @@
 | 10-3  | ✅   | 3D AP 標記：依 x/y/z 座標顯示，含安裝高度差異（圓柱+環+垂直桿） |
 | 10-3b | ✅   | 3D AP 天線方向性視覺化：directional=圓錐 / custom=極座標水平輪廓 |
 | 10-3c | ✅   | 3D AP 選取 / hover 視覺化 + 名稱 label（CanvasTexture sprite billboard） |
-| 10-3d | ⬜   | AP mountType（ceiling/wall）UI 啟用 + 3D 視覺差異（天花板 vs 壁掛姿勢） |
+| 10-3d | ✅   | AP mountType UI 啟用（APPanel + BatchPanel）+ 3D 視覺差異（wall 模式豎立面朝 azimuth，移除垂直桿，加掛架小方塊） |
 | 10-4  | ✅   | 3D Scope / Floor Hole 視覺化（地板平鋪多邊形 + 外框）         |
 | 10-5a | ✅   | 3D 多樓層堆疊：floor.floorHeight（預設 3 m）+ computeFloorElevations，所有樓層同時渲染，切換 active 樓層時相機平滑上下移動 |
 | 10-5b | ✅   | 非 active 樓層的牆 / AP / Scope 視覺弱化（dimOpacity 0.28 套到所有 material） |

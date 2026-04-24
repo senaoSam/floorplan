@@ -294,15 +294,15 @@ function APPanel({ floorId, apId }) {
         </div>
       </section>
 
-      {/* 安裝方式（3D 視圖開放後啟用） */}
-      <section className="ap-panel__section ap-panel__section--disabled" title="3D 視圖開放後啟用">
-        <p className="ap-panel__label">安裝方式 <span className="ap-panel__coming-soon">即將推出</span></p>
+      {/* 安裝方式 — 影響 3D 視覺姿勢（天花板 vs 壁掛） */}
+      <section className="ap-panel__section">
+        <p className="ap-panel__label">安裝方式</p>
         <div className="ap-panel__btn-group">
           {MOUNT_OPTIONS.map((o) => (
             <button
               key={o.value}
               className={`ap-panel__btn${ap.mountType === o.value ? ' ap-panel__btn--active' : ''}`}
-              disabled
+              onClick={() => updateAP(floorId, apId, { mountType: o.value })}
             >
               {o.label}
             </button>

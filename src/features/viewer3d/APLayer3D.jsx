@@ -212,6 +212,8 @@ function APMarker({ ap, pxToM, dimOpacity, isActiveFloor }) {
   const mode = ap.antennaMode ?? 'omni'
   const isDirectional = mode === 'directional'
   const isCustom      = mode === 'custom'
+  const isWallMount   = (ap.mountType ?? 'ceiling') === 'wall'
+  const azimuthRad    = (ap.azimuth ?? 0) * Math.PI / 180
 
   // Selection / hover bookkeeping.
   const selectedId   = useEditorStore((s) => s.selectedId)
@@ -247,26 +249,46 @@ function APMarker({ ap, pxToM, dimOpacity, isActiveFloor }) {
       onPointerOver={onPointerOver}
       onPointerOut={onPointerOut}
     >
-      {/* Vertical pole from floor up to the AP height — makes the install
-          height difference between APs visually readable. */}
-      {y > 0 && (
+      {/* Ceiling mount: vertical drop pole from floor up to install height.
+          Wall mount: no pole — the AP reads as mounted on an implied wall
+          surface, with the mount bracket instead suggesting attachment. */}
+      {!isWallMount && y > 0 && (
         <mesh position={[0, y / 2, 0]}>
           <cylinderGeometry args={[DROP_RADIUS_M, DROP_RADIUS_M, y, 8]} />
           <meshStandardMaterial color="#64748b" roughness={0.6} {...matOpts} />
         </mesh>
       )}
 
-      {/* Body disc at the install height */}
-      <mesh position={[0, y, 0]} castShadow>
-        <cylinderGeometry args={[BODY_RADIUS_M, BODY_RADIUS_M, BODY_HEIGHT_M, 24]} />
-        <meshStandardMaterial color={color} roughness={0.5} metalness={0.2} emissive={accentEmissive} emissiveIntensity={bodyEmissiveIntensity} {...matOpts} />
-      </mesh>
+      {/* Mount bracket for wall-mounted APs: a short arm pointing opposite
+          to the azimuth (i.e. into the wall), hinting at the attachment. */}
+      {isWallMount && (
+        <group position={[0, y, 0]} rotation={[0, -azimuthRad, 0]}>
+          <mesh position={[-BODY_RADIUS_M - 0.05, 0, 0]}>
+            <boxGeometry args={[0.1, 0.08, 0.04]} />
+            <meshStandardMaterial color="#475569" roughness={0.6} {...matOpts} />
+          </mesh>
+        </group>
+      )}
 
-      {/* Ring around the body — echoes the 2D concentric-circle motif */}
-      <mesh position={[0, y + BODY_HEIGHT_M / 2 + 0.005, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[RING_RADIUS_M, RING_TUBE_M, 10, 36]} />
-        <meshStandardMaterial color={ringColor} roughness={0.4} metalness={0.3} emissive={accentEmissive} emissiveIntensity={ringEmissiveIntensity} {...matOpts} />
-      </mesh>
+      {/*
+        AP body + ring. For ceiling mount the disc is horizontal (axis Y).
+        For wall mount the disc stands upright and faces the azimuth: an
+        outer group spins around Y by −azimuth so local +X lines up with the
+        azimuth, then an inner group tips the disc axis 90° around Z so its
+        axis (local Y) ends up along +X in the outer frame.
+      */}
+      <group position={[0, y, 0]} rotation={isWallMount ? [0, -azimuthRad, 0] : [0, 0, 0]}>
+        <group rotation={isWallMount ? [0, 0, -Math.PI / 2] : [0, 0, 0]}>
+          <mesh castShadow>
+            <cylinderGeometry args={[BODY_RADIUS_M, BODY_RADIUS_M, BODY_HEIGHT_M, 24]} />
+            <meshStandardMaterial color={color} roughness={0.5} metalness={0.2} emissive={accentEmissive} emissiveIntensity={bodyEmissiveIntensity} {...matOpts} />
+          </mesh>
+          <mesh position={[0, BODY_HEIGHT_M / 2 + 0.005, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[RING_RADIUS_M, RING_TUBE_M, 10, 36]} />
+            <meshStandardMaterial color={ringColor} roughness={0.4} metalness={0.3} emissive={accentEmissive} emissiveIntensity={ringEmissiveIntensity} {...matOpts} />
+          </mesh>
+        </group>
+      </group>
 
       {/* Floating name label above the ring */}
       {ap.name && (
@@ -277,9 +299,13 @@ function APMarker({ ap, pxToM, dimOpacity, isActiveFloor }) {
         />
       )}
 
-      {/* Directional beam cone — projected downward from the AP's install height. */}
+      {/* Directional beam cone. Ceiling mount: cone tip at the AP and axis
+          sweeping outward along azimuth (already horizontal in DirectionalCone
+          because we tipped −Y to +X there). Wall mount: same geometry — the
+          DirectionalCone is built in the horizontal plane, so both mount
+          modes share the same orientation math. */}
       {isDirectional && (
-        <group position={[0, y - BODY_HEIGHT_M / 2, 0]}>
+        <group position={[0, y - (isWallMount ? 0 : BODY_HEIGHT_M / 2), 0]}>
           <DirectionalCone
             azimuthDeg={ap.azimuth ?? 0}
             beamwidthDeg={ap.beamwidth ?? 60}

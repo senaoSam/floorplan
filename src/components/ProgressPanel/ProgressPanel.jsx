@@ -159,7 +159,7 @@ const PHASES = [
           { id: '10-3', done: true, text: '3D AP 標記（圓柱 + 環 + 垂直桿）' },
           { id: '10-3b', done: true, text: '3D AP 天線方向性視覺化' },
           { id: '10-3c', done: true, text: '3D AP 選取 / hover + 名稱 label' },
-          { id: '10-3d', done: false, text: 'AP mountType UI + 3D 差異' },
+          { id: '10-3d', done: true, text: 'AP mountType UI + 3D 差異' },
           { id: '10-4', done: true, text: '3D Scope / Floor Hole 視覺化' },
           { id: '10-5a', done: true, text: '3D 多樓層堆疊（floorHeight 預設 3m + 相機平滑切換）' },
           { id: '10-5b', done: true, text: '非 active 樓層的牆/AP/Scope 視覺弱化' },
