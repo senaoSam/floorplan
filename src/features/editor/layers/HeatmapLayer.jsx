@@ -9,6 +9,7 @@ import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { buildScenario } from '@/features/heatmap/buildScenario'
 import { sampleField } from '@/features/heatmap/sampleField'
 import { getModeConfig } from '@/features/heatmap/modes'
+import { computeFloorElevations } from '@/features/viewer3d/floorStacking'
 import { createHeatmapGL } from '@/heatmap_sample/render/heatmapGL.js'
 
 // Heatmap render layer. Sits between the floor image and the wall layer so
@@ -19,11 +20,13 @@ import { createHeatmapGL } from '@/heatmap_sample/render/heatmapGL.js'
 // / scopes / floor.scale, including while dragging. Optimising drag freeze is
 // tracked as HM-F6.
 export default function HeatmapLayer({ floorId }) {
-  const floors  = useFloorStore((s) => s.floors)
-  const floor   = floors.find((f) => f.id === floorId) ?? null
-  const walls   = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
-  const aps     = useAPStore((s) => s.apsByFloor[floorId] ?? [])
-  const scopes  = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
+  const floors       = useFloorStore((s) => s.floors)
+  const floor        = floors.find((f) => f.id === floorId) ?? null
+  const walls        = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
+  const aps          = useAPStore((s) => s.apsByFloor[floorId] ?? [])
+  const scopes       = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
+  // Subscribe to the full apsByFloor map so cross-floor APs drive recompute.
+  const apsByFloor   = useAPStore((s) => s.apsByFloor)
 
   const enabled     = useHeatmapStore((s) => s.enabled)
   const mode        = useHeatmapStore((s) => s.mode)
@@ -56,7 +59,10 @@ export default function HeatmapLayer({ floorId }) {
   const scenario = useMemo(() => {
     if (!enabled) return null
     if (!floor?.scale) return null
-    if (!aps.length)   return null
+    // With cross-floor in play, the heatmap still has content when the
+    // active floor has no APs as long as other floors do.
+    const anyAp = Object.values(apsByFloor).some((arr) => arr && arr.length > 0)
+    if (!anyAp) return null
 
     // Apply live drag overrides so the heatmap tracks the object being dragged
     // without waiting for the commit-on-dragend write into the main stores.
@@ -83,8 +89,50 @@ export default function HeatmapLayer({ floorId }) {
         })
       : scopes
 
-    return buildScenario(floor, wallsLive, apsLive, scopesLive)
-  }, [enabled, floor, walls, aps, scopes, dragAP, dragWall, dragScope])
+    // Cross-floor context for HM-F3a. Every other floor's APs are projected
+    // into the active floor's coordinate system so they contribute to this
+    // floor's heatmap (with per-floor slab attenuation on the AP→rx ray).
+    // Simplifications (iteration 1):
+    //   - Walls from other floors are ignored (they only attenuate same-floor
+    //     rays). Cross-floor rays pass through horizontal slabs only.
+    //   - XY alignment assumes each floor's canvas (0,0) refers to the same
+    //     world point. If the user has applied the 2D "align floor" transform
+    //     (alignOffset / scale / rotation), APs from misaligned floors will
+    //     appear at the wrong XY. Fixing this needs a canonical world frame
+    //     (tracked as a future refinement).
+    const elevations = computeFloorElevations(floors)
+    const floorStack = floors.map((f) => ({
+      id: f.id,
+      elevationM: elevations[f.id] ?? 0,
+      slabDb: f.floorSlabAttenuationDb ?? 0,
+    }))
+
+    // Collect APs across every floor, each with the elevation of its own
+    // floor. The active floor contributes its live-drag copy so the heatmap
+    // updates immediately while dragging.
+    const apsAcrossFloors = []
+    for (const f of floors) {
+      const floorAPs = f.id === floorId ? apsLive : (apsByFloor[f.id] ?? [])
+      const floorElev = elevations[f.id] ?? 0
+      for (const ap of floorAPs) {
+        apsAcrossFloors.push({
+          ...ap,
+          posPx: { x: ap.x, y: ap.y },
+          elevationM: floorElev,
+          floorScale: f.scale,
+        })
+      }
+    }
+
+    const crossFloor = {
+      activeElevationM: elevations[floorId] ?? 0,
+      rxHeightM: 1.0,
+      floorStack,
+      apsByFloor: apsAcrossFloors,
+    }
+
+    return buildScenario(floor, wallsLive, apsLive, scopesLive, crossFloor)
+  }, [enabled, floor, floorId, floors, walls, aps, scopes, apsByFloor, dragAP, dragWall, dragScope])
 
   useEffect(() => {
     if (!enabled || !scenario || !floor?.scale) return

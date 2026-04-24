@@ -100,11 +100,24 @@ function collectCorners(segments) {
 //   walls:    Wall[]  (startX/startY/endX/endY in px + optional openings)
 //   aps:      AP[]    (x/y in px, frequency/channel/channelWidth/txPower)
 //   scopes:   Scope[] (points flat [x,y,…] in px, type 'in'|'out')  — optional
+//   crossFloor: {                        — optional cross-floor data (HM-F3a/F2b)
+//     activeElevationM: number,          active floor's ground-level Y (m)
+//     rxHeightM:        number,          receiver height above active floor (m)
+//     floorStack: [                      all floors sorted by elevation ascending
+//       { id, elevationM, slabDb, scale, holes, holePxToM, width, height }
+//     ],
+//     apsByFloor: [                      APs from every floor with their
+//       { id, name, posPx:{x,y}, z, elevationM, floorScale,
+//         txPower, frequency, channel, channelWidth,
+//         antennaMode, azimuth, beamwidth, patternId }
+//     ]
+//   }
 //
-// Returns: { size:{w,h}, walls, corners, aps, scopeMaskFn }
-//          size/walls/corners/aps in meters, matching heatmap_sample's format.
-//          scopeMaskFn(x,y) — true if point is renderable (passes scope filter).
-export function buildScenario(floor, walls, aps, scopes = []) {
+// Returns: { size:{w,h}, walls, corners, aps, scopeMaskFn, floorStack?, rxElevationM? }
+//          When crossFloor is provided, aps includes all floors' APs with
+//          absoluteZ baked in, and floorStack lets propagation compute how
+//          many slabs a given ray crosses.
+export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null) {
   if (!floor || !floor.scale || !floor.imageWidth || !floor.imageHeight) return null
   const pxToM = 1 / floor.scale
 
@@ -117,26 +130,46 @@ export function buildScenario(floor, walls, aps, scopes = []) {
   }
   const corners = collectCorners(wallSegs)
 
-  const apList = (aps ?? []).map((ap) => ({
+  // Build per-AP entries. By default these come from the active floor's AP
+  // list (planar heatmap), converted from px to meters via pxToM. When
+  // crossFloor is supplied, the caller hands us pre-computed AP entries that
+  // already carry per-AP elevation — we use those instead so upstairs /
+  // downstairs APs are modelled with their correct absolute Z.
+  const buildApEntry = (ap, posMeters, elevationM) => ({
     id: ap.id,
     name: ap.name ?? ap.id,
-    pos: { x: ap.x * pxToM, y: ap.y * pxToM },
+    pos: posMeters,
+    // Absolute Z of the AP = its floor's elevation + its install height.
+    // 0 when no cross-floor data is in play (single-floor planar mode).
+    zM: (elevationM ?? 0) + (ap.z ?? 0),
     txDbm: ap.txPower ?? 20,
     frequency: ap.frequency ?? 5,
     channel: ap.channel ?? 36,
     channelWidth: ap.channelWidth ?? 20,
-    // Precomputed center frequency in MHz — propagation reads this to derive
-    // wavelength / Friis path loss for this specific AP.
     centerMHz: channelCenterMHz(ap.frequency ?? 5, ap.channel ?? 36),
-    // Antenna directionality — propagation.js applies a per-ray gain based on
-    // the departure angle from the AP. Canvas Y grows downward, so azimuth is
-    // stored as a canvas-frame angle in degrees (+x = 0°, +y = 90°), matching
-    // APLayer's rendering convention.
     antennaMode: ap.antennaMode ?? 'omni',
     azimuthDeg: ap.azimuth ?? 0,
     beamwidthDeg: ap.beamwidth ?? 60,
     patternId: ap.patternId ?? null,
-  }))
+  })
+
+  let apList
+  if (crossFloor && crossFloor.apsByFloor) {
+    // Cross-floor path: each entry already has {posPx, floorScale, elevationM}.
+    apList = crossFloor.apsByFloor.map((ap) => {
+      const apPxToM = ap.floorScale ? 1 / ap.floorScale : pxToM
+      return buildApEntry(
+        ap,
+        { x: ap.posPx.x * apPxToM, y: ap.posPx.y * apPxToM },
+        ap.elevationM,
+      )
+    })
+  } else {
+    // Planar path: every AP lives on the supplied `floor`.
+    apList = (aps ?? []).map((ap) =>
+      buildApEntry(ap, { x: ap.x * pxToM, y: ap.y * pxToM }, 0),
+    )
+  }
 
   // Build scope mask. If there are any in-scopes, a point must lie inside at
   // least one; out-scopes always exclude their interior. No scopes → all pass.
@@ -173,11 +206,35 @@ export function buildScenario(floor, walls, aps, scopes = []) {
     return true
   }
 
+  // Slab-crossing metadata for HM-F3a. `floorBoundaries` is a sorted list of
+  // the *upper* boundary Y of each floor; slabDb is the attenuation applied
+  // when a ray crosses that boundary. Active floor's rx lives at
+  // activeElevationM + rxHeightM (default: standing-height ≈ 1.0 m).
+  let floorBoundaries = null
+  let rxElevationM = null
+  if (crossFloor && crossFloor.floorStack && crossFloor.floorStack.length) {
+    const stack = crossFloor.floorStack
+    floorBoundaries = []
+    for (let i = 0; i < stack.length - 1; i++) {
+      // Boundary between floor[i] and floor[i+1] is at floor[i+1]'s elevation.
+      // The attenuating slab belongs to floor[i] (its ceiling / floor above's
+      // floor slab). Either floor can hold the dB number; convention here is
+      // "slab belongs to the floor whose ceiling it is" (floor[i]).
+      floorBoundaries.push({
+        yM: stack[i + 1].elevationM,
+        slabDb: stack[i].slabDb ?? 0,
+      })
+    }
+    rxElevationM = (crossFloor.activeElevationM ?? 0) + (crossFloor.rxHeightM ?? 1.0)
+  }
+
   return {
     size: { w, h },
     walls: wallSegs,
     corners,
     aps: apList,
     scopeMaskFn,
+    floorBoundaries,   // null when single-floor
+    rxElevationM,      // null when single-floor
   }
 }

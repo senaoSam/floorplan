@@ -5,10 +5,12 @@ import { rssiFromAp, aggregateApContributions } from './propagation'
 export function probeAt(scenario, rx, opts = {}) {
   if (!scenario || !scenario.aps.length) return null
   if (scenario.scopeMaskFn && !scenario.scopeMaskFn(rx.x, rx.y)) return null
+  const rxAbs = { ...rx, zM: scenario.rxElevationM ?? rx.zM ?? 0 }
   const perAp = scenario.aps.map((ap) =>
-    rssiFromAp(ap, rx, scenario.walls, scenario.corners, {
+    rssiFromAp(ap, rxAbs, scenario.walls, scenario.corners, {
       maxReflOrder: opts.reflections ? 1 : 0,
       enableDiffraction: opts.diffraction ?? true,
+      floorBoundaries: scenario.floorBoundaries ?? null,
     }).rssiDbm,
   )
   const agg = aggregateApContributions(perAp, scenario.aps)

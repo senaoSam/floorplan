@@ -212,25 +212,75 @@ function chooseFreqSamples(bwMhz) {
   return Math.max(5, Math.ceil(bwMhz / 4))
 }
 
+// Sum the attenuation dB for every floor slab a ray between z1 and z2 crosses.
+// boundaries is a list of { yM, slabDb } pre-sorted ascending by yM. The rx /
+// AP world coordinates for this ray must include absolute Z (meters).
+function accumulateSlabLoss(z1, z2, boundaries) {
+  if (!boundaries || boundaries.length === 0) return 0
+  const zLo = Math.min(z1, z2)
+  const zHi = Math.max(z1, z2)
+  let loss = 0
+  for (const b of boundaries) {
+    if (b.yM > zLo && b.yM < zHi) loss += b.slabDb
+  }
+  return loss
+}
+
+// Count how many slab boundaries a ray between z1 and z2 crosses, regardless
+// of each slab's attenuation. Used as the same-floor test (0 = same floor).
+function countSlabCrossings(z1, z2, boundaries) {
+  if (!boundaries || boundaries.length === 0) return 0
+  const zLo = Math.min(z1, z2)
+  const zHi = Math.max(z1, z2)
+  let n = 0
+  for (const b of boundaries) {
+    if (b.yM > zLo && b.yM < zHi) n += 1
+  }
+  return n
+}
+
 // Received power at rx from one AP. ap must carry centerMHz (see buildScenario).
+// When `opts.floorBoundaries` + rx.zM / ap.zM are present, we add the total
+// slab attenuation on the direct AP→rx ray (HM-F3a). Reflected / diffracted
+// paths still use the horizontal walls only — cross-floor reflections are
+// treated as negligible for the first iteration.
 export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   const maxReflOrder = opts.maxReflOrder ?? 1
   const enableDiffraction = opts.enableDiffraction ?? true
+  const boundaries = opts.floorBoundaries ?? null
 
   const freqMhz = ap.centerMHz || 5190
   const wavelength = C / (freqMhz * 1e6)
   const kWave = (2 * Math.PI) / wavelength
 
+  // Absolute Z of AP / rx; 0 when caller didn't provide elevation data.
+  const apZM = ap.zM ?? 0
+  const rxZM = rx.zM ?? 0
+  const slabLossDirect = accumulateSlabLoss(apZM, rxZM, boundaries)
+  // Geometry-only same-floor test: "no slab between AP and rx". Distinct
+  // from slabLossDirect === 0, which would also be true when all slabs
+  // happen to have 0 dB attenuation.
+  const slabCount = countSlabCrossings(apZM, rxZM, boundaries)
+
   const paths = []
 
-  // Direct
-  const dDir = Math.max(dist(ap.pos, rx), 0.25)
+  // Direct — use 3D distance so cross-floor Friis is correct. Horizontal
+  // wall losses still use the 2D ray (walls have no cross-floor geometry
+  // in this iteration), while slab losses come from slabLossDirect.
+  const dxyDir = Math.max(dist(ap.pos, rx), 0.25)
+  const dzDir  = apZM - rxZM
+  const dDir   = Math.sqrt(dxyDir * dxyDir + dzDir * dzDir)
   const wallScan = accumulateWallLoss(ap.pos, rx, walls)
-  const plDir = pathLossDb(dDir, freqMhz) + wallScan.totalLoss
+  const plDir = pathLossDb(dDir, freqMhz) + wallScan.totalLoss + slabLossDirect
   paths.push(makeScalarPath(ap.txDbm, apGainDbi(ap, rx), plDir, dDir))
 
   // 1st-order image-source reflections with per-polarization Fresnel.
-  if (maxReflOrder >= 1) {
+  // Cross-floor APs skip reflections — walls are 2D in this iteration and
+  // mirror geometry across a horizontal wall doesn't correspond to anything
+  // physical when AP and rx are on different floors. "Same floor" means the
+  // AP↔rx ray crosses zero slab boundaries.
+  const sameFloorRay = slabCount === 0
+  if (maxReflOrder >= 1 && sameFloorRay) {
     for (const w of walls) {
       const apImage = mirrorPoint(ap.pos, w.a, w.b)
       const hit = segSegIntersect(apImage, rx, w.a, w.b)
@@ -261,8 +311,9 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   }
 
   // Knife-edge diffraction around corners (only when direct is blocked).
-  // Treated as polarization-neutral (scalar approximation).
-  if (enableDiffraction && wallScan.hits > 0) {
+  // Treated as polarization-neutral (scalar approximation). Disabled for
+  // cross-floor rays for the same reason reflections are.
+  if (enableDiffraction && wallScan.hits > 0 && sameFloorRay) {
     for (const c of corners) {
       const s1 = accumulateWallLoss(ap.pos, c, walls)
       const s2 = accumulateWallLoss(c, rx, walls)

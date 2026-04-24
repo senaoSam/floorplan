@@ -24,6 +24,13 @@ export function sampleField(scenario, gridStepM = 0.5, opts = {}) {
 
   const mask = scenario.scopeMaskFn ?? (() => true)
 
+  // Cross-floor context: propagation reads `floorBoundaries` from opts, and
+  // `rx.zM` per sample. When scenario has no boundaries we're in single-floor
+  // planar mode and propagation ignores both.
+  const boundaries = scenario.floorBoundaries ?? null
+  const rxZM = scenario.rxElevationM ?? 0
+  const propOpts = { ...opts, floorBoundaries: boundaries }
+
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
       const x = i * gridStepM
@@ -36,10 +43,10 @@ export function sampleField(scenario, gridStepM = 0.5, opts = {}) {
         cci[idx]  = NaN
         continue
       }
-      const rx = { x, y }
+      const rx = { x, y, zM: rxZM }
       const perAp = []
       for (const ap of scenario.aps) {
-        const { rssiDbm } = rssiFromAp(ap, rx, scenario.walls, scenario.corners, opts)
+        const { rssiDbm } = rssiFromAp(ap, rx, scenario.walls, scenario.corners, propOpts)
         perAp.push(rssiDbm)
       }
       if (perAp.length === 0) {
