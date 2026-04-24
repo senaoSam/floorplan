@@ -1,6 +1,7 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { useAPStore } from '@/store/useAPStore'
+import { useEditorStore } from '@/store/useEditorStore'
 import { getPatternById, sampleGain } from '@/constants/antennaPatterns'
 
 // Match APLayer (2D) so users see the same freq-based color across views.
@@ -126,7 +127,80 @@ function CustomLobe({ patternId, azimuthDeg, color, opacity, matOpts }) {
   )
 }
 
-function APMarker({ ap, pxToM, dimOpacity }) {
+// Build a sprite texture showing the AP name as white text on a dark pill.
+// Cached per-name so dragging / re-renders don't rebuild the canvas.
+const labelTextureCache = new Map()
+function getLabelTexture(text) {
+  if (labelTextureCache.has(text)) return labelTextureCache.get(text)
+  const pad = 18
+  const fontSize = 42
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  ctx.font = `600 ${fontSize}px sans-serif`
+  const metrics = ctx.measureText(text)
+  const textW = Math.ceil(metrics.width)
+  canvas.width  = textW + pad * 2
+  canvas.height = fontSize + pad * 2
+  // Re-set font after resizing canvas (context resets).
+  const ctx2 = canvas.getContext('2d')
+  ctx2.font = `600 ${fontSize}px sans-serif`
+  ctx2.textBaseline = 'middle'
+  ctx2.textAlign = 'center'
+  // Pill background
+  const r = canvas.height / 2
+  ctx2.fillStyle = 'rgba(15, 23, 42, 0.88)'
+  ctx2.beginPath()
+  ctx2.moveTo(r, 0)
+  ctx2.lineTo(canvas.width - r, 0)
+  ctx2.arc(canvas.width - r, r, r, -Math.PI / 2, Math.PI / 2)
+  ctx2.lineTo(r, canvas.height)
+  ctx2.arc(r, r, r, Math.PI / 2, -Math.PI / 2)
+  ctx2.fill()
+  ctx2.strokeStyle = 'rgba(255, 255, 255, 0.25)'
+  ctx2.lineWidth = 2
+  ctx2.stroke()
+  // Text
+  ctx2.fillStyle = '#f1f5f9'
+  ctx2.fillText(text, canvas.width / 2, canvas.height / 2)
+
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.minFilter = THREE.LinearFilter
+  tex.magFilter = THREE.LinearFilter
+  if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace
+  else tex.encoding = THREE.sRGBEncoding
+  tex.needsUpdate = true
+  const entry = { texture: tex, aspect: canvas.width / canvas.height }
+  labelTextureCache.set(text, entry)
+  return entry
+}
+
+// Billboarded AP name label. Sprite always faces the camera, scales so the
+// text stays at a consistent on-screen size as the user zooms.
+function APLabel({ text, position, opacity }) {
+  const { texture, aspect } = useMemo(() => getLabelTexture(text), [text])
+  // World-space height of the pill. 0.5 m reads well alongside the 0.36 m AP
+  // disc without dominating the scene.
+  const heightM = 0.5
+  const widthM = heightM * aspect
+  return (
+    <sprite position={position} scale={[widthM, heightM, 1]}>
+      <spriteMaterial
+        map={texture}
+        transparent
+        opacity={opacity}
+        depthTest={false}
+        depthWrite={false}
+      />
+    </sprite>
+  )
+}
+
+// Selection / hover accent — red emissive glow (matches 2D APLayer) layered
+// on top of the existing freq color so the AP still reads as its band.
+const SELECT_EMISSIVE = '#e74c3c'
+const HOVER_EMISSIVE  = '#ffffff'
+
+function APMarker({ ap, pxToM, dimOpacity, isActiveFloor }) {
   const color = FREQ_COLOR[ap.frequency] ?? DEFAULT_COLOR
   const x = (ap.x ?? 0) * pxToM
   const z = (ap.y ?? 0) * pxToM
@@ -139,8 +213,40 @@ function APMarker({ ap, pxToM, dimOpacity }) {
   const isDirectional = mode === 'directional'
   const isCustom      = mode === 'custom'
 
+  // Selection / hover bookkeeping.
+  const selectedId   = useEditorStore((s) => s.selectedId)
+  const selectedType = useEditorStore((s) => s.selectedType)
+  const setSelected  = useEditorStore((s) => s.setSelected)
+  const [hovered, setHovered] = useState(false)
+  const isSelected = isActiveFloor && selectedType === 'ap' && selectedId === ap.id
+  const isHovered  = isActiveFloor && hovered
+
+  // When selected, swap the ring + body emissive to red accent; default still
+  // uses the freq color so unselected APs look as before.
+  const accentEmissive = isSelected ? SELECT_EMISSIVE : (isHovered ? HOVER_EMISSIVE : color)
+  const bodyEmissiveIntensity = isSelected ? 0.55 : (isHovered ? 0.30 : 0.15)
+  const ringEmissiveIntensity = isSelected ? 0.7  : (isHovered ? 0.40 : 0.20)
+  const ringColor = isSelected ? SELECT_EMISSIVE : color
+
+  const onClick = (e) => {
+    if (!isActiveFloor) return
+    e.stopPropagation()
+    setSelected(ap.id, 'ap')
+  }
+  const onPointerOver = (e) => {
+    if (!isActiveFloor) return
+    e.stopPropagation()
+    setHovered(true)
+  }
+  const onPointerOut = () => setHovered(false)
+
   return (
-    <group position={[x, 0, z]}>
+    <group
+      position={[x, 0, z]}
+      onClick={onClick}
+      onPointerOver={onPointerOver}
+      onPointerOut={onPointerOut}
+    >
       {/* Vertical pole from floor up to the AP height — makes the install
           height difference between APs visually readable. */}
       {y > 0 && (
@@ -153,14 +259,23 @@ function APMarker({ ap, pxToM, dimOpacity }) {
       {/* Body disc at the install height */}
       <mesh position={[0, y, 0]} castShadow>
         <cylinderGeometry args={[BODY_RADIUS_M, BODY_RADIUS_M, BODY_HEIGHT_M, 24]} />
-        <meshStandardMaterial color={color} roughness={0.5} metalness={0.2} emissive={color} emissiveIntensity={0.15} {...matOpts} />
+        <meshStandardMaterial color={color} roughness={0.5} metalness={0.2} emissive={accentEmissive} emissiveIntensity={bodyEmissiveIntensity} {...matOpts} />
       </mesh>
 
       {/* Ring around the body — echoes the 2D concentric-circle motif */}
       <mesh position={[0, y + BODY_HEIGHT_M / 2 + 0.005, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <torusGeometry args={[RING_RADIUS_M, RING_TUBE_M, 10, 36]} />
-        <meshStandardMaterial color={color} roughness={0.4} metalness={0.3} emissive={color} emissiveIntensity={0.2} {...matOpts} />
+        <meshStandardMaterial color={ringColor} roughness={0.4} metalness={0.3} emissive={accentEmissive} emissiveIntensity={ringEmissiveIntensity} {...matOpts} />
       </mesh>
+
+      {/* Floating name label above the ring */}
+      {ap.name && (
+        <APLabel
+          text={ap.name}
+          position={[0, y + 0.6, 0]}
+          opacity={dimOpacity}
+        />
+      )}
 
       {/* Directional beam cone — projected downward from the AP's install height. */}
       {isDirectional && (
@@ -191,13 +306,13 @@ function APMarker({ ap, pxToM, dimOpacity }) {
   )
 }
 
-export default function APLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
+export default function APLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true }) {
   const aps = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   if (!aps.length || !pxToM) return null
   return (
     <group>
       {aps.map((ap) => (
-        <APMarker key={ap.id} ap={ap} pxToM={pxToM} dimOpacity={dimOpacity} />
+        <APMarker key={ap.id} ap={ap} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActiveFloor} />
       ))}
     </group>
   )

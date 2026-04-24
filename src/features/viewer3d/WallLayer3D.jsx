@@ -1,6 +1,7 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { useWallStore } from '@/store/useWallStore'
+import { useEditorStore } from '@/store/useEditorStore'
 import OpeningsDetail from './OpeningDetail3D'
 
 // Fixed visual thickness for wall boxes (meters). Walls are semantically 2D
@@ -64,7 +65,12 @@ function buildWallGeometry(length, height, openings, wallBottom, thickness) {
   return geom
 }
 
-function WallMesh({ wall, pxToM, dimOpacity }) {
+// Accent colors: selected = red (matches 2D APLayer/WallLayer selection red),
+// hovered = soft white highlight.
+const SELECT_EMISSIVE = '#e74c3c'
+const HOVER_EMISSIVE  = '#ffffff'
+
+function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor }) {
   const {
     startX, startY, endX, endY,
     topHeight = 3, bottomHeight = 0,
@@ -108,9 +114,40 @@ function WallMesh({ wall, pxToM, dimOpacity }) {
   const transparent = dimOpacity < 1
   const hasOpenings = (wall.openings?.length ?? 0) > 0
 
+  // Select/hover visuals. Only the active-floor wall layer is interactive —
+  // ghost floors ignore pointer events so the user doesn't accidentally
+  // select a dimmed wall from an upstairs/downstairs floor.
+  const selectedId   = useEditorStore((s) => s.selectedId)
+  const selectedType = useEditorStore((s) => s.selectedType)
+  const setSelected  = useEditorStore((s) => s.setSelected)
+  const [hovered, setHovered] = useState(false)
+
+  const isSelected = isActiveFloor && selectedType === 'wall' && selectedId === wall.id
+  const isHovered  = isActiveFloor && hovered
+  const emissive = isSelected ? SELECT_EMISSIVE : (isHovered ? HOVER_EMISSIVE : '#000000')
+  const emissiveIntensity = isSelected ? 0.45 : (isHovered ? 0.25 : 0)
+
+  const onClick = (e) => {
+    if (!isActiveFloor) return
+    e.stopPropagation()
+    setSelected(wall.id, 'wall')
+  }
+  const onPointerOver = (e) => {
+    if (!isActiveFloor) return
+    e.stopPropagation()
+    setHovered(true)
+  }
+  const onPointerOut = () => setHovered(false)
+
   return (
     <group position={center} rotation={[0, rotationY, 0]}>
-      <mesh castShadow receiveShadow>
+      <mesh
+        castShadow
+        receiveShadow
+        onClick={onClick}
+        onPointerOver={onPointerOver}
+        onPointerOut={onPointerOut}
+      >
         <primitive object={geometry} attach="geometry" />
         <meshStandardMaterial
           color={color}
@@ -120,6 +157,8 @@ function WallMesh({ wall, pxToM, dimOpacity }) {
           transparent={transparent}
           opacity={dimOpacity}
           depthWrite={!transparent}
+          emissive={emissive}
+          emissiveIntensity={emissiveIntensity}
         />
       </mesh>
       {hasOpenings && (
@@ -134,13 +173,13 @@ function WallMesh({ wall, pxToM, dimOpacity }) {
   )
 }
 
-export default function WallLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
+export default function WallLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true }) {
   const walls = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
   if (!walls.length || !pxToM) return null
   return (
     <group>
       {walls.map((w) => (
-        <WallMesh key={w.id} wall={w} pxToM={pxToM} dimOpacity={dimOpacity} />
+        <WallMesh key={w.id} wall={w} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActiveFloor} />
       ))}
     </group>
   )

@@ -77,8 +77,8 @@ function FloorStack({ floor, elevation, isActive }) {
         {floor.imageUrl && <FloorPlane floor={floor} opacity={dimOpacity} />}
       </Suspense>
       <ScopeLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
-      <WallLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
-      <APLayer3D    floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
+      <WallLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActive} />
+      <APLayer3D    floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActive} />
     </group>
   )
 }
@@ -174,6 +174,7 @@ function Viewer3D() {
   const activeFloor = floors.find((f) => f.id === activeFloorId) ?? null
   const show3DAllFloors = useEditorStore((s) => s.show3DAllFloors)
   const toggleLayer     = useEditorStore((s) => s.toggleLayer)
+  const clearSelected   = useEditorStore((s) => s.clearSelected)
 
   const visibleFloors = show3DAllFloors
     ? floors
@@ -213,6 +214,7 @@ function Viewer3D() {
       <Canvas
         camera={{ position: camPos, fov: 50, near: 0.1, far: 2000 }}
         style={{ width: '100%', height: '100%', background: '#0f172a' }}
+        onPointerMissed={() => clearSelected()}
       >
       <ambientLight intensity={0.6} />
       <directionalLight position={[10, 20, 10]} intensity={0.8} />

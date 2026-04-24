@@ -160,10 +160,10 @@
 | 10-1  | ✅   | R3F 基礎場景：平面圖貼圖到地板平面                           |
 | 10-2  | ✅   | 3D 牆體:依 startX/Y → endX/Y 與 topHeight/bottomHeight 生成（實心 Box，厚度 0.1 m，材質顏色） |
 | 10-2b | ✅   | 3D 牆體 openings 鏤空（ExtrudeGeometry + 結構化門窗：門框 / 門扇 / 門把，窗框 / 玻璃 / 窗台） |
-| 10-2c | ⬜   | 3D 牆體選取 / hover 視覺化：與 2D 選取同步（selectedId 反白、hover 高亮） |
+| 10-2c | ✅   | 3D 牆體選取 / hover 視覺化：與 2D 選取同步（selected=紅 emissive、hover=白 emissive） |
 | 10-3  | ✅   | 3D AP 標記：依 x/y/z 座標顯示，含安裝高度差異（圓柱+環+垂直桿） |
 | 10-3b | ✅   | 3D AP 天線方向性視覺化：directional=圓錐 / custom=極座標水平輪廓 |
-| 10-3c | ⬜   | 3D AP 選取 / hover 視覺化 + AP 名稱 label（需引入 drei 或自寫 billboard） |
+| 10-3c | ✅   | 3D AP 選取 / hover 視覺化 + 名稱 label（CanvasTexture sprite billboard） |
 | 10-3d | ⬜   | AP mountType（ceiling/wall）UI 啟用 + 3D 視覺差異（天花板 vs 壁掛姿勢） |
 | 10-4  | ✅   | 3D Scope / Floor Hole 視覺化（地板平鋪多邊形 + 外框）         |
 | 10-5a | ✅   | 3D 多樓層堆疊：floor.floorHeight（預設 3 m）+ computeFloorElevations，所有樓層同時渲染，切換 active 樓層時相機平滑上下移動 |
