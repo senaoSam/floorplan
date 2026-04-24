@@ -5,6 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { useFloorStore } from '@/store/useFloorStore'
 import WallLayer3D from './WallLayer3D'
 import APLayer3D from './APLayer3D'
+import ScopeLayer3D from './ScopeLayer3D'
 
 // r3f v7 doesn't include drei by default. Make OrbitControls available as a
 // JSX element by registering it with the reconciler.
@@ -119,8 +120,9 @@ function Viewer3D() {
 
       {floor && (
         <>
-          <WallLayer3D floorId={floor.id} pxToM={1 / (floor.scale || 100)} />
-          <APLayer3D   floorId={floor.id} pxToM={1 / (floor.scale || 100)} />
+          <ScopeLayer3D floorId={floor.id} pxToM={1 / (floor.scale || 100)} />
+          <WallLayer3D  floorId={floor.id} pxToM={1 / (floor.scale || 100)} />
+          <APLayer3D    floorId={floor.id} pxToM={1 / (floor.scale || 100)} />
         </>
       )}
 

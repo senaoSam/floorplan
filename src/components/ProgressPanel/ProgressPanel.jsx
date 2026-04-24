@@ -160,7 +160,7 @@ const PHASES = [
           { id: '10-3b', done: false, text: '3D AP 天線方向性視覺化' },
           { id: '10-3c', done: false, text: '3D AP 選取 / hover + 名稱 label' },
           { id: '10-3d', done: false, text: 'AP mountType UI + 3D 差異' },
-          { id: '10-4', done: false, text: '3D Scope / Floor Hole 視覺化' },
+          { id: '10-4', done: true, text: '3D Scope / Floor Hole 視覺化' },
           { id: '10-5', done: false, text: '3D 多樓層堆疊 + 訊號穿透視覺化' },
         ],
       },
