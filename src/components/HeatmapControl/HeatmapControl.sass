@@ -129,3 +129,66 @@
     &:hover
       color: $text-primary
       border-color: rgba(255, 255, 255, 0.3)
+
+.heatmap-legend
+  width: 220px
+  background: rgba(15, 23, 42, 0.92)
+  border: 1px solid rgba(255, 255, 255, 0.15)
+  border-radius: 8px
+  padding: 6px 10px 8px
+  color: $text-primary
+  font-size: 10px
+  font-variant-numeric: tabular-nums
+  backdrop-filter: blur(6px)
+
+  &__labels
+    display: flex
+    justify-content: space-between
+    margin-bottom: 3px
+
+  &__label
+    color: #cbd5e1
+    font-size: 10px
+    line-height: 1
+
+  &__bar
+    position: relative
+    height: 10px
+    border-radius: 3px
+    border: 1px solid rgba(255, 255, 255, 0.1)
+
+  &__pointer
+    position: absolute
+    top: -18px
+    transform: translateX(-50%)
+    display: flex
+    flex-direction: column
+    align-items: center
+    pointer-events: none
+
+  &__pointer-value
+    background: rgba(15, 23, 42, 0.95)
+    border: 1px solid rgba(255, 255, 255, 0.25)
+    border-radius: 4px
+    padding: 1px 5px
+    font-size: 10px
+    font-weight: 600
+    color: $text-primary
+    line-height: 1.2
+    white-space: nowrap
+
+  &__pointer-arrow
+    width: 0
+    height: 0
+    border-left: 5px solid transparent
+    border-right: 5px solid transparent
+    border-top: 6px solid rgba(255, 255, 255, 0.85)
+    margin-top: 1px
+
+  &__ticks
+    display: flex
+    justify-content: space-between
+    margin-top: 3px
+    color: #94a3b8
+    font-size: 9px
+    line-height: 1

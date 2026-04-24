@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import FormulaNote from '@/components/FormulaNote/FormulaNote'
+import HeatmapLegend from './HeatmapLegend'
 import './HeatmapControl.sass'
 
 function HeatmapControl() {
@@ -41,6 +42,11 @@ function HeatmapControl() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Color legend — only while heatmap is enabled; pointer follows hover RSSI */}
+      {enabled && (
+        <HeatmapLegend hoverDbm={hover?.rssiDbm} />
       )}
 
       <div className="heatmap-control__row">
