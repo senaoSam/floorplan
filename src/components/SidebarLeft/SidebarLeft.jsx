@@ -1,5 +1,11 @@
 import React, { useRef, useState, useEffect } from 'react'
 import { useFloorStore, DEFAULT_FLOOR_HEIGHT_M } from '@/store/useFloorStore'
+import {
+  MATERIAL_LIST,
+  FLOOR_SLAB_DEFAULT_DB,
+  DEFAULT_FLOOR_SLAB_MATERIAL_ID,
+  DEFAULT_FLOOR_SLAB_DB,
+} from '@/constants/materials'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
@@ -277,6 +283,39 @@ function SidebarLeft() {
                       onClick={(e) => e.stopPropagation()}
                     />
                     <span>m</span>
+                  </label>
+                  <label className="sidebar-left__floor-prop">
+                    <span>樓板</span>
+                    <select
+                      value={floor.floorSlabMaterialId ?? DEFAULT_FLOOR_SLAB_MATERIAL_ID}
+                      onChange={(e) => {
+                        const matId = e.target.value
+                        updateFloor(floor.id, {
+                          floorSlabMaterialId: matId,
+                          floorSlabAttenuationDb: FLOOR_SLAB_DEFAULT_DB[matId] ?? DEFAULT_FLOOR_SLAB_DB,
+                        })
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {MATERIAL_LIST.map((m) => (
+                        <option key={m.id} value={m.id}>{m.label} ({m.dbLoss} dB)</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="sidebar-left__floor-prop">
+                    <span>衰減</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={floor.floorSlabAttenuationDb ?? DEFAULT_FLOOR_SLAB_DB}
+                      onChange={(e) => {
+                        const num = parseFloat(e.target.value)
+                        if (!isNaN(num) && num >= 0) updateFloor(floor.id, { floorSlabAttenuationDb: num })
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <span>dB</span>
                   </label>
                 </li>
               )}

@@ -176,6 +176,10 @@
     gap: 6px
     font-size: 11px
     color: #cbd5e1
+    margin-bottom: 3px
+
+    &:last-child
+      margin-bottom: 0
 
     input
       width: 60px
@@ -192,6 +196,19 @@
 
       &:hover
         background: rgba(255, 107, 107, 0.12)
+
+    select
+      flex: 1
+      padding: 3px 6px
+      border: 1px solid $border-color
+      border-radius: 4px
+      background: $bg-primary
+      color: $text-primary
+      font-size: 11px
+
+      &:focus
+        outline: none
+        border-color: rgba(59, 130, 246, 0.6)
 
   &__layer-item
     display: flex
