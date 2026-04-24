@@ -1,12 +1,27 @@
 import React, { useState } from 'react'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
+import { HEATMAP_MODE_LIST, getModeConfig } from '@/features/heatmap/modes'
 import FormulaNote from '@/components/FormulaNote/FormulaNote'
 import HeatmapLegend from './HeatmapLegend'
 import './HeatmapControl.sass'
 
+// Pick the hover value that corresponds to the active visualisation mode.
+function hoverValueForMode(hover, mode) {
+  if (!hover) return undefined
+  switch (mode) {
+    case 'sinr': return hover.sinrDb
+    case 'snr':  return hover.snrDb
+    case 'cci':  return hover.cciDbm
+    case 'rssi':
+    default:     return hover.rssiDbm
+  }
+}
+
 function HeatmapControl() {
   const enabled      = useHeatmapStore((s) => s.enabled)
   const setEnabled   = useHeatmapStore((s) => s.setEnabled)
+  const mode         = useHeatmapStore((s) => s.mode)
+  const setMode      = useHeatmapStore((s) => s.setMode)
   const reflections  = useHeatmapStore((s) => s.reflections)
   const setReflections = useHeatmapStore((s) => s.setReflections)
   const diffraction  = useHeatmapStore((s) => s.diffraction)
@@ -22,16 +37,28 @@ function HeatmapControl() {
   const [panelOpen, setPanelOpen] = useState(false)
   const [formulaOpen, setFormulaOpen] = useState(false)
 
+  const hoverValue = hoverValueForMode(hover, mode)
+  const activeCfg  = getModeConfig(mode)
+
+  const formatReading = (v, unit) => isFinite(v) ? `${v.toFixed(1)} ${unit}` : '—'
+
   return (
     <div className="heatmap-control">
-      {/* RSSI readout — stacked above the button */}
+      {/* Readout — stacked above the button. Shows all four metrics so the
+          user can compare without flipping modes. */}
       {enabled && hover && (
         <div className="heatmap-control__readout">
           <div className="heatmap-control__readout-row">
-            <b>RSSI</b> <span>{hover.rssiDbm.toFixed(1)} dBm</span>
+            <b>RSSI</b> <span>{formatReading(hover.rssiDbm, 'dBm')}</span>
           </div>
           <div className="heatmap-control__readout-row">
-            <b>SINR</b> <span>{hover.sinrDb.toFixed(1)} dB</span>
+            <b>SINR</b> <span>{formatReading(hover.sinrDb, 'dB')}</span>
+          </div>
+          <div className="heatmap-control__readout-row">
+            <b>SNR</b> <span>{formatReading(hover.snrDb, 'dB')}</span>
+          </div>
+          <div className="heatmap-control__readout-row">
+            <b>CCI</b> <span>{formatReading(hover.cciDbm, 'dBm')}</span>
           </div>
           <div className="heatmap-control__readout-row heatmap-control__readout-pos">
             ({hover.at.x.toFixed(2)}, {hover.at.y.toFixed(2)}) m
@@ -44,9 +71,10 @@ function HeatmapControl() {
         </div>
       )}
 
-      {/* Color legend — only while heatmap is enabled; pointer follows hover RSSI */}
+      {/* Color legend — only while heatmap is enabled; pointer follows hover
+          value for the active mode. */}
       {enabled && (
-        <HeatmapLegend hoverDbm={hover?.rssiDbm} />
+        <HeatmapLegend mode={mode} hoverValue={hoverValue} />
       )}
 
       <div className="heatmap-control__row">
@@ -60,14 +88,26 @@ function HeatmapControl() {
           <span>熱圖 {enabled ? '已開啟' : '已關閉'}</span>
         </button>
         {enabled && (
-          <button
-            type="button"
-            className="heatmap-control__more"
-            onClick={() => setPanelOpen((v) => !v)}
-            title="熱圖設定"
-          >
-            {panelOpen ? '▾' : '▸'} 設定
-          </button>
+          <>
+            <select
+              className="heatmap-control__mode"
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+              title={activeCfg.description}
+            >
+              {HEATMAP_MODE_LIST.map((m) => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="heatmap-control__more"
+              onClick={() => setPanelOpen((v) => !v)}
+              title="熱圖設定"
+            >
+              {panelOpen ? '▾' : '▸'} 設定
+            </button>
+          </>
         )}
       </div>
 

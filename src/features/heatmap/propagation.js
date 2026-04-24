@@ -311,9 +311,15 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
 
 // SINR-aware aggregation: strongest AP is the signal; other APs contribute to
 // interference only if they share spectrum with the signal AP.
-// Returns { rssiDbm, sinrDb, bestApIndex }.
+// Returns { rssiDbm, sinrDb, snrDb, cciDbm, bestApIndex }.
+//   - rssiDbm: strongest AP's received power
+//   - sinrDb:  S / (N + ΣI_co-channel)
+//   - snrDb:   S / N, ignores interferers (no-interference upper bound)
+//   - cciDbm:  10·log10(ΣI_co-channel linear), or -Infinity if none
 export function aggregateApContributions(perApDbm, apList, noiseDbm = NOISE_FLOOR_DBM) {
-  if (!perApDbm.length) return { rssiDbm: -120, sinrDb: -50, bestApIndex: -1 }
+  if (!perApDbm.length) {
+    return { rssiDbm: -120, sinrDb: -50, snrDb: -50, cciDbm: -Infinity, bestApIndex: -1 }
+  }
 
   // Best (strongest) AP = "serving" AP.
   let bestIdx = 0
@@ -323,12 +329,15 @@ export function aggregateApContributions(perApDbm, apList, noiseDbm = NOISE_FLOO
   const signalDb = perApDbm[bestIdx]
   const signalAp = apList[bestIdx]
 
-  let interfLin = dbToLin(noiseDbm)
+  let cciLin = 0
   for (let i = 0; i < perApDbm.length; i++) {
     if (i === bestIdx) continue
     if (!apsShareSpectrum(signalAp, apList[i])) continue
-    interfLin += dbToLin(perApDbm[i])
+    cciLin += dbToLin(perApDbm[i])
   }
-  const sinrDb = signalDb - linToDb(interfLin)
-  return { rssiDbm: signalDb, sinrDb, bestApIndex: bestIdx }
+  const noiseLin = dbToLin(noiseDbm)
+  const sinrDb = signalDb - linToDb(noiseLin + cciLin)
+  const snrDb  = signalDb - noiseDbm
+  const cciDbm = cciLin > 0 ? linToDb(cciLin) : -Infinity
+  return { rssiDbm: signalDb, sinrDb, snrDb, cciDbm, bestApIndex: bestIdx }
 }

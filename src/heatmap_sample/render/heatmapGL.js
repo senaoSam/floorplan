@@ -226,16 +226,20 @@ export function createHeatmapGL() {
   const targets = [createTarget(gl), createTarget(gl)];
   let targetW = 0, targetH = 0;
 
-  // Precomputed anchor uniform (Float32Array of 8*4).
+  // Precomputed anchor uniform (Float32Array of 5*4).
   const anchorData  = new Float32Array(5 * 4);
   const alphaData   = new Float32Array(5);
-  for (let i = 0; i < 5; i++) {
-    anchorData[i * 4    ] = ANCHORS[i][0];
-    anchorData[i * 4 + 1] = ANCHORS[i][1];
-    anchorData[i * 4 + 2] = ANCHORS[i][2];
-    anchorData[i * 4 + 3] = ANCHORS[i][3];
-    alphaData[i]           = Math.round(ANCHORS[i][4] * 255);
+  function setAnchors(anchors) {
+    const src = anchors ?? ANCHORS;
+    for (let i = 0; i < 5; i++) {
+      anchorData[i * 4    ] = src[i][0];
+      anchorData[i * 4 + 1] = src[i][1];
+      anchorData[i * 4 + 2] = src[i][2];
+      anchorData[i * 4 + 3] = src[i][3];
+      alphaData[i]           = Math.round(src[i][4] * 255);
+    }
   }
+  setAnchors(null);
 
   function ensureTargets(w, h) {
     if (w === targetW && h === targetH) return;
@@ -269,11 +273,12 @@ export function createHeatmapGL() {
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
 
-  function render(field, outW, outH, _metersPerPixel, blurRadius, showContours) {
+  function render(field, outW, outH, _metersPerPixel, blurRadius, showContours, colorConfig) {
     canvas.width = outW;
     canvas.height = outH;
     ensureTargets(outW, outH);
     uploadField(field);
+    setAnchors(colorConfig?.anchors ?? null);
 
     // --- Pass 1: sample coarse field → targets[0] (R32F, output res) ---
     gl.bindFramebuffer(gl.FRAMEBUFFER, targets[0].fbo);

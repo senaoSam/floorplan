@@ -94,15 +94,23 @@ function FormulaNote() {
       </section>
 
       <section>
-        <h4>6. 同頻 SINR 聚合</h4>
+        <h4>6. 訊號品質指標聚合（RSSI / SINR / SNR / CCI）</h4>
         <ul>
-          <li>RSSI 取最強 AP (client 會 associate 到它)</li>
-          <li>SINR 分母只加入「頻譜真的重疊」的其他 AP（依 band + channel + channelWidth 判斷）</li>
+          <li>RSSI = 最強 AP 的接收功率（client 會 associate 到它）</li>
           <li>
-            雜訊與干擾在線性功率 (mW) 域相加：<br />
-            <code>SINR_dB = S_dBm − 10·log₁₀(10^(N/10) + Σ 10^(I_k/10))</code><br />
-            noise floor N = −95 dBm
+            SINR 分母加入「頻譜真的重疊」的其他 AP（依 band + channel + channelWidth 判斷），
+            干擾與雜訊在線性功率 (mW) 域相加：<br />
+            <code>SINR_dB = S_dBm − 10·log₁₀(10^(N/10) + Σ 10^(I_k/10))</code>
           </li>
+          <li>
+            SNR = 忽略干擾的訊號雜訊比，上限參考：<br />
+            <code>SNR_dB = S_dBm − N_dBm</code>
+          </li>
+          <li>
+            CCI = 同頻干擾功率總和（dBm），越低越好：<br />
+            <code>CCI_dBm = 10·log₁₀( Σ 10^(I_k/10) )</code>（無干擾時 −∞）
+          </li>
+          <li>noise floor N = −95 dBm</li>
         </ul>
       </section>
 

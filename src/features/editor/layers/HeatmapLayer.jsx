@@ -8,6 +8,7 @@ import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { buildScenario } from '@/features/heatmap/buildScenario'
 import { sampleField } from '@/features/heatmap/sampleField'
+import { getModeConfig } from '@/features/heatmap/modes'
 import { createHeatmapGL } from '@/heatmap_sample/render/heatmapGL.js'
 
 // Heatmap render layer. Sits between the floor image and the wall layer so
@@ -25,6 +26,7 @@ export default function HeatmapLayer({ floorId }) {
   const scopes  = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
 
   const enabled     = useHeatmapStore((s) => s.enabled)
+  const mode        = useHeatmapStore((s) => s.mode)
   const reflections = useHeatmapStore((s) => s.reflections)
   const diffraction = useHeatmapStore((s) => s.diffraction)
   const gridStepM   = useHeatmapStore((s) => s.gridStepM)
@@ -97,12 +99,19 @@ export default function HeatmapLayer({ floorId }) {
       const outH = Math.max(1, Math.round(scenario.size.h * floor.scale))
       const gl = getGL()
       if (!gl) return
-      gl.render(field, outW, outH, 1 / floor.scale, blur, showContours)
+      // Mode selects which sampled field feeds the renderer. heatmapGL reads
+      // `field.rssi` by convention, so we swap the active field into that slot.
+      const modeCfg = getModeConfig(mode)
+      const activeField = field[modeCfg.field] ?? field.rssi
+      const renderField = { rssi: activeField, nx: field.nx, ny: field.ny }
+      gl.render(renderField, outW, outH, 1 / floor.scale, blur, showContours, {
+        anchors: modeCfg.anchors,
+      })
       setVersion((n) => n + 1)
     }
     const id = setTimeout(run, 0)
     return () => { cancelled = true; clearTimeout(id) }
-  }, [enabled, scenario, reflections, diffraction, gridStepM, blur, showContours, floor?.scale])
+  }, [enabled, mode, scenario, reflections, diffraction, gridStepM, blur, showContours, floor?.scale])
 
   if (!enabled || !floor?.scale || !glRef.current) return null
 

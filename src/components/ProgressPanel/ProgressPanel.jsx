@@ -136,7 +136,7 @@ const PHASES = [
         layer: '未來擴充',
         items: [
           { id: 'HM-F1', done: true, text: '天線方向性（antennaPattern 進計算）' },
-          { id: 'HM-F7', done: false, text: '熱圖指標切換：SNR / CCI 模式' },
+          { id: 'HM-F7', done: true, text: '熱圖指標切換：SNR / CCI 模式' },
           { id: 'HM-F2', done: false, text: 'FloorHole 跨樓層訊號穿透（待樓層垂直模型）' },
           { id: 'HM-F3', done: false, text: '樓板衰減（跨樓層，與 F2 耦合）' },
           { id: 'HM-F4', done: false, text: 'autoPowerPlan 自動功率規劃重建' },
