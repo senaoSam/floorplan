@@ -138,7 +138,37 @@ function FormulaNote() {
       </section>
 
       <section>
-        <h4>8. Scope 遮罩</h4>
+        <h4>8. 跨樓層訊號（樓板衰減 + FloorHole bypass）</h4>
+        <p>
+          所有樓層的 AP 都參與計算。每個 AP 的絕對高度
+          <code>Z_ap = floor.elevation + ap.z</code>，接收端則是
+          <code>Z_rx = 當前樓層.elevation + 1.0 m</code>（預設觀察高度）。
+        </p>
+        <ul>
+          <li>
+            <b>3D 距離</b>：直射路徑的 Friis 自由空間損失改用 3D 距離
+            <code>d = √(Δx² + Δy² + Δz²)</code>。
+          </li>
+          <li>
+            <b>樓板衰減（Slab loss）</b>：射線從 Z_ap 到 Z_rx 垂直跨越的每一道樓板邊界都累加
+            <code>floor.floorSlabAttenuationDb</code>（預設 concrete 12 dB）。
+          </li>
+          <li>
+            <b>FloorHole bypass</b>：射線穿越某道樓板邊界 y=b 時，求該 XY 交點
+            <code>(x(t), y(t))</code>，若落在該邊界有效的任一 FloorHole 多邊形內 → 該層 slab 不計。
+            Hole 的垂直範圍由 <code>bottomFloorId</code> ~ <code>topFloorId</code> 決定，
+            預設只 bypass 自己樓層的天花板。
+          </li>
+          <li>
+            <b>跨樓層簡化</b>：當射線跨越 ≥ 1 層樓板時，
+            關閉反射 / 繞射（walls 是 2D segment，鏡像幾何在跨樓層沒物理意義），
+            也不計其他樓層的牆衰減。這些限制將在後續任務放寬。
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h4>9. Scope 遮罩</h4>
         <p>
           若存在至少一個 in-scope 多邊形，網格點必須落在其中之一才算；
           落在任一 out-scope 多邊形內的點也會被剔除。被剔除的點標成 NaN，
@@ -153,7 +183,9 @@ function FormulaNote() {
         (2) 頻率參數化為 per-AP（<code>ap.centerMHz</code>，缺值 fallback 5190 MHz）；
         (3) 反射改用 ITU-R P.2040-3 材質係數 + 複數 Fresnel，並拆成兩個正交極化通道在功率域合成；
         (4) 多路徑在整個 channel 頻寬內取 N 個頻點做寬頻平均；
-        (5) SINR 只累計頻譜重疊的 AP。
+        (5) SINR 只累計頻譜重疊的 AP；
+        (6) 多樓層：所有樓層 AP 共用同一套 propagation，直射加 slab loss，
+        FloorHole 可 bypass，跨樓層射線關閉反射/繞射與其他樓層牆穿透。
       </section>
     </div>
   )
