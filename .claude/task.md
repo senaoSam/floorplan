@@ -169,7 +169,7 @@
 | 10-5a | ✅   | 3D 多樓層堆疊：floor.floorHeight（預設 3 m）+ computeFloorElevations，所有樓層同時渲染，切換 active 樓層時相機平滑上下移動 |
 | 10-5b | ✅   | 非 active 樓層的牆 / AP / Scope 視覺弱化（dimOpacity 0.28 套到所有 material） |
 | 10-5c | ✅   | 單樓層 / 全樓層切換（Viewer3D 左上 toggle + useEditorStore.show3DAllFloors） |
-| 10-5d | ⬜   | `floor.floorHeight` 編輯 UI（目前都預設 3 m）                |
+| 10-5d | ✅   | `floor.floorHeight` 編輯 UI（SidebarLeft active 樓層下方 inline 輸入） |
 | 10-5e | ⬜   | 樓層間訊號穿透視覺化（依賴 HM-F2/F3 完成）                   |
 
 ---

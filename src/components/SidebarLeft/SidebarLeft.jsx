@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react'
-import { useFloorStore } from '@/store/useFloorStore'
+import { useFloorStore, DEFAULT_FLOOR_HEIGHT_M } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
@@ -205,9 +205,10 @@ function SidebarLeft() {
             const isEditing = editingId === floor.id
             const isMenuOpen = menuOpenId === floor.id
             const isDragOver = dropIndex === idx && dragIndex !== null && dragIndex !== idx
+            const floorHeight = floor.floorHeight ?? DEFAULT_FLOOR_HEIGHT_M
             return (
+              <React.Fragment key={floor.id}>
               <li
-                key={floor.id}
                 className={[
                   'sidebar-left__floor-item',
                   isActive ? 'sidebar-left__floor-item--active' : '',
@@ -260,6 +261,26 @@ function SidebarLeft() {
                   </div>
                 )}
               </li>
+              {isActive && (
+                <li className="sidebar-left__floor-props">
+                  <label className="sidebar-left__floor-prop">
+                    <span>樓高</span>
+                    <input
+                      type="number"
+                      min="0.5"
+                      step="0.1"
+                      value={floorHeight}
+                      onChange={(e) => {
+                        const num = parseFloat(e.target.value)
+                        if (!isNaN(num) && num >= 0.5) updateFloor(floor.id, { floorHeight: num })
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <span>m</span>
+                  </label>
+                </li>
+              )}
+              </React.Fragment>
             )
           })}
         </ul>

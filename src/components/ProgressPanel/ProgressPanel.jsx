@@ -164,7 +164,7 @@ const PHASES = [
           { id: '10-5a', done: true, text: '3D 多樓層堆疊（floorHeight 預設 3m + 相機平滑切換）' },
           { id: '10-5b', done: true, text: '非 active 樓層的牆/AP/Scope 視覺弱化' },
           { id: '10-5c', done: true, text: '單樓層 / 全樓層顯示切換' },
-          { id: '10-5d', done: false, text: 'floor.floorHeight 編輯 UI' },
+          { id: '10-5d', done: true, text: 'floor.floorHeight 編輯 UI' },
           { id: '10-5e', done: false, text: '樓層間訊號穿透視覺化（依賴 HM-F2/F3）' },
         ],
       },
