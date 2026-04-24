@@ -79,8 +79,13 @@ function Editor2D() {
   const [cropStart, setCropStart] = useState(null)   // {x,y}
 
   // ── 框選狀態 ──────────────────────────────────────────
-  const [marquee, setMarquee] = useState(null)       // { startX, startY, endX, endY } canvas coords
-  const marqueeRectRef        = useRef(null)          // 同步副本，避免 useCallback 閉包取到舊值
+  // Marquee rect is drawn imperatively onto its own Konva Layer so mousemove
+  // doesn't trigger React re-renders of wall / AP / scope layers. On demo
+  // with ~30 walls + openings + APs, a state-driven rect caused visible lag
+  // during marquee drag because every move re-reconciled all vector layers.
+  const marqueeRectRef        = useRef(null)          // { startX, startY, endX, endY } canvas coords
+  const marqueeNodeRef        = useRef(null)          // Konva Rect node for imperative updates
+  const marqueeLayerRef       = useRef(null)          // dedicated Layer — batchDraw is cheap
 
   // ── 牆體材質快捷鍵 ────────────────────────────────────
   const [wallMaterial, setWallMaterial] = useState(MATERIALS.CONCRETE)
@@ -556,7 +561,11 @@ function Editor2D() {
       }
       marqueeRef.current = null
       marqueeRectRef.current = null
-      setMarquee(null)
+      const node = marqueeNodeRef.current
+      if (node) {
+        node.visible(false)
+        marqueeLayerRef.current?.batchDraw()
+      }
     }
   }, [collectMarqueeHits, setSelectedItems, clearSelected])
 
@@ -593,7 +602,7 @@ function Editor2D() {
       return
     }
 
-    // 框選拖曳
+    // 框選拖曳 — 用 ref + 命令式 Konva 更新，避免每個 mousemove 都重渲染整個 Editor2D
     if (marqueeRef.current) {
       const canvasPos = toCanvasPos(pos)
       const { startX, startY } = marqueeRef.current
@@ -601,7 +610,19 @@ function Editor2D() {
       if (Math.hypot(canvasPos.x - startX, canvasPos.y - startY) > 5 / viewport.scale) {
         const rect = { startX, startY, endX: canvasPos.x, endY: canvasPos.y }
         marqueeRectRef.current = rect
-        setMarquee(rect)
+        const node = marqueeNodeRef.current
+        if (node) {
+          node.setAttrs({
+            x: Math.min(startX, canvasPos.x),
+            y: Math.min(startY, canvasPos.y),
+            width: Math.abs(canvasPos.x - startX),
+            height: Math.abs(canvasPos.y - startY),
+            strokeWidth: 1.5 / viewport.scale,
+            dash: [6 / viewport.scale, 3 / viewport.scale],
+            visible: true,
+          })
+          marqueeLayerRef.current?.batchDraw()
+        }
       }
       return
     }
@@ -993,7 +1014,7 @@ function Editor2D() {
           width={size.width}  height={size.height}
           x={viewport.x}      y={viewport.y}
           scaleX={viewport.scale} scaleY={viewport.scale}
-          draggable={!hoverCursor && !marquee && !isMarqueeMode}
+          draggable={!hoverCursor && !isMarqueeMode}
           onWheel={handleWheel}
           onDragEnd={handleDragEnd}
           onMouseDown={handleMouseDown}
@@ -1187,20 +1208,18 @@ function Editor2D() {
               />
             )}
 
-            {/* 框選矩形 */}
-            {marquee && (
-              <Rect
-                x={Math.min(marquee.startX, marquee.endX)}
-                y={Math.min(marquee.startY, marquee.endY)}
-                width={Math.abs(marquee.endX - marquee.startX)}
-                height={Math.abs(marquee.endY - marquee.startY)}
-                fill="rgba(0, 229, 255, 0.08)"
-                stroke="#00e5ff"
-                strokeWidth={1.5 / viewport.scale}
-                dash={[6 / viewport.scale, 3 / viewport.scale]}
-                listening={false}
-              />
-            )}
+          </Layer>
+
+          {/* 框選矩形 — 獨立 Layer + imperative 更新，避免 mousemove 打到 React */}
+          <Layer ref={marqueeLayerRef} listening={false}>
+            <Rect
+              ref={marqueeNodeRef}
+              visible={false}
+              fill="rgba(0, 229, 255, 0.08)"
+              stroke="#00e5ff"
+              strokeWidth={1.5}
+              listening={false}
+            />
           </Layer>
         </Stage>
       )}
