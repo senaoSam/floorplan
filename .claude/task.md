@@ -151,10 +151,54 @@
 | HM-F2c | ✅   | 跨樓層射線的牆穿透：射線 2D 投影穿過其他樓層的牆時也加牆損；牆僅對 Z 介於 wall.bottomHeight~topHeight 的射線段有效 |
 | HM-F2e | ✅   | 牆 Z 範圍過濾：同樓層也應限制 wall 只對 AP/rx 在 wall.bottomHeight~topHeight 內的射線有效（矮隔間不該阻擋高處訊號） |
 | HM-F3b | ✅   | 樓板材質 UI：Sidebar 或 FloorPanel 暴露 floorSlabMaterialId + 自動同步 floorSlabAttenuationDb |
-| HM-F2d | ⬜   | 跨樓層反射/繞射（高成本；牆需升級成 3D 平面、image-source 在 3D 做；第一版貢獻小，先擱） |
-| HM-F4 | ⬜   | autoPowerPlan 自動功率規劃重建（依賴 F2/F3 完成的跨樓層 heatmap） |
-| HM-F5 | ⬜   | 把 CPU 引擎移植到 WebGL fragment shader（GPU 即時性） |
-| HM-F6 | ⬜   | 拖曳中凍結 heatmap 的效能優化（目前任何變動即重算；大場景卡時再加） |
+> **目標場景**：500 AP + 2000 牆，拖曳時 ≥ 60 Hz 即時熱圖。
+> 純 CPU（JS 或 WASM）在此規模撐不住，只有 GPU + 空間加速結構能達標。
+> 路線：WebGL fragment shader MVP → BVH → 完整物理（Fresnel / 反射）→ 調優。
+> **不做 WebGPU**（相容性考量）。Worker 保留為 CPU fallback 備援。
+
+### Shader 開發工具鏈（HM-F5a 開工前先建好，降低 debug 成本）
+
+> 浮點精度（32-bit vs 64-bit）、uniform 傳遞、texture sampler 模式都是容易踩雷的點。
+> 不先建對照機制，改到後面會出現「哪裡飄了不知道」的困境。
+
+| #      | 狀態 | Task |
+| ------ | ---- | ---- |
+| HM-T1  | ⬜   | Golden test fixture：挑固定場景（2 AP + 10 牆 + 2 opening + 2 樓層），把 JS 引擎輸出的 grid（float array + meta）序列化成 `.golden.json`，存在 `src/features/heatmap/__fixtures__/` |
+| HM-T2  | ⬜   | Diff harness：一個測試 runner（Vitest / 獨立 script 皆可）執行 shader 版 + JS 版對同一 scenario，grid 逐格 diff，報告 max abs dB error、超過 ±1 dB 的格子座標與數量 |
+| HM-T3  | ⬜   | 「CPU 對照模式」開關：HeatmapControl 加一顆按鈕，一鍵切回純 JS 引擎（繞過 shader），方便使用者/開發者視覺 diff 兩版熱圖 |
+| HM-T4  | ⬜   | 每個 F5 子階段定義**驗收門檻**：F5a 完成後 max diff ≤ 3 dB（缺反射/Fresnel 允許較大誤差）；F5c 完成後 ≤ 1.5 dB；F5d 完成後 ≤ 1 dB（full parity） |
+
+### GPU 即時化路線（依序執行）
+
+| #      | 狀態 | Task |
+| ------ | ---- | ---- |
+| HM-F5a | ⬜   | WebGL shader MVP：`rssiFromAp` 翻 GLSL，walls/APs 打包成 texture，fragment shader 每格掃全部 walls/APs；只做 Friis + 牆穿透（Z 過濾、slab、openings 一併移植）；暫跳過反射、複數 Fresnel、多頻點相干疊加。**完成條件**：通過 HM-T2 diff，max error ≤ 3 dB |
+| HM-F5b | ⬜   | BVH / Uniform Grid 空間加速：每格 raycast 從 O(N_walls) 降到 O(log N) 或 O(常數)；資料結構塞進 texture 讓 shader 查詢 |
+| HM-F5c | ⬜   | 反射 + 複數 Fresnel 移植：vec2 模擬複數，image-source search + 貢獻門檻 cull；ITU-R P.2040-3 Fresnel 公式完整跑在 shader。**完成條件**：HM-T2 max error ≤ 1.5 dB |
+| HM-F5d | ⬜   | 多頻點相干疊加 + 繞射：N 個頻點在 shader 迴圈 accumulate；knife-edge diffraction corners。**完成條件**：HM-T2 max error ≤ 1 dB（與 JS 版達到實質 parity） |
+| HM-F5e | ⬜   | 增量資料上傳優化：拖曳單一 AP 時只更新該 AP 在 texture 的那幾個 texel，而不是整包重傳 |
+| HM-F5f | ⬜   | 大場景調優：profile 500 AP + 2000 牆實際耗時，若 < 60 Hz 則針對熱點優化（branch coherence、texture layout、uniform cache） |
+
+### 備援與延伸
+
+| #     | 狀態 | Task |
+| ----- | ---- | ---- |
+| HM-F6 | ⬜   | Web Worker CPU fallback：無 WebGL2 環境（舊瀏覽器 / headless）降級回 JS 引擎並丟 Worker 避免卡 UI |
+| HM-F4 | ⬜   | autoPowerPlan 自動功率規劃重建（依賴 F5 即時熱圖才有好的反覆搜尋效率） |
+| HM-F2d | ⬜  | 跨樓層反射/繞射（高成本；牆需升級成 3D 平面、image-source 在 3D 做；第一版貢獻小，先擱） |
+
+<!--
+移除項目（2026-04-24 排序調整時下線）：
+  - 拖曳降解析度（gridStepM 暫時拉大）：短期 quick win 方案，
+    但等 F5a 做完後 GPU 版本應該直接 60Hz 不需要降級策略。
+    若 F5 整段推延且拖曳真的卡，再回頭評估。
+-->
+
+### 其他（低優先）
+
+| #      | 狀態 | Task |
+| ------ | ---- | ---- |
+| HM-B1  | ⬜   | Gaussian blur 改善 / 參數微調 / 關閉選項（使用者要求先排到後面） |
 
 ---
 
