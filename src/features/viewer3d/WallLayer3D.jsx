@@ -11,7 +11,7 @@ const WALL_THICKNESS_M = 0.1
 // happen for materials from constants/materials.js, but mock imports might).
 const DEFAULT_WALL_COLOR = '#94a3b8'
 
-function WallMesh({ wall, pxToM }) {
+function WallMesh({ wall, pxToM, dimOpacity }) {
   const {
     startX, startY, endX, endY,
     topHeight = 3, bottomHeight = 0,
@@ -56,18 +56,21 @@ function WallMesh({ wall, pxToM }) {
         roughness={0.85}
         metalness={0.05}
         side={THREE.DoubleSide}
+        transparent={dimOpacity < 1}
+        opacity={dimOpacity}
+        depthWrite={dimOpacity >= 1}
       />
     </mesh>
   )
 }
 
-export default function WallLayer3D({ floorId, pxToM }) {
+export default function WallLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
   const walls = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
   if (!walls.length || !pxToM) return null
   return (
     <group>
       {walls.map((w) => (
-        <WallMesh key={w.id} wall={w} pxToM={pxToM} />
+        <WallMesh key={w.id} wall={w} pxToM={pxToM} dimOpacity={dimOpacity} />
       ))}
     </group>
   )

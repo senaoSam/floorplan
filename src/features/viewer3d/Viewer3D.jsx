@@ -3,10 +3,12 @@ import { Canvas, extend, useFrame, useLoader, useThree } from '@react-three/fibe
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { useFloorStore } from '@/store/useFloorStore'
+import { useEditorStore } from '@/store/useEditorStore'
 import WallLayer3D from './WallLayer3D'
 import APLayer3D from './APLayer3D'
 import ScopeLayer3D from './ScopeLayer3D'
 import { computeFloorElevations } from './floorStacking'
+import './Viewer3D.sass'
 
 // r3f v7 doesn't include drei by default. Make OrbitControls available as a
 // JSX element by registering it with the reconciler.
@@ -62,23 +64,21 @@ function FloorPlane({ floor, opacity = 1 }) {
 }
 
 // Single stacked floor: its image plane plus all vector layers living in a
-// group lifted to the floor's elevation.
+// group lifted to the floor's elevation. Non-active floors render with a
+// uniform `dimOpacity` < 1 so the active floor stays legible against the
+// stacked reference floors.
 function FloorStack({ floor, elevation, isActive }) {
   const pxToM = 1 / (floor.scale || 100)
-  // Non-active floors fade into "ghost reference" mode so the active floor
-  // stays legible. Mirrors the 2D "参考樓層疊影" convention.
-  const opacity = isActive ? 1 : 0.28
+  const dimOpacity = isActive ? 1 : 0.28
 
   return (
     <group position={[0, elevation, 0]}>
       <Suspense fallback={null}>
-        {floor.imageUrl && <FloorPlane floor={floor} opacity={opacity} />}
+        {floor.imageUrl && <FloorPlane floor={floor} opacity={dimOpacity} />}
       </Suspense>
-      <group visible={isActive || opacity > 0.05}>
-        <ScopeLayer3D floorId={floor.id} pxToM={pxToM} />
-        <WallLayer3D  floorId={floor.id} pxToM={pxToM} />
-        <APLayer3D    floorId={floor.id} pxToM={pxToM} />
-      </group>
+      <ScopeLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
+      <WallLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
+      <APLayer3D    floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
     </group>
   )
 }
@@ -86,25 +86,30 @@ function FloorStack({ floor, elevation, isActive }) {
 // Wraps a three.js OrbitControls instance, driven each frame. Camera target is
 // the active floor's center so zoom/pan feels anchored to the floor being
 // edited in 2D. When `target` changes (e.g. user switches active floor in the
-// sidebar) we tween target + camera position together so the view glides
-// instead of snapping.
+// sidebar) we tween target + camera position together for a short window so
+// the view glides instead of snapping. Outside that window OrbitControls owns
+// the camera fully — keeping it hijacked per-frame breaks orbit/pan/zoom.
 function CameraRig({ target }) {
   const controlsRef = useRef()
   const { camera, gl } = useThree()
 
-  // Tween endpoints. targetDesired is the rig's authoritative goal; we also
-  // carry the camera position delta so zoom distance/azimuth survive the lift.
-  const desired = useRef(new THREE.Vector3(...target))
-  const cameraDelta = useRef(new THREE.Vector3(0, 0, 0))
+  // Tween endpoints + active flag. We only drive the camera during a lift;
+  // as soon as target/camera are close enough we hand control back so the
+  // user can orbit, pan, and zoom without the rig fighting them.
+  const desiredTarget = useRef(new THREE.Vector3(...target))
+  const desiredCam    = useRef(new THREE.Vector3())
+  const tweening      = useRef(false)
 
-  // On target prop change, set new goal + record the camera offset relative
-  // to the old target so the tween preserves the user's orbit pose.
+  // On target prop change, set new goal and compute the matching camera goal
+  // that preserves the user's current orbit pose (same offset to the target).
   useEffect(() => {
     const controls = controlsRef.current
     if (!controls) return
     const nextTarget = new THREE.Vector3(...target)
-    cameraDelta.current.copy(camera.position).sub(controls.target)
-    desired.current.copy(nextTarget)
+    const camOffset = new THREE.Vector3().copy(camera.position).sub(controls.target)
+    desiredTarget.current.copy(nextTarget)
+    desiredCam.current.copy(nextTarget).add(camOffset)
+    tweening.current = true
   }, [target, camera])
 
   // Initialise on mount so the first render doesn't try to tween from 0.
@@ -113,21 +118,31 @@ function CameraRig({ target }) {
     if (!controls) return
     controls.target.set(target[0], target[1], target[2])
     controls.update()
+    tweening.current = false
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useFrame((_, dt) => {
     const controls = controlsRef.current
     if (!controls) return
-    // Critically-damped-ish lerp: 1 − e^(−k·dt) keeps the tween frame-rate
-    // independent and lets OrbitControls keep handling user input underneath.
+    if (!tweening.current) return   // idle → OrbitControls fully in charge
+    // Frame-rate independent critically-damped-ish lerp.
     const k = 8
     const alpha = 1 - Math.exp(-k * Math.min(dt, 0.1))
-    controls.target.lerp(desired.current, alpha)
-    // Recompute camera so it stays at the same offset from the tweening target.
-    const goalCam = desired.current.clone().add(cameraDelta.current)
-    camera.position.lerp(goalCam, alpha)
+    controls.target.lerp(desiredTarget.current, alpha)
+    camera.position.lerp(desiredCam.current, alpha)
     controls.update()
+    // Stop the tween once we're visually settled so user orbit input isn't
+    // fought on subsequent frames.
+    const done =
+      controls.target.distanceToSquared(desiredTarget.current) < 1e-4 &&
+      camera.position.distanceToSquared(desiredCam.current) < 1e-4
+    if (done) {
+      controls.target.copy(desiredTarget.current)
+      camera.position.copy(desiredCam.current)
+      controls.update()
+      tweening.current = false
+    }
   })
 
   return (
@@ -157,6 +172,12 @@ function Viewer3D() {
   const floors = useFloorStore((s) => s.floors)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
   const activeFloor = floors.find((f) => f.id === activeFloorId) ?? null
+  const show3DAllFloors = useEditorStore((s) => s.show3DAllFloors)
+  const toggleLayer     = useEditorStore((s) => s.toggleLayer)
+
+  const visibleFloors = show3DAllFloors
+    ? floors
+    : floors.filter((f) => f.id === activeFloorId)
 
   // Per-floor stacking elevations computed from floorHeight; shared by the
   // scene graph and the camera target so they move together when the user
@@ -178,17 +199,28 @@ function Viewer3D() {
   const camPos = [w / 2 + diag * 0.6, activeElev + diag * 0.7, h / 2 + diag * 0.9]
 
   return (
-    <Canvas
-      camera={{ position: camPos, fov: 50, near: 0.1, far: 2000 }}
-      style={{ width: '100%', height: '100%', background: '#0f172a' }}
-    >
+    <div className="viewer3d">
+      <div className="viewer3d__overlay">
+        <button
+          type="button"
+          className={`viewer3d__floors-btn${show3DAllFloors ? ' viewer3d__floors-btn--active' : ''}`}
+          onClick={() => toggleLayer('show3DAllFloors')}
+          title={show3DAllFloors ? '切換為只顯示當前樓層' : '切換為顯示全部樓層'}
+        >
+          {show3DAllFloors ? '🏢 全樓層' : '🏠 單樓層'}
+        </button>
+      </div>
+      <Canvas
+        camera={{ position: camPos, fov: 50, near: 0.1, far: 2000 }}
+        style={{ width: '100%', height: '100%', background: '#0f172a' }}
+      >
       <ambientLight intensity={0.6} />
       <directionalLight position={[10, 20, 10]} intensity={0.8} />
       <hemisphereLight args={['#e2e8f0', '#1e293b', 0.4]} />
 
       {floors.length === 0 && <EmptyScene />}
 
-      {floors.map((f) => (
+      {visibleFloors.map((f) => (
         <FloorStack
           key={f.id}
           floor={f}
@@ -208,7 +240,8 @@ function Viewer3D() {
       )}
 
       <CameraRig target={center} />
-    </Canvas>
+      </Canvas>
+    </div>
   )
 }
 

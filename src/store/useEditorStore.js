@@ -52,6 +52,11 @@ export const useEditorStore = create((set, get) => ({
   alignRefFloors: null,
   alignRefOpacity: 0.3,
 
+  // 3D view: when true, Viewer3D renders every floor stacked; when false,
+  // only the active floor is shown (useful when stacked walls / APs clutter
+  // the view). Non-active floors in "all" mode render dimmed.
+  show3DAllFloors: true,
+
   setEditorMode: (mode) => set({ editorMode: mode, selectedId: null, selectedType: null, selectedItems: [] }),
   setViewMode: (mode) => set({ viewMode: mode }),
   setSelected: (id, type) => set({ selectedId: id, selectedType: type, selectedItems: [], panelCollapsed: false }),

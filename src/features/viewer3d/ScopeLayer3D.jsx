@@ -26,7 +26,7 @@ function buildShape(pointsM) {
 
 // Polygon outline as a continuous Line Loop on the ground plane. Slightly
 // lifted off the floor so z-fighting with the floor image doesn't flicker.
-function PolygonFill({ pointsM, yOffset, style }) {
+function PolygonFill({ pointsM, yOffset, style, dimOpacity = 1 }) {
   const shape = useMemo(() => buildShape(pointsM), [pointsM])
   const geom  = useMemo(() => (shape ? new THREE.ShapeGeometry(shape) : null), [shape])
 
@@ -59,7 +59,7 @@ function PolygonFill({ pointsM, yOffset, style }) {
         <meshBasicMaterial
           color={style.fill}
           transparent
-          opacity={style.fillAlpha}
+          opacity={style.fillAlpha * dimOpacity}
           side={THREE.DoubleSide}
           depthWrite={false}
         />
@@ -74,7 +74,7 @@ function PolygonFill({ pointsM, yOffset, style }) {
             itemSize={3}
           />
         </bufferGeometry>
-        <lineBasicMaterial color={style.stroke} linewidth={2} />
+        <lineBasicMaterial color={style.stroke} transparent opacity={dimOpacity} linewidth={2} />
       </line>
     </group>
   )
@@ -87,7 +87,7 @@ function pointsToMeters(pts, pxToM) {
   return out
 }
 
-export default function ScopeLayer3D({ floorId, pxToM }) {
+export default function ScopeLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
   const scopes = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
   const holes  = useFloorHoleStore((s) => s.floorHolesByFloor[floorId] ?? [])
 
@@ -106,6 +106,7 @@ export default function ScopeLayer3D({ floorId, pxToM }) {
             pointsM={pointsToMeters(z.points, pxToM)}
             yOffset={0.005}
             style={style}
+            dimOpacity={dimOpacity}
           />
         )
       })}
@@ -115,6 +116,7 @@ export default function ScopeLayer3D({ floorId, pxToM }) {
           pointsM={pointsToMeters(h.points, pxToM)}
           yOffset={0.015}
           style={STYLES.hole}
+          dimOpacity={dimOpacity}
         />
       ))}
     </group>
