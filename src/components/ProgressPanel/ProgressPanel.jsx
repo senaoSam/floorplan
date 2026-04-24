@@ -140,7 +140,7 @@ const PHASES = [
           { id: 'HM-F3a', done: true,  text: '樓板衰減計算' },
           { id: 'HM-F2b', done: true,  text: 'Cross-floor 熱圖呈現' },
           { id: 'HM-F2a', done: true, text: 'FloorHole bypass slab loss' },
-          { id: 'HM-F3c', done: false, text: 'Slab 斜入射放大 sec θ' },
+          { id: 'HM-F3c', done: true, text: 'Slab 斜入射放大 sec θ' },
           { id: 'HM-F2c', done: false, text: '跨樓層射線的牆穿透' },
           { id: 'HM-F2e', done: false, text: '牆 Z 範圍過濾（wall bottom/topHeight）' },
           { id: 'HM-F3b', done: false, text: '樓板材質 UI' },

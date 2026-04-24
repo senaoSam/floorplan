@@ -151,7 +151,10 @@ function FormulaNote() {
           </li>
           <li>
             <b>樓板衰減（Slab loss）</b>：射線從 Z_ap 到 Z_rx 垂直跨越的每一道樓板邊界都累加
-            <code>floor.floorSlabAttenuationDb</code>（預設 concrete 12 dB）。
+            <code>floor.floorSlabAttenuationDb</code>（預設 concrete 12 dB），
+            並以斜入射放大：<code>L_slab · sec(θ_i)</code>，
+            <code>cos θ_i = |Δz| / d_3D</code>、<code>sec</code> 上限 3.5（與牆同）。
+            近乎水平的射線幾乎穿不出去。
           </li>
           <li>
             <b>FloorHole bypass</b>：射線穿越某道樓板邊界 y=b 時，求該 XY 交點

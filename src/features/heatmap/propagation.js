@@ -227,29 +227,40 @@ function pointInPolyFlat(x, y, pts) {
 }
 
 // Sum the attenuation dB for every floor slab a ray crosses, honouring
-// FloorHole bypasses. The ray runs from (ap.pos.x, ap.pos.y, apZM) to
-// (rx.x, rx.y, rxZM) where pos.x/pos.y are the XY coordinates (meters) and
-// the Z-axis is vertical. For each boundary we solve for the t at which
-// the ray's vertical coordinate equals boundary.yM, look up (X(t), Y(t)),
-// and skip the slab's dB when that intersection falls inside any of the
-// boundary's bypassHoles polygons.
+// FloorHole bypasses and oblique-incidence magnification. The ray runs from
+// (ap.pos.x, ap.pos.y, apZM) to (rx.x, rx.y, rxZM) where pos.x/pos.y are the
+// horizontal XY coordinates (meters) and Z is vertical. For each boundary
+// we solve for the t at which the ray's vertical coordinate equals
+// boundary.yM, look up (X(t), Y(t)), and skip the slab's dB when that
+// intersection falls inside any bypassHoles polygon.
+// Oblique incidence (HM-F3c): slab normal is vertical, so
+//   cos θ_incidence = |Δz| / 3D_distance
+// and the per-crossing loss is multiplied by sec(θ) clamped ≤ 3.5, matching
+// wallLossOblique. Near-horizontal rays therefore gain a lot of slab loss,
+// preventing unphysical "sneaking through the ceiling edge-on".
+const SLAB_SEC_CAP = 3.5
 function accumulateSlabLoss(apPos, apZM, rxPos, rxZM, boundaries) {
   if (!boundaries || boundaries.length === 0) return 0
   const zLo = Math.min(apZM, rxZM)
   const zHi = Math.max(apZM, rxZM)
   const dz = rxZM - apZM
+  const dx = rxPos.x - apPos.x
+  const dy = rxPos.y - apPos.y
+  const d3 = Math.sqrt(dx * dx + dy * dy + dz * dz)
+  const cosI = d3 > 1e-9 ? Math.abs(dz) / d3 : 1
+  const sec = 1 / Math.max(cosI, 1 / SLAB_SEC_CAP)
   let loss = 0
   for (const b of boundaries) {
     if (!(b.yM > zLo && b.yM < zHi)) continue
     // Parametric t along the ray where vertical crosses b.yM.
     const t = Math.abs(dz) > 1e-9 ? (b.yM - apZM) / dz : 0
-    const xAt = apPos.x + (rxPos.x - apPos.x) * t
-    const yAt = apPos.y + (rxPos.y - apPos.y) * t
+    const xAt = apPos.x + dx * t
+    const yAt = apPos.y + dy * t
     let bypassed = false
     for (const poly of (b.bypassHoles ?? [])) {
       if (pointInPolyFlat(xAt, yAt, poly)) { bypassed = true; break }
     }
-    if (!bypassed) loss += b.slabDb
+    if (!bypassed) loss += b.slabDb * sec
   }
   return loss
 }
