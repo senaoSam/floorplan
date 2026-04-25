@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "heatmap:golden": "node src/features/heatmap/__fixtures__/build-golden.mjs",
+    "heatmap:diff": "node src/features/heatmap/__fixtures__/diff-golden.mjs"
   },
   "dependencies": {
     "konva": "^8.0.1",

@@ -163,10 +163,12 @@
 
 | #      | 狀態 | Task |
 | ------ | ---- | ---- |
-| HM-T1  | ⬜   | Golden test fixture：挑固定場景（2 AP + 10 牆 + 2 opening + 2 樓層），把 JS 引擎輸出的 grid（float array + meta）序列化成 `.golden.json`，存在 `src/features/heatmap/__fixtures__/` |
-| HM-T2  | ⬜   | Diff harness：一個測試 runner（Vitest / 獨立 script 皆可）執行 shader 版 + JS 版對同一 scenario，grid 逐格 diff，報告 max abs dB error、超過 ±1 dB 的格子座標與數量 |
+| HM-T1  | ⬜   | Golden test fixture：固定場景（**3 AP**——含同頻對製造 CCI + 異頻 directional + 10 牆 + 2 opening + 2 樓層 + 1 floor hole + 1 in-scope），把 JS 引擎輸出的 grid（float array + meta）序列化成 `.golden.json`，存在 `src/features/heatmap/__fixtures__/basic/`。檔案拆 `scenario.json`（輸入）/ `field.json`（輸出，rssi/sinr/snr/cci 用 base64 Float32Array）/ `meta.json`（commit hash + timestamp + opts + 引擎指紋）。產生器：`__fixtures__/build-golden.mjs`，`pnpm heatmap:golden` 重生 |
+| HM-T2  | ⬜   | Diff harness：一個測試 runner（Vitest / 獨立 script 皆可）執行 shader 版 + JS 版對同一 scenario，grid 逐格 diff，報告 max abs dB error、超過 ±1 dB 的格子座標與數量。**追加產 HTML diff report**（左 golden / 中 current / 右 diff 熱圖 + 統計表）|
 | HM-T3  | ⬜   | 「CPU 對照模式」開關：HeatmapControl 加一顆按鈕，一鍵切回純 JS 引擎（繞過 shader），方便使用者/開發者視覺 diff 兩版熱圖 |
-| HM-T4  | ⬜   | 每個 F5 子階段定義**驗收門檻**：F5a 完成後 max diff ≤ 3 dB（缺反射/Fresnel 允許較大誤差）；F5c 完成後 ≤ 1.5 dB；F5d 完成後 ≤ 1 dB（full parity） |
+| HM-T3b | ⬜   | Split-view 並排比對：HeatmapControl 加 split-view 模式，畫布左半邊 JS 版、右半邊 Shader 版，同步 pan/zoom，方便肉眼掃局部 artefact（依賴 T3 的雙引擎切換能力） |
+| HM-T4  | ✅   | 每個 F5 子階段定義**驗收門檻**：F5a/b ≤ 3 dB（缺反射/Fresnel/多頻點）、F5c ≤ 1.5 dB（含反射+繞射）、F5d ≤ 1 dB（full parity）。NaN-mismatch 永遠必須 = 0。完整門檻表 + 各階段執行指令見 `src/features/heatmap/__fixtures__/README.md` |
+| HM-T5  | ⬜   | Edge-case fixtures（延後到對應 F5 子階段開工前再做）：`__fixtures__/dense-walls/`（50+ 牆，F5b BVH 開工前）、`__fixtures__/dense-aps/`（10 AP 同頻擠壓 SINR/CCI，F5d 開工前）、`__fixtures__/cross-floor-tunneling/`（斜射穿多 slab 驗 sec(θ)）|
 
 ### GPU 即時化路線（依序執行）
 
