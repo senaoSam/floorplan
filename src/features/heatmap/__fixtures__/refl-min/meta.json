@@ -1,0 +1,104 @@
+{
+  "fixtureId": "refl-min",
+  "description": "1 AP + 1 reflective concrete wall. Reflection-only isolation fixture for HM-F5c+d debug.",
+  "activeFloorId": "floor-0",
+  "engineOpts": {
+    "gridStepM": 0.5,
+    "maxReflOrder": 1,
+    "enableDiffraction": false,
+    "rxHeightM": 1
+  },
+  "engineFingerprint": "05a72d71579cd5dc",
+  "gitCommit": "3231cbe9cb3a622151220f38454a6760f3669791",
+  "gitDirty": true,
+  "generatedAt": "2026-04-25T15:15:45.013Z",
+  "grid": {
+    "nx": 41,
+    "ny": 41,
+    "gridStepM": 0.5
+  },
+  "baselines": {
+    "full": {
+      "opts": {
+        "maxReflOrder": 1,
+        "enableDiffraction": false
+      },
+      "appliesTo": [
+        "F5c",
+        "F5d",
+        "F5e",
+        "F5f"
+      ],
+      "stats": {
+        "rssi": {
+          "finite": 1600,
+          "nan": 81,
+          "min": -89.526,
+          "max": -28.405,
+          "mean": -56.069
+        },
+        "sinr": {
+          "finite": 1600,
+          "nan": 81,
+          "min": 5.474,
+          "max": 66.595,
+          "mean": 38.931
+        },
+        "snr": {
+          "finite": 1600,
+          "nan": 81,
+          "min": 5.474,
+          "max": 66.595,
+          "mean": 38.931
+        },
+        "cci": {
+          "finite": 1600,
+          "nan": 81,
+          "min": -120,
+          "max": -120,
+          "mean": -120
+        }
+      }
+    },
+    "friis": {
+      "opts": {
+        "maxReflOrder": 0,
+        "enableDiffraction": false
+      },
+      "appliesTo": [
+        "F5a",
+        "F5b"
+      ],
+      "stats": {
+        "rssi": {
+          "finite": 1600,
+          "nan": 81,
+          "min": -89.526,
+          "max": -28.438,
+          "mean": -56.457
+        },
+        "sinr": {
+          "finite": 1600,
+          "nan": 81,
+          "min": 5.474,
+          "max": 66.562,
+          "mean": 38.543
+        },
+        "snr": {
+          "finite": 1600,
+          "nan": 81,
+          "min": 5.474,
+          "max": 66.562,
+          "mean": 38.543
+        },
+        "cci": {
+          "finite": 1600,
+          "nan": 81,
+          "min": -120,
+          "max": -120,
+          "mean": -120
+        }
+      }
+    }
+  }
+}
