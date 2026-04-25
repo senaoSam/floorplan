@@ -9,42 +9,96 @@
     "rxHeightM": 1
   },
   "engineFingerprint": "05a72d71579cd5dc",
-  "gitCommit": "5739ab930457339405a385e41723c8aa8807abcf",
+  "gitCommit": "4fb1ec47e5d9229ce4d258b829c284bec8aa22fd",
   "gitDirty": true,
-  "generatedAt": "2026-04-25T04:24:46.213Z",
+  "generatedAt": "2026-04-25T05:02:31.535Z",
   "grid": {
     "nx": 61,
     "ny": 41,
     "gridStepM": 0.5
   },
-  "stats": {
-    "rssi": {
-      "finite": 1664,
-      "nan": 837,
-      "min": -60.355,
-      "max": -7.857,
-      "mean": -22.623
+  "baselines": {
+    "full": {
+      "opts": {
+        "maxReflOrder": 1,
+        "enableDiffraction": true
+      },
+      "appliesTo": [
+        "F5c",
+        "F5d",
+        "F5e",
+        "F5f"
+      ],
+      "stats": {
+        "rssi": {
+          "finite": 1664,
+          "nan": 837,
+          "min": -60.355,
+          "max": -7.857,
+          "mean": -22.623
+        },
+        "sinr": {
+          "finite": 1664,
+          "nan": 837,
+          "min": 0.004,
+          "max": 45.483,
+          "mean": 19.401
+        },
+        "snr": {
+          "finite": 1664,
+          "nan": 837,
+          "min": 34.645,
+          "max": 87.143,
+          "mean": 72.377
+        },
+        "cci": {
+          "finite": 1664,
+          "nan": 837,
+          "min": -69.008,
+          "max": -15.61,
+          "mean": -42.025
+        }
+      }
     },
-    "sinr": {
-      "finite": 1664,
-      "nan": 837,
-      "min": 0.004,
-      "max": 45.483,
-      "mean": 19.401
-    },
-    "snr": {
-      "finite": 1664,
-      "nan": 837,
-      "min": 34.645,
-      "max": 87.143,
-      "mean": 72.377
-    },
-    "cci": {
-      "finite": 1664,
-      "nan": 837,
-      "min": -69.008,
-      "max": -15.61,
-      "mean": -42.025
+    "friis": {
+      "opts": {
+        "maxReflOrder": 0,
+        "enableDiffraction": false
+      },
+      "appliesTo": [
+        "F5a",
+        "F5b"
+      ],
+      "stats": {
+        "rssi": {
+          "finite": 1664,
+          "nan": 837,
+          "min": -63.692,
+          "max": -28.438,
+          "mean": -43.472
+        },
+        "sinr": {
+          "finite": 1664,
+          "nan": 837,
+          "min": 0.003,
+          "max": 49.735,
+          "mean": 10.829
+        },
+        "snr": {
+          "finite": 1664,
+          "nan": 837,
+          "min": 31.308,
+          "max": 66.562,
+          "mean": 51.528
+        },
+        "cci": {
+          "finite": 1664,
+          "nan": 837,
+          "min": -120,
+          "max": -42.725,
+          "mean": -54.319
+        }
+      }
     }
   }
 }

@@ -349,11 +349,14 @@ async function loadEngineJS(server) {
 }
 
 async function loadEngineShader(server) {
-  // Placeholder for HM-F5a: when the shader engine lands, expose
-  // `sampleFieldShader(scenario, gridStepM, opts)` from a sibling module and
-  // wire it here. Until then we hard-fail so anyone running --engine=shader
-  // by accident gets a clear message rather than silent JS-engine results.
-  throw new Error('shader engine not implemented yet (pending HM-F5a)')
+  // Headless WebGL2 isn't available in Node, so the shader engine cannot run
+  // in this CLI. Use the browser diff page (`#/heatmap-diff`) for shader
+  // verification — it consumes the same fixtures and reports the same stats
+  // with a per-stage gate selector.
+  throw new Error(
+    'shader engine cannot run in Node (no headless WebGL2). ' +
+    'Open #/heatmap-diff in the dev server for visual + numeric shader diffs.'
+  )
 }
 
 async function loadEngine(server, name) {

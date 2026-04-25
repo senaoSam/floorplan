@@ -9,6 +9,7 @@ import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { buildScenario } from '@/features/heatmap/buildScenario'
 import { sampleField } from '@/features/heatmap/sampleField'
+import { sampleFieldGL } from '@/features/heatmap/sampleFieldGL'
 import { getModeConfig } from '@/features/heatmap/modes'
 import { computeFloorElevations } from '@/features/viewer3d/floorStacking'
 import { createHeatmapGL } from '@/heatmap_sample/render/heatmapGL.js'
@@ -35,6 +36,7 @@ export default function HeatmapLayer({ floorId }) {
 
   const enabled     = useHeatmapStore((s) => s.enabled)
   const mode        = useHeatmapStore((s) => s.mode)
+  const engine      = useHeatmapStore((s) => s.engine)
   const reflections = useHeatmapStore((s) => s.reflections)
   const diffraction = useHeatmapStore((s) => s.diffraction)
   const gridStepM   = useHeatmapStore((s) => s.gridStepM)
@@ -172,10 +174,29 @@ export default function HeatmapLayer({ floorId }) {
     if (!enabled || !scenario || !floor?.scale) return
     let cancelled = false
     const run = () => {
-      const field = sampleField(scenario, gridStepM, {
-        maxReflOrder: reflections ? 1 : 0,
-        enableDiffraction: diffraction,
-      })
+      // Engine choice: shader is HM-F5a (Friis + walls + slab + openings only;
+      // reflections / diffraction silently ignored at this stage). Falls back
+      // to JS if the GL context can't be created (no WebGL2, lost context).
+      let field
+      if (engine === 'shader') {
+        try {
+          field = sampleFieldGL(scenario, gridStepM, {
+            maxReflOrder: reflections ? 1 : 0,
+            enableDiffraction: diffraction,
+          })
+        } catch (e) {
+          console.warn('[Heatmap] shader engine failed, falling back to JS:', e.message)
+          field = sampleField(scenario, gridStepM, {
+            maxReflOrder: reflections ? 1 : 0,
+            enableDiffraction: diffraction,
+          })
+        }
+      } else {
+        field = sampleField(scenario, gridStepM, {
+          maxReflOrder: reflections ? 1 : 0,
+          enableDiffraction: diffraction,
+        })
+      }
       if (cancelled) return
       const outW = Math.max(1, Math.round(scenario.size.w * floor.scale))
       const outH = Math.max(1, Math.round(scenario.size.h * floor.scale))
@@ -193,7 +214,7 @@ export default function HeatmapLayer({ floorId }) {
     }
     const id = setTimeout(run, 0)
     return () => { cancelled = true; clearTimeout(id) }
-  }, [enabled, mode, scenario, reflections, diffraction, gridStepM, blur, showContours, floor?.scale])
+  }, [enabled, mode, engine, scenario, reflections, diffraction, gridStepM, blur, showContours, floor?.scale])
 
   if (!enabled || !scenario || !floor?.scale || !glRef.current) return null
 

@@ -10,14 +10,20 @@ against `field.json` here.
 ```
 __fixtures__/
   build-golden.mjs         # generator (run via `pnpm heatmap:golden`)
-  diff-golden.mjs          # diff harness (run via `pnpm heatmap:diff`)
+  diff-golden.mjs          # CLI diff harness (run via `pnpm heatmap:diff`)
   README.md                # this file
   basic/
     scenario.js            # input — single source of truth, hand-written
-    field.json             # output — rssi/sinr/snr/cci as base64 Float32Array
-    meta.json              # commit hash, timestamp, engine fingerprint, opts
+    field-full.json        # baseline #1: full physics (reflections + diffraction on)
+    field-friis.json       # baseline #2: Friis + walls + slab only (no refl/diff)
+    field.json             # alias of field-full.json (back-compat)
+    meta.json              # commit hash, timestamp, engine fingerprint, opts, both baselines' stats
     diff-report.html       # written by `pnpm heatmap:diff --html` (gitignored)
 ```
+
+The browser diff page (`#/heatmap-diff`) is the primary visual validator
+during shader development. It eagerly imports every `<name>/scenario.js` +
+`field-{full,friis}.json` via Vite's `import.meta.glob`.
 
 Each fixture lives in its own directory. The generator picks up every
 subdirectory containing a `scenario.js`.
@@ -81,60 +87,52 @@ red &gt; 3·thr / magenta = NaN mismatch).
 
 ## Acceptance gates per HM-F5 sub-stage (HM-T4)
 
-The shader port lands incrementally: each F5 sub-stage adds physics that the
-previous stage couldn't do, so the diff bar relaxes accordingly. The harness's
-default threshold (`±1 dB`) corresponds to **full parity (F5d)**. While the
-shader is at an intermediate stage you must override per-channel thresholds
-to match what's actually implemented — otherwise CI mode will rightly fail.
+Each F5 sub-stage adds physics terms the previous stage didn't have, so a
+naive "single golden, monotonically tightening threshold" gate would force
+each stage to either inherit physics it doesn't implement (defeating the
+staging plan) or accept a threshold so loose it stops catching regressions.
 
-### Why per-stage thresholds, not "fix it later"
+We solve this by **pinning each stage to a baseline that matches the physics
+it implements**:
 
-Each stage is allowed to be wrong about a *specific* physics term. F5a
-intentionally skips reflections, so it must match a "Friis + walls only"
-reference, not the full JS engine. Holding F5a to ≤1 dB would force us to
-implement reflections inside F5a's MVP and defeat the whole staging plan.
-The lookup table below names which term each stage adds and how loose the
-diff bar is allowed to be on its way there.
+- **`field-friis.json`** — JS engine output with `maxReflOrder=0` and
+  `enableDiffraction=false`. F5a/F5b's target. Comparing the shader against
+  this baseline measures only the physics F5a/b actually implements (Friis
+  + walls + slab + openings) — anything off is a real bug.
+- **`field-full.json`** — JS engine output with full physics. F5c/F5d/F5e/F5f's
+  target. Once reflections + diffraction + multi-frequency coherence land,
+  the shader should converge to JS parity here.
+
+Both baselines are regenerated together by `pnpm heatmap:golden` and stored
+inside each fixture directory. `meta.json` records the per-baseline stats so
+unintended drift is visible in `git diff`.
 
 ### Threshold table
 
-| Stage | Adds | RSSI / SNR / CCI | SINR | Notes |
-| ----- | ---- | ---------------- | ---- | ----- |
-| **F5a** MVP | Friis + walls (with Z filter), slab, openings | ≤ **3.0 dB** | ≤ **3.0 dB** | No reflections, no diffraction, no multi-frequency coherence yet — large absolute drift expected near reflective walls and grazing slabs. |
-| **F5b** BVH | (perf only — same physics as F5a) | ≤ **3.0 dB** | ≤ **3.0 dB** | Identical numerical envelope to F5a; this stage just makes it fast. Diff must not regress vs F5a. |
-| **F5c** Reflections + Fresnel | image-source reflections, complex Fresnel per polarization, knife-edge diffraction | ≤ **1.5 dB** | ≤ **1.5 dB** | Reflections fold most of the F5a drift into spec. Diffraction lands here too — corner cells should now be inside ±1.5 dB. |
-| **F5d** Multi-frequency coherent sum | per-channel N-sample frequency average | ≤ **1.0 dB** | ≤ **1.0 dB** | Full parity with the JS engine. From here onward the harness's default threshold applies; CI mode runs with no overrides. |
-| **F5e/f** Optimisations | (perf only) | ≤ **1.0 dB** | ≤ **1.0 dB** | Must not regress F5d. |
+| Stage | Adds | Baseline | All channels | Notes |
+| ----- | ---- | -------- | ------------ | ----- |
+| **F5a** MVP | Friis + walls (with Z filter), slab, openings | `field-friis` | ≤ **1.0 dB** | Full numerical parity expected against the friis baseline at this stage. fp32 round-off only. |
+| **F5b** BVH | (perf only — same physics as F5a) | `field-friis` | ≤ **1.0 dB** | Must not regress F5a. |
+| **F5c** Reflections + Fresnel + diffraction | image-source reflections w/ complex Fresnel, knife-edge diffraction | `field-full` | ≤ **1.5 dB** | First diff against full physics. Multi-frequency coherent sum still missing → small residual drift expected at multipath nulls. |
+| **F5d** Multi-frequency coherent sum | per-channel N-sample frequency average | `field-full` | ≤ **1.0 dB** | Full parity with JS engine. |
+| **F5e/f** Optimisations | (perf only) | `field-full` | ≤ **1.0 dB** | Must not regress F5d. |
 
 NaN-mismatch count must be **0** at every stage — out-of-scope masking is
 data-driven (scope polygon test) and does not depend on which physics terms
-the shader implements. A nonzero `nanMis` always indicates a scope-mask wiring
-bug, not a physics drift, regardless of the stage.
+the shader implements. A nonzero `nanMis` always indicates a scope-mask
+wiring bug, not a physics drift, regardless of the stage.
 
-### Running the gate per stage
+### How to run the gate
 
-```bash
-# F5a / F5b
-HEATMAP_DIFF_THRESHOLD_RSSI=3 \
-HEATMAP_DIFF_THRESHOLD_SINR=3 \
-HEATMAP_DIFF_THRESHOLD_SNR=3  \
-HEATMAP_DIFF_THRESHOLD_CCI=3  \
-pnpm heatmap:diff --engine shader --ci
+The browser diff page (`#/heatmap-diff`) provides a stage selector that
+auto-picks the matching baseline + threshold for each stage. This is the
+canonical workflow for shader development since headless WebGL2 isn't
+available in Node.
 
-# F5c
-HEATMAP_DIFF_THRESHOLD_RSSI=1.5 \
-HEATMAP_DIFF_THRESHOLD_SINR=1.5 \
-HEATMAP_DIFF_THRESHOLD_SNR=1.5  \
-HEATMAP_DIFF_THRESHOLD_CCI=1.5  \
-pnpm heatmap:diff --engine shader --ci
-
-# F5d onward (default ±1 dB, no env override needed)
-pnpm heatmap:diff --engine shader --ci
-```
-
-Any sub-stage is "done" when its corresponding command above exits 0 against
-**every** committed fixture (currently just `basic/`; HM-T5 adds more before
-F5b and F5d land).
+The CLI diff harness (`pnpm heatmap:diff`) only loads `field.json` (the
+back-compat alias of `field-full.json`) and only runs the JS engine. It's
+useful for catching JS-side regressions during pure CPU work; for shader
+verification use the browser diff page.
 
 ## Adding a new fixture
 

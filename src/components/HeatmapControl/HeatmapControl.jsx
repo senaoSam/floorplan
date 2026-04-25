@@ -32,6 +32,8 @@ function HeatmapControl() {
   const setBlur      = useHeatmapStore((s) => s.setBlur)
   const showContours = useHeatmapStore((s) => s.showContours)
   const setShowContours = useHeatmapStore((s) => s.setShowContours)
+  const engine       = useHeatmapStore((s) => s.engine)
+  const setEngine    = useHeatmapStore((s) => s.setEngine)
   const hover        = useHeatmapStore((s) => s.hoverReading)
 
   const [panelOpen, setPanelOpen] = useState(false)
@@ -113,6 +115,17 @@ function HeatmapControl() {
 
       {enabled && panelOpen && (
         <div className="heatmap-control__panel">
+          <label className="heatmap-control__line">
+            <span>引擎</span>
+            <select
+              value={engine}
+              onChange={(e) => setEngine(e.target.value)}
+              title="JS = 完整物理 (full parity); Shader = WebGL2 加速 (HM-F5a, 暫無反射/繞射/多頻點)"
+            >
+              <option value="js">JS (full parity)</option>
+              <option value="shader">Shader (F5a, fast)</option>
+            </select>
+          </label>
           <label className="heatmap-control__line">
             <input type="checkbox" checked={reflections} onChange={(e) => setReflections(e.target.checked)} />
             <span>反射 (1st-order, image source)</span>

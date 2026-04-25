@@ -163,18 +163,18 @@
 
 | #      | 狀態 | Task |
 | ------ | ---- | ---- |
-| HM-T1  | ⬜   | Golden test fixture：固定場景（**3 AP**——含同頻對製造 CCI + 異頻 directional + 10 牆 + 2 opening + 2 樓層 + 1 floor hole + 1 in-scope），把 JS 引擎輸出的 grid（float array + meta）序列化成 `.golden.json`，存在 `src/features/heatmap/__fixtures__/basic/`。檔案拆 `scenario.json`（輸入）/ `field.json`（輸出，rssi/sinr/snr/cci 用 base64 Float32Array）/ `meta.json`（commit hash + timestamp + opts + 引擎指紋）。產生器：`__fixtures__/build-golden.mjs`，`pnpm heatmap:golden` 重生 |
-| HM-T2  | ⬜   | Diff harness：一個測試 runner（Vitest / 獨立 script 皆可）執行 shader 版 + JS 版對同一 scenario，grid 逐格 diff，報告 max abs dB error、超過 ±1 dB 的格子座標與數量。**追加產 HTML diff report**（左 golden / 中 current / 右 diff 熱圖 + 統計表）|
-| HM-T3  | ⬜   | 「CPU 對照模式」開關：HeatmapControl 加一顆按鈕，一鍵切回純 JS 引擎（繞過 shader），方便使用者/開發者視覺 diff 兩版熱圖 |
-| HM-T3b | ⬜   | Split-view 並排比對：HeatmapControl 加 split-view 模式，畫布左半邊 JS 版、右半邊 Shader 版，同步 pan/zoom，方便肉眼掃局部 artefact（依賴 T3 的雙引擎切換能力） |
-| HM-T4  | ✅   | 每個 F5 子階段定義**驗收門檻**：F5a/b ≤ 3 dB（缺反射/Fresnel/多頻點）、F5c ≤ 1.5 dB（含反射+繞射）、F5d ≤ 1 dB（full parity）。NaN-mismatch 永遠必須 = 0。完整門檻表 + 各階段執行指令見 `src/features/heatmap/__fixtures__/README.md` |
+| HM-T1  | ✅   | Golden test fixture：固定場景（3 AP——同頻對製造 CCI + 異頻 directional + 10 牆 + 2 opening + 2 樓層 + 1 floor hole + 1 in-scope），存在 `src/features/heatmap/__fixtures__/basic/`。雙 baseline：`field-full.json` (full physics) + `field-friis.json` (no refl/diff)。`scenario.js`（輸入）/ `meta.json`（commit hash + timestamp + opts + 引擎指紋 + 雙 baseline stats）。產生器：`__fixtures__/build-golden.mjs`，`pnpm heatmap:golden` 重生 |
+| HM-T2  | ✅   | Diff harness 雙路徑：(1) Node CLI `pnpm heatmap:diff` — JS 引擎 vs golden，產 HTML report，純 CPU regression 用；(2) **瀏覽器 #/heatmap-diff** — 真正驗證 shader 的工具（headless WebGL2 不可得，CLI 不能跑 shader）。CLI 詳見 HM-T2、瀏覽器版見 HM-T3b |
+| HM-T3  | ✅   | 引擎切換：useHeatmapStore 加 `engine: 'js' \| 'shader'`，HeatmapControl 設定面板加引擎下拉。Shader 路徑失敗（無 WebGL2 / context lost）時 HeatmapLayer fallback 回 JS |
+| HM-T3b | ✅   | 瀏覽器 diff page `#/heatmap-diff`：每個 fixture 跑 JS + Shader 兩版，跟對應 baseline (friis/full) 各自 diff，輸出 RSSI/SINR/SNR/CCI 4 channel × (golden/JS/Shader/diff) panel + stats 表 + per-stage gate 切換按鈕。F5a baseline=friis，F5c/F5d baseline=full |
+| HM-T4  | ✅   | 每個 F5 子階段定義**驗收門檻**：F5a/b 對 `field-friis` baseline ≤ 1 dB（純 Friis+walls+slab，full parity 預期）、F5c 對 `field-full` ≤ 1.5 dB（缺多頻點）、F5d 對 `field-full` ≤ 1 dB（full parity）。NaN-mismatch 永遠必須 = 0。完整門檻表 + 各階段執行方式見 `src/features/heatmap/__fixtures__/README.md` |
 | HM-T5  | ⬜   | Edge-case fixtures（延後到對應 F5 子階段開工前再做）：`__fixtures__/dense-walls/`（50+ 牆，F5b BVH 開工前）、`__fixtures__/dense-aps/`（10 AP 同頻擠壓 SINR/CCI，F5d 開工前）、`__fixtures__/cross-floor-tunneling/`（斜射穿多 slab 驗 sec(θ)）|
 
 ### GPU 即時化路線（依序執行）
 
 | #      | 狀態 | Task |
 | ------ | ---- | ---- |
-| HM-F5a | ⬜   | WebGL shader MVP：`rssiFromAp` 翻 GLSL，walls/APs 打包成 texture，fragment shader 每格掃全部 walls/APs；只做 Friis + 牆穿透（Z 過濾、slab、openings 一併移植）；暫跳過反射、複數 Fresnel、多頻點相干疊加。**完成條件**：通過 HM-T2 diff，max error ≤ 3 dB |
+| HM-F5a | ✅   | WebGL shader MVP：`rssiFromAp` 翻 GLSL（`src/features/heatmap/propagationGL.js` + `sampleFieldGL.js`），walls/APs 打包成 RGBA32F texture、fragment shader 每格掃全部 walls/APs；Friis + 牆穿透 (Z filter) + slab loss + openings + omni/directional 天線 (custom 走 CPU fallback)。反射/複數 Fresnel/繞射/多頻點留給 F5c/F5d。**驗收**：對 `field-friis.json` baseline max diff ~1e-5 dB ≤ 1 dB ✓。HM-T3 引擎切換按鈕 + 瀏覽器 diff page (`#/heatmap-diff`) 也一併實作 |
 | HM-F5b | ⬜   | BVH / Uniform Grid 空間加速：每格 raycast 從 O(N_walls) 降到 O(log N) 或 O(常數)；資料結構塞進 texture 讓 shader 查詢 |
 | HM-F5c | ⬜   | 反射 + 複數 Fresnel 移植：vec2 模擬複數，image-source search + 貢獻門檻 cull；ITU-R P.2040-3 Fresnel 公式完整跑在 shader。**完成條件**：HM-T2 max error ≤ 1.5 dB |
 | HM-F5d | ⬜   | 多頻點相干疊加 + 繞射：N 個頻點在 shader 迴圈 accumulate；knife-edge diffraction corners。**完成條件**：HM-T2 max error ≤ 1 dB（與 JS 版達到實質 parity） |

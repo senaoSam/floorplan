@@ -6,6 +6,7 @@ import PanelRight from '@/components/PanelRight/PanelRight'
 import ProgressPanel from '@/components/ProgressPanel/ProgressPanel'
 import DemoLoader from '@/components/DemoLoader/DemoLoader'
 import SampleApp from '@/heatmap_sample/SampleApp'
+import HeatmapDiffPage from '@/features/heatmap/diffPage/HeatmapDiffPage'
 import './styles/App.sass'
 
 function useHashRoute() {
@@ -23,6 +24,9 @@ function App() {
 
   if (hash === '#/heatmap-sample') {
     return <SampleApp />
+  }
+  if (hash === '#/heatmap-diff') {
+    return <HeatmapDiffPage />
   }
 
   return (

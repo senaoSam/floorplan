@@ -175,13 +175,24 @@ async function buildOne(name, server) {
     crossFloor,
   )
 
-  const field = sampleField(scenario, engineOpts.gridStepM, {
+  // Two golden baselines per fixture:
+  //   - field-full.json:  reflections + diffraction on. Target for F5c onward.
+  //   - field-friis.json: reflections + diffraction off (Friis + walls + slab).
+  //                       Target for F5a/F5b — they intentionally omit those
+  //                       physics terms, so diffing against full-physics would
+  //                       always blow past 3 dB regardless of correctness.
+  // `field.json` stays as an alias of field-full.json for back-compat with
+  // existing harness consumers (T2 CLI, current diff page).
+  const fieldFull = sampleField(scenario, engineOpts.gridStepM, {
     maxReflOrder:     engineOpts.maxReflOrder,
     enableDiffraction: engineOpts.enableDiffraction,
   })
+  const fieldFriis = sampleField(scenario, engineOpts.gridStepM, {
+    maxReflOrder:     0,
+    enableDiffraction: false,
+  })
 
-  // ---- serialise ----
-  const fieldOut = {
+  const serialise = (field) => ({
     nx: field.nx,
     ny: field.ny,
     gridStepM: field.gridStepM,
@@ -189,14 +200,16 @@ async function buildOne(name, server) {
     sinr: f32ToBase64(field.sinr),
     snr:  f32ToBase64(field.snr),
     cci:  f32ToBase64(field.cci),
-  }
-
-  const stats = {
+  })
+  const stats = (field) => ({
     rssi: arrayStats(field.rssi),
     sinr: arrayStats(field.sinr),
     snr:  arrayStats(field.snr),
     cci:  arrayStats(field.cci),
-  }
+  })
+
+  const fullOut  = serialise(fieldFull)
+  const friisOut = serialise(fieldFriis)
 
   const metaOut = {
     fixtureId: meta.fixtureId,
@@ -207,14 +220,35 @@ async function buildOne(name, server) {
     gitCommit: gitCommit(),
     gitDirty: gitDirty(),
     generatedAt: new Date().toISOString(),
-    grid: { nx: field.nx, ny: field.ny, gridStepM: field.gridStepM },
-    stats,
+    grid: { nx: fieldFull.nx, ny: fieldFull.ny, gridStepM: fieldFull.gridStepM },
+    baselines: {
+      full: {
+        opts: { maxReflOrder: engineOpts.maxReflOrder, enableDiffraction: engineOpts.enableDiffraction },
+        appliesTo: ['F5c', 'F5d', 'F5e', 'F5f'],
+        stats: stats(fieldFull),
+      },
+      friis: {
+        opts: { maxReflOrder: 0, enableDiffraction: false },
+        appliesTo: ['F5a', 'F5b'],
+        stats: stats(fieldFriis),
+      },
+    },
   }
 
-  writeFileSync(resolve(fixtureDir, 'field.json'), JSON.stringify(fieldOut))
-  writeFileSync(resolve(fixtureDir, 'meta.json'),  JSON.stringify(metaOut, null, 2))
+  writeFileSync(resolve(fixtureDir, 'field-full.json'),  JSON.stringify(fullOut))
+  writeFileSync(resolve(fixtureDir, 'field-friis.json'), JSON.stringify(friisOut))
+  // back-compat alias — `field.json` mirrors field-full.json so older readers
+  // that haven't been updated still see the canonical full-physics baseline.
+  writeFileSync(resolve(fixtureDir, 'field.json'), JSON.stringify(fullOut))
+  writeFileSync(resolve(fixtureDir, 'meta.json'), JSON.stringify(metaOut, null, 2))
 
-  return { name, fieldBytes: JSON.stringify(fieldOut).length, stats, grid: metaOut.grid }
+  return {
+    name,
+    fullBytes:  JSON.stringify(fullOut).length,
+    friisBytes: JSON.stringify(friisOut).length,
+    stats: { full: metaOut.baselines.full.stats, friis: metaOut.baselines.friis.stats },
+    grid: metaOut.grid,
+  }
 }
 
 // ---- main ----
@@ -238,10 +272,13 @@ try {
     const t0 = Date.now()
     const result = await buildOne(name, server)
     const dt = Date.now() - t0
-    console.log(`[heatmap:golden] ${name}: ${result.grid.nx}×${result.grid.ny} grid, ${(result.fieldBytes / 1024).toFixed(1)} KB, ${dt} ms`)
-    for (const k of ['rssi', 'sinr', 'snr', 'cci']) {
-      const s = result.stats[k]
-      console.log(`  ${k.padEnd(4)} min=${s.min} max=${s.max} mean=${s.mean} finite=${s.finite} nan=${s.nan}`)
+    console.log(`[heatmap:golden] ${name}: ${result.grid.nx}×${result.grid.ny} grid · full ${(result.fullBytes / 1024).toFixed(1)} KB · friis ${(result.friisBytes / 1024).toFixed(1)} KB · ${dt} ms`)
+    for (const baseline of ['full', 'friis']) {
+      console.log(`  [${baseline}]`)
+      for (const k of ['rssi', 'sinr', 'snr', 'cci']) {
+        const s = result.stats[baseline][k]
+        console.log(`    ${k.padEnd(4)} min=${s.min} max=${s.max} mean=${s.mean} finite=${s.finite} nan=${s.nan}`)
+      }
     }
   }
 } finally {
