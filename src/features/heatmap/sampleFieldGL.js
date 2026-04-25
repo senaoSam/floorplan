@@ -118,3 +118,10 @@ export function disposeGL() {
     glInstance = null
   }
 }
+
+// Bench / debug: switch the shader between brute-force (per-wall loop) and
+// grid traversal at runtime. Useful for measuring the F5b speedup on a fixed
+// scenario without rebuilding textures.
+export function setUseGrid(v) {
+  if (glInstance) glInstance.setUseGrid(v)
+}

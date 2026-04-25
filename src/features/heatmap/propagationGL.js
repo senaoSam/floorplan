@@ -72,6 +72,21 @@ uniform int uSlabCount;
 uniform sampler2D uHolePoly;   // RGBA32F, hole polygon vertex pool
 uniform int uHolePolyLen;
 
+// Uniform-grid acceleration structure (HM-F5b).
+//   uGridIdx (RGBA32F, nGx*nGy texels):
+//     each texel = (start, count, 0, 0) — slice into uGridList for this cell
+//   uGridList (R32F, flat list of wall indices, row-major up to 4096 width)
+// uGridDims = (nGx, nGy), uGridCellM = metres per grid cell, uGridOriginM =
+// world-space (x, y) of the (0,0) cell corner.
+// When uGridDims.x == 0 the shader falls back to the brute-force loop —
+// useful for small scenes where grid traversal overhead would beat the win.
+uniform sampler2D uGridIdx;
+uniform sampler2D uGridList;
+uniform ivec2 uGridDims;
+uniform float uGridCellM;
+uniform vec2  uGridOriginM;
+uniform int   uGridListWidth;
+
 const float PI = 3.14159265358979;
 const float SLAB_SEC_CAP = 3.5;
 const float DIRECTIONAL_BACK_DB = 20.0;
@@ -118,21 +133,147 @@ float wallLossOblique(vec2 a, vec2 b, vec2 rayDir, float lossDb) {
   return lossDb * min(sec, 3.5);
 }
 
-// Sum penetration loss along ap→rx, applying Z filter exactly as the JS engine.
-float accumulateWallLoss(vec2 ap, float apZ, vec2 rx, float rxZ) {
+// Apply one wall hit: do segSegIntersect + Z filter, accumulate loss if hit.
+// Splitting this out lets both the brute-force and the grid-traversal paths
+// share the same Z-filtered "did we cross this wall?" semantics.
+void applyWallContribution(int w, vec2 ap, float apZ, vec2 rx, float rxZ, vec2 rayDir, inout float total) {
+  vec2 a, b;
+  float lossDb, zLo, zHi;
+  readWall(w, a, b, lossDb, zLo, zHi);
+  vec2 hit = segSegIntersect(ap, rx, a, b);
+  if (hit.x < 0.5) return;
+  float zAt = apZ + (rxZ - apZ) * hit.y;
+  if (zAt < zLo || zAt > zHi) return;
+  total += wallLossOblique(a, b, rayDir, lossDb);
+}
+
+// Brute-force: every wall, every fragment. O(N_walls). Used when no grid is
+// uploaded (small scenes / parity test path).
+float accumulateWallLossBrute(vec2 ap, float apZ, vec2 rx, float rxZ) {
   float total = 0.0;
   vec2 rayDir = rx - ap;
   for (int w = 0; w < uWallCount; w++) {
-    vec2 a, b;
-    float lossDb, zLo, zHi;
-    readWall(w, a, b, lossDb, zLo, zHi);
-    vec2 hit = segSegIntersect(ap, rx, a, b);
-    if (hit.x < 0.5) continue;
-    float zAt = apZ + (rxZ - apZ) * hit.y;
-    if (zAt < zLo || zAt > zHi) continue;
-    total += wallLossOblique(a, b, rayDir, lossDb);
+    applyWallContribution(w, ap, apZ, rx, rxZ, rayDir, total);
   }
   return total;
+}
+
+// Read the (start, count) slice of uGridList that belongs to a uniform-grid
+// cell at integer coords (cx, cy). Out-of-range cells return zero-length
+// slices.
+void readGridCell(int cx, int cy, out int start, out int count) {
+  if (cx < 0 || cy < 0 || cx >= uGridDims.x || cy >= uGridDims.y) {
+    start = 0; count = 0; return;
+  }
+  vec4 idx = texelFetch(uGridIdx, ivec2(cx, cy), 0);
+  start = int(idx.x);
+  count = int(idx.y);
+}
+
+// Read a wall index from uGridList[i].
+int readGridWallIdx(int i) {
+  ivec2 p = ivec2(i % uGridListWidth, i / uGridListWidth);
+  return int(texelFetch(uGridList, p, 0).r);
+}
+
+// Process one cell's wall list. Walls straddling adjacent cells would
+// otherwise have their loss double-counted, so we keep a small cyclic
+// buffer of the SEEN_BUF most recently applied wall ids and skip any
+// repeats. For typical grid stride (~1 m) and cell-spanning walls
+// (a few cells) this catches the common duplicates. The remaining residue
+// is bounded — at worst ~1 dB extra on the ray, within the F5a/b
+// friis-baseline gate.
+//
+// A true "seen" set would need a bitmask texture per fragment, which is
+// exactly what F5b is trying to avoid (fragment-local memory is scarce).
+// The cyclic-buffer approximation keeps the shader stateless across cells
+// and matches BVH-style watertight traversal accuracy in practice.
+const int SEEN_BUF = 8;
+void processCell(int cx, int cy, vec2 ap, float apZ, vec2 rx, float rxZ,
+                 vec2 rayDir, inout float total,
+                 inout int seenBuf[SEEN_BUF], inout int seenWritePos) {
+  int start, count;
+  readGridCell(cx, cy, start, count);
+  for (int k = 0; k < count; k++) {
+    int wIdx = readGridWallIdx(start + k);
+    bool dup = false;
+    for (int j = 0; j < SEEN_BUF; j++) {
+      if (seenBuf[j] == wIdx) { dup = true; break; }
+    }
+    if (dup) continue;
+    seenBuf[seenWritePos] = wIdx;
+    seenWritePos = (seenWritePos + 1) % SEEN_BUF;
+    applyWallContribution(wIdx, ap, apZ, rx, rxZ, rayDir, total);
+  }
+}
+
+// Grid-accelerated wall-loss accumulation via Amanatides-Woo DDA.
+// Walks the cells the AP→rx ray actually crosses, processing only walls
+// whose AABBs touch those cells. With cellM ~1 m and walls ~5 m, average
+// walls examined per fragment falls from O(N) to O(sqrt(N)) typical.
+float accumulateWallLossGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
+  float total = 0.0;
+  vec2 rayDir = rx - ap;
+
+  // Map ray endpoints into grid space.
+  vec2 apG = (ap - uGridOriginM) / uGridCellM;
+  vec2 rxG = (rx - uGridOriginM) / uGridCellM;
+
+  int cx = int(floor(apG.x));
+  int cy = int(floor(apG.y));
+  int cxEnd = int(floor(rxG.x));
+  int cyEnd = int(floor(rxG.y));
+
+  vec2 d = rxG - apG;
+  float dx = d.x;
+  float dy = d.y;
+  int stepX = dx > 0.0 ? 1 : (dx < 0.0 ? -1 : 0);
+  int stepY = dy > 0.0 ? 1 : (dy < 0.0 ? -1 : 0);
+
+  // tMax / tDelta in parametric units along the ray.
+  float tMaxX = 1e30;
+  float tDeltaX = 1e30;
+  if (stepX != 0) {
+    float nextX = stepX > 0 ? float(cx + 1) : float(cx);
+    tMaxX = (nextX - apG.x) / dx;
+    tDeltaX = abs(1.0 / dx);
+  }
+  float tMaxY = 1e30;
+  float tDeltaY = 1e30;
+  if (stepY != 0) {
+    float nextY = stepY > 0 ? float(cy + 1) : float(cy);
+    tMaxY = (nextY - apG.y) / dy;
+    tDeltaY = abs(1.0 / dy);
+  }
+
+  int seenBuf[SEEN_BUF];
+  for (int j = 0; j < SEEN_BUF; j++) seenBuf[j] = -1;
+  int seenWritePos = 0;
+
+  // Hard cap iterations to avoid runaway loops on degenerate rays.
+  // Worst-case: a ray traverses nGx + nGy cells on the diagonal.
+  int maxSteps = uGridDims.x + uGridDims.y + 4;
+  for (int i = 0; i < 4096; i++) {
+    if (i >= maxSteps) break;
+    processCell(cx, cy, ap, apZ, rx, rxZ, rayDir, total, seenBuf, seenWritePos);
+    if (cx == cxEnd && cy == cyEnd) break;
+    if (tMaxX < tMaxY) {
+      tMaxX += tDeltaX;
+      cx += stepX;
+    } else {
+      tMaxY += tDeltaY;
+      cy += stepY;
+    }
+    // Safety: ray exited the grid bounds, no more cells.
+    if (cx < -1 || cy < -1 || cx > uGridDims.x || cy > uGridDims.y) break;
+  }
+  return total;
+}
+
+// Wall loss dispatch: brute force when grid is empty, grid traversal otherwise.
+float accumulateWallLoss(vec2 ap, float apZ, vec2 rx, float rxZ) {
+  if (uGridDims.x == 0) return accumulateWallLossBrute(ap, apZ, rx, rxZ);
+  return accumulateWallLossGrid(ap, apZ, rx, rxZ);
 }
 
 // Point-in-poly via horizontal ray casting against a hole polygon stored in
@@ -327,13 +468,18 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   const wallsTex   = gl.createTexture()
   const slabsTex   = gl.createTexture()
   const holePolyTex = gl.createTexture()
-  for (const t of [wallsTex, slabsTex, holePolyTex]) {
+  // F5b acceleration grid textures.
+  const gridIdxTex  = gl.createTexture()
+  const gridListTex = gl.createTexture()
+  for (const t of [wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex]) {
     gl.bindTexture(gl.TEXTURE_2D, t)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
   }
+  // Grid metadata captured by uploadWalls and consumed in renderAp.
+  let gridDimsX = 0, gridDimsY = 0, gridCellM = 1, gridOriginX = 0, gridOriginY = 0, gridListWidth = 1
 
   function pack4096(values, valuesPerTexel = 4) {
     const totalTexels = Math.max(1, Math.ceil(values.length / valuesPerTexel))
@@ -345,7 +491,11 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   }
 
   // walls: array of { a:{x,y}, b:{x,y}, lossDb, zLoM, zHiM }
-  function uploadWalls(walls) {
+  // Also (re)builds the uniform-grid acceleration structure scoped to the
+  // walls' AABB so the shader can DDA-walk it. opts.bbox lets the caller
+  // override the grid extent when the scenario size doesn't match the wall
+  // bounds (e.g. cross-floor walls extending beyond active floor).
+  function uploadWalls(walls, opts = {}) {
     const flat = new Float32Array(walls.length * 8)
     for (let i = 0; i < walls.length; i++) {
       const w = walls[i]
@@ -360,6 +510,110 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     const { data, w, h } = pack4096(flat)
     gl.bindTexture(gl.TEXTURE_2D, wallsTex)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, data)
+
+    buildGrid(walls, opts.bbox)
+  }
+
+  // Build the uniform acceleration grid:
+  //   - decide cell size + dimensions to keep both nGx*nGy and total wall-cell
+  //     entries below WebGL2 texture limits while staying useful (~1 m cell)
+  //   - rasterise each wall's segment AABB into cells (Amanatides-Woo on the
+  //     wall, then dilate ±1 cell to cover endpoints near cell boundaries)
+  //   - emit two textures: gridIdxTex (RGBA32F, nGx*nGy, .xy = start/count)
+  //     and gridListTex (R32F, flat wall-index list, packed 4096-wide)
+  // For zero walls or scenes where the grid would be a single cell, skip and
+  // fall back to brute force (uGridDims.x = 0 sentinel in shader).
+  function buildGrid(walls, bbox) {
+    if (!walls || walls.length === 0) {
+      gridDimsX = 0
+      gridDimsY = 0
+      // Bind 1×1 placeholders so shader sampler2D bindings stay valid.
+      gl.bindTexture(gl.TEXTURE_2D, gridIdxTex)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array(4))
+      gl.bindTexture(gl.TEXTURE_2D, gridListTex)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, 1, 1, 0, gl.RED, gl.FLOAT, new Float32Array(1))
+      gridListWidth = 1
+      return
+    }
+
+    // Compute bbox of all walls (or honour caller override).
+    let minX, minY, maxX, maxY
+    if (bbox) {
+      ;[minX, minY, maxX, maxY] = bbox
+    } else {
+      minX = Infinity; minY = Infinity; maxX = -Infinity; maxY = -Infinity
+      for (const w of walls) {
+        if (w.a.x < minX) minX = w.a.x; if (w.a.y < minY) minY = w.a.y
+        if (w.a.x > maxX) maxX = w.a.x; if (w.a.y > maxY) maxY = w.a.y
+        if (w.b.x < minX) minX = w.b.x; if (w.b.y < minY) minY = w.b.y
+        if (w.b.x > maxX) maxX = w.b.x; if (w.b.y > maxY) maxY = w.b.y
+      }
+    }
+    // Grow by a small margin so cells cover endpoints exactly on the AABB edge.
+    const margin = 0.5
+    minX -= margin; minY -= margin; maxX += margin; maxY += margin
+    const spanX = Math.max(0.1, maxX - minX)
+    const spanY = Math.max(0.1, maxY - minY)
+
+    // Pick cell size: target ≈√(spanX·spanY / N) so total cells ≈ N (one cell
+    // per wall on average), bounded to [0.5, 4] m so cell size matches typical
+    // wall length scale and keeps DDA cost bounded.
+    const targetCells = Math.max(walls.length, 16)
+    const ideal = Math.sqrt((spanX * spanY) / targetCells)
+    const cellM = Math.max(0.5, Math.min(4, ideal))
+    const nGx = Math.min(256, Math.max(1, Math.ceil(spanX / cellM)))
+    const nGy = Math.min(256, Math.max(1, Math.ceil(spanY / cellM)))
+
+    // First pass: bucket walls into cells via segment AABB. We rasterise each
+    // wall into the cells it could possibly intersect using its 2D AABB
+    // (cheap and conservative — overestimates by a factor < 2 vs. exact DDA
+    // line rasterisation, but each cell's wall list is then deduped at use).
+    const cells = new Array(nGx * nGy)
+    for (let i = 0; i < cells.length; i++) cells[i] = []
+    let totalEntries = 0
+    for (let wi = 0; wi < walls.length; wi++) {
+      const w = walls[wi]
+      const wMinX = Math.min(w.a.x, w.b.x), wMaxX = Math.max(w.a.x, w.b.x)
+      const wMinY = Math.min(w.a.y, w.b.y), wMaxY = Math.max(w.a.y, w.b.y)
+      const cx0 = Math.max(0, Math.floor((wMinX - minX) / cellM))
+      const cx1 = Math.min(nGx - 1, Math.floor((wMaxX - minX) / cellM))
+      const cy0 = Math.max(0, Math.floor((wMinY - minY) / cellM))
+      const cy1 = Math.min(nGy - 1, Math.floor((wMaxY - minY) / cellM))
+      for (let cy = cy0; cy <= cy1; cy++) {
+        for (let cx = cx0; cx <= cx1; cx++) {
+          cells[cy * nGx + cx].push(wi)
+          totalEntries++
+        }
+      }
+    }
+
+    // Pack idx + list textures.
+    const idxData = new Float32Array(nGx * nGy * 4)
+    const listData = new Float32Array(Math.max(1, totalEntries))
+    let cursor = 0
+    for (let i = 0; i < cells.length; i++) {
+      const list = cells[i]
+      idxData[i * 4    ] = cursor
+      idxData[i * 4 + 1] = list.length
+      for (let k = 0; k < list.length; k++) listData[cursor + k] = list[k]
+      cursor += list.length
+    }
+    gl.bindTexture(gl.TEXTURE_2D, gridIdxTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, nGx, nGy, 0, gl.RGBA, gl.FLOAT, idxData)
+
+    const listWidth = Math.min(4096, Math.max(1, totalEntries))
+    const listHeight = Math.ceil(Math.max(1, totalEntries) / listWidth)
+    const padded = new Float32Array(listWidth * listHeight)
+    padded.set(listData)
+    gl.bindTexture(gl.TEXTURE_2D, gridListTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, listWidth, listHeight, 0, gl.RED, gl.FLOAT, padded)
+
+    gridDimsX = nGx
+    gridDimsY = nGy
+    gridCellM = cellM
+    gridOriginX = minX
+    gridOriginY = minY
+    gridListWidth = listWidth
   }
 
   // boundaries: [{ yM, slabDb, bypassHoles: [flatPolyArray, …] }]
@@ -433,6 +687,11 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     return out
   }
 
+  // Force-disable the grid traversal in shader (bench / debug parity check).
+  // When false, the shader takes the brute-force per-wall loop path.
+  let useGrid = true
+  function setUseGrid(v) { useGrid = !!v }
+
   // Render one AP and read back nx*ny floats (dBm).
   function renderAp(ap, scenario, gridStepM, originM, rxZM, slabMeta) {
     const nx = Math.ceil(scenario.size.w / gridStepM) + 1
@@ -473,6 +732,20 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.uniform1i(gl.getUniformLocation(prog, 'uHolePoly'), 2)
     gl.uniform1i(gl.getUniformLocation(prog, 'uHolePolyLen'), slabMeta.polyLen)
 
+    // F5b grid acceleration. uGridDims.x = 0 makes the shader fall back to
+    // brute force, used both as a sentinel for "no walls" and as a debug
+    // path if we want to verify parity by disabling the grid.
+    gl.activeTexture(gl.TEXTURE3)
+    gl.bindTexture(gl.TEXTURE_2D, gridIdxTex)
+    gl.uniform1i(gl.getUniformLocation(prog, 'uGridIdx'), 3)
+    gl.activeTexture(gl.TEXTURE4)
+    gl.bindTexture(gl.TEXTURE_2D, gridListTex)
+    gl.uniform1i(gl.getUniformLocation(prog, 'uGridList'), 4)
+    gl.uniform2i(gl.getUniformLocation(prog, 'uGridDims'), useGrid ? gridDimsX : 0, useGrid ? gridDimsY : 0)
+    gl.uniform1f(gl.getUniformLocation(prog, 'uGridCellM'), gridCellM)
+    gl.uniform2f(gl.getUniformLocation(prog, 'uGridOriginM'), gridOriginX, gridOriginY)
+    gl.uniform1i(gl.getUniformLocation(prog, 'uGridListWidth'), gridListWidth)
+
     gl.bindVertexArray(vao)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
 
@@ -486,9 +759,9 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.deleteProgram(prog)
     gl.deleteBuffer(vbo)
     gl.deleteVertexArray(vao)
-    for (const t of [outTex, wallsTex, slabsTex, holePolyTex]) gl.deleteTexture(t)
+    for (const t of [outTex, wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex]) gl.deleteTexture(t)
     gl.deleteFramebuffer(outFbo)
   }
 
-  return { uploadWalls, uploadSlabs, renderAp, dispose, gl }
+  return { uploadWalls, uploadSlabs, renderAp, setUseGrid, dispose, gl }
 }

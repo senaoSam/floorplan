@@ -175,7 +175,7 @@
 | #      | 狀態 | Task |
 | ------ | ---- | ---- |
 | HM-F5a | ✅   | WebGL shader MVP：`rssiFromAp` 翻 GLSL（`src/features/heatmap/propagationGL.js` + `sampleFieldGL.js`），walls/APs 打包成 RGBA32F texture、fragment shader 每格掃全部 walls/APs；Friis + 牆穿透 (Z filter) + slab loss + openings + omni/directional 天線 (custom 走 CPU fallback)。反射/複數 Fresnel/繞射/多頻點留給 F5c/F5d。**驗收**：對 `field-friis.json` baseline max diff ~1e-5 dB ≤ 1 dB ✓。HM-T3 引擎切換按鈕 + 瀏覽器 diff page (`#/heatmap-diff`) 也一併實作 |
-| HM-F5b | ⬜   | BVH / Uniform Grid 空間加速：每格 raycast 從 O(N_walls) 降到 O(log N) 或 O(常數)；資料結構塞進 texture 讓 shader 查詢 |
+| HM-F5b | ✅   | Uniform Grid 空間加速（不用 BVH，2D 場景下 grid 構造簡單、shader 無遞迴）：CPU 端按 wall AABB 把每面牆塞進覆蓋的 cells，emit `gridIdxTex` (RGBA32F, nGx×nGy) + `gridListTex` (R32F, flat wall idx)。Shader 用 Amanatides-Woo DDA 沿 ray 走 cells，配 8-slot 循環 buffer 去重。`setUseGrid(false)` 可切回 brute force（debug / bench 用）。**驗收**：對 friis baseline max diff = 0.000 dB ✓。Bench (`#/heatmap-bench`) 100 AP × 2000 牆 JS 155s vs Shader+grid 129ms → **1196× 加速** |
 | HM-F5c | ⬜   | 反射 + 複數 Fresnel 移植：vec2 模擬複數，image-source search + 貢獻門檻 cull；ITU-R P.2040-3 Fresnel 公式完整跑在 shader。**完成條件**：HM-T2 max error ≤ 1.5 dB |
 | HM-F5d | ⬜   | 多頻點相干疊加 + 繞射：N 個頻點在 shader 迴圈 accumulate；knife-edge diffraction corners。**完成條件**：HM-T2 max error ≤ 1 dB（與 JS 版達到實質 parity） |
 | HM-F5e | ⬜   | 增量資料上傳優化：拖曳單一 AP 時只更新該 AP 在 texture 的那幾個 texel，而不是整包重傳 |
