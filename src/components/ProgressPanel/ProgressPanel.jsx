@@ -148,7 +148,7 @@ const PHASES = [
         ],
       },
       {
-        layer: 'GPU 即時化（500 AP + 2000 牆 @ 60Hz）',
+        layer: 'GPU 即時化（目標天花板：3000 AP / 150K walls 拖 ~25ms / 放 ~150ms）',
         items: [
           { id: 'HM-T1', done: true,  text: 'Golden test fixture（雙 baseline：full + friis）' },
           { id: 'HM-T2', done: true,  text: 'Diff harness — Node CLI（JS 引擎 vs golden, --html）' },
@@ -159,8 +159,11 @@ const PHASES = [
           { id: 'HM-F5a', done: true, text: 'WebGL shader MVP（Friis + 牆穿透 + Z 過濾 + slab + opening + omni/directional）' },
           { id: 'HM-F5b', done: true,  text: 'Uniform Grid 空間加速（DDA 走 cell；100 AP×2000 牆 JS 155s → Shader 129ms = 1196×）' },
           { id: 'HM-F5c+d', done: false, text: '反射 + 複數 Fresnel + 繞射 + 多頻點相干（合併處理；F5c 中間 stage 不可分割，需 N≥5 才能 ≤ 1 dB）' },
-          { id: 'HM-F5e', done: false, text: '增量資料上傳優化（拖曳時只更新變動 texel）' },
-          { id: 'HM-F5f', done: false, text: '大場景調優（500 AP + 2000 牆達 60Hz）' },
+          { id: 'HM-F5g', done: false, text: 'per-fragment all-AP loop + AP 距離 culling（解 N_AP dispatch overhead，1000 AP ~30s → ~50ms）' },
+          { id: 'HM-F5h', done: false, text: 'Cascade tiling（粗→細多 pass，動牆也救到，~1.5-2× 加速）' },
+          { id: 'HM-drag-lod', done: false, text: '拖曳期間降畫質（gridStep×3 + freqN 15→3，5 行 code，拖曳 8-40× 加速）' },
+          { id: 'HM-F5e', done: false, text: '⏸️ 延後（被 HM-drag-lod dominate；增量 texel 上傳僅救拖 AP，對動牆 0 加速）' },
+          { id: 'HM-F5f', done: false, text: '大場景調優（profile 3000 AP + 150K 牆，hot-path optimisation）' },
         ],
       },
       {

@@ -151,9 +151,45 @@
 | HM-F2c | ✅   | 跨樓層射線的牆穿透：射線 2D 投影穿過其他樓層的牆時也加牆損；牆僅對 Z 介於 wall.bottomHeight~topHeight 的射線段有效 |
 | HM-F2e | ✅   | 牆 Z 範圍過濾：同樓層也應限制 wall 只對 AP/rx 在 wall.bottomHeight~topHeight 內的射線有效（矮隔間不該阻擋高處訊號） |
 | HM-F3b | ✅   | 樓板材質 UI：Sidebar 或 FloorPanel 暴露 floorSlabMaterialId + 自動同步 floorSlabAttenuationDb |
-> **目標場景**：500 AP + 2000 牆，拖曳時 ≥ 60 Hz 即時熱圖。
-> 純 CPU（JS 或 WASM）在此規模撐不住，只有 GPU + 空間加速結構能達標。
-> 路線：WebGL fragment shader MVP → BVH → 完整物理（Fresnel / 反射）→ 調優。
+### 規模目標 + Roadmap 修訂（2026-04-25 討論結論）
+
+> **天花板**：3000 AP / 150K walls 即時拖曳熱圖（拖 ~25ms / 放 ~150ms，可用級）
+> 對照業界場景：大機場、大商場、大學單棟建築、單一校區
+> **絕對絲滑（< 16ms）上限約 2000 AP / 100K walls**
+
+#### 規模 vs 延遲對照表（F5 全套完成後預估）
+
+| 規模 | 拖曳延遲 | 放手精細化 | 體感等級 |
+| --- | --- | --- | --- |
+| 1000 AP / 50K walls   | ~5 ms  | ~25 ms  | 絕對絲滑 |
+| 2000 AP / 100K walls  | ~12 ms | ~70 ms  | 絕對絲滑 |
+| **3000 AP / 150K walls** | **~25 ms** | **~150 ms** | **可用（天花板）** |
+| 5000 AP / 250K walls  | ~50 ms | ~300 ms | 可忍受 |
+| 10000 AP / 500K walls | ~150 ms | ~1 s | 卡 |
+
+walls/AP 比典型 30-60，所以「1000 AP / 50K walls」是合理的「大機場」規模、「3000/150K」是大校區量級。
+
+#### 達到天花板需要的 stage（依序）
+
+1. **F5c+d**（合併）— 反射 + Fresnel + 繞射 + 多頻點，shader 視覺對齊 JS（**must**：不做物理錯）
+2. **F5g** — per-fragment all-AP loop + AP 距離 culling（**must**：解 N_AP dispatch overhead，1000 AP 不做就死）
+3. **F5h** — cascade tiling（粗→細多 pass，拖牆也救到）
+4. **HM-drag-lod** — 拖曳期間 gridStep×3 + freqN 15→3（5 行 code，極低成本）
+
+#### 已放棄項目
+
+- **F5e（增量 texel 上傳）**：被「拖曳降畫質」全面 dominate，且對動牆 0 加速；先標延後，實測「拖曳降畫質」不夠時再評估
+- **AP merging / decimation（路線 E）**：物理失準，與 JS reference 對齊精神衝突
+- **WebGPU compute shader（路線 C）**：相容性考量（task.md 既有約束）
+- **WASM 主線**：CPU 加速 2-3× 對 1000 AP 杯水車薪；留給 HM-F6 fallback
+
+#### 備註（暫不做，未來參考）
+
+- **拖曳結束從粗版切細版的「閃一下」過渡感**：建議方案是 Konva Image opacity tween（兩 canvas cross-fade ~200ms，~20 行 code）。多數網規工具（Hamina/Ekahau）沒做此 transition，35ms 切換可能根本察覺不到。實測有需要再加。
+
+#### 既有約束
+
+> 純 CPU（JS 或 WASM）在 1000+ AP 規模撐不住，主線是 GPU。
 > **不做 WebGPU**（相容性考量）。Worker 保留為 CPU fallback 備援。
 
 ### Shader 開發工具鏈（HM-F5a 開工前先建好，降低 debug 成本）
@@ -177,8 +213,11 @@
 | HM-F5a | ✅   | WebGL shader MVP：`rssiFromAp` 翻 GLSL（`src/features/heatmap/propagationGL.js` + `sampleFieldGL.js`），walls/APs 打包成 RGBA32F texture、fragment shader 每格掃全部 walls/APs；Friis + 牆穿透 (Z filter) + slab loss + openings + omni/directional 天線 (custom 走 CPU fallback)。反射/複數 Fresnel/繞射/多頻點留給 F5c/F5d。**驗收**：對 `field-friis.json` baseline max diff ~1e-5 dB ≤ 1 dB ✓。HM-T3 引擎切換按鈕 + 瀏覽器 diff page (`#/heatmap-diff`) 也一併實作 |
 | HM-F5b | ✅   | Uniform Grid 空間加速（不用 BVH，2D 場景下 grid 構造簡單、shader 無遞迴）：CPU 端按 wall AABB 把每面牆塞進覆蓋的 cells，emit `gridIdxTex` (RGBA32F, nGx×nGy) + `gridListTex` (R32F, flat wall idx)。Shader 用 Amanatides-Woo DDA 沿 ray 走 cells，配 8-slot 循環 buffer 去重。`setUseGrid(false)` 可切回 brute force（debug / bench 用）。**驗收**：對 friis baseline max diff = 0.000 dB ✓。Bench (`#/heatmap-bench`) 100 AP × 2000 牆 JS 155s vs Shader+grid 129ms → **1196× 加速** |
 | HM-F5c+d | ⬜ | **合併處理**：反射 + 複數 Fresnel + 繞射 + 多頻點相干疊加同步上 shader（嘗試後發現 F5c 中間 stage 不可分割：N=1 多頻點對 full baseline 注定 30+ dB diff，因為 multipath 建設/破壞干涉只有 N≥5 的功率平均才會抹平到 ≤ 1 dB）。實作要點：(1) `vec2 cmul/cdiv/csqrt` 模擬複數；(2) ITU-R P.2040-3 epsC + per-polarisation Fresnel；(3) image-source 反射，Fresnel + 粗糙度衰減 + |Γ|·rough < 0.02 cull；(4) knife-edge diffraction corners；(5) `Hperp[N]/Hpara[N]` const-size array 累加器，最後 `power = (1/N)Σ(|Hperp|²+|Hpara|²)`；(6) phase = -2π·d/λ wrapped to (-π, π) 防 fp32 大角度精度爆炸。**完成條件**：對 `field-full` baseline max diff ≤ 1 dB。**已知未解 bug**：1st 嘗試 reflection-only 模式 max 40 dB，需要 single-cell 對齊 JS 公式比對找根因 |
-| HM-F5e | ⬜   | 增量資料上傳優化：拖曳單一 AP 時只更新該 AP 在 texture 的那幾個 texel，而不是整包重傳 |
-| HM-F5f | ⬜   | 大場景調優：profile 500 AP + 2000 牆實際耗時，若 < 60 Hz 則針對熱點優化（branch coherence、texture layout、uniform cache） |
+| HM-F5g | ⬜   | **per-fragment all-AP loop + AP 空間 culling**（解 N_AP dispatch overhead）：把 APs 也包進 RGBA32F texture，shader 內 loop over APs 同時做 distance culling（距 fragment 太遠的 AP 直接 skip，因功率太低無意義）；output 從「per-AP grid」變「直接 aggregated grid」（best AP RSSI + 同頻 SINR/SNR/CCI 都在 GPU 算完）。**目的**：1000 AP 從 ~30s（per-AP host loop）降到 ~50-100ms。需重組 sampleFieldGL — readPixels 拿掉，純 GPU pipeline + Konva 直接吃 GL canvas。**驗收**：對 `field-full` baseline 不可 regress F5c+d 的 ≤ 1 dB |
+| HM-F5h | ⬜   | **Cascade tiling（粗→細多 pass）**：先粗網格（gridStep ≈ 2m）找哪裡 RSSI > -80 dBm，只在「有訊號」區域用細網格 (0.5m) 渲染。可選 3 層 cascade（4m / 1m / 0.5m）。對動牆也救到（牆動了重算還是會經過 tiling 過濾死區）。預估在 F5g 之上再 1.5-2× 加速 |
+| HM-drag-lod | ⬜ | **拖曳期間降畫質**：useDragOverlayStore 已追蹤 isDragging，HeatmapLayer 改成拖曳時 gridStep × 3 + freqSamples 15→3（~5 行 code）。**位置/牆/AP 形狀全正確**，只是邊緣糊 + 反射區數值抖 ±5 dB；放手立刻精細化重算（35ms 內）。實測類似 Hamina/Ekahau 的 UX。對「拖曳體驗」是 game changer，比 F5e 通用且便宜 |
+| HM-F5e | ⏸️   | **延後（被 HM-drag-lod dominate）**：增量 texel 上傳僅對「拖一顆 AP」加速，對動牆 0 加速；HM-drag-lod 通用且 ~5 行 code 即可達 8-40× 加速。等 HM-drag-lod 實測拖曳體感不夠絲滑時再評估 |
+| HM-F5f | ⬜   | 大場景調優：profile 3000 AP + 150K 牆實際耗時，若 < 60 Hz 則針對熱點優化（branch coherence、texture layout、uniform cache） |
 
 ### 備援與延伸
 
@@ -189,10 +228,10 @@
 | HM-F2d | ⬜  | 跨樓層反射/繞射（高成本；牆需升級成 3D 平面、image-source 在 3D 做；第一版貢獻小，先擱） |
 
 <!--
-移除項目（2026-04-24 排序調整時下線）：
-  - 拖曳降解析度（gridStepM 暫時拉大）：短期 quick win 方案，
-    但等 F5a 做完後 GPU 版本應該直接 60Hz 不需要降級策略。
-    若 F5 整段推延且拖曳真的卡，再回頭評估。
+2026-04-25 翻案：拖曳降畫質從 quick-win 升為主線（HM-drag-lod）。
+理由：F5g+h 完成後 1000 AP/50K walls 仍要 ~25ms/frame，未達絕對絲滑；
+拖曳降畫質 5 行 code 帶來 8-40× 加速、覆蓋拖 AP 跟拖牆兩種場景，
+比原計畫 F5e（增量上傳，僅救拖 AP）通用得多。
 -->
 
 ### 其他（低優先）
