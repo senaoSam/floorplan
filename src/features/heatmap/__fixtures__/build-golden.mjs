@@ -54,8 +54,8 @@ function engineFingerprint() {
     'src/features/heatmap/sampleField.js',
     'src/features/heatmap/buildScenario.js',
     'src/features/heatmap/frequency.js',
-    'src/heatmap_sample/physics/constants.js',
-    'src/heatmap_sample/physics/geometry.js',
+    'src/features/heatmap/rfConstants.js',
+    'src/features/heatmap/geometry.js',
   ]
   const h = createHash('sha256')
   for (const f of files) {

@@ -100,17 +100,17 @@
 
 ---
 
-## Phase 5 — Heatmap 重寫（依 heatmap_sample 演算法）
+## Phase 5 — Heatmap 重寫
 
 > **背景**：原先基於 NPv1 / .tmp-heatmap 規格的 WebGL 實作於 2026-04-21 全數移除（HeatmapWebGL、HeatmapControl、FormulaNote、ituR2040、rfDefaults、autoPowerPlan、useEditorStore 熱圖相關 state、materials.js 的 ITU-R 欄位、FloorImagePanel 樓板 UI）。
 >
-> **新規格來源**：`heatmap_sample/`（獨立小專案）
-> - `src/physics/` constants / geometry / propagation / scenario
-> - `src/render/` heatmap / colormap
-> - 演算法：ITU-R P.1238 室內 + Friis blend / image-source 反射 / UTD knife-edge 繞射 / 入射角 secant / 同頻 SINR 聚合
-> - 渲染：Canvas 2D coarse grid + bilinear 上採樣 + gaussian blur
+> **真相來源**：`src/features/heatmap/` 下的 JS 引擎（propagation.js / sampleField.js / buildScenario.js / frequency.js / rfConstants.js / geometry.js）。所有公式、參數、資料結構決策以這份 JS 為準。
 >
-> **本專案改寫方向**：把 heatmap_sample 演算法**移植進 WebGL fragment shader**（保留 GPU 即時性）
+> 演算法：純 Friis + 顯式牆損失 / image-source 反射（複數 Fresnel + ITU-R P.2040-3 材質） / UTD knife-edge 繞射 / 入射角 secant / 多頻點寬頻平均 / 同頻 SINR 聚合。
+>
+> 渲染：Konva Image 吃 heatmapGL（WebGL2）的 off-screen canvas — coarse grid + bilinear 上採樣 + gaussian blur + 5-anchor colormap。
+>
+> **本專案改寫方向**：把 JS 引擎**移植進 WebGL fragment shader**（保留 GPU 即時性），shader 路徑須對齊 JS 引擎的 baseline。
 >
 > **保留的輸入端資料**（不變動）：
 > - walls（含 openings 門窗細分、material.dbLoss）
@@ -123,12 +123,12 @@
 > - FormulaNote 公式說明面板
 > - Toolbar 環境類型下拉、HeatmapControl 熱圖模式選擇
 
-### MVP — 把 heatmap_sample 演算法接進主系統（CPU 版，先不 GLSL）
+### MVP — JS 引擎接進主系統（CPU 版，先不 GLSL）
 
 | #    | 狀態 | Task |
 | ---- | ---- | ---- |
-| HM-1 | ✅   | 橋接層 `src/features/heatmap/buildScenario.js`：把 floor/walls/APs/scopes 轉成 sample 的 scenario 格式（px→m 用 floor.scale；walls 展成 segments 並合併 openings；APs 帶 pos/txDbm/channel/frequency/channelWidth） |
-| HM-2 | ✅   | 引擎整合：把 `src/heatmap_sample/render/heatmap.js` + `propagation.js` 改成可被主系統呼叫；頻率改讀 AP `frequency + channel + channelWidth` 算真實中心頻率（取代 sample 寫死 5190 MHz） |
+| HM-1 | ✅   | 橋接層 `src/features/heatmap/buildScenario.js`：把 floor/walls/APs/scopes 轉成 scenario 格式（px→m 用 floor.scale；walls 展成 segments 並合併 openings；APs 帶 pos/txDbm/channel/frequency/channelWidth） |
+| HM-2 | ✅   | 引擎整合：CPU heatmap 引擎放在 `src/features/heatmap/`（propagation.js / sampleField.js）；頻率讀 AP `frequency + channel + channelWidth` 算真實中心頻率 |
 | HM-3 | ✅   | 同頻干擾：只有「頻道實際重疊」的 AP 才計入 SINR（依 channel + channelWidth 計算重疊範圍） |
 | HM-4 | ✅   | 門窗穿透：walls 有 openings 時，線段穿越用 opening.material.dbLoss；牆剩餘段用 wall.material.dbLoss |
 | HM-5 | ✅   | Scope 過濾：out-of-scope 區域不渲染（alpha=0）；FloorHole 第一版忽略 |

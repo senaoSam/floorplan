@@ -47,14 +47,6 @@ function Toolbar() {
     <header className="toolbar">
       <div className="toolbar__brand">Floorplan</div>
 
-      <a
-        className="toolbar__sample-link"
-        href="#/heatmap-sample"
-        title="切到 heatmap_sample 獨立頁面對照"
-      >
-        → Heatmap Sample
-      </a>
-
       <div className="toolbar__tools">
         {TOOL_GROUPS.map((group, gi) => (
           <div key={gi} className="toolbar__group">

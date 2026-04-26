@@ -206,7 +206,7 @@ src/features/
                               #   - 所有繪製模式的滑鼠/鍵盤事件處理
                               #   - 端點吸附 (snap-to-grid, 12px threshold)
                               #   - 整合 DropZone、LayerToggle、DevicePlanningPanel、RegulatorySelector、ScaleDialog
-                              #   - Heatmap 已於 2026-04-21 移除；新版依 heatmap_sample 演算法重寫（待規劃）
+                              #   - Heatmap 已於 2026-04-21 移除；新版 JS 引擎（features/heatmap/）已上線，shader 化進行中
 
     ScaleDialog.jsx           # 比例尺對話框：輸入像素距離 + 實際公尺數 → 計算 px/m
     ScaleDialog.sass
@@ -234,24 +234,24 @@ src/features/
     Viewer3D.jsx              # React Three Fiber 3D 場景（佔位，未來 3D 視覺化）
 
   heatmap/
-    buildScenario.js          # 主系統 state → heatmap_sample scenario 格式
+    buildScenario.js          # 主系統 state → heatmap engine scenario 格式
                               #   - px → m（用 floor.scale）
                               #   - walls 依 openings 展成多段（各段帶自己的 dbLoss）
                               #   - scopes 轉成 scopeMaskFn(x,y) → true/false
                               #   - AP 帶 centerMHz（依 band + channel 算）
     frequency.js              # channelCenterMHz / channelRangeMHz / apsShareSpectrum
                               #   供 propagation.js SINR 判斷同頻重疊
-    propagation.js            # Per-AP 傳播模型（ITU-R P.1238 + Friis blend / image-source
-                              #   / UTD 繞射 / secant 斜入射）
-                              #   算法同 heatmap_sample 但頻率參數化、SINR 加入頻譜重疊過濾
-    sampleField.js            # 在粗網格上取樣 rssi/sinr；out-of-scope 設 NaN
+    rfConstants.js            # AP_ANT_GAIN_DBI / RX_ANT_GAIN_DBI / NOISE_FLOOR_DBM
+    geometry.js               # 2D ray/segment/normal/mirror 等基本幾何 helper
+    propagation.js            # **JS 引擎真相來源**：per-AP 傳播模型
+                              #   純 Friis + image-source 反射（複數 Fresnel） + UTD 繞射
+                              #   + secant 斜入射 + 多頻點寬頻平均；shader 路徑要對齊這份
+    sampleField.js            # 在粗網格上取樣 rssi/sinr/snr/cci；out-of-scope 設 NaN
+    propagationGL.js          # GLSL fragment shader：對齊 propagation.js 的 GPU 版本
+    sampleFieldGL.js          # 用 propagationGL 在 GPU 跑 per-AP grid，再 CPU 聚合
+    heatmapGL.js              # WebGL2 colormap/blur/contour renderer（吃 sampleField 出的 grid）
     hoverProbe.js             # 單點 probeAt(scenario, rx) — 供 hover 讀值使用
-
-src/heatmap_sample/           # 從根目錄 heatmap_sample/ 完整複製的獨立演算法包
-                              # （保留原始結構；propagation/geometry/constants/render 都在）
-                              # 由 hash route #/heatmap-sample 獨立檢視
-                              # 主系統的 src/features/heatmap/ 直接 import 此資料夾的
-                              # physics/constants.js 與 physics/geometry.js 及 render/heatmapGL.js
+    modes.js                  # RSSI / SINR / SNR / CCI 視覺化模式 + 色階 anchors
 ```
 
 ### Styles

@@ -189,11 +189,11 @@ function FormulaNote() {
       </section>
 
       <section className="muted small">
-        演算法來源：<code>heatmap_sample/</code>（image-source reflection / knife-edge 繞射 /
-        secant 穿透）。本系統的 propagation adapter 相對 sample 有幾點差異：
-        (1) 路徑損失改為純 Friis，不再與 ITU-R P.1238 取 max；
-        (2) 頻率參數化為 per-AP（<code>ap.centerMHz</code>，缺值 fallback 5190 MHz）；
-        (3) 反射改用 ITU-R P.2040-3 材質係數 + 複數 Fresnel，並拆成兩個正交極化通道在功率域合成；
+        演算法摘要：image-source reflection / knife-edge 繞射 / secant 穿透。
+        本系統 propagation 引擎要點：
+        (1) 路徑損失採純 Friis（不再與 ITU-R P.1238 取 max，避免重複計算牆損）；
+        (2) 頻率 per-AP（<code>ap.centerMHz</code>，缺值 fallback 5190 MHz）；
+        (3) 反射採 ITU-R P.2040-3 材質係數 + 複數 Fresnel，並拆成兩個正交極化通道在功率域合成；
         (4) 多路徑在整個 channel 頻寬內取 N 個頻點做寬頻平均；
         (5) SINR 只累計頻譜重疊的 AP；
         (6) 多樓層：所有樓層 AP 共用同一套 propagation，直射加 slab loss，

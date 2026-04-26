@@ -15,7 +15,6 @@ export const HEATMAP_MODES = ['rssi', 'sinr', 'snr', 'cci']
 export const HEATMAP_ENGINES = ['js', 'shader']
 
 // Heatmap UI / compute options.
-// Defaults mirror heatmap_sample's App.jsx initial state.
 export const useHeatmapStore = create((set) => ({
   enabled: false,
   mode: 'rssi',

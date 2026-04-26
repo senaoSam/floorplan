@@ -113,9 +113,10 @@ const PHASES = [
     ],
   },
   {
-    // 依 heatmap_sample/ 演算法（ITU-R P.1238 + image-source 反射 + UTD 繞射）
-    // 重新實作。先前 Phase 5/5.5/6 的 NPv1 方案已於 2026-04-21 全數移除。
-    phase: 'Phase 5 — Heatmap 重寫（依 heatmap_sample 演算法）',
+    // 第二版 heatmap：純 Friis + image-source 反射 + UTD knife-edge 繞射 +
+    // 複數 Fresnel + 多頻點寬頻平均。先前 Phase 5/5.5/6 的 NPv1 方案已於
+    // 2026-04-21 全數移除。
+    phase: 'Phase 5 — Heatmap 重寫',
     groups: [
       {
         layer: 'MVP — CPU 實作',

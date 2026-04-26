@@ -13,7 +13,7 @@ import { rssiFromAp, aggregateApContributions } from './propagation'
 import { createPropagationGL } from './propagationGL'
 import {
   AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, NOISE_FLOOR_DBM,
-} from '@/heatmap_sample/physics/constants.js'
+} from './rfConstants.js'
 
 const CCI_MIN_DBM = -120
 

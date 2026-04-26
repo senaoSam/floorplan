@@ -111,7 +111,7 @@ void readWall(int w, out vec2 a, out vec2 b, out float lossDb, out float zLo, ou
 }
 
 // 2D segment-segment intersection. Returns 1 in .x if hit, the parametric t
-// (0..1 along ap→rx) in .y. Mirrors heatmap_sample/physics/geometry.js.
+// (0..1 along ap→rx) in .y. Mirrors features/heatmap/geometry.js (segSegIntersect).
 vec2 segSegIntersect(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
   vec2 d1 = p2 - p1;
   vec2 d2 = p4 - p3;

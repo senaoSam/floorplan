@@ -1,6 +1,6 @@
-// Bridge: main-system state → heatmap_sample scenario format.
+// Bridge: main-system state → heatmap engine scenario format.
 //
-// Main system stores walls/APs in canvas pixels; sample physics works in meters.
+// Main system stores walls/APs in canvas pixels; the engine works in meters.
 // floor.scale is px/m. We convert here and flatten wall openings into their own
 // sub-segments so each sub-segment carries its own dB loss.
 
@@ -108,7 +108,7 @@ function collectCorners(segments) {
 }
 
 // Main entry. Takes main-system data in canvas-pixel space and returns the
-// scenario object the heatmap_sample engine consumes.
+// scenario object the heatmap engine consumes.
 //
 // Args:
 //   floor:    { imageWidth, imageHeight, scale }  — scale is px/m

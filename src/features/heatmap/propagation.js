@@ -1,14 +1,12 @@
-// Per-AP propagation adapter over heatmap_sample's physics.
+// Per-AP propagation engine. This is the JS reference engine — the source of
+// truth that the WebGL shader path (sampleFieldGL / propagationGL) is meant to
+// match.
 //
-// heatmap_sample/src/physics/propagation.js hardcodes 5190 MHz (5 GHz Ch36@40).
-// We need per-AP frequency so that a 2.4 GHz or 6 GHz AP computes with its own
-// wavelength. We re-implement the same model here but parameterised by AP.
-//
-// Differences vs. sample:
+// Model:
 //   - Per-AP centre frequency (derived from ap.centerMHz) drives wavelength,
 //     path loss and phasor wavenumber.
 //   - Path loss uses pure Friis; wall losses are applied explicitly per ray
-//     (no ITU-R P.1238 blend - that model would double-count wall loss).
+//     (no ITU-R P.1238 blend — that model would double-count wall loss).
 //   - Multipath sum is evaluated at N frequency samples across the AP's
 //     channel bandwidth (not just the centre), then power-averaged. Each path
 //     carries a complex gain a_n,p and delay tau_n so the channel response
@@ -24,11 +22,11 @@
 
 import {
   AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, NOISE_FLOOR_DBM,
-} from '@/heatmap_sample/physics/constants.js'
+} from './rfConstants.js'
 import {
   sub, dot, len, dist, norm, segSegIntersect,
   pointSegDistance, mirrorPoint, segmentNormal,
-} from '@/heatmap_sample/physics/geometry.js'
+} from './geometry.js'
 import { apsShareSpectrum } from './frequency'
 import { getPatternById, sampleGain } from '@/constants/antennaPatterns'
 

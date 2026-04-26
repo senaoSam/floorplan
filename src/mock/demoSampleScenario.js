@@ -1,7 +1,6 @@
-// Seed the Demo floor with the same walls + APs as heatmap_sample's default
-// scenario (see heatmap_sample/src/physics/scenario.js). Coordinates are
-// translated from meters into the Demo floor's pixel space using the same
-// px/m scale DemoLoader sets (200/20 = 10 px/m).
+// Seed the Demo floor with a fixed wall + AP layout used to validate the
+// heatmap engine. Coordinates are translated from meters into the Demo floor's
+// pixel space using the px/m scale DemoLoader sets (200/20 = 10 px/m).
 //
 // Layout occupies the top-left 30x18 m (300x180 px) patch of the Demo floor.
 

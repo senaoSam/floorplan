@@ -9,8 +9,8 @@
 //   - signBetter: 'high' when higher values are better (green end = high),
 //                 'low'  when lower values are better (CCI: low = less noise).
 
-// RSSI — same anchors as heatmap_sample's shared colormap. Weakest on the left
-// side of the bar (teal, far edge), strongest on the right (red, close).
+// RSSI anchors. Weakest on the left side of the bar (teal, far edge),
+// strongest on the right (red, close).
 const RSSI_ANCHORS = [
   [-35, 235,  26,  26, 0.90],
   [-45, 255, 128,  13, 0.88],

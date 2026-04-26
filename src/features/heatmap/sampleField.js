@@ -1,10 +1,6 @@
 // Sample RSSI / SINR / SNR / CCI on a coarse grid — adapter over the per-AP
-// propagation module.
-//
-// Differs from heatmap_sample/src/render/heatmap.js in two ways:
-//   1) Calls our per-AP rssiFromAp (so each AP uses its own frequency)
-//   2) Honours scope mask — out-of-scope grid cells get NaN so the GL shader's
-//      NaN check renders them transparent.
+// propagation module. Out-of-scope grid cells get NaN so the GL shader's NaN
+// check renders them transparent.
 
 import { rssiFromAp, aggregateApContributions } from './propagation'
 

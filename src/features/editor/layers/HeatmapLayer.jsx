@@ -12,7 +12,7 @@ import { sampleField } from '@/features/heatmap/sampleField'
 import { sampleFieldGL } from '@/features/heatmap/sampleFieldGL'
 import { getModeConfig } from '@/features/heatmap/modes'
 import { computeFloorElevations } from '@/features/viewer3d/floorStacking'
-import { createHeatmapGL } from '@/heatmap_sample/render/heatmapGL.js'
+import { createHeatmapGL } from '@/features/heatmap/heatmapGL.js'
 
 // Heatmap render layer. Sits between the floor image and the wall layer so
 // the plan is still visible underneath and wall strokes cut across the heat

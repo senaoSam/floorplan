@@ -32,12 +32,12 @@ function DemoLoader() {
     try {
       const img = new window.Image()
       img.onload = () => {
-        // Treat the whole Demo image as the sample's 30 x 18 m office so the
-        // heatmap grid count matches sample and dragging stays smooth.
+        // Treat the whole Demo image as a 30 x 18 m office so the heatmap grid
+        // count stays modest and dragging is smooth.
         const pxPerM = img.naturalWidth / 30
         const floor = importFloorFromUrl(DEMO_SRC, img.naturalWidth, img.naturalHeight, nextDemoName(floors), pxPerM)
-        // Seed this new Demo floor with the heatmap_sample scenario: same wall
-        // layout + 2 APs at (4,4) / (4,14) m, mapped 1:1 via px/m scale.
+        // Seed this new Demo floor with the canned scenario: walls + 2 APs at
+        // (4,4) / (4,14) m, mapped 1:1 via px/m scale.
         const { walls, aps } = buildDemoSampleObjects(pxPerM)
         setWalls(floor.id, walls)
         setAPs(floor.id, aps)
