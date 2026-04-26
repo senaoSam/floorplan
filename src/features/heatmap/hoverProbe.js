@@ -9,7 +9,10 @@ export function probeAt(scenario, rx, opts = {}) {
   const perAp = scenario.aps.map((ap) =>
     rssiFromAp(ap, rxAbs, scenario.walls, scenario.corners, {
       maxReflOrder: opts.reflections ? 1 : 0,
-      enableDiffraction: opts.diffraction ?? true,
+      // Default off: hover is interactive and the reflection / diffraction JS
+      // loops dominate per-mousemove cost. Callers that need full physics
+      // (e.g. an offline AP-quality report) must opt in explicitly.
+      enableDiffraction: opts.diffraction ?? false,
       floorBoundaries: scenario.floorBoundaries ?? null,
     }).rssiDbm,
   )

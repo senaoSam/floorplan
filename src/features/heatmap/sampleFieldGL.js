@@ -90,7 +90,8 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
     const out = gl.renderField(scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta, {
       _rxGainDbi: RX_ANT_GAIN_DBI,
       noiseDbm: NOISE_FLOOR_DBM,
-      cullFloorDbm: CULL_FLOOR_DBM,
+      cullFloorDbm: opts.cullFloorDbm ?? CULL_FLOOR_DBM,
+      rssiOnly: !!opts.rssiOnly,
       gridSize: { nx, ny },
     })
 

@@ -30,6 +30,7 @@ import RegulatorySelector from '@/components/RegulatorySelector/RegulatorySelect
 import DropZone from '@/features/importer/DropZone'
 import HeatmapControl from '@/components/HeatmapControl/HeatmapControl'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
+import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { buildScenario } from '@/features/heatmap/buildScenario'
 import { probeAt } from '@/features/heatmap/hoverProbe'
@@ -47,6 +48,11 @@ function Editor2D() {
   const draggingAPRef          = useRef(null)   // { id, x, y } AP 拖移中暫存位置
   const apDragPendingRef       = useRef(null)   // { id, x, y } mousemove 寫入；RAF flush 到 draggingAPRef
   const apDragRafRef           = useRef(0)      // RAF id，0 代表未排程
+  // Heatmap hover probe coalescer: mousemove writes the latest canvas-frame
+  // position; RAF flushes one probeAt per frame so the JS engine can't be
+  // overwhelmed when the OS fires mousemove > 60 Hz.
+  const hoverProbePendingRef   = useRef(null)
+  const hoverProbeRafRef       = useRef(0)
   const draggingWallRef        = useRef(null)   // { id, dx, dy } 牆體拖移中暫存偏移
   const draggingScopeRef       = useRef(null)   // { id, dx, dy } Scope 拖移中暫存偏移
   const rightDragPendingRef    = useRef(null)   // { node, startX, startY } 右鍵等待拖曳
@@ -628,35 +634,62 @@ function Editor2D() {
     }
 
     const canvasPos = toCanvasPos(pos)
-    setMousePos(isWallMode ? snapToWallEndpoint(canvasPos) : canvasPos)
+    // mousePos drives ghost-line previews in wall/scope/floor-hole/scale/crop
+    // /door-window modes. Outside those modes nothing reads it, so skipping
+    // setMousePos avoids a per-mousemove React commit that re-renders every
+    // Konva layer and starves the main thread (slows Konva hit detection,
+    // which is what surfaces as laggy hover highlight + RSSI readout).
+    const needsMousePos = isWallMode || isScopeMode || isFloorHoleMode ||
+                          isScaleMode || isCropMode || isDoorWindowMode
+    if (needsMousePos) {
+      setMousePos(isWallMode ? snapToWallEndpoint(canvasPos) : canvasPos)
+    } else if (mousePos !== null) {
+      setMousePos(null)
+    }
 
-    // Heatmap hover probe — one RSSI/SINR read per mousemove when enabled.
+    // Heatmap hover probe — coalesced via RAF so OS-rate mousemove (> 60 Hz)
+    // can't pile up JS-engine probes. Forces direct path only (no reflection /
+    // diffraction): the hover readout's purpose is "what does this point look
+    // like roughly", and the per-mousemove cost of the JS reflection /
+    // diffraction loops blows up to ~20 × (1 + N_walls + N_corners) segment
+    // intersections per probe. Direct-only is one-segment-per-AP-per-wall, ~60×
+    // cheaper, and the RSSI difference is single-digit dB at most.
     const heat = useHeatmapStore.getState()
     if (heat.enabled) {
-      const floor = useFloorStore.getState().floors.find((f) => f.id === activeFloorId)
-      if (floor?.scale) {
-        const walls  = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
-        const aps    = useAPStore.getState().apsByFloor[activeFloorId] ?? []
-        const scopes = useScopeStore.getState().scopesByFloor[activeFloorId] ?? []
-        const scenario = buildScenario(floor, walls, aps, scopes)
-        if (scenario) {
+      hoverProbePendingRef.current = canvasPos
+      if (!hoverProbeRafRef.current) {
+        hoverProbeRafRef.current = requestAnimationFrame(() => {
+          hoverProbeRafRef.current = 0
+          const cp = hoverProbePendingRef.current
+          hoverProbePendingRef.current = null
+          if (!cp) return
+          const heatNow = useHeatmapStore.getState()
+          if (!heatNow.enabled) return
+          const floor = useFloorStore.getState().floors.find((f) => f.id === activeFloorId)
+          if (!floor?.scale) return
+          const walls  = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
+          const aps    = useAPStore.getState().apsByFloor[activeFloorId] ?? []
+          const scopes = useScopeStore.getState().scopesByFloor[activeFloorId] ?? []
+          const scenario = buildScenario(floor, walls, aps, scopes)
+          if (!scenario) return
           const pxToM = 1 / floor.scale
-          const rx = { x: canvasPos.x * pxToM, y: canvasPos.y * pxToM }
+          const rx = { x: cp.x * pxToM, y: cp.y * pxToM }
+          const setReading = useHoverReadoutStore.getState().setReading
           if (rx.x >= 0 && rx.x <= scenario.size.w && rx.y >= 0 && rx.y <= scenario.size.h) {
             const reading = probeAt(scenario, rx, {
-              reflections: heat.reflections,
-              diffraction: heat.diffraction,
+              reflections: false,
+              diffraction: false,
             })
-            heat.setHoverReading(reading)
+            setReading(reading)
           } else {
-            heat.setHoverReading(null)
+            setReading(null)
           }
-        }
+        })
       }
-    } else if (heat.hoverReading) {
-      heat.setHoverReading(null)
+    } else if (useHoverReadoutStore.getState().reading) {
+      useHoverReadoutStore.getState().setReading(null)
     }
-  }, [toCanvasPos, isWallMode, snapToWallEndpoint, viewport.scale, activeFloorId])
+  }, [toCanvasPos, isWallMode, isScopeMode, isFloorHoleMode, isScaleMode, isCropMode, isDoorWindowMode, mousePos, snapToWallEndpoint, viewport.scale, activeFloorId])
 
   // ── 點擊：分流到各模式 ─────────────────────────────────
   const handleStageClick = useCallback((e) => {

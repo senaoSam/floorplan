@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
+import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
 import { HEATMAP_MODE_LIST, getModeConfig } from '@/features/heatmap/modes'
 import FormulaNote from '@/components/FormulaNote/FormulaNote'
 import HeatmapLegend from './HeatmapLegend'
@@ -34,7 +35,7 @@ function HeatmapControl() {
   const setShowContours = useHeatmapStore((s) => s.setShowContours)
   const engine       = useHeatmapStore((s) => s.engine)
   const setEngine    = useHeatmapStore((s) => s.setEngine)
-  const hover        = useHeatmapStore((s) => s.hoverReading)
+  const hover        = useHoverReadoutStore((s) => s.reading)
 
   const [panelOpen, setPanelOpen] = useState(false)
   const [formulaOpen, setFormulaOpen] = useState(false)

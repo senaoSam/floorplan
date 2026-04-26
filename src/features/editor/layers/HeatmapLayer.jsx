@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import { Layer, Image as KonvaImage } from 'react-konva'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
@@ -14,6 +14,12 @@ import { getModeConfig } from '@/features/heatmap/modes'
 import { computeFloorElevations } from '@/features/viewer3d/floorStacking'
 import { createHeatmapGL } from '@/features/heatmap/heatmapGL.js'
 
+// Module-level stable empty array. Used as the fallback for per-floor selectors
+// (scopes / walls / APs / holes) when a floor has no entries. Returning a fresh
+// `[]` from a Zustand selector triggers a useMemo cache miss on every render,
+// which—on hover—cascades into a full sampleFieldGL recompute every frame.
+const EMPTY = Object.freeze([])
+
 // Heatmap render layer. Sits between the floor image and the wall layer so
 // the plan is still visible underneath and wall strokes cut across the heat
 // on top.
@@ -24,9 +30,9 @@ import { createHeatmapGL } from '@/features/heatmap/heatmapGL.js'
 export default function HeatmapLayer({ floorId }) {
   const floors       = useFloorStore((s) => s.floors)
   const floor        = floors.find((f) => f.id === floorId) ?? null
-  const walls        = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
-  const aps          = useAPStore((s) => s.apsByFloor[floorId] ?? [])
-  const scopes       = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
+  const walls        = useWallStore((s) => s.wallsByFloor[floorId] ?? EMPTY)
+  const aps          = useAPStore((s) => s.apsByFloor[floorId] ?? EMPTY)
+  const scopes       = useScopeStore((s) => s.scopesByFloor[floorId] ?? EMPTY)
   // Subscribe to the full apsByFloor map so cross-floor APs drive recompute.
   const apsByFloor   = useAPStore((s) => s.apsByFloor)
   // Same for walls — other floors' walls attenuate cross-floor rays (HM-F2c).
@@ -49,7 +55,15 @@ export default function HeatmapLayer({ floorId }) {
   const dragScope = useDragOverlayStore((s) => s.scope)
 
   const glRef = useRef(null)
-  const [version, setVersion] = useState(0)
+  // Konva node ref — used to imperatively redraw after the WebGL canvas has new
+  // pixels, without forcing a React re-render. The previous `setVersion + key`
+  // trick triggered a render loop: the post-render setState scheduled another
+  // commit, and during that commit any subscriber that returned a different
+  // ref (anywhere in the Editor2D tree) re-fired this useEffect, which called
+  // setVersion again. Hover-rate mousemove fed that loop, producing the
+  // "Timer fired → run → sampleFieldGL → renderAp → readPixels" stack the user
+  // saw in DevTools every frame.
+  const imageNodeRef = useRef(null)
 
   const getGL = () => {
     if (!glRef.current) {
@@ -220,6 +234,20 @@ export default function HeatmapLayer({ floorId }) {
   const isDragging = !!(dragAP || dragWall || dragScope)
   const liveGridStepM     = isDragging ? gridStepM * 1 : gridStepM
   const liveFreqOverrideN = undefined
+  // Cull threshold: -120 (default) is exact for full quality. -95 dBm matches
+  // the noise floor so any AP whose free-space-only RSSI sits below it cannot
+  // change SINR / CCI / SNR meaningfully — still lossless within colormap
+  // resolution but lets faraway APs get culled per-fragment, skipping their
+  // wall DDA. Only applied while dragging; rest snaps back to -120.
+  const liveCullFloorDbm = isDragging ? -95 : undefined
+  const liveBlur         = isDragging ? 0     : blur
+  const liveShowContours = isDragging ? false : showContours
+  // RSSI / SNR mode never reads cci/sinr fields, so the shader can skip the
+  // expensive per-fragment co-channel AP loop while dragging. SINR/CCI modes
+  // still need it. dragend triggers a full re-render so SNR's sentinel doesn't
+  // linger.
+  const liveRssiOnly = isDragging && (mode === 'rssi' || mode === 'snr')
+
 
   useEffect(() => {
     if (!enabled || !scenario || !floor?.scale || !padding) return
@@ -236,6 +264,8 @@ export default function HeatmapLayer({ floorId }) {
             enableDiffraction: diffraction,
             padding,
             freqOverrideN: liveFreqOverrideN,
+            cullFloorDbm: liveCullFloorDbm,
+            rssiOnly: liveRssiOnly,
           })
         } catch (e) {
           console.warn('[Heatmap] shader engine failed, falling back to JS:', e.message)
@@ -269,14 +299,19 @@ export default function HeatmapLayer({ floorId }) {
       const modeCfg = getModeConfig(mode)
       const activeField = field[modeCfg.field] ?? field.rssi
       const renderField = { rssi: activeField, nx: field.nx, ny: field.ny }
-      gl.render(renderField, outW, outH, 1 / floor.scale, blur, showContours, {
+      gl.render(renderField, outW, outH, 1 / floor.scale, liveBlur, liveShowContours, {
         anchors: modeCfg.anchors,
       })
-      setVersion((n) => n + 1)
+      // Imperative repaint — the canvas pixels were just rewritten in place.
+      // Konva's image node still points at the same canvas object, so React
+      // doesn't need to re-render; we just nudge the layer to redraw.
+      const node = imageNodeRef.current
+      const layer = node?.getLayer?.()
+      if (layer) layer.batchDraw()
     }
     const id = setTimeout(run, 0)
     return () => { cancelled = true; clearTimeout(id) }
-  }, [enabled, mode, engine, scenario, reflections, diffraction, liveGridStepM, liveFreqOverrideN, blur, showContours, floor?.scale, padding])
+  }, [enabled, mode, engine, scenario, reflections, diffraction, liveGridStepM, liveFreqOverrideN, liveCullFloorDbm, liveRssiOnly, liveBlur, liveShowContours, floor?.scale, padding])
 
   if (!enabled || !scenario || !floor?.scale || !glRef.current || !padding) return null
 
@@ -314,6 +349,7 @@ export default function HeatmapLayer({ floorId }) {
   return (
     <Layer listening={false} clipFunc={clipFunc}>
       <KonvaImage
+        ref={imageNodeRef}
         image={canvas}
         x={cx}
         y={cy}
@@ -322,7 +358,6 @@ export default function HeatmapLayer({ floorId }) {
         width={fullW}
         height={fullH}
         rotation={rotation}
-        key={version}
       />
     </Layer>
   )

@@ -889,6 +889,7 @@ uniform float uRxZM;
 uniform float uRxGainDbi;
 uniform float uNoiseDbm;
 uniform float uCullFloorDbm;   // skip AP when its free-space-only RSSI is below this
+uniform int   uRssiOnly;       // 1 = skip CCI/SINR loop, write sentinels into those channels
 
 uniform sampler2D uWalls;
 uniform int uWallCount;
@@ -1237,6 +1238,17 @@ void main() {
     // Every AP got culled by uCullFloorDbm — nothing to serve. Use floor
     // values; CCI is also -120 by definition (no interferers either).
     outColor = vec4(-120.0, -50.0, -50.0, -120.0);
+    return;
+  }
+
+  // RSSI-only fast path. Skip the per-fragment co-channel AP loop entirely —
+  // the second loop re-runs wall DDA for every same-band AP and is the
+  // dominant cost in scenes where most APs share a band. CCI/SINR get
+  // sentinel values; the host only routes this output to the RSSI/SNR
+  // colormap during drag, then re-renders full quality on dragend.
+  if (uRssiOnly == 1) {
+    float snrDbFast = bestDb - uNoiseDbm;
+    outColor = vec4(bestDb, -50.0, snrDbFast, -120.0);
     return;
   }
 
@@ -1906,12 +1918,13 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
 
     // HM-F5h cascade gate. We trigger the coarse pre-pass when AP count is
     // high enough that the per-fragment AP loop dominates frame time; below
-    // that threshold the coarse-pass overhead beats the saving. AP count = 50
-    // is a heuristic — well below where we benchmark (1000+ APs), and the
-    // coarse pass is dirt cheap per fragment so a bit of unnecessary work in
-    // borderline cases is OK.
+    // that threshold the coarse-pass overhead beats the saving. The 20-AP
+    // floor catches medium scenes (~26 APs is the user's drag-perf baseline)
+    // where per-fragment AP iteration starts to dominate; the coarse pass is
+    // dirt cheap per fragment so a bit of unnecessary work in borderline cases
+    // is OK.
     const cullFloor = opts.cullFloorDbm ?? -120
-    const cascadeFactor = (apCount >= 50) ? 4 : 0
+    const cascadeFactor = (apCount >= 20) ? 4 : 0
     let mNx = 0, mNy = 0
     if (cascadeFactor > 0) {
       mNx = Math.max(1, Math.ceil(nx / cascadeFactor))
@@ -1952,6 +1965,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.uniform1f(gl.getUniformLocation(progField, 'uRxGainDbi'), opts._rxGainDbi ?? 0)
     gl.uniform1f(gl.getUniformLocation(progField, 'uNoiseDbm'), opts.noiseDbm ?? -95)
     gl.uniform1f(gl.getUniformLocation(progField, 'uCullFloorDbm'), opts.cullFloorDbm ?? -120)
+    gl.uniform1i(gl.getUniformLocation(progField, 'uRssiOnly'), opts.rssiOnly ? 1 : 0)
 
     gl.activeTexture(gl.TEXTURE0)
     gl.bindTexture(gl.TEXTURE_2D, wallsTex)
