@@ -218,8 +218,8 @@ export default function HeatmapLayer({ floorId }) {
   // smoothness degrade. On dragend the drag overlays clear and the next
   // effect run snaps back to full quality (~35 ms typical).
   const isDragging = !!(dragAP || dragWall || dragScope)
-  const liveGridStepM     = isDragging ? gridStepM * 3 : gridStepM
-  const liveFreqOverrideN = isDragging ? 3 : undefined
+  const liveGridStepM     = isDragging ? gridStepM * 1 : gridStepM
+  const liveFreqOverrideN = undefined
 
   useEffect(() => {
     if (!enabled || !scenario || !floor?.scale || !padding) return
