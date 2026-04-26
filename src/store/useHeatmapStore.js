@@ -18,7 +18,7 @@ export const HEATMAP_ENGINES = ['js', 'shader']
 export const useHeatmapStore = create((set) => ({
   enabled: false,
   mode: 'rssi',
-  engine: 'js',
+  engine: 'shader',
   reflections: true,
   diffraction: true,
   gridStepM: 0.5,

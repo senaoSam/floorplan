@@ -242,6 +242,12 @@ export default function HeatmapLayer({ floorId }) {
   const liveCullFloorDbm = isDragging ? -95 : undefined
   const liveBlur         = isDragging ? 0     : blur
   const liveShowContours = isDragging ? false : showContours
+  // Drop reflections / diffraction during drag — both are O(N_walls) per AP
+  // (reflection 22× cost, diffraction 128× on a 25-AP/25-wall scene), so
+  // keeping them on shreds the per-frame budget. p50 RSSI delta is < 1 dB
+  // in the typical coverage range, so the visual jump on dragend is small.
+  const liveMaxReflOrder      = isDragging ? 0     : (reflections ? 1 : 0)
+  const liveEnableDiffraction = isDragging ? false : diffraction
   // RSSI / SNR mode never reads cci/sinr fields, so the shader can skip the
   // expensive per-fragment co-channel AP loop while dragging. SINR/CCI modes
   // still need it. dragend triggers a full re-render so SNR's sentinel doesn't
@@ -260,8 +266,8 @@ export default function HeatmapLayer({ floorId }) {
       if (engine === 'shader') {
         try {
           field = sampleFieldGL(scenario, liveGridStepM, {
-            maxReflOrder: reflections ? 1 : 0,
-            enableDiffraction: diffraction,
+            maxReflOrder: liveMaxReflOrder,
+            enableDiffraction: liveEnableDiffraction,
             padding,
             freqOverrideN: liveFreqOverrideN,
             cullFloorDbm: liveCullFloorDbm,
@@ -270,16 +276,16 @@ export default function HeatmapLayer({ floorId }) {
         } catch (e) {
           console.warn('[Heatmap] shader engine failed, falling back to JS:', e.message)
           field = sampleField(scenario, liveGridStepM, {
-            maxReflOrder: reflections ? 1 : 0,
-            enableDiffraction: diffraction,
+            maxReflOrder: liveMaxReflOrder,
+            enableDiffraction: liveEnableDiffraction,
             padding,
             freqOverrideN: liveFreqOverrideN,
           })
         }
       } else {
         field = sampleField(scenario, liveGridStepM, {
-          maxReflOrder: reflections ? 1 : 0,
-          enableDiffraction: diffraction,
+          maxReflOrder: liveMaxReflOrder,
+          enableDiffraction: liveEnableDiffraction,
           padding,
           freqOverrideN: liveFreqOverrideN,
         })
