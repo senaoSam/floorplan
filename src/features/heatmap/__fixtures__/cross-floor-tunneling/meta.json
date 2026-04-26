@@ -1,0 +1,104 @@
+{
+  "fixtureId": "cross-floor-tunneling",
+  "description": "1 AP on floor-4 (z=14.5 m world), rx grid on floor-0 ground. 5 stacked floors, 4 concrete slabs between AP and rx. No walls / holes / reflections — isolates slab dB accumulation + sec(θ) magnification with cap at 3.5.",
+  "activeFloorId": "floor-0",
+  "engineOpts": {
+    "gridStepM": 0.5,
+    "maxReflOrder": 0,
+    "enableDiffraction": false,
+    "rxHeightM": 1
+  },
+  "engineFingerprint": "6fc708d466f02d22",
+  "gitCommit": "bf27e3532e027ed20fc5739634346491224b92b4",
+  "gitDirty": true,
+  "generatedAt": "2026-04-26T12:46:52.904Z",
+  "grid": {
+    "nx": 61,
+    "ny": 41,
+    "gridStepM": 0.5
+  },
+  "baselines": {
+    "full": {
+      "opts": {
+        "maxReflOrder": 0,
+        "enableDiffraction": false
+      },
+      "appliesTo": [
+        "F5c",
+        "F5d",
+        "F5e",
+        "F5f"
+      ],
+      "stats": {
+        "rssi": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -165.733,
+          "max": -94.345,
+          "mean": -119.337
+        },
+        "sinr": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -70.733,
+          "max": 0.655,
+          "mean": -24.337
+        },
+        "snr": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -70.733,
+          "max": 0.655,
+          "mean": -24.337
+        },
+        "cci": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -120,
+          "max": -120,
+          "mean": -120
+        }
+      }
+    },
+    "friis": {
+      "opts": {
+        "maxReflOrder": 0,
+        "enableDiffraction": false
+      },
+      "appliesTo": [
+        "F5a",
+        "F5b"
+      ],
+      "stats": {
+        "rssi": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -165.733,
+          "max": -94.345,
+          "mean": -119.337
+        },
+        "sinr": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -70.733,
+          "max": 0.655,
+          "mean": -24.337
+        },
+        "snr": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -70.733,
+          "max": 0.655,
+          "mean": -24.337
+        },
+        "cci": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -120,
+          "max": -120,
+          "mean": -120
+        }
+      }
+    }
+  }
+}
