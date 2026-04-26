@@ -53,8 +53,23 @@ function canUseAggregated(scenario, opts) {
 export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
   const gl = getGL()
   const { w, h } = scenario.size
-  const nx = Math.ceil(w / gridStepM) + 1
-  const ny = Math.ceil(h / gridStepM) + 1
+  // Optional padding extends the sampled grid outside the scenario rectangle
+  // so iso-contours don't get clamped at the plan edges (the bilinear sampler
+  // in heatmapGL uses CLAMP_TO_EDGE, which otherwise turns out-of-grid contour
+  // arcs into straight rectangle edges). Caller crops the heatmap canvas back
+  // to the plan view; padded samples only matter for what bleeds in from
+  // outside through bilinear filtering.
+  const pad = opts.padding ?? { left: 0, right: 0, top: 0, bottom: 0 }
+  const padL = pad.left   ?? 0
+  const padR = pad.right  ?? 0
+  const padT = pad.top    ?? 0
+  const padB = pad.bottom ?? 0
+  const totalW = w + padL + padR
+  const totalH = h + padT + padB
+  const originX = -padL
+  const originY = -padT
+  const nx = Math.ceil(totalW / gridStepM) + 1
+  const ny = Math.ceil(totalH / gridStepM) + 1
   const mask = scenario.scopeMaskFn ?? (() => true)
   const rxZM = scenario.rxElevationM ?? 0
 
@@ -72,21 +87,25 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
       _antGainDbi: AP_ANT_GAIN_DBI,
     }))
     gl.uploadAps(apsForGL)
-    const out = gl.renderField(scenario, gridStepM, { x: 0, y: 0 }, rxZM, slabMeta, {
+    const out = gl.renderField(scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta, {
       _rxGainDbi: RX_ANT_GAIN_DBI,
       noiseDbm: NOISE_FLOOR_DBM,
       cullFloorDbm: CULL_FLOOR_DBM,
+      gridSize: { nx, ny },
     })
 
     // Apply scope mask host-side (cheaper than encoding it into the shader,
-    // and the dominant cost is the per-fragment AP loop anyway).
+    // and the dominant cost is the per-fragment AP loop anyway). Mask only
+    // applies inside the original plan rect; padded samples bypass it so
+    // contours bending into the margin survive the crop.
     const { rssi, sinr, snr, cci } = out
     for (let j = 0; j < ny; j++) {
       for (let i = 0; i < nx; i++) {
         const idx = j * nx + i
-        const x = i * gridStepM
-        const y = j * gridStepM
-        if (!mask(x, y)) {
+        const x = originX + i * gridStepM
+        const y = originY + j * gridStepM
+        const insidePlan = (x >= 0 && x <= w && y >= 0 && y <= h)
+        if (insidePlan && !mask(x, y)) {
           rssi[idx] = NaN; sinr[idx] = NaN; snr[idx] = NaN; cci[idx] = NaN
           continue
         }
@@ -94,7 +113,7 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
         if (cci[idx] < CCI_MIN_DBM) cci[idx] = CCI_MIN_DBM
       }
     }
-    return { rssi, sinr, snr, cci, nx, ny, gridStepM }
+    return { rssi, sinr, snr, cci, nx, ny, gridStepM, originX, originY }
   }
 
   // ---- per-AP fallback (refl on, diff on, or custom AP present) ----
@@ -106,7 +125,10 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
       _antGainDbi: AP_ANT_GAIN_DBI,
       _rxGainDbi: RX_ANT_GAIN_DBI,
     }
-    const { rssi: shaderGrid } = gl.renderAp(apForGL, scenario, gridStepM, { x: 0, y: 0 }, rxZM, slabMeta, opts)
+    const { rssi: shaderGrid } = gl.renderAp(
+      apForGL, scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta,
+      { ...opts, gridSize: { nx, ny } },
+    )
 
     if (ap.antennaMode === 'custom') {
       // Custom-pattern AP fallback to JS for the antenna lobe — opts are
@@ -116,8 +138,8 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
       for (let j = 0; j < ny; j++) {
         for (let i = 0; i < nx; i++) {
           const idx = j * nx + i
-          const x = i * gridStepM
-          const y = j * gridStepM
+          const x = originX + i * gridStepM
+          const y = originY + j * gridStepM
           const rx = { x, y, zM: rxZM }
           const { rssiDbm } = rssiFromAp(ap, rx, scenario.walls, scenario.corners, {
             ...opts,
@@ -141,9 +163,10 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
       const idx = j * nx + i
-      const x = i * gridStepM
-      const y = j * gridStepM
-      if (!mask(x, y)) {
+      const x = originX + i * gridStepM
+      const y = originY + j * gridStepM
+      const insidePlan = (x >= 0 && x <= w && y >= 0 && y <= h)
+      if (insidePlan && !mask(x, y)) {
         rssi[idx] = NaN; sinr[idx] = NaN; snr[idx] = NaN; cci[idx] = NaN
         continue
       }
@@ -162,7 +185,7 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
     }
   }
 
-  return { rssi, sinr, snr, cci, nx, ny, gridStepM }
+  return { rssi, sinr, snr, cci, nx, ny, gridStepM, originX, originY }
 }
 
 export function disposeGL() {

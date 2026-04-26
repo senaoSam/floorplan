@@ -1623,10 +1623,12 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   let useGrid = true
   function setUseGrid(v) { useGrid = !!v }
 
-  // Render one AP and read back nx*ny floats (dBm).
+  // Render one AP and read back nx*ny floats (dBm). Caller can override the
+  // grid extent via opts.gridSize when sampling beyond scenario.size (padded
+  // grids — see sampleFieldGL).
   function renderAp(ap, scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
-    const nx = Math.ceil(scenario.size.w / gridStepM) + 1
-    const ny = Math.ceil(scenario.size.h / gridStepM) + 1
+    const nx = opts.gridSize?.nx ?? (Math.ceil(scenario.size.w / gridStepM) + 1)
+    const ny = opts.gridSize?.ny ?? (Math.ceil(scenario.size.h / gridStepM) + 1)
     ensureOutSize(nx, ny)
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, outFbo)
@@ -1710,8 +1712,8 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // cullFloorDbm is the per-AP free-space-RSSI threshold below which an AP is
   // skipped entirely; -120 dBm matches the JS aggregateApContributions floor.
   function renderField(scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
-    const nx = Math.ceil(scenario.size.w / gridStepM) + 1
-    const ny = Math.ceil(scenario.size.h / gridStepM) + 1
+    const nx = opts.gridSize?.nx ?? (Math.ceil(scenario.size.w / gridStepM) + 1)
+    const ny = opts.gridSize?.ny ?? (Math.ceil(scenario.size.h / gridStepM) + 1)
     ensureOutFieldSize(nx, ny)
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, outFieldFbo)
