@@ -1,6 +1,23 @@
-// WebGL2 fragment-shader implementation of `rssiFromAp` — HM-F5a MVP.
+// WebGL2 fragment-shader implementation of `rssiFromAp` — HM-F5a..F5g.
 //
-// Scope (matches HM-F5a exit criteria, see __fixtures__/README.md):
+// Two render entry points:
+//   renderAp(ap, ...)       — per-AP RSSI grid (R32F). Reflection / diffraction
+//                             path stays here because each fragment already
+//                             carries an NMAX coherent-sum array; multiplying
+//                             that by N_AP would explode register pressure.
+//   renderField(scenario...) — HM-F5g. all-AP loop in shader, RGBA32F output =
+//                             (rssi, sinr, snr, cci). Scalar path only (Friis
+//                             + walls + slab + openings + antenna gain).
+//                             Distance culling skips APs whose maximum
+//                             possible RSSI at this fragment is below the
+//                             usable floor, so 1000+ AP scenes don't pay an
+//                             N_AP * frame_size overhead.
+//
+// The aggregated path is enabled for the F5a fast path (refl=off, diff=off,
+// no custom-pattern APs). When any of those triggers, sampleFieldGL falls
+// back to the per-AP renderAp loop so accuracy is preserved.
+//
+// Scope of the scalar path (mirrors HM-F5a/b/g):
 //   - Friis path loss (3D distance) with per-AP centre frequency
 //   - Per-wall penetration: oblique-incidence multiplier same as JS engine,
 //     Z filter (skip wall hits whose Z falls outside [zLoM, zHiM])
@@ -9,18 +26,7 @@
 //   - Wall openings already pre-expanded into segment list by buildScenario,
 //     so shader sees them as just shorter wall segments with their own dbLoss
 //   - AP antenna gain: omni and directional (patch/sector approximation).
-//     Custom-pattern APs fall back to the JS engine on the host so we don't
-//     need to ship a sampled lobe table to the shader at this stage.
-//
-// Out of scope here (lands in F5c onward):
-//   - Image-source reflections / complex Fresnel
-//   - Knife-edge diffraction
-//   - Multi-frequency coherent power averaging (we use centre-frequency only)
-//
-// Output: per-AP RSSI grid (Float32Array, length nx*ny, dBm). The host adapter
-// (`sampleFieldGL.js`) loops APs, dispatches one render per AP, reads pixels
-// back, and runs `aggregateApContributions` on the CPU to fold the perAp grids
-// into the final rssi/sinr/snr/cci fields.
+//     Custom-pattern APs trigger host fallback (renderAp + JS aggregate).
 
 const VS = `#version 300 es
 in vec2 aPos;
@@ -809,6 +815,387 @@ void main() {
   outColor = vec4(rxDb, 0.0, 0.0, 1.0);
 }`
 
+// HM-F5g: per-fragment all-AP loop. Output = (rssi, sinr, snr, cci) in dB(m).
+//
+// AP texture layout (uAps, RGBA32F, 4 texels per AP, packed 4096-wide):
+//   t0 = (x, y, zM, txDbm)
+//   t1 = (centerMHz, channelWidthMHz, antGainDbi, antMode)
+//        antMode: 0 = omni, 1 = directional. Custom never reaches the
+//        aggregated path — host falls back to renderAp.
+//   t2 = (azimuthDeg, beamwidthDeg, freqLoMHz, freqHiMHz)
+//        [freqLo, freqHi] = AP's occupied band; SINR co-channel test compares
+//        against the serving AP's range (same band + interval intersect).
+//   t3 = (band, _, _, _)
+//        band: 1=2.4 GHz, 2=5 GHz, 3=6 GHz. Cross-band APs never co-channel.
+//
+// Distance culling: free-space PL gives the maximum possible RSSI an AP can
+// contribute to this fragment. If that's below uCullFloorDbm we skip the AP
+// entirely — saves the wall-loss DDA, which is the per-AP bottleneck.
+//
+// Reflection/diffraction NOT supported here: the coherent NMAX array per
+// fragment × per AP would explode register pressure. Host falls back to the
+// per-AP renderAp dispatch when refl or diff is on.
+const FS_FIELD = `#version 300 es
+precision highp float;
+precision highp int;
+
+in vec2 vUv;
+out vec4 outColor;
+
+uniform vec2 uGridSize;        // (nx, ny)
+uniform vec2 uOriginM;
+uniform float uGridStepM;
+uniform float uRxZM;
+uniform float uRxGainDbi;
+uniform float uNoiseDbm;
+uniform float uCullFloorDbm;   // skip AP when its free-space-only RSSI is below this
+
+uniform sampler2D uWalls;
+uniform int uWallCount;
+uniform sampler2D uSlabs;
+uniform int uSlabCount;
+uniform sampler2D uHolePoly;
+uniform int uHolePolyLen;
+
+uniform sampler2D uGridIdx;
+uniform sampler2D uGridList;
+uniform ivec2 uGridDims;
+uniform float uGridCellM;
+uniform vec2  uGridOriginM;
+uniform int   uGridListWidth;
+
+uniform sampler2D uAps;
+uniform int uApCount;
+
+const float PI = 3.14159265358979;
+const float SLAB_SEC_CAP = 3.5;
+const float DIRECTIONAL_BACK_DB = 20.0;
+const float DIRECTIONAL_EDGE_DEG = 15.0;
+
+vec2 segSegIntersect(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
+  vec2 d1 = p2 - p1;
+  vec2 d2 = p4 - p3;
+  float denom = d1.x * d2.y - d1.y * d2.x;
+  if (abs(denom) < 1e-12) return vec2(0.0, 0.0);
+  vec2 r = p1 - p3;
+  float t = (d2.x * r.y - d2.y * r.x) / denom;
+  float u = (d1.x * r.y - d1.y * r.x) / denom;
+  if (t < 0.0 || t > 1.0 || u < 0.0 || u > 1.0) return vec2(0.0, 0.0);
+  return vec2(1.0, t);
+}
+
+void readWall(int w, out vec2 a, out vec2 b, out float lossDb, out float zLo, out float zHi) {
+  int t0 = w * 3;
+  int t1 = t0 + 1;
+  ivec2 p0 = ivec2(t0 % 4096, t0 / 4096);
+  ivec2 p1 = ivec2(t1 % 4096, t1 / 4096);
+  vec4 e0 = texelFetch(uWalls, p0, 0);
+  vec4 e1 = texelFetch(uWalls, p1, 0);
+  a = e0.xy;  b = e0.zw;
+  lossDb = e1.x;  zLo = e1.y;  zHi = e1.z;
+}
+
+float wallLossOblique(vec2 a, vec2 b, vec2 rayDir, float lossDb) {
+  vec2 t = b - a;
+  vec2 n = normalize(vec2(-t.y, t.x));
+  float rL = length(rayDir);
+  vec2 rDir = rL > 1e-12 ? rayDir / rL : vec2(0.0);
+  float cosI = abs(dot(rDir, n));
+  float sec = 1.0 / max(cosI, 0.2);
+  return lossDb * min(sec, 3.5);
+}
+
+void applyWallContribution(int w, vec2 ap, float apZ, vec2 rx, float rxZ, vec2 rayDir, inout float total) {
+  vec2 a, b;
+  float lossDb, zLo, zHi;
+  readWall(w, a, b, lossDb, zLo, zHi);
+  vec2 hit = segSegIntersect(ap, rx, a, b);
+  if (hit.x < 0.5) return;
+  float zAt = apZ + (rxZ - apZ) * hit.y;
+  if (zAt < zLo || zAt > zHi) return;
+  total += wallLossOblique(a, b, rayDir, lossDb);
+}
+
+float accumulateWallLossBrute(vec2 ap, float apZ, vec2 rx, float rxZ) {
+  float total = 0.0;
+  vec2 rayDir = rx - ap;
+  for (int w = 0; w < uWallCount; w++) {
+    applyWallContribution(w, ap, apZ, rx, rxZ, rayDir, total);
+  }
+  return total;
+}
+
+void readGridCell(int cx, int cy, out int start, out int count) {
+  if (cx < 0 || cy < 0 || cx >= uGridDims.x || cy >= uGridDims.y) {
+    start = 0; count = 0; return;
+  }
+  vec4 idx = texelFetch(uGridIdx, ivec2(cx, cy), 0);
+  start = int(idx.x);
+  count = int(idx.y);
+}
+
+int readGridWallIdx(int i) {
+  ivec2 p = ivec2(i % uGridListWidth, i / uGridListWidth);
+  return int(texelFetch(uGridList, p, 0).r);
+}
+
+const int SEEN_BUF = 8;
+
+float accumulateWallLossGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
+  float total = 0.0;
+  vec2 rayDir = rx - ap;
+
+  vec2 apG = (ap - uGridOriginM) / uGridCellM;
+  vec2 rxG = (rx - uGridOriginM) / uGridCellM;
+
+  int cx = int(floor(apG.x));
+  int cy = int(floor(apG.y));
+  int cxEnd = int(floor(rxG.x));
+  int cyEnd = int(floor(rxG.y));
+
+  vec2 d = rxG - apG;
+  float dx = d.x;
+  float dy = d.y;
+  int stepX = dx > 0.0 ? 1 : (dx < 0.0 ? -1 : 0);
+  int stepY = dy > 0.0 ? 1 : (dy < 0.0 ? -1 : 0);
+
+  float tMaxX = 1e30;
+  float tDeltaX = 1e30;
+  if (stepX != 0) {
+    float nextX = stepX > 0 ? float(cx + 1) : float(cx);
+    tMaxX = (nextX - apG.x) / dx;
+    tDeltaX = abs(1.0 / dx);
+  }
+  float tMaxY = 1e30;
+  float tDeltaY = 1e30;
+  if (stepY != 0) {
+    float nextY = stepY > 0 ? float(cy + 1) : float(cy);
+    tMaxY = (nextY - apG.y) / dy;
+    tDeltaY = abs(1.0 / dy);
+  }
+
+  int seenBuf[SEEN_BUF];
+  for (int j = 0; j < SEEN_BUF; j++) seenBuf[j] = -1;
+  int seenWritePos = 0;
+
+  float tCur = 0.0;
+  int maxSteps = uGridDims.x + uGridDims.y + 4;
+  for (int i = 0; i < 4096; i++) {
+    if (i >= maxSteps) break;
+    int start, count;
+    readGridCell(cx, cy, start, count);
+    for (int k = 0; k < count; k++) {
+      int wIdx = readGridWallIdx(start + k);
+      bool dup = false;
+      for (int j = 0; j < SEEN_BUF; j++) {
+        if (seenBuf[j] == wIdx) { dup = true; break; }
+      }
+      if (dup) continue;
+      seenBuf[seenWritePos] = wIdx;
+      seenWritePos = (seenWritePos + 1) % SEEN_BUF;
+      applyWallContribution(wIdx, ap, apZ, rx, rxZ, rayDir, total);
+    }
+    if (cx == cxEnd && cy == cyEnd) break;
+    if (tMaxX < tMaxY) {
+      tCur = tMaxX;
+      tMaxX += tDeltaX;
+      cx += stepX;
+    } else {
+      tCur = tMaxY;
+      tMaxY += tDeltaY;
+      cy += stepY;
+    }
+    if (tCur > 1.0) break;
+  }
+  return total;
+}
+
+float accumulateWallLossField(vec2 ap, float apZ, vec2 rx, float rxZ) {
+  if (uGridDims.x == 0) return accumulateWallLossBrute(ap, apZ, rx, rxZ);
+  return accumulateWallLossGrid(ap, apZ, rx, rxZ);
+}
+
+bool pointInPoly(vec2 q, int start, int count) {
+  bool inside = false;
+  int prevIdx = start + count - 1;
+  vec2 prev = texelFetch(uHolePoly, ivec2(prevIdx % 4096, prevIdx / 4096), 0).xy;
+  for (int k = 0; k < count; k++) {
+    int idx = start + k;
+    vec2 cur = texelFetch(uHolePoly, ivec2(idx % 4096, idx / 4096), 0).xy;
+    bool yCross = (cur.y > q.y) != (prev.y > q.y);
+    if (yCross) {
+      float dy = prev.y - cur.y;
+      if (abs(dy) < 1e-12) dy = 1e-12;
+      float xAt = (prev.x - cur.x) * (q.y - cur.y) / dy + cur.x;
+      if (q.x < xAt) inside = !inside;
+    }
+    prev = cur;
+  }
+  return inside;
+}
+
+float accumulateSlabLossField(vec2 ap, float apZ, vec2 rx, float rxZ) {
+  if (uSlabCount == 0) return 0.0;
+  float zLo = min(apZ, rxZ);
+  float zHi = max(apZ, rxZ);
+  float dz = rxZ - apZ;
+  vec2  d2 = rx - ap;
+  float d3 = sqrt(d2.x * d2.x + d2.y * d2.y + dz * dz);
+  float cosI = d3 > 1e-9 ? abs(dz) / d3 : 1.0;
+  float sec = 1.0 / max(cosI, 1.0 / SLAB_SEC_CAP);
+  float loss = 0.0;
+
+  for (int s = 0; s < uSlabCount; s++) {
+    vec4 sb = texelFetch(uSlabs, ivec2(s, 0), 0);
+    float yM = sb.x;
+    float slabDb = sb.y;
+    int holeStart = int(sb.z);
+    int holeCount = int(sb.w);
+    if (yM <= zLo || yM >= zHi) continue;
+    float t = abs(dz) > 1e-9 ? (yM - apZ) / dz : 0.0;
+    vec2 cross = ap + d2 * t;
+    bool bypassed = false;
+    if (holeCount > 0 && pointInPoly(cross, holeStart, holeCount)) bypassed = true;
+    if (!bypassed) loss += slabDb * sec;
+  }
+  return loss;
+}
+
+float pathLossDbField(float d, float freqMhz) {
+  float dEff = max(d, 0.5);
+  return 20.0 * log(dEff)/log(10.0) + 20.0 * log(freqMhz)/log(10.0) - 27.55;
+}
+
+// Per-AP gain at the fragment. apMode: 0 omni, 1 directional. azimuth/beamwidth
+// only consulted when mode=1; matches apGainDbi in propagation.js.
+float apGainAt(vec2 apPos, vec2 target, int mode, float gainDbi, float azDeg, float bwDeg) {
+  if (mode == 0) return gainDbi;
+  vec2 dxy = target - apPos;
+  if (abs(dxy.x) < 1e-9 && abs(dxy.y) < 1e-9) return gainDbi;
+  float rayDeg = atan(dxy.y, dxy.x) * 180.0 / PI;
+  float off = rayDeg - azDeg;
+  off = mod(off + 540.0, 360.0) - 180.0;
+  float absOff = abs(off);
+  float halfBw = bwDeg * 0.5;
+  if (absOff <= halfBw) return gainDbi;
+  if (absOff >= halfBw + DIRECTIONAL_EDGE_DEG) return gainDbi - DIRECTIONAL_BACK_DB;
+  float t = (absOff - halfBw) / DIRECTIONAL_EDGE_DEG;
+  return gainDbi - DIRECTIONAL_BACK_DB * t;
+}
+
+float dbToLin(float db) { return pow(10.0, db * 0.1); }
+float linToDb(float lin) { return 10.0 * log(max(lin, 1e-30)) / log(10.0); }
+
+void main() {
+  ivec2 gpx = ivec2(gl_FragCoord.xy);
+  if (gpx.x >= int(uGridSize.x) || gpx.y >= int(uGridSize.y)) {
+    outColor = vec4(0.0/0.0);
+    return;
+  }
+  vec2 rx = uOriginM + vec2(float(gpx.x), float(gpx.y)) * uGridStepM;
+  float rxZ = uRxZM;
+
+  // Two-pass over APs: first pass picks best (serving) AP RSSI; we keep the
+  // serving AP's frequency window so the second pass can identify co-channel
+  // interferers. Both passes share the same wall/slab traversal, so we do all
+  // the heavy work twice — but each fragment still saves N_AP host dispatches.
+  // Computing in a single pass would need per-fragment scratch for every AP's
+  // RSSI which doesn't fit in registers; the 2× is the right tradeoff.
+  //
+  // Output sentinels (mirror sampleField.js + aggregateApContributions):
+  //   no APs     → rssi=-120 sinr=-50 snr=-50 cci=-120
+  //   no co-chan → cci=-120 (caller's CCI floor)
+  if (uApCount == 0) {
+    outColor = vec4(-120.0, -50.0, -50.0, -120.0);
+    return;
+  }
+
+  float bestDb = -1e6;
+  int   bestIdx = -1;
+  float bestFreqLo = 0.0;
+  float bestFreqHi = 0.0;
+  float bestBand   = 0.0;
+
+  for (int k = 0; k < 4096; k++) {
+    if (k >= uApCount) break;
+    int base = k * 4;
+    vec4 t0 = texelFetch(uAps, ivec2((base    ) % 4096, (base    ) / 4096), 0);
+    vec4 t1 = texelFetch(uAps, ivec2((base + 1) % 4096, (base + 1) / 4096), 0);
+    vec4 t2 = texelFetch(uAps, ivec2((base + 2) % 4096, (base + 2) / 4096), 0);
+    vec3 apPos = t0.xyz; float txDbm = t0.w;
+    float centerMHz = t1.x; float antGain = t1.z; int antMode = int(t1.w);
+    float azDeg = t2.x; float bwDeg = t2.y;
+
+    // Cull by free-space-only RSSI: txDbm + max possible gain - PL(d) < floor.
+    vec2 dxy = rx - apPos.xy;
+    float dz = apPos.z - rxZ;
+    float dDir = sqrt(dxy.x*dxy.x + dxy.y*dxy.y + dz*dz);
+    float fsBest = txDbm + antGain + uRxGainDbi - pathLossDbField(dDir, centerMHz);
+    if (fsBest < uCullFloorDbm) continue;
+
+    float wallLoss = accumulateWallLossField(apPos.xy, apPos.z, rx, rxZ);
+    float slabLoss = accumulateSlabLossField(apPos.xy, apPos.z, rx, rxZ);
+    float gain = apGainAt(apPos.xy, rx, antMode, antGain, azDeg, bwDeg);
+    float pl = pathLossDbField(dDir, centerMHz) + wallLoss + slabLoss;
+    float rxDb = txDbm + gain + uRxGainDbi - pl;
+
+    if (rxDb > bestDb) {
+      bestDb = rxDb;
+      bestIdx = k;
+      bestFreqLo = t2.z;
+      bestFreqHi = t2.w;
+      vec4 t3 = texelFetch(uAps, ivec2((base + 3) % 4096, (base + 3) / 4096), 0);
+      bestBand = t3.x;
+    }
+  }
+
+  if (bestIdx < 0) {
+    // Every AP got culled by uCullFloorDbm — nothing to serve. Use floor
+    // values; CCI is also -120 by definition (no interferers either).
+    outColor = vec4(-120.0, -50.0, -50.0, -120.0);
+    return;
+  }
+
+  float cciLin = 0.0;
+  for (int k = 0; k < 4096; k++) {
+    if (k >= uApCount) break;
+    if (k == bestIdx) continue;
+    int base = k * 4;
+    vec4 t0 = texelFetch(uAps, ivec2((base    ) % 4096, (base    ) / 4096), 0);
+    vec4 t1 = texelFetch(uAps, ivec2((base + 1) % 4096, (base + 1) / 4096), 0);
+    vec4 t2 = texelFetch(uAps, ivec2((base + 2) % 4096, (base + 2) / 4096), 0);
+    vec4 t3 = texelFetch(uAps, ivec2((base + 3) % 4096, (base + 3) / 4096), 0);
+    // Co-channel test: same band AND occupied-MHz windows intersect.
+    if (t3.x != bestBand) continue;
+    float loA = t2.z, hiA = t2.w;
+    if (loA >= bestFreqHi || hiA <= bestFreqLo) continue;
+
+    vec3 apPos = t0.xyz; float txDbm = t0.w;
+    float centerMHz = t1.x; float antGain = t1.z; int antMode = int(t1.w);
+    float azDeg = t2.x; float bwDeg = t2.y;
+
+    vec2 dxy = rx - apPos.xy;
+    float dz = apPos.z - rxZ;
+    float dDir = sqrt(dxy.x*dxy.x + dxy.y*dxy.y + dz*dz);
+    float fsBest = txDbm + antGain + uRxGainDbi - pathLossDbField(dDir, centerMHz);
+    if (fsBest < uCullFloorDbm) continue;
+
+    float wallLoss = accumulateWallLossField(apPos.xy, apPos.z, rx, rxZ);
+    float slabLoss = accumulateSlabLossField(apPos.xy, apPos.z, rx, rxZ);
+    float gain = apGainAt(apPos.xy, rx, antMode, antGain, azDeg, bwDeg);
+    float pl = pathLossDbField(dDir, centerMHz) + wallLoss + slabLoss;
+    float rxDb = txDbm + gain + uRxGainDbi - pl;
+
+    cciLin += dbToLin(rxDb);
+  }
+
+  float noiseLin = dbToLin(uNoiseDbm);
+  float sinrDb = bestDb - linToDb(noiseLin + cciLin);
+  float snrDb  = bestDb - uNoiseDbm;
+  float cciDbm = cciLin > 0.0 ? linToDb(cciLin) : -120.0;
+  outColor = vec4(bestDb, sinrDb, snrDb, cciDbm);
+}`
+
 function compile(gl, type, src) {
   const sh = gl.createShader(type)
   gl.shaderSource(sh, src)
@@ -860,6 +1247,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   }
 
   const prog = link(gl, VS, FS)
+  const progField = link(gl, VS, FS_FIELD)
 
   const vao = gl.createVertexArray()
   gl.bindVertexArray(vao)
@@ -896,6 +1284,30 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     outNx = nx; outNy = ny
   }
 
+  // HM-F5g: aggregated 4-channel output target (rssi, sinr, snr, cci) — sized
+  // to the grid, sampled once at end of renderField.
+  const outFieldTex = gl.createTexture()
+  gl.bindTexture(gl.TEXTURE_2D, outFieldTex)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+  const outFieldFbo = gl.createFramebuffer()
+  let outFieldNx = 0, outFieldNy = 0
+
+  function ensureOutFieldSize(nx, ny) {
+    if (nx === outFieldNx && ny === outFieldNy) return
+    gl.bindTexture(gl.TEXTURE_2D, outFieldTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, nx, ny, 0, gl.RGBA, gl.FLOAT, null)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, outFieldFbo)
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, outFieldTex, 0)
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      throw new Error('field output FBO incomplete')
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    outFieldNx = nx; outFieldNy = ny
+  }
+
   // Walls texture is reused across all AP renders within a frame. We pack
   // walls into a 4096-wide RGBA32F image and reupload only when the wall list
   // changes. Same for slabs and hole polygons.
@@ -909,7 +1321,10 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // texel per corner; reuploaded alongside walls.
   const cornersTex  = gl.createTexture()
   let cornerCount = 0
-  for (const t of [wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex]) {
+  // HM-F5g: AP texture (4 RGBA32F texels per AP).
+  const apsTex = gl.createTexture()
+  let apCount = 0
+  for (const t of [wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex, apsTex]) {
     gl.bindTexture(gl.TEXTURE_2D, t)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
@@ -964,6 +1379,51 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, data)
 
     buildGrid(walls, opts.bbox)
+  }
+
+  // HM-F5g: pack APs into a 4-texel-per-AP RGBA32F image. Layout matches the
+  // FS_FIELD shader's expectations exactly:
+  //   t0 = (x, y, zM, txDbm)
+  //   t1 = (centerMHz, channelWidthMHz, antGainDbi, antMode)
+  //          antMode 0 = omni, 1 = directional. Custom-pattern APs must be
+  //          rejected at the host (sampleFieldGL falls back to renderAp), so
+  //          they should never reach here — but if one does we encode it as 0
+  //          (omni) to avoid producing garbage; the host fallback is
+  //          authoritative.
+  //   t2 = (azimuthDeg, beamwidthDeg, freqLoMHz, freqHiMHz)
+  //   t3 = (band, _, _, _)
+  //          band 1=2.4 GHz, 2=5 GHz, 3=6 GHz; cross-band APs never co-channel.
+  function uploadAps(apList) {
+    apCount = apList?.length ?? 0
+    const totalTexels = Math.max(1, apCount * 4)
+    const tw = Math.min(4096, totalTexels)
+    const th = Math.ceil(totalTexels / 4096)
+    const data = new Float32Array(tw * th * 4)
+    for (let i = 0; i < apCount; i++) {
+      const ap = apList[i]
+      const o = i * 16
+      const cx = ap.pos.x, cy = ap.pos.y, cz = ap.zM ?? 0
+      data[o     ] = cx;  data[o + 1] = cy;  data[o + 2] = cz;  data[o + 3] = ap.txDbm
+      const centerMHz = ap.centerMHz || 5190
+      const bwMHz = ap.channelWidth || 20
+      const gainDbi = ap._antGainDbi ?? 0
+      const mode = ap.antennaMode === 'directional' ? 1 : 0
+      data[o + 4] = centerMHz
+      data[o + 5] = bwMHz
+      data[o + 6] = gainDbi
+      data[o + 7] = mode
+      data[o + 8 ] = ap.azimuthDeg ?? 0
+      data[o + 9 ] = ap.beamwidthDeg ?? 60
+      data[o + 10] = centerMHz - bwMHz * 0.5
+      data[o + 11] = centerMHz + bwMHz * 0.5
+      // Band code = 1/2/3 for 2.4/5/6 GHz (matches buildScenario's ap.frequency
+      // values 2.4 / 5 / 6). 0 sentinel = unknown so cross-band test still works.
+      const f = ap.frequency
+      const band = f === 2.4 ? 1 : f === 5 ? 2 : f === 6 ? 3 : 0
+      data[o + 12] = band
+    }
+    gl.bindTexture(gl.TEXTURE_2D, apsTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, tw, th, 0, gl.RGBA, gl.FLOAT, data)
   }
 
   // HM-F5c step 3: pack corner points (wall segment endpoints) into a 4096-
@@ -1242,13 +1702,93 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     return { rssi: out, nx, ny }
   }
 
-  function dispose() {
-    gl.deleteProgram(prog)
-    gl.deleteBuffer(vbo)
-    gl.deleteVertexArray(vao)
-    for (const t of [outTex, wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex]) gl.deleteTexture(t)
-    gl.deleteFramebuffer(outFbo)
+  // HM-F5g: aggregated all-AP single-pass render. Only valid for the scalar
+  // path (no reflections, no diffraction). Returns 4 Float32Arrays of length
+  // nx*ny: rssi, sinr, snr, cci. The caller has already filtered out custom-
+  // pattern APs and verified opts.maxReflOrder/enableDiffraction are off.
+  //
+  // cullFloorDbm is the per-AP free-space-RSSI threshold below which an AP is
+  // skipped entirely; -120 dBm matches the JS aggregateApContributions floor.
+  function renderField(scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
+    const nx = Math.ceil(scenario.size.w / gridStepM) + 1
+    const ny = Math.ceil(scenario.size.h / gridStepM) + 1
+    ensureOutFieldSize(nx, ny)
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, outFieldFbo)
+    gl.viewport(0, 0, nx, ny)
+    gl.useProgram(progField)
+
+    gl.uniform2f(gl.getUniformLocation(progField, 'uGridSize'), nx, ny)
+    gl.uniform2f(gl.getUniformLocation(progField, 'uOriginM'), originM.x, originM.y)
+    gl.uniform1f(gl.getUniformLocation(progField, 'uGridStepM'), gridStepM)
+    gl.uniform1f(gl.getUniformLocation(progField, 'uRxZM'), rxZM)
+    gl.uniform1f(gl.getUniformLocation(progField, 'uRxGainDbi'), opts._rxGainDbi ?? 0)
+    gl.uniform1f(gl.getUniformLocation(progField, 'uNoiseDbm'), opts.noiseDbm ?? -95)
+    gl.uniform1f(gl.getUniformLocation(progField, 'uCullFloorDbm'), opts.cullFloorDbm ?? -120)
+
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, wallsTex)
+    gl.uniform1i(gl.getUniformLocation(progField, 'uWalls'), 0)
+    gl.uniform1i(gl.getUniformLocation(progField, 'uWallCount'), scenario.walls.length)
+
+    gl.activeTexture(gl.TEXTURE1)
+    gl.bindTexture(gl.TEXTURE_2D, slabsTex)
+    gl.uniform1i(gl.getUniformLocation(progField, 'uSlabs'), 1)
+    gl.uniform1i(gl.getUniformLocation(progField, 'uSlabCount'), slabMeta.slabCount)
+
+    gl.activeTexture(gl.TEXTURE2)
+    gl.bindTexture(gl.TEXTURE_2D, holePolyTex)
+    gl.uniform1i(gl.getUniformLocation(progField, 'uHolePoly'), 2)
+    gl.uniform1i(gl.getUniformLocation(progField, 'uHolePolyLen'), slabMeta.polyLen)
+
+    gl.activeTexture(gl.TEXTURE3)
+    gl.bindTexture(gl.TEXTURE_2D, gridIdxTex)
+    gl.uniform1i(gl.getUniformLocation(progField, 'uGridIdx'), 3)
+    gl.activeTexture(gl.TEXTURE4)
+    gl.bindTexture(gl.TEXTURE_2D, gridListTex)
+    gl.uniform1i(gl.getUniformLocation(progField, 'uGridList'), 4)
+    gl.uniform2i(gl.getUniformLocation(progField, 'uGridDims'), useGrid ? gridDimsX : 0, useGrid ? gridDimsY : 0)
+    gl.uniform1f(gl.getUniformLocation(progField, 'uGridCellM'), gridCellM)
+    gl.uniform2f(gl.getUniformLocation(progField, 'uGridOriginM'), gridOriginX, gridOriginY)
+    gl.uniform1i(gl.getUniformLocation(progField, 'uGridListWidth'), gridListWidth)
+
+    gl.activeTexture(gl.TEXTURE5)
+    gl.bindTexture(gl.TEXTURE_2D, apsTex)
+    gl.uniform1i(gl.getUniformLocation(progField, 'uAps'), 5)
+    gl.uniform1i(gl.getUniformLocation(progField, 'uApCount'), apCount)
+
+    gl.bindVertexArray(vao)
+    gl.drawArrays(gl.TRIANGLES, 0, 6)
+
+    const packed = new Float32Array(nx * ny * 4)
+    gl.readPixels(0, 0, nx, ny, gl.RGBA, gl.FLOAT, packed)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+
+    // De-interleave into the 4 channel arrays the host already expects.
+    const n = nx * ny
+    const rssi = new Float32Array(n)
+    const sinr = new Float32Array(n)
+    const snr  = new Float32Array(n)
+    const cci  = new Float32Array(n)
+    for (let i = 0; i < n; i++) {
+      const o = i * 4
+      rssi[i] = packed[o]
+      sinr[i] = packed[o + 1]
+      snr[i]  = packed[o + 2]
+      cci[i]  = packed[o + 3]
+    }
+    return { rssi, sinr, snr, cci, nx, ny }
   }
 
-  return { uploadWalls, uploadCorners, uploadSlabs, renderAp, setUseGrid, dispose, gl }
+  function dispose() {
+    gl.deleteProgram(prog)
+    gl.deleteProgram(progField)
+    gl.deleteBuffer(vbo)
+    gl.deleteVertexArray(vao)
+    for (const t of [outTex, outFieldTex, wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex, apsTex]) gl.deleteTexture(t)
+    gl.deleteFramebuffer(outFbo)
+    gl.deleteFramebuffer(outFieldFbo)
+  }
+
+  return { uploadWalls, uploadCorners, uploadSlabs, uploadAps, renderAp, renderField, setUseGrid, dispose, gl }
 }

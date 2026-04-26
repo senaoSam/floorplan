@@ -1,13 +1,25 @@
 // GPU-backed sampler. Mirrors `sampleField.js`'s output shape exactly so the
-// host (HeatmapLayer / diff harness) is unchanged. Each AP gets its own
-// per-cell RSSI grid via a fragment-shader pass; the per-AP grids are folded
-// into rssi/sinr/snr/cci on the CPU using the existing `aggregateApContributions`.
+// host (HeatmapLayer / diff harness) is unchanged.
 //
-// Stage gate: HM-F5a — Friis + walls + slab + openings only. Reflections,
-// diffraction and multi-frequency coherent averaging are out of scope here
-// (lands in F5c/F5d). Custom-pattern APs are rendered as omni in shader and
-// have their per-cell contribution overwritten by a CPU-side rssiFromAp call
-// so the antenna lobe is still respected.
+// Two execution paths:
+//
+//   1. Aggregated (HM-F5g) — single fragment shader pass loops every AP per
+//      fragment, distance-culls APs whose free-space-only RSSI is below the
+//      usable floor, and writes (rssi, sinr, snr, cci) into a single RGBA32F
+//      target. Output is read back once. Eligible iff:
+//        - opts.maxReflOrder is 0 (no image-source reflections)
+//        - opts.enableDiffraction is false (no knife-edge diffraction)
+//        - no AP has antennaMode === 'custom'
+//        - no out-of-scope mask (scopes still applied host-side post-render)
+//      This path solves the N_AP host dispatch overhead that dominated 1000+
+//      AP scenes (per-AP path is O(N_AP) GL submits + N_AP readPixels).
+//
+//   2. Per-AP fallback (HM-F5a..F5d) — original behaviour. Each AP renders
+//      its own R32F grid, then `aggregateApContributions` folds them into the
+//      4 fields on the CPU. Used when refl/diff is on or any custom AP is
+//      present — the per-fragment NMAX coherent-sum + N_AP loop would explode
+//      register pressure on the GPU, and custom-pattern APs need JS-side
+//      lobe sampling that hasn't been ported to GLSL.
 
 import { rssiFromAp, aggregateApContributions } from './propagation'
 import { createPropagationGL } from './propagationGL'
@@ -16,13 +28,26 @@ import {
 } from './rfConstants.js'
 
 const CCI_MIN_DBM = -120
+// Free-space-only RSSI floor used to cull faraway APs in the aggregated path.
+// Matches the JS engine's "no signal" sentinel; an AP whose best possible RSSI
+// at this fragment is below the floor cannot contribute to either signal or
+// CCI, so skipping it is exact.
+const CULL_FLOOR_DBM = -120
 
-// Lazy-init the GL context on first call. Throws if WebGL2 isn't available
-// — caller should fall back to the CPU sampler.
 let glInstance = null
 function getGL() {
   if (!glInstance) glInstance = createPropagationGL()
   return glInstance
+}
+
+// Decide whether the aggregated single-pass path is safe for this scenario.
+function canUseAggregated(scenario, opts) {
+  if (opts?.maxReflOrder && opts.maxReflOrder > 0) return false
+  if (opts?.enableDiffraction) return false
+  for (const ap of scenario.aps) {
+    if (ap.antennaMode === 'custom') return false
+  }
+  return true
 }
 
 export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
@@ -33,17 +58,46 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
   const mask = scenario.scopeMaskFn ?? (() => true)
   const rxZM = scenario.rxElevationM ?? 0
 
-  // Build slab record list expanded across (boundary × bypass-hole) pairs —
-  // see uploadSlabs comment in propagationGL for why the duplication is safe.
   const boundaries = scenario.floorBoundaries ?? []
   gl.uploadWalls(scenario.walls)
   gl.uploadCorners(scenario.corners ?? [])
   const slabMeta = gl.uploadSlabs(boundaries)
 
-  // Render every AP. Custom-pattern APs need full JS for now; we still run
-  // the shader for them (output is "omni-equivalent") but overwrite from JS
-  // afterwards so the lobe is correct. This keeps the codepath uniform until
-  // F5d adds a sampled-pattern texture.
+  if (canUseAggregated(scenario, opts)) {
+    // ---- HM-F5g aggregated path ----
+    // Decorate APs with the constant gains the shader expects, then upload
+    // once for the single dispatch.
+    const apsForGL = scenario.aps.map((ap) => ({
+      ...ap,
+      _antGainDbi: AP_ANT_GAIN_DBI,
+    }))
+    gl.uploadAps(apsForGL)
+    const out = gl.renderField(scenario, gridStepM, { x: 0, y: 0 }, rxZM, slabMeta, {
+      _rxGainDbi: RX_ANT_GAIN_DBI,
+      noiseDbm: NOISE_FLOOR_DBM,
+      cullFloorDbm: CULL_FLOOR_DBM,
+    })
+
+    // Apply scope mask host-side (cheaper than encoding it into the shader,
+    // and the dominant cost is the per-fragment AP loop anyway).
+    const { rssi, sinr, snr, cci } = out
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        const idx = j * nx + i
+        const x = i * gridStepM
+        const y = j * gridStepM
+        if (!mask(x, y)) {
+          rssi[idx] = NaN; sinr[idx] = NaN; snr[idx] = NaN; cci[idx] = NaN
+          continue
+        }
+        // Empty-AP sentinel: shader writes -120/-50/-50/-120; preserve floors.
+        if (cci[idx] < CCI_MIN_DBM) cci[idx] = CCI_MIN_DBM
+      }
+    }
+    return { rssi, sinr, snr, cci, nx, ny, gridStepM }
+  }
+
+  // ---- per-AP fallback (refl on, diff on, or custom AP present) ----
   const perApGrids = []
   for (let k = 0; k < scenario.aps.length; k++) {
     const ap = scenario.aps[k]
@@ -57,9 +111,7 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
     if (ap.antennaMode === 'custom') {
       // Custom-pattern AP fallback to JS for the antenna lobe — opts are
       // forwarded verbatim so refl/diff/freqN stay in sync with the shader's
-      // own gating (HM-F5c step 2 onwards). Earlier this was hard-coded to
-      // refl=0/diff=off for F5a; that would silently desync once reflections
-      // land, so we now mirror whatever the caller asked for.
+      // own gating.
       const corrected = new Float32Array(shaderGrid.length)
       for (let j = 0; j < ny; j++) {
         for (let i = 0; i < nx; i++) {
@@ -80,7 +132,6 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
     }
   }
 
-  // ---- aggregate per-cell ----
   const rssi = new Float32Array(nx * ny)
   const sinr = new Float32Array(nx * ny)
   const snr  = new Float32Array(nx * ny)
@@ -114,8 +165,6 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
   return { rssi, sinr, snr, cci, nx, ny, gridStepM }
 }
 
-// Test/cleanup hook — primarily for the diff harness in headless mode where
-// the GL context shouldn't be cached across server restarts.
 export function disposeGL() {
   if (glInstance) {
     glInstance.dispose()
