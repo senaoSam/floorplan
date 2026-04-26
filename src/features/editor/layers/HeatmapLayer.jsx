@@ -211,6 +211,16 @@ export default function HeatmapLayer({ floorId }) {
     }
   }, [scenario])
 
+  // HM-drag-lod: while any object is being dragged we render a coarser grid
+  // and force a low frequency-sample count so the per-frame cost drops by
+  // roughly an order of magnitude. The position / wall / AP geometry stays
+  // physically correct — only sub-meter detail and reflection-zone numerical
+  // smoothness degrade. On dragend the drag overlays clear and the next
+  // effect run snaps back to full quality (~35 ms typical).
+  const isDragging = !!(dragAP || dragWall || dragScope)
+  const liveGridStepM     = isDragging ? gridStepM * 3 : gridStepM
+  const liveFreqOverrideN = isDragging ? 3 : undefined
+
   useEffect(() => {
     if (!enabled || !scenario || !floor?.scale || !padding) return
     let cancelled = false
@@ -221,24 +231,27 @@ export default function HeatmapLayer({ floorId }) {
       let field
       if (engine === 'shader') {
         try {
-          field = sampleFieldGL(scenario, gridStepM, {
+          field = sampleFieldGL(scenario, liveGridStepM, {
             maxReflOrder: reflections ? 1 : 0,
             enableDiffraction: diffraction,
             padding,
+            freqOverrideN: liveFreqOverrideN,
           })
         } catch (e) {
           console.warn('[Heatmap] shader engine failed, falling back to JS:', e.message)
-          field = sampleField(scenario, gridStepM, {
+          field = sampleField(scenario, liveGridStepM, {
             maxReflOrder: reflections ? 1 : 0,
             enableDiffraction: diffraction,
             padding,
+            freqOverrideN: liveFreqOverrideN,
           })
         }
       } else {
-        field = sampleField(scenario, gridStepM, {
+        field = sampleField(scenario, liveGridStepM, {
           maxReflOrder: reflections ? 1 : 0,
           enableDiffraction: diffraction,
           padding,
+          freqOverrideN: liveFreqOverrideN,
         })
       }
       if (cancelled) return
@@ -263,7 +276,7 @@ export default function HeatmapLayer({ floorId }) {
     }
     const id = setTimeout(run, 0)
     return () => { cancelled = true; clearTimeout(id) }
-  }, [enabled, mode, engine, scenario, reflections, diffraction, gridStepM, blur, showContours, floor?.scale, padding])
+  }, [enabled, mode, engine, scenario, reflections, diffraction, liveGridStepM, liveFreqOverrideN, blur, showContours, floor?.scale, padding])
 
   if (!enabled || !scenario || !floor?.scale || !glRef.current || !padding) return null
 
