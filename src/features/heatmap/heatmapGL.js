@@ -26,41 +26,74 @@ void main() {
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
 
-// Pass 1: sample R32F rssi grid → rssi in dBm into R32F FBO.
-// When OES_texture_float_linear is available we use hardware LINEAR; otherwise
-// we fall back to manual bilinear in the shader (R32F defaults to NEAREST-only).
+// Pass 1: sample R32F rssi grid → rssi in dBm into R32F FBO using Catmull-Rom
+// bicubic. The earlier bilinear path produced visible step-edges along grid
+// cell boundaries — most obvious as zig-zags on iso-contours, since fwidth(d)
+// in the colormap pass amplifies the C^0 slope discontinuity that bilinear
+// leaves at every integer texel boundary. Catmull-Rom is C^1 across cells, so
+// the dBm field reads continuous and contour lines stay smooth even when the
+// underlying physics grid is coarse (e.g. drag-lod's 1.5 m grid step).
+//
+// 16-tap implementation. We could fold 4×4 fetches into 9 via hardware-LINEAR
+// tricks (Sigg-Hadwiger), but R32F isn't filterable on every driver, and 16
+// nearest fetches at output resolution is cheap (sub-millisecond at 1080p on
+// any GPU shipped this decade). NaN propagation is preserved: any NaN in the
+// 4×4 stencil bleeds through, matching bilinear's behaviour for out-of-scope
+// cells. Catmull-Rom can produce small overshoots near sharp anchor crossings;
+// the visual cost is far smaller than bilinear's stair-stepping, and the
+// colormap's per-anchor lookup absorbs most of it.
 const FS_SAMPLE = `#version 300 es
 precision highp float;
 in vec2 vUv;
 uniform sampler2D uField;
 uniform vec2 uFieldSize;      // (nx, ny)
-uniform int uManualBilinear;  // 1 if driver lacks float-linear filtering
 out vec4 outColor;
 
-float sampleBilinear(vec2 uv) {
-  vec2 texel = 1.0 / uFieldSize;
-  vec2 f = uv * uFieldSize - 0.5;
+// Catmull-Rom basis weights for fractional offset t ∈ [0, 1] across the four
+// neighbours (i-1, i, i+1, i+2).
+vec4 cubicWeights(float t) {
+  float t2 = t * t;
+  float t3 = t2 * t;
+  return vec4(
+    -0.5 * t3 +       t2 - 0.5 * t,
+     1.5 * t3 - 2.5 * t2            + 1.0,
+    -1.5 * t3 + 2.0 * t2 + 0.5 * t,
+     0.5 * t3 - 0.5 * t2
+  );
+}
+
+float sampleCatmullRom(vec2 uv) {
+  vec2 sz = uFieldSize;
+  vec2 f = uv * sz - 0.5;
   vec2 i = floor(f);
   vec2 t = f - i;
-  vec2 uv00 = (i + 0.5) * texel;
-  vec2 uv10 = uv00 + vec2(texel.x, 0.0);
-  vec2 uv01 = uv00 + vec2(0.0, texel.y);
-  vec2 uv11 = uv00 + texel;
-  float v00 = texture(uField, uv00).r;
-  float v10 = texture(uField, uv10).r;
-  float v01 = texture(uField, uv01).r;
-  float v11 = texture(uField, uv11).r;
-  float a = mix(v00, v10, t.x);
-  float b = mix(v01, v11, t.x);
-  return mix(a, b, t.y);
+  vec4 wx = cubicWeights(t.x);
+  vec4 wy = cubicWeights(t.y);
+
+  float result = 0.0;
+  for (int oy = -1; oy <= 2; ++oy) {
+    float ry = 0.0;
+    for (int ox = -1; ox <= 2; ++ox) {
+      // CLAMP_TO_EDGE on the texture handles out-of-range fetches; we still
+      // clamp manually so the integer index is always in-bounds for
+      // texelFetch (cheaper + driver-portable than relying on wrap).
+      ivec2 p = ivec2(
+        clamp(int(i.x) + ox, 0, int(sz.x) - 1),
+        clamp(int(i.y) + oy, 0, int(sz.y) - 1)
+      );
+      float v = texelFetch(uField, p, 0).r;
+      ry += v * wx[ox + 1];
+    }
+    result += ry * wy[oy + 1];
+  }
+  return result;
 }
 
 void main() {
   // Flip Y when sampling the coarse field: the CPU lays out rssi[j*nx+i] with
   // j=0 at world y=0 (top), but GL textures treat row 0 as the bottom.
   vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
-  float v = (uManualBilinear == 1) ? sampleBilinear(uv) : texture(uField, uv).r;
-  outColor = vec4(v, 0.0, 0.0, 1.0);
+  outColor = vec4(sampleCatmullRom(uv), 0.0, 0.0, 1.0);
 }`;
 
 // Pass 2/3: separable gaussian blur on R32F. Blur is applied in *output pixel*
@@ -195,9 +228,9 @@ export function createHeatmapGL() {
   if (!gl.getExtension('EXT_color_buffer_float')) {
     throw new Error('EXT_color_buffer_float not supported');
   }
-  // R32F is not texture-filterable by default in WebGL2 — need this for LINEAR.
-  // If missing, shader fall back does bilinear manually.
-  const hasLinearFloat = !!gl.getExtension('OES_texture_float_linear');
+  // R32F filter setup: the bicubic sample pass uses texelFetch, so the field
+  // texture's MIN/MAG filter is functionally irrelevant. NEAREST is the
+  // portable default that doesn't require OES_texture_float_linear.
 
   const progSample   = link(gl, VS, FS_SAMPLE);
   const progBlur     = link(gl, VS, FS_BLUR);
@@ -254,9 +287,8 @@ export function createHeatmapGL() {
     gl.bindTexture(gl.TEXTURE_2D, fieldTex);
     if (nx !== fieldNx || ny !== fieldNy) {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, nx, ny, 0, gl.RED, gl.FLOAT, rssi);
-      const filter = hasLinearFloat ? gl.LINEAR : gl.NEAREST;
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       fieldNx = nx;
@@ -286,7 +318,6 @@ export function createHeatmapGL() {
     gl.bindTexture(gl.TEXTURE_2D, fieldTex);
     gl.uniform1i(gl.getUniformLocation(progSample, 'uField'), 0);
     gl.uniform2f(gl.getUniformLocation(progSample, 'uFieldSize'), field.nx, field.ny);
-    gl.uniform1i(gl.getUniformLocation(progSample, 'uManualBilinear'), hasLinearFloat ? 0 : 1);
     drawQuad();
 
     let src = 0; // index into targets[] holding the latest result
