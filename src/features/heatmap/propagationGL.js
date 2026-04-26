@@ -250,22 +250,36 @@ float accumulateWallLossGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
   for (int j = 0; j < SEEN_BUF; j++) seenBuf[j] = -1;
   int seenWritePos = 0;
 
-  // Hard cap iterations to avoid runaway loops on degenerate rays.
-  // Worst-case: a ray traverses nGx + nGy cells on the diagonal.
+  // Walk the ray in cell-parameter space, processing each cell the segment
+  // [AP, rx] crosses. Termination logic:
+  //   - destination cell (cxEnd, cyEnd) reached: process it, then stop.
+  //   - parametric t at which we ENTER the next cell exceeds 1.0: the new
+  //     cell lies past rx, do not process it.
+  //   - maxSteps (nGx + nGy + 4) is a hard safety cap.
+  // We do NOT bail when (cx, cy) sits outside the grid: when AP/rx are
+  // outside the wall AABB the ray legitimately enters the grid mid-walk,
+  // and an early bounds check would skip the wall-bearing cells in between.
+  // readGridCell returns an empty slice for out-of-range cells anyway.
+  float tCur = 0.0;
   int maxSteps = uGridDims.x + uGridDims.y + 4;
   for (int i = 0; i < 4096; i++) {
     if (i >= maxSteps) break;
     processCell(cx, cy, ap, apZ, rx, rxZ, rayDir, total, seenBuf, seenWritePos);
     if (cx == cxEnd && cy == cyEnd) break;
+    // Step into the next cell along whichever boundary we hit first.
     if (tMaxX < tMaxY) {
+      tCur = tMaxX;
       tMaxX += tDeltaX;
       cx += stepX;
     } else {
+      tCur = tMaxY;
       tMaxY += tDeltaY;
       cy += stepY;
     }
-    // Safety: ray exited the grid bounds, no more cells.
-    if (cx < -1 || cy < -1 || cx > uGridDims.x || cy > uGridDims.y) break;
+    // tCur is the parametric t at which the ray entered the new (cx, cy).
+    // If that is already past rx (t > 1) the new cell sits beyond the
+    // segment, do not process it.
+    if (tCur > 1.0) break;
   }
   return total;
 }
