@@ -30,9 +30,11 @@ void main() {
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`
 
-// Wall record layout in `uWalls` (RGBA32F texture, 2 texels per wall):
+// Wall record layout in `uWalls` (RGBA32F texture, 3 texels per wall):
 //   texel 0 .rgba = (ax, ay, bx, by)            — endpoints in metres
-//   texel 1 .rgba = (lossDb, zLo, zHi, _padding)
+//   texel 1 .rgba = (lossDb, zLo, zHi, roughnessM)
+//   texel 2 .rgba = (ituA, ituB, ituC, ituD) — ITU-R P.2040-3 coefficients;
+//                   ituA < 0 sentinel = metal (Gamma → -1).
 //
 // Slab boundary layout in `uSlabs` (RGBA32F, 1 texel per boundary):
 //   .rgba = (yM, slabDb, holeStart, holeCount)
@@ -58,6 +60,7 @@ uniform float uGridStepM;      // metres per grid cell
 uniform vec3  uApPos;          // (x, y, zM) in metres
 uniform float uTxDbm;
 uniform float uCenterMHz;
+uniform float uChannelWidthMHz;
 uniform float uAntGainDbi;     // base AP antenna gain (constant per AP)
 uniform int   uAntMode;        // 0 = omni, 1 = directional, 2 = treat as omni (custom — host fallback handles real pattern)
 uniform float uAntAzimuthDeg;
@@ -87,10 +90,75 @@ uniform float uGridCellM;
 uniform vec2  uGridOriginM;
 uniform int   uGridListWidth;
 
+// HM-F5c step 2: image-source reflection on/off. When 0 the shader stays on
+// the F5a scalar-dB path (RSSI = txDbm + gain - pathLoss). When 1 we switch
+// to a coherent-sum path: direct + reflected complex amplitudes accumulated
+// in (Hperp, Hpara), final power = |Hperp|^2 + |Hpara|^2.
+// freqOverrideN matches the JS opts.freqOverrideN; step 2 always uses N=1.
+uniform int uReflEnabled;
+uniform int uFreqOverrideN;
+
+// HM-F5c step 3: knife-edge diffraction around corners.
+// uCorners packs one (x, y, 0, 0) texel per corner, similar to walls.
+// uDiffEnabled gates the diffraction loop; runs only when refl path is active
+// (the scalar-dB fast path keeps F5a/b semantics intact).
+uniform int uDiffEnabled;
+uniform sampler2D uCorners;
+uniform int uCornerCount;
+
 const float PI = 3.14159265358979;
 const float SLAB_SEC_CAP = 3.5;
 const float DIRECTIONAL_BACK_DB = 20.0;
 const float DIRECTIONAL_EDGE_DEG = 15.0;
+const float EPS0 = 8.854187817e-12;
+
+// Complex arithmetic (vec2 = (re, im)). Mirror src/features/heatmap/propagation.js.
+vec2 cmul(vec2 a, vec2 b) {
+  return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+vec2 cdiv(vec2 a, vec2 b) {
+  float den = b.x * b.x + b.y * b.y;
+  return vec2((a.x * b.x + a.y * b.y) / den,
+              (a.y * b.x - a.x * b.y) / den);
+}
+// Principal sqrt — same branch (non-negative re) as JS csqrt.
+vec2 csqrt(vec2 z) {
+  float r = sqrt(z.x * z.x + z.y * z.y);
+  float re = sqrt(max((r + z.x) * 0.5, 0.0));
+  float imMag = sqrt(max((r - z.x) * 0.5, 0.0));
+  return vec2(re, z.y >= 0.0 ? imMag : -imMag);
+}
+
+// ITU-R P.2040-3 complex relative permittivity for a material.
+//   itu = (a, b, c, d): eta' = a*f_GHz^b, sigma = c*f_GHz^d
+//   eps_c = eta' - j * sigma / (2*pi*f*eps_0)
+// Metal is encoded as ituA < 0 sentinel — caller treats that as Gamma = -1
+// without invoking this function.
+vec2 materialEpsC(vec4 itu, float freqMhz) {
+  float fGhz = freqMhz * 0.001;
+  float etaPrime = itu.x * pow(fGhz, itu.y);
+  float sigma    = itu.z * pow(fGhz, itu.w);
+  return vec2(etaPrime, -sigma / (2.0 * PI * freqMhz * 1e6 * EPS0));
+}
+
+// Fresnel reflection coefficients for TE / TM (perpendicular / parallel).
+// Mirrors fresnelGamma in propagation.js. Returns perp in xy, para in zw.
+//   isMetal: caller decides via itu sentinel — both pols collapse to (-1, 0).
+//   root      = sqrt(eps_c - sin^2 theta)
+//   Gamma_perp = (cosI - root) / (cosI + root)
+//   Gamma_para = (eps_c*cosI - root) / (eps_c*cosI + root)
+vec4 fresnelGamma(float cosI, vec2 epsC, bool isMetal) {
+  if (isMetal) return vec4(-1.0, 0.0, -1.0, 0.0);
+  float sinI2 = 1.0 - cosI * cosI;
+  vec2 root = csqrt(vec2(epsC.x - sinI2, epsC.y));
+  vec2 cI   = vec2(cosI, 0.0);
+  vec2 perp = cdiv(vec2(cI.x - root.x, -root.y),
+                   vec2(cI.x + root.x,  root.y));
+  vec2 ecCos = cmul(epsC, cI);
+  vec2 para = cdiv(vec2(ecCos.x - root.x, ecCos.y - root.y),
+                   vec2(ecCos.x + root.x, ecCos.y + root.y));
+  return vec4(perp, para);
+}
 
 // Free-space (Friis) path loss in dB.
 float pathLossDb(float d, float freqMhz) {
@@ -98,9 +166,9 @@ float pathLossDb(float d, float freqMhz) {
   return 20.0 * log(dEff)/log(10.0) + 20.0 * log(freqMhz)/log(10.0) - 27.55;
 }
 
-// Read a wall record (2 texels at base index w*2).
+// Read a wall record (3 texels at base index w*3).
 void readWall(int w, out vec2 a, out vec2 b, out float lossDb, out float zLo, out float zHi) {
-  int t0 = w * 2;
+  int t0 = w * 3;
   int t1 = t0 + 1;
   ivec2 p0 = ivec2(t0 % 4096, t0 / 4096);
   ivec2 p1 = ivec2(t1 % 4096, t1 / 4096);
@@ -110,13 +178,27 @@ void readWall(int w, out vec2 a, out vec2 b, out float lossDb, out float zLo, ou
   lossDb = e1.x;  zLo = e1.y;  zHi = e1.z;
 }
 
+// Read material (texel 2): ituA<0 sentinel = metal.
+void readWallMaterial(int w, out vec4 itu, out float roughnessM, out bool isMetal) {
+  int t1 = w * 3 + 1;
+  int t2 = w * 3 + 2;
+  ivec2 p1 = ivec2(t1 % 4096, t1 / 4096);
+  ivec2 p2 = ivec2(t2 % 4096, t2 / 4096);
+  roughnessM = texelFetch(uWalls, p1, 0).w;
+  itu        = texelFetch(uWalls, p2, 0);
+  isMetal    = itu.x < 0.0;
+}
+
 // 2D segment-segment intersection. Returns 1 in .x if hit, the parametric t
-// (0..1 along ap→rx) in .y. Mirrors features/heatmap/geometry.js (segSegIntersect).
+// (0..1 along ap→rx) in .y. Mirrors features/heatmap/geometry.js
+// (segSegIntersect). Epsilon tightened to 1e-12 to match JS — looser values
+// admit colinear ap→wall configurations as "hits", which then poisons the
+// diffraction gate (dirHits > 0 launches the corner loop and inflates RSSI).
 vec2 segSegIntersect(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
   vec2 d1 = p2 - p1;
   vec2 d2 = p4 - p3;
   float denom = d1.x * d2.y - d1.y * d2.x;
-  if (abs(denom) < 1e-9) return vec2(0.0, 0.0);
+  if (abs(denom) < 1e-12) return vec2(0.0, 0.0);
   vec2 r = p1 - p3;
   float t = (d2.x * r.y - d2.y * r.x) / denom;
   float u = (d1.x * r.y - d1.y * r.x) / denom;
@@ -125,10 +207,20 @@ vec2 segSegIntersect(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
 }
 
 // Wall normal (unit) and oblique-incidence loss (cap 3.5).
+// rayDir-zero guard: when caller's two endpoints coincide (e.g. reflPt==rx
+// in image-source reflection's degenerate cases) GLSL normalize((0,0)) is
+// NaN and pollutes the coherent sum. JS's len(a) || 1 trick treats it as
+// zero; we mirror that — a degenerate ray contributes no oblique magnification
+// (cosI=0 → sec capped to 5.0 → lossDb * min(5.0, 3.5) = lossDb * 3.5),
+// but the hit count at the call site is what really gates the path. The
+// segSegIntersect 1e-12 epsilon already rejects most degenerate hits before
+// we reach this function, so this guard is defence-in-depth.
 float wallLossOblique(vec2 a, vec2 b, vec2 rayDir, float lossDb) {
   vec2 t = b - a;
   vec2 n = normalize(vec2(-t.y, t.x));
-  float cosI = abs(dot(normalize(rayDir), n));
+  float rL = length(rayDir);
+  vec2 rDir = rL > 1e-12 ? rayDir / rL : vec2(0.0);
+  float cosI = abs(dot(rDir, n));
   float sec = 1.0 / max(cosI, 0.2);
   return lossDb * min(sec, 3.5);
 }
@@ -346,6 +438,107 @@ float accumulateSlabLoss(vec2 ap, float apZ, vec2 rx, float rxZ) {
   return loss;
 }
 
+// 2D wall-loss accumulation that excludes one wall index (used for the two
+// legs of an image-source reflection — the reflecting wall itself must not
+// contribute its own dB to either leg). Otherwise mirrors accumulateWallLoss.
+// We always go through the brute-force path here because:
+//   (a) reflection legs are short (typically a few cells) so grid traversal
+//       overhead dominates,
+//   (b) the grid duplicates wall references across cells, which complicates
+//       "skip exactly this wall" semantics.
+// JS engine does the same (walls.filter(x => x !== w)).
+float accumulateWallLossExcept(vec2 ap, float apZ, vec2 rx, float rxZ, int excludeW) {
+  float total = 0.0;
+  vec2 rayDir = rx - ap;
+  for (int w = 0; w < uWallCount; w++) {
+    if (w == excludeW) continue;
+    applyWallContribution(w, ap, apZ, rx, rxZ, rayDir, total);
+  }
+  return total;
+}
+
+// Mirror point p across the infinite line through (a, b). Mirrors JS
+// mirrorPoint exactly: n = unit segment normal, then p - 2*(p-a)·n * n.
+vec2 mirrorPoint(vec2 p, vec2 a, vec2 b) {
+  vec2 d = b - a;
+  vec2 n = normalize(vec2(-d.y, d.x));
+  float k = dot(p - a, n);
+  return p - 2.0 * k * n;
+}
+
+// segSegIntersect tuned to JS's epsilon (1e-12). The version above
+// (segSegIntersect with 1e-9) is for wall-loss tests where coarser tolerance
+// is fine. Image-source reflection uses this stricter one to match the JS
+// reference's rejection of near-parallel walls.
+// Returns hit point in xy, valid flag in z (>0 = hit).
+vec3 segSegHit(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
+  vec2 d1 = p2 - p1;
+  vec2 d2 = p4 - p3;
+  float denom = d1.x * d2.y - d1.y * d2.x;
+  if (abs(denom) < 1e-12) return vec3(0.0, 0.0, 0.0);
+  vec2 r = p1 - p3;
+  float t = (d2.x * r.y - d2.y * r.x) / denom;
+  float u = (d1.x * r.y - d1.y * r.x) / denom;
+  if (t < 0.0 || t > 1.0 || u < 0.0 || u > 1.0) return vec3(0.0, 0.0, 0.0);
+  vec2 hit = p1 + d1 * t;
+  return vec3(hit, 1.0);
+}
+
+// Knife-edge diffraction loss curve. Exact piecewise mirror of the JS
+// reference (knifeEdgeLossDb in propagation.js). v is the Fresnel-Kirchhoff
+// parameter (positive = corner blocks the ray, negative = clear).
+float knifeEdgeLossDb(float v) {
+  if (v <= -1.0) return 0.0;
+  if (v <= 0.0)  return 20.0 * log(0.5 - 0.62 * v) / log(10.0);
+  if (v <= 1.0)  return 20.0 * log(0.5 * exp(-0.95 * v)) / log(10.0);
+  if (v <= 2.4) {
+    float t = 0.38 - 0.1 * v;
+    return 20.0 * log(0.4 - sqrt(0.1184 - t * t)) / log(10.0);
+  }
+  return 20.0 * log(0.225 / v) / log(10.0);
+}
+
+// Corner-diffraction Fresnel-Kirchhoff parameter v then dB loss.
+// Mirrors cornerDiffractionDb. Returns +Infinity when the corner sits past
+// the AP↔rx segment endpoints (seg.t outside (0, 1)).
+// Returns 1e30 sentinel for "infeasible — skip" so caller can cull cleanly
+// without a separate flag.
+float cornerDiffractionDb(vec2 tx, vec2 rx, vec2 corner, float wavelengthM) {
+  float d1 = length(corner - tx);
+  float d2 = length(rx - corner);
+  // Project corner onto AP→rx; t in [0,1] means corner sits between them.
+  vec2 ab = rx - tx;
+  float l2 = dot(ab, ab);
+  if (l2 == 0.0) return 1e30;
+  float t = dot(corner - tx, ab) / l2;
+  if (t <= 0.0 || t >= 1.0) return 1e30;
+  // Perpendicular distance corner ↔ AP→rx line.
+  vec2 closest = tx + ab * t;
+  float h = length(corner - closest);
+  float v = h * sqrt((2.0 / wavelengthM) * ((d1 + d2) / (d1 * d2)));
+  return knifeEdgeLossDb(v);
+}
+
+// Brute-force wall-loss accumulation but also returns hit count, so the
+// diffraction code can apply JS's "s1.hits > 1 || s2.hits > 1 → cull" rule.
+// Out: x = total dB, y = hits as float (caller compares > 1.0).
+vec2 accumulateWallLossWithHits(vec2 ap, float apZ, vec2 rx, float rxZ) {
+  vec2 acc = vec2(0.0);
+  vec2 rayDir = rx - ap;
+  for (int w = 0; w < uWallCount; w++) {
+    vec2 a, b;
+    float lossDb, zLo, zHi;
+    readWall(w, a, b, lossDb, zLo, zHi);
+    vec2 hit = segSegIntersect(ap, rx, a, b);
+    if (hit.x < 0.5) continue;
+    float zAt = apZ + (rxZ - apZ) * hit.y;
+    if (zAt < zLo || zAt > zHi) continue;
+    acc.x += wallLossOblique(a, b, rayDir, lossDb);
+    acc.y += 1.0;
+  }
+  return acc;
+}
+
 // AP antenna gain in dBi for a ray heading from AP to target. Mirrors
 // apGainDbi in propagation.js modulo custom-pattern (host falls back).
 float apGainDbi(vec2 target) {
@@ -364,6 +557,226 @@ float apGainDbi(vec2 target) {
   return uAntGainDbi - DIRECTIONAL_BACK_DB * t;
 }
 
+// Cap on the number of frequency samples in the band-sweep coherent sum.
+// JS chooseFreqSamples is max(5, ceil(bwMhz/4)); 160 MHz → 40 samples is the
+// realistic ceiling. NMAX=40 gives shader its array size; runtime N is the
+// uniform uFreqN (always ≤ NMAX or the host clamps it).
+const int NMAX = 40;
+
+// Add one path's contribution to all N coherent-sum H accumulators. Mirrors
+// the inner-loop body of propagation.js's H(f_i) sweep: each f_i sees the
+// same path complex amplitude (Fresnel/material/roughness all use the
+// channel's centre frequency, JS-style), only the phase ph_i = -2π·f_i·tau
+// differs per sample.
+//
+// CRITICAL: f·tau spans 1000+ cycles for typical Friis distances. fp32 wrap-
+// to-(-π, π] alone is not enough — when paths interfere in narrow
+// destructive bands, the residual phase noise (~ULP·1300 = 0.001 rad) lets
+// some grid cells diverge ~30 dB from the JS reference. We instead phase-
+// reference every path against a shared tauRef (chosen as the direct
+// path's tau), so cycles = f·(tau-tauRef) stays small (typically < 50)
+// for all reasonable scenes. Multiplying every H by a global phase doesn't
+// change |H|², so power is invariant.
+void addPathHN(int N, float startHz, float stepHz, float tau, float tauRef,
+               vec2 perpC, vec2 paraC,
+               inout vec2 Hperp[NMAX], inout vec2 Hpara[NMAX]) {
+  float dtau = tau - tauRef;
+  for (int i = 0; i < NMAX; i++) {
+    if (i >= N) break;
+    float f = startHz + float(i) * stepHz;
+    float cycles = f * dtau;
+    float frac = cycles - floor(cycles);
+    if (frac > 0.5) frac -= 1.0;
+    float ph = -2.0 * PI * frac;
+    float cs = cos(ph), sn = sin(ph);
+    Hperp[i] += vec2(perpC.x * cs - perpC.y * sn, perpC.x * sn + perpC.y * cs);
+    Hpara[i] += vec2(paraC.x * cs - paraC.y * sn, paraC.x * sn + paraC.y * cs);
+  }
+}
+
+float dbToLin(float db) { return pow(10.0, db * 0.1); }
+float linToDb(float lin) { return 10.0 * log(max(lin, 1e-30)) / log(10.0); }
+const float SQRT2 = 1.4142135623730951;
+const float C_LIGHT = 299792458.0;
+
+// Reflection-aware RSSI in dBm. uReflEnabled gates the entire complex path;
+// when 0 the caller takes the F5a scalar fast path. Step 2 hard-codes N=1
+// (single tone at centre frequency); multi-frequency averaging lands in step 4.
+float rssiWithReflections(vec2 rx, float rxZ) {
+  // ---- direct path ----
+  vec2 dxy = rx - uApPos.xy;
+  float dxyLen = max(length(dxy), 0.25);
+  float dz = uApPos.z - rxZ;
+  float dDir = sqrt(dxyLen * dxyLen + dz * dz);
+
+  // Need both wall-loss dB and the hit count so the diffraction loop can
+  // gate "direct path is blocked" the same way JS does (wallScan.hits > 0).
+  // Brute-force is mandatory here — the grid path doesn't surface hit counts
+  // and would also double-count walls that span multiple cells.
+  vec2 dirScan = accumulateWallLossWithHits(uApPos.xy, uApPos.z, rx, rxZ);
+  float wallLossDir = dirScan.x;
+  float dirHits     = dirScan.y;
+  float slabLossDir = accumulateSlabLoss(uApPos.xy, uApPos.z, rx, rxZ);
+  float plDir = pathLossDb(dDir, uCenterMHz) + wallLossDir + slabLossDir;
+
+  // Geometry-only same-floor test for reflection eligibility — reflections
+  // are 2D and only valid when AP↔rx ray crosses zero slab boundaries (same
+  // logic as JS engine's sameFloorRay = slabCount === 0).
+  // We approximate by sweeping slabs again with a "count crossings" pass; for
+  // the typical scenario that's already done implicitly when slabLossDir was
+  // computed but we don't expose the count. Simpler: just rerun the loop here.
+  bool sameFloor = true;
+  if (uSlabCount > 0) {
+    float zLo = min(uApPos.z, rxZ);
+    float zHi = max(uApPos.z, rxZ);
+    for (int s = 0; s < uSlabCount; s++) {
+      float yM = texelFetch(uSlabs, ivec2(s, 0), 0).x;
+      if (yM > zLo && yM < zHi) { sameFloor = false; break; }
+    }
+  }
+
+  // Direct path → complex H. amp = sqrt(rxLin) / sqrt(2); perp = para = (amp, 0).
+  float rxDbDir = uTxDbm + apGainDbi(rx) + uRxGainDbi - plDir;
+  float ampDir = sqrt(dbToLin(rxDbDir)) / SQRT2;
+  float tauDir = dDir / C_LIGHT;
+  vec2  perpDir = vec2(ampDir, 0.0);
+  vec2  paraDir = vec2(ampDir, 0.0);
+
+  // Frequency-sweep parameters. JS chooseFreqSamples = max(5, ceil(bwMhz/4));
+  // when uFreqOverrideN > 0 the caller pins it (debug N=1 path). N=1 collapses
+  // to centre frequency only (matches propagation.js's startHz = centerHz
+  // branch). N≥2 sweeps the band edge-to-edge with uniform spacing.
+  float bwMhz   = uChannelWidthMHz > 0.0 ? uChannelWidthMHz : 20.0;
+  float bwHz    = bwMhz * 1e6 * 0.9;        // 5% guard each edge
+  float centerHz = uCenterMHz * 1e6;
+  int N = uFreqOverrideN > 0
+            ? max(1, uFreqOverrideN)
+            : max(5, int(ceil(bwMhz / 4.0)));
+  if (N > NMAX) N = NMAX;
+  float startHz = N > 1 ? centerHz - bwHz * 0.5 : centerHz;
+  float stepHz  = N > 1 ? bwHz / float(N - 1)   : 0.0;
+
+  vec2 Hperp[NMAX];
+  vec2 Hpara[NMAX];
+  for (int i = 0; i < NMAX; i++) { Hperp[i] = vec2(0.0); Hpara[i] = vec2(0.0); }
+
+  // Material/Fresnel etc. still use centre frequency (JS does the same:
+  // wavelength = C / (freqMhz * 1e6) is computed once before the band
+  // sweep). Only phase varies across samples.
+  float f = centerHz;
+  // Direct-path tau is the shared phase reference for all paths in this
+  // fragment, so cycles=f·(tau-tauRef) stays small and fp32 round-off
+  // doesn't poison destructive interference points (~30 dB outliers).
+  float tauRef = tauDir;
+
+  addPathHN(N, startHz, stepHz, tauDir, tauRef, perpDir, paraDir, Hperp, Hpara);
+
+  // ---- 1st-order image-source reflections ----
+  if (sameFloor) {
+    for (int w = 0; w < uWallCount; w++) {
+      vec2 wa, wb;
+      float wLossDb, wZLo, wZHi;
+      readWall(w, wa, wb, wLossDb, wZLo, wZHi);
+      vec4 itu;
+      float roughM;
+      bool isMetal;
+      readWallMaterial(w, itu, roughM, isMetal);
+
+      vec2 apImg = mirrorPoint(uApPos.xy, wa, wb);
+      vec3 hit = segSegHit(apImg, rx, wa, wb);
+      if (hit.z < 0.5) continue;
+      vec2 reflPt = hit.xy;
+
+      // Degenerate "AP sits on the wall's infinite line" makes mirror = AP
+      // and reflPt = AP, so inDir = (0, 0). JS's norm() handles that as zero
+      // (l ||= 1 guard); GLSL normalize() returns NaN, which would silently
+      // poison the coherent sum (NaN amp → NaN H → power → -300 dBm sentinel).
+      // Match JS behaviour: zero-length inDir → cosI = 0 → cull by threshold.
+      vec2 inVec = reflPt - uApPos.xy;
+      float inLen = length(inVec);
+      vec2 inDir = inLen > 1e-12 ? inVec / inLen : vec2(0.0);
+      vec2 nrm   = normalize(vec2(-(wb.y - wa.y), wb.x - wa.x));
+      float cosI = abs(dot(inDir, nrm));
+      if (cosI < 0.05) continue;
+
+      vec2 epsC = isMetal ? vec2(0.0) : materialEpsC(itu, uCenterMHz);
+      vec4 g = fresnelGamma(cosI, epsC, isMetal);
+      vec2 gPerp = g.xy;
+      vec2 gPara = g.zw;
+
+      float kWave = 2.0 * PI / (C_LIGHT / f);
+      float arg = kWave * roughM * cosI;
+      float rough = exp(-2.0 * arg * arg);
+
+      float magPerp = length(gPerp);
+      float magPara = length(gPara);
+      if (max(magPerp, magPara) * rough < 0.02) continue;
+
+      float d1 = length(reflPt - uApPos.xy);
+      float d2 = length(rx - reflPt);
+      float dTot = d1 + d2;
+      float reflZ = uApPos.z + (rxZ - uApPos.z) * (d1 / max(dTot, 1e-9));
+
+      float leg1 = accumulateWallLossExcept(uApPos.xy, uApPos.z, reflPt, reflZ, w);
+      float leg2 = accumulateWallLossExcept(reflPt, reflZ, rx, rxZ, w);
+      float plRef = pathLossDb(dTot, uCenterMHz) + leg1 + leg2;
+
+      float rxDbRef = uTxDbm + apGainDbi(reflPt) + uRxGainDbi - plRef;
+      float ampRef = sqrt(dbToLin(rxDbRef)) / SQRT2;
+      vec2  baseR = vec2(ampRef * rough, 0.0);
+      vec2  perpR = cmul(baseR, gPerp);
+      vec2  paraR = cmul(baseR, gPara);
+      float tauR  = dTot / C_LIGHT;
+      addPathHN(N, startHz, stepHz, tauR, tauRef, perpR, paraR, Hperp, Hpara);
+    }
+  }
+
+  // ---- knife-edge corner diffraction ----
+  // Only worth considering when:
+  //   - direct ray is blocked by ≥1 wall (otherwise direct dominates)
+  //   - same-floor (cross-floor diffraction is 3D; out of scope)
+  //   - diffraction toggle on
+  // Mirrors JS: enableDiffraction && wallScan.hits > 0 && sameFloorRay.
+  // Each path is polarization-neutral (scalar amp into both H channels),
+  // matching makeScalarPath in propagation.js.
+  if (uDiffEnabled == 1 && dirHits > 0.0 && sameFloor) {
+    float wavelengthM = C_LIGHT / f;
+    for (int ci = 0; ci < uCornerCount; ci++) {
+      vec2 corner = texelFetch(uCorners, ivec2(ci % 4096, ci / 4096), 0).xy;
+      float d1 = length(corner - uApPos.xy);
+      float d2 = length(rx - corner);
+      float dTotC = d1 + d2;
+      float cZM = uApPos.z + (rxZ - uApPos.z) * (d1 / max(dTotC, 1e-9));
+      // Per-leg wall accumulation with hit count — JS culls if either leg
+      // crosses more than one wall, since the corner is supposed to be the
+      // single obstruction. >1 means the diffracted path is blocked too.
+      vec2 s1 = accumulateWallLossWithHits(uApPos.xy, uApPos.z, corner, cZM);
+      vec2 s2 = accumulateWallLossWithHits(corner, cZM, rx, rxZ);
+      if (s1.y > 1.0 || s2.y > 1.0) continue;
+
+      float diff = cornerDiffractionDb(uApPos.xy, rx, corner, wavelengthM);
+      if (diff >= 1e29 || diff > 40.0) continue;
+
+      float plDiff = pathLossDb(dTotC, uCenterMHz) + s1.x + s2.x + diff;
+      float rxDbD  = uTxDbm + apGainDbi(corner) + uRxGainDbi - plDiff;
+      float ampD   = sqrt(dbToLin(rxDbD)) / SQRT2;
+      vec2  perpD  = vec2(ampD, 0.0);
+      vec2  paraD  = vec2(ampD, 0.0);
+      float tauD   = dTotC / C_LIGHT;
+      addPathHN(N, startHz, stepHz, tauD, tauRef, perpD, paraD, Hperp, Hpara);
+    }
+  }
+
+  // Power = (1/N) Σ (|H_perp(f_i)|² + |H_para(f_i)|²). The factor 1/N matches
+  // propagation.js's powerSum / N for an unbiased band-average.
+  float powerSum = 0.0;
+  for (int i = 0; i < NMAX; i++) {
+    if (i >= N) break;
+    powerSum += dot(Hperp[i], Hperp[i]) + dot(Hpara[i], Hpara[i]);
+  }
+  return linToDb(powerSum / float(N));
+}
+
 void main() {
   // Fragment → grid index (i, j); world coord at cell centre matches CPU.
   // CPU writes rssi[j*nx + i] with x = i*step, y = j*step. We treat row 0 as
@@ -376,6 +789,13 @@ void main() {
   vec2 rx = uOriginM + vec2(float(gpx.x), float(gpx.y)) * uGridStepM;
   float rxZ = uRxZM;
 
+  if (uReflEnabled == 1) {
+    outColor = vec4(rssiWithReflections(rx, rxZ), 0.0, 0.0, 1.0);
+    return;
+  }
+
+  // F5a fast path — scalar dB only, no complex coherent sum. Bit-for-bit
+  // identical to pre-step-2 behaviour.
   vec2 dxy = rx - uApPos.xy;
   float dxyLen = max(length(dxy), 0.25);
   float dz = uApPos.z - rxZ;
@@ -485,7 +905,11 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // F5b acceleration grid textures.
   const gridIdxTex  = gl.createTexture()
   const gridListTex = gl.createTexture()
-  for (const t of [wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex]) {
+  // HM-F5c step 3: corner texture for knife-edge diffraction. One (x, y, 0, 0)
+  // texel per corner; reuploaded alongside walls.
+  const cornersTex  = gl.createTexture()
+  let cornerCount = 0
+  for (const t of [wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex]) {
     gl.bindTexture(gl.TEXTURE_2D, t)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
@@ -504,28 +928,61 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     return { data, w, h }
   }
 
-  // walls: array of { a:{x,y}, b:{x,y}, lossDb, zLoM, zHiM }
+  // walls: array of { a:{x,y}, b:{x,y}, lossDb, zLoM, zHiM, itu, roughnessM }
+  // Now packs 3 texels per wall (12 floats) so reflection (HM-F5c step 2) has
+  // ITU-R P.2040-3 coefficients + roughness on hand without a second texture.
+  // Metal is encoded as itu.a = -1 sentinel (real materials have a > 0).
   // Also (re)builds the uniform-grid acceleration structure scoped to the
   // walls' AABB so the shader can DDA-walk it. opts.bbox lets the caller
   // override the grid extent when the scenario size doesn't match the wall
   // bounds (e.g. cross-floor walls extending beyond active floor).
   function uploadWalls(walls, opts = {}) {
-    const flat = new Float32Array(walls.length * 8)
+    const flat = new Float32Array(walls.length * 12)
     for (let i = 0; i < walls.length; i++) {
       const w = walls[i]
-      const o = i * 8
-      flat[o    ] = w.a.x;  flat[o + 1] = w.a.y
-      flat[o + 2] = w.b.x;  flat[o + 3] = w.b.y
-      flat[o + 4] = w.lossDb
-      flat[o + 5] = w.zLoM ?? -1e6
-      flat[o + 6] = w.zHiM ??  1e6
-      flat[o + 7] = 0
+      const o = i * 12
+      flat[o     ] = w.a.x;  flat[o + 1] = w.a.y
+      flat[o + 2 ] = w.b.x;  flat[o + 3] = w.b.y
+      flat[o + 4 ] = w.lossDb
+      flat[o + 5 ] = w.zLoM ?? -1e6
+      flat[o + 6 ] = w.zHiM ??  1e6
+      flat[o + 7 ] = w.roughnessM ?? 0.01
+      const itu = w.itu
+      if (itu && itu.metal) {
+        flat[o + 8] = -1; flat[o + 9] = 0; flat[o + 10] = 0; flat[o + 11] = 0
+      } else if (itu) {
+        flat[o + 8] = itu.a ?? 0
+        flat[o + 9] = itu.b ?? 0
+        flat[o + 10] = itu.c ?? 0
+        flat[o + 11] = itu.d ?? 0
+      } else {
+        flat[o + 8] = 0; flat[o + 9] = 0; flat[o + 10] = 0; flat[o + 11] = 0
+      }
     }
     const { data, w, h } = pack4096(flat)
     gl.bindTexture(gl.TEXTURE_2D, wallsTex)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, data)
 
     buildGrid(walls, opts.bbox)
+  }
+
+  // HM-F5c step 3: pack corner points (wall segment endpoints) into a 4096-
+  // wide RGBA32F texture for the diffraction loop. One (x, y, 0, 0) texel per
+  // corner. Empty list still uploads a 1×1 placeholder so the sampler binding
+  // stays valid; uCornerCount = 0 makes the shader skip the loop entirely.
+  function uploadCorners(corners) {
+    cornerCount = corners?.length ?? 0
+    const totalTexels = Math.max(1, cornerCount)
+    const tw = Math.min(4096, totalTexels)
+    const th = Math.ceil(totalTexels / 4096)
+    const data = new Float32Array(tw * th * 4)
+    for (let i = 0; i < cornerCount; i++) {
+      const c = corners[i]
+      data[i * 4    ] = c.x
+      data[i * 4 + 1] = c.y
+    }
+    gl.bindTexture(gl.TEXTURE_2D, cornersTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, tw, th, 0, gl.RGBA, gl.FLOAT, data)
   }
 
   // Build the uniform acceleration grid:
@@ -707,7 +1164,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   function setUseGrid(v) { useGrid = !!v }
 
   // Render one AP and read back nx*ny floats (dBm).
-  function renderAp(ap, scenario, gridStepM, originM, rxZM, slabMeta) {
+  function renderAp(ap, scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
     const nx = Math.ceil(scenario.size.w / gridStepM) + 1
     const ny = Math.ceil(scenario.size.h / gridStepM) + 1
     ensureOutSize(nx, ny)
@@ -723,6 +1180,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.uniform3f(gl.getUniformLocation(prog, 'uApPos'), ap.pos.x, ap.pos.y, ap.zM ?? 0)
     gl.uniform1f(gl.getUniformLocation(prog, 'uTxDbm'), ap.txDbm)
     gl.uniform1f(gl.getUniformLocation(prog, 'uCenterMHz'), ap.centerMHz || 5190)
+    gl.uniform1f(gl.getUniformLocation(prog, 'uChannelWidthMHz'), ap.channelWidth || 20)
     gl.uniform1f(gl.getUniformLocation(prog, 'uAntGainDbi'), ap._antGainDbi)
     gl.uniform1i(gl.getUniformLocation(prog, 'uAntMode'),
       ap.antennaMode === 'directional' ? 1 : (ap.antennaMode === 'custom' ? 2 : 0))
@@ -760,6 +1218,21 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.uniform2f(gl.getUniformLocation(prog, 'uGridOriginM'), gridOriginX, gridOriginY)
     gl.uniform1i(gl.getUniformLocation(prog, 'uGridListWidth'), gridListWidth)
 
+    // HM-F5c step 2: reflection toggle + frequency-sample override.
+    // refl=on switches the shader to coherent-sum H accumulation. step 2 only
+    // supports N=1; real multi-frequency averaging lands in step 4.
+    gl.uniform1i(gl.getUniformLocation(prog, 'uReflEnabled'),
+      opts.maxReflOrder && opts.maxReflOrder > 0 ? 1 : 0)
+    gl.uniform1i(gl.getUniformLocation(prog, 'uFreqOverrideN'), opts.freqOverrideN ?? 0)
+
+    // HM-F5c step 3: knife-edge diffraction toggle + corners texture.
+    gl.uniform1i(gl.getUniformLocation(prog, 'uDiffEnabled'),
+      opts.enableDiffraction ? 1 : 0)
+    gl.activeTexture(gl.TEXTURE5)
+    gl.bindTexture(gl.TEXTURE_2D, cornersTex)
+    gl.uniform1i(gl.getUniformLocation(prog, 'uCorners'), 5)
+    gl.uniform1i(gl.getUniformLocation(prog, 'uCornerCount'), cornerCount)
+
     gl.bindVertexArray(vao)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
 
@@ -773,9 +1246,9 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.deleteProgram(prog)
     gl.deleteBuffer(vbo)
     gl.deleteVertexArray(vao)
-    for (const t of [outTex, wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex]) gl.deleteTexture(t)
+    for (const t of [outTex, wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex]) gl.deleteTexture(t)
     gl.deleteFramebuffer(outFbo)
   }
 
-  return { uploadWalls, uploadSlabs, renderAp, setUseGrid, dispose, gl }
+  return { uploadWalls, uploadCorners, uploadSlabs, renderAp, setUseGrid, dispose, gl }
 }

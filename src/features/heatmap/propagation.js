@@ -299,6 +299,10 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   const maxReflOrder = opts.maxReflOrder ?? 1
   const enableDiffraction = opts.enableDiffraction ?? true
   const boundaries = opts.floorBoundaries ?? null
+  // Debug-only: pin the frequency-sample count to a fixed N (typically 1) so
+  // JS and shader can be diffed under matched opts during HM-F5c+d porting.
+  // Production code never sets this — chooseFreqSamples picks N adaptively.
+  const freqOverrideN = opts.freqOverrideN ?? null
 
   const freqMhz = ap.centerMHz || 5190
   const wavelength = C / (freqMhz * 1e6)
@@ -394,9 +398,12 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   const bwMhz = ap.channelWidth || 20
   const bwHz = bwMhz * 1e6 * 0.9          // drop 5% guard on each edge
   const centerHz = freqMhz * 1e6
-  const N = chooseFreqSamples(bwMhz)
-  const startHz = centerHz - bwHz / 2
-  const stepHz = N > 1 ? bwHz / (N - 1) : 0
+  const N = freqOverrideN != null ? Math.max(1, freqOverrideN | 0) : chooseFreqSamples(bwMhz)
+  // N=1 collapses to a single tone at centre frequency (matches shader's
+  // single-frequency path during the F5c+d port). N≥2 sweeps the band so the
+  // edges sit at centerHz ± bwHz/2 with uniform stepHz spacing.
+  const startHz = N > 1 ? centerHz - bwHz / 2 : centerHz
+  const stepHz  = N > 1 ? bwHz / (N - 1)      : 0
 
   let powerSum = 0
   for (let i = 0; i < N; i++) {
@@ -416,6 +423,15 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   }
   const rssiDbm = linToDb(powerSum / N)
   return { rssiDbm, pathsUsed: paths.length }
+}
+
+// Debug-only re-export of the complex/Fresnel kernels — used by the diff
+// page's "step 1 fresnel parity" check during HM-F5c+d porting. These match
+// the GLSL versions in fresnelGLDebug.js bit-for-bit (within fp32 limits).
+// Not part of the production API.
+export const __debug = {
+  materialEpsC,
+  fresnelGamma,
 }
 
 // SINR-aware aggregation: strongest AP is the signal; other APs contribute to

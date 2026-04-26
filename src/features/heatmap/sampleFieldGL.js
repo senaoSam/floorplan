@@ -37,6 +37,7 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
   // see uploadSlabs comment in propagationGL for why the duplication is safe.
   const boundaries = scenario.floorBoundaries ?? []
   gl.uploadWalls(scenario.walls)
+  gl.uploadCorners(scenario.corners ?? [])
   const slabMeta = gl.uploadSlabs(boundaries)
 
   // Render every AP. Custom-pattern APs need full JS for now; we still run
@@ -51,9 +52,14 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
       _antGainDbi: AP_ANT_GAIN_DBI,
       _rxGainDbi: RX_ANT_GAIN_DBI,
     }
-    const { rssi: shaderGrid } = gl.renderAp(apForGL, scenario, gridStepM, { x: 0, y: 0 }, rxZM, slabMeta)
+    const { rssi: shaderGrid } = gl.renderAp(apForGL, scenario, gridStepM, { x: 0, y: 0 }, rxZM, slabMeta, opts)
 
     if (ap.antennaMode === 'custom') {
+      // Custom-pattern AP fallback to JS for the antenna lobe — opts are
+      // forwarded verbatim so refl/diff/freqN stay in sync with the shader's
+      // own gating (HM-F5c step 2 onwards). Earlier this was hard-coded to
+      // refl=0/diff=off for F5a; that would silently desync once reflections
+      // land, so we now mirror whatever the caller asked for.
       const corrected = new Float32Array(shaderGrid.length)
       for (let j = 0; j < ny; j++) {
         for (let i = 0; i < nx; i++) {
@@ -64,8 +70,6 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
           const { rssiDbm } = rssiFromAp(ap, rx, scenario.walls, scenario.corners, {
             ...opts,
             floorBoundaries: boundaries,
-            maxReflOrder: 0,        // F5a doesn't do reflections
-            enableDiffraction: false,
           })
           corrected[idx] = rssiDbm
         }

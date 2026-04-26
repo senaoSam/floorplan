@@ -16,6 +16,9 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { buildScenario } from '@/features/heatmap/buildScenario'
 import { sampleField }   from '@/features/heatmap/sampleField'
 import { sampleFieldGL } from '@/features/heatmap/sampleFieldGL'
+import { __debug as propDebug } from '@/features/heatmap/propagation'
+import { evaluateFresnelGL } from '@/features/heatmap/fresnelGLDebug'
+import { MATERIAL_LIST } from '@/constants/materials'
 import { computeFloorElevations } from '@/features/viewer3d/floorStacking'
 import './HeatmapDiffPage.sass'
 
@@ -248,7 +251,7 @@ function valueRangeFor(arrays) {
   return [lo, hi]
 }
 
-function FixturePanel({ name, scenarioMod, fullRaw, friisRaw, metaRaw, threshold, baseline }) {
+function FixturePanel({ name, scenarioMod, fullRaw, friisRaw, metaRaw, threshold, baseline, optsOverride }) {
   const [computed, setComputed] = useState(null)
   const [error, setError] = useState(null)
 
@@ -274,9 +277,20 @@ function FixturePanel({ name, scenarioMod, fullRaw, friisRaw, metaRaw, threshold
         // The shader path runs the same opts; at F5a/b it ignores reflections/
         // diffraction internally regardless, so for friis baselines the result
         // converges with both JS and golden.
-        const opts = baseline === 'friis'
+        // optsOverride (HM-F5c+d porting) lets the user pin refl/diff/freqN
+        // independent of the stage's baseline — matters because intermediate
+        // sub-steps (refl-only, refl+diff single-freq) diff JS-vs-Shader, not
+        // vs golden. Override null → use baseline-derived opts as before.
+        const baseOpts = baseline === 'friis'
           ? { maxReflOrder: 0, enableDiffraction: false }
           : { maxReflOrder: engineOpts.maxReflOrder, enableDiffraction: engineOpts.enableDiffraction }
+        const opts = optsOverride
+          ? {
+              maxReflOrder: optsOverride.refl ? 1 : 0,
+              enableDiffraction: !!optsOverride.diff,
+              freqOverrideN: optsOverride.freqN,
+            }
+          : baseOpts
         const tJs = performance.now()
         const fieldJs = sampleField(scenario, engineOpts.gridStepM, opts)
         const dtJs = performance.now() - tJs
@@ -299,7 +313,7 @@ function FixturePanel({ name, scenarioMod, fullRaw, friisRaw, metaRaw, threshold
     }
     run()
     return () => { cancelled = true }
-  }, [scenarioMod, baseline])
+  }, [scenarioMod, baseline, optsOverride])
 
   if (error) return <section className="panel"><h3>{name}</h3><p className="error">{error}</p></section>
   if (!computed) return <section className="panel"><h3>{name}</h3><p>Computing…</p></section>
@@ -316,12 +330,15 @@ function FixturePanel({ name, scenarioMod, fullRaw, friisRaw, metaRaw, threshold
     cci:  base64ToFloat32(goldenRaw.cci),
   }
 
+  const optsLabel = optsOverride
+    ? `override refl=${optsOverride.refl ? 'on' : 'off'} diff=${optsOverride.diff ? 'on' : 'off'} freqN=${optsOverride.freqN ?? 'auto'}`
+    : 'baseline opts'
   return (
     <section className="panel">
       <header>
         <h3>{name}</h3>
         <p className="meta">
-          grid {nx}×{ny} · gridStep {fieldJs.gridStepM} m · baseline <strong>{baseline}</strong> · golden fingerprint {metaRaw.engineFingerprint} ·
+          grid {nx}×{ny} · gridStep {fieldJs.gridStepM} m · baseline <strong>{baseline}</strong> · {optsLabel} · golden fingerprint {metaRaw.engineFingerprint} ·
           JS {dtJs.toFixed(0)} ms · Shader {fieldShader ? `${dtShader.toFixed(0)} ms` : `failed (${shaderErr})`}
         </p>
       </header>
@@ -420,9 +437,120 @@ const STAGE_GATES = {
   'F5d': { baseline: 'full',  threshold: 1.0 },
 }
 
+// HM-F5c+d porting step 1: pure-function GLSL parity check.
+// Sweeps a small grid of (material × cosI × freqMhz) and diffs JS vs GLSL
+// fresnelGamma / materialEpsC outputs. Threshold 1e-4 — these are pure
+// arithmetic functions, fp32 noise alone shouldn't approach that.
+const FRESNEL_PARITY_THRESHOLD = 1e-4
+const FRESNEL_FREQS_MHZ = [2400, 5500, 6000]
+const FRESNEL_COSI = [0.1, 0.3, 0.6, 0.95]
+
+function runFresnelParity() {
+  const cases = []
+  let worstAbs = 0
+  let worstLabel = ''
+  let pass = 0
+  let fail = 0
+  for (const mat of MATERIAL_LIST) {
+    const isMetal = !!mat.itu?.metal
+    const itu = isMetal ? null : mat.itu
+    for (const freqMhz of FRESNEL_FREQS_MHZ) {
+      for (const cosI of FRESNEL_COSI) {
+        const epsC = propDebug.materialEpsC(mat.itu, freqMhz)
+        const jsG  = propDebug.fresnelGamma(cosI, epsC)
+        const glG  = evaluateFresnelGL({ cosI, freqMhz, itu, isMetal })
+        const dPerpRe = Math.abs(jsG.perp.re - glG.perp.re)
+        const dPerpIm = Math.abs(jsG.perp.im - glG.perp.im)
+        const dParaRe = Math.abs(jsG.para.re - glG.para.re)
+        const dParaIm = Math.abs(jsG.para.im - glG.para.im)
+        const maxAbs = Math.max(dPerpRe, dPerpIm, dParaRe, dParaIm)
+        const ok = maxAbs <= FRESNEL_PARITY_THRESHOLD
+        if (ok) pass++; else fail++
+        if (maxAbs > worstAbs) {
+          worstAbs = maxAbs
+          worstLabel = `${mat.id} f=${freqMhz} cosI=${cosI}`
+        }
+        cases.push({
+          mat: mat.id, freqMhz, cosI,
+          js: jsG, gl: glG, maxAbs, ok,
+        })
+      }
+    }
+  }
+  return { cases, pass, fail, worstAbs, worstLabel }
+}
+
+function FresnelParityPanel() {
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState(null)
+  const run = () => {
+    try { setResult(runFresnelParity()); setError(null) }
+    catch (e) { setError(e.message ?? String(e)); setResult(null) }
+  }
+  return (
+    <section className="panel">
+      <header>
+        <h3>Step 1 — fresnelGamma / materialEpsC GLSL parity</h3>
+        <p className="meta">
+          Threshold {FRESNEL_PARITY_THRESHOLD} (max abs error across perp.re, perp.im, para.re, para.im).
+          Cases: {MATERIAL_LIST.length} mats × {FRESNEL_FREQS_MHZ.length} freqs × {FRESNEL_COSI.length} cosI =&nbsp;
+          {MATERIAL_LIST.length * FRESNEL_FREQS_MHZ.length * FRESNEL_COSI.length}.
+        </p>
+        <button type="button" onClick={run}>Run parity check</button>
+      </header>
+      {error && <p className="error">{error}</p>}
+      {result && (
+        <>
+          <p className="meta">
+            <span className={`verdict ${result.fail === 0 ? 'pass' : 'fail'}`}>
+              {result.fail === 0 ? 'PASS' : 'FAIL'}
+            </span>
+            {' '}pass {result.pass} · fail {result.fail} · worst {result.worstAbs.toExponential(2)} ({result.worstLabel})
+          </p>
+          <table className="stats">
+            <thead>
+              <tr>
+                <th>material</th><th>freq MHz</th><th>cosI</th>
+                <th>JS Γ⊥</th><th>GL Γ⊥</th>
+                <th>JS Γ∥</th><th>GL Γ∥</th>
+                <th>maxAbs</th><th>ok</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.cases.map((c, i) => (
+                <tr key={i}>
+                  <td>{c.mat}</td>
+                  <td>{c.freqMhz}</td>
+                  <td>{c.cosI}</td>
+                  <td>{c.js.perp.re.toFixed(5)}{c.js.perp.im >= 0 ? '+' : ''}{c.js.perp.im.toFixed(5)}j</td>
+                  <td>{c.gl.perp.re.toFixed(5)}{c.gl.perp.im >= 0 ? '+' : ''}{c.gl.perp.im.toFixed(5)}j</td>
+                  <td>{c.js.para.re.toFixed(5)}{c.js.para.im >= 0 ? '+' : ''}{c.js.para.im.toFixed(5)}j</td>
+                  <td>{c.gl.para.re.toFixed(5)}{c.gl.para.im >= 0 ? '+' : ''}{c.gl.para.im.toFixed(5)}j</td>
+                  <td>{c.maxAbs.toExponential(2)}</td>
+                  <td>{c.ok ? '✓' : '✗'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </section>
+  )
+}
+
+// HM-F5c+d porting sub-steps. Each pins specific opts (refl/diff/freqN) so
+// JS and shader run the same physics subset; verdict is read off the
+// "Shader vs JS" stats row, not vs golden. Threshold 1 dB for all sub-steps.
+const SUBSTEP_OVERRIDES = {
+  'sub2-refl-only':  { refl: true,  diff: false, freqN: 1 },
+  'sub3-refl+diff':  { refl: true,  diff: true,  freqN: 1 },
+}
+
 export default function HeatmapDiffPage() {
   const [stage, setStage] = useState('F5a')
+  const [substep, setSubstep] = useState('none')
   const gate = STAGE_GATES[stage] ?? STAGE_GATES['F5a']
+  const optsOverride = substep !== 'none' ? SUBSTEP_OVERRIDES[substep] : null
 
   const fixtures = useMemo(() => {
     const result = []
@@ -464,10 +592,39 @@ export default function HeatmapDiffPage() {
             )
           })}
         </div>
+        <div className="stage-row">
+          <span style={{ alignSelf: 'center', marginRight: 8, opacity: 0.7 }}>F5c+d sub-step:</span>
+          <button
+            type="button"
+            className={substep === 'none' ? 'active' : ''}
+            onClick={() => setSubstep('none')}
+          >
+            none (use baseline opts)
+          </button>
+          {Object.keys(SUBSTEP_OVERRIDES).map((s) => {
+            const o = SUBSTEP_OVERRIDES[s]
+            return (
+              <button
+                key={s}
+                type="button"
+                className={s === substep ? 'active' : ''}
+                onClick={() => setSubstep(s)}
+              >
+                {s} · refl={o.refl ? 'on' : 'off'} diff={o.diff ? 'on' : 'off'} N={o.freqN}
+              </button>
+            )
+          })}
+        </div>
+        {optsOverride && (
+          <p style={{ opacity: 0.75, fontSize: 12, marginTop: 4 }}>
+            Sub-step active. Verdict = <strong>"Shader vs JS"</strong> stats row · threshold 1 dB. "vs golden" rows will likely fail (golden uses different opts), that's expected.
+          </p>
+        )}
       </header>
+      <FresnelParityPanel />
       {fixtures.length === 0 && <p>No fixtures found.</p>}
       {fixtures.map((f) => (
-        <FixturePanel key={f.name} {...f} threshold={gate.threshold} baseline={gate.baseline} />
+        <FixturePanel key={f.name} {...f} threshold={gate.threshold} baseline={gate.baseline} optsOverride={optsOverride} />
       ))}
     </div>
   )
