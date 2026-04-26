@@ -867,6 +867,15 @@ uniform int   uGridListWidth;
 uniform sampler2D uAps;
 uniform int uApCount;
 
+// HM-F5h cascade input. uCascadeFactor = 0 disables cascade (single-pass).
+// uMask is the R8 dead/alive output of FS_FIELD_COARSE; uMaskSize is its
+// resolution in texels. Each fine fragment maps to mask cell
+// (gpx / uCascadeFactor) and we OR a 3×3 neighbourhood for dilation so the
+// cell-boundary stays soft.
+uniform sampler2D uMask;
+uniform ivec2 uMaskSize;
+uniform int uCascadeFactor;
+
 const float PI = 3.14159265358979;
 const float SLAB_SEC_CAP = 3.5;
 const float DIRECTIONAL_BACK_DB = 20.0;
@@ -1110,6 +1119,29 @@ void main() {
     return;
   }
 
+  // HM-F5h cascade early-exit. We checked the coarse mask at this fragment's
+  // mapped cell + 1-cell dilated neighbourhood; if everyone says "dead", the
+  // free-space-only RSSI is below uCullFloorDbm everywhere in this region, so
+  // the full physics result has to be too — write the empty-AP sentinel.
+  if (uCascadeFactor > 0) {
+    int cx = gpx.x / uCascadeFactor;
+    int cy = gpx.y / uCascadeFactor;
+    float alive = 0.0;
+    for (int oy = -1; oy <= 1; ++oy) {
+      for (int ox = -1; ox <= 1; ++ox) {
+        ivec2 p = ivec2(
+          clamp(cx + ox, 0, uMaskSize.x - 1),
+          clamp(cy + oy, 0, uMaskSize.y - 1)
+        );
+        alive = max(alive, texelFetch(uMask, p, 0).r);
+      }
+    }
+    if (alive < 0.5) {
+      outColor = vec4(-120.0, -50.0, -50.0, -120.0);
+      return;
+    }
+  }
+
   float bestDb = -1e6;
   int   bestIdx = -1;
   float bestFreqLo = 0.0;
@@ -1196,6 +1228,68 @@ void main() {
   outColor = vec4(bestDb, sinrDb, snrDb, cciDbm);
 }`
 
+// HM-F5h coarse mask. Skips wall DDA / slab loss entirely and only does the
+// free-space-RSSI cull check across all APs at a coarse cell. Output is R8:
+// 1.0 = at least one AP could conceivably reach this cell, 0.0 = all APs
+// would be culled by the fine pass anyway. Fine pass reads this and skips
+// any fragment whose mask cell (after 1-cell dilation) is dead.
+//
+// We deliberately use the same uCullFloorDbm threshold as the fine pass so
+// no live-region fragment is wrongly killed: free-space RSSI is an upper
+// bound (walls / slabs only attenuate further), so if FS-only is below the
+// floor, the full physics result is always below too. This makes the cull
+// numerically exact, no false negatives.
+const FS_FIELD_COARSE = `#version 300 es
+precision highp float;
+precision highp int;
+
+in vec2 vUv;
+out vec4 outColor;
+
+uniform vec2 uGridSize;        // coarse (nx, ny)
+uniform vec2 uOriginM;
+uniform float uGridStepM;      // coarse step (= fine step × cascade factor)
+uniform float uRxZM;
+uniform float uRxGainDbi;
+uniform float uCullFloorDbm;
+
+uniform sampler2D uAps;
+uniform int uApCount;
+
+float pathLossDbField(float d, float freqMhz) {
+  float dEff = max(d, 0.5);
+  return 20.0 * log(dEff)/log(10.0) + 20.0 * log(freqMhz)/log(10.0) - 27.55;
+}
+
+void main() {
+  ivec2 gpx = ivec2(gl_FragCoord.xy);
+  if (gpx.x >= int(uGridSize.x) || gpx.y >= int(uGridSize.y)) {
+    outColor = vec4(0.0);
+    return;
+  }
+  vec2 rx = uOriginM + vec2(float(gpx.x), float(gpx.y)) * uGridStepM;
+  float rxZ = uRxZM;
+
+  for (int k = 0; k < 4096; k++) {
+    if (k >= uApCount) break;
+    int base = k * 4;
+    vec4 t0 = texelFetch(uAps, ivec2((base    ) % 4096, (base    ) / 4096), 0);
+    vec4 t1 = texelFetch(uAps, ivec2((base + 1) % 4096, (base + 1) / 4096), 0);
+    vec3 apPos = t0.xyz; float txDbm = t0.w;
+    float centerMHz = t1.x; float antGain = t1.z;
+
+    vec2 dxy = rx - apPos.xy;
+    float dz = apPos.z - rxZ;
+    float dDir = sqrt(dxy.x*dxy.x + dxy.y*dxy.y + dz*dz);
+    float fsBest = txDbm + antGain + uRxGainDbi - pathLossDbField(dDir, centerMHz);
+    if (fsBest >= uCullFloorDbm) {
+      outColor = vec4(1.0);
+      return;
+    }
+  }
+  outColor = vec4(0.0);
+}`
+
 function compile(gl, type, src) {
   const sh = gl.createShader(type)
   gl.shaderSource(sh, src)
@@ -1248,6 +1342,9 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
 
   const prog = link(gl, VS, FS)
   const progField = link(gl, VS, FS_FIELD)
+  // HM-F5h coarse-pass program. Lazily linked because most callers never
+  // trigger cascade (small scenes), but cheap enough to compile up-front.
+  const progFieldCoarse = link(gl, VS, FS_FIELD_COARSE)
 
   const vao = gl.createVertexArray()
   gl.bindVertexArray(vao)
@@ -1306,6 +1403,35 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     outFieldNx = nx; outFieldNy = ny
+  }
+
+  // HM-F5h cascade mask: R8 alive/dead at coarse resolution. R8 (not R32F) so
+  // the upload doesn't need EXT_color_buffer_float for *this* attachment —
+  // R8 is universally renderable in WebGL2.
+  const maskTex = gl.createTexture()
+  gl.bindTexture(gl.TEXTURE_2D, maskTex)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+  const maskFbo = gl.createFramebuffer()
+  // Placeholder so the sampler is texture-complete even when cascade is off.
+  // Shader gates on uCascadeFactor before fetching, so this 1×1 zero is
+  // never read for output, only there to satisfy WebGL2 sampler validation.
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 1, 1, 0, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array([0]))
+  let maskNx = 1, maskNy = 1
+
+  function ensureMaskSize(nx, ny) {
+    if (nx === maskNx && ny === maskNy) return
+    gl.bindTexture(gl.TEXTURE_2D, maskTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, nx, ny, 0, gl.RED, gl.UNSIGNED_BYTE, null)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, maskFbo)
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, maskTex, 0)
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      throw new Error('mask FBO incomplete')
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    maskNx = nx; maskNy = ny
   }
 
   // Walls texture is reused across all AP renders within a frame. We pack
@@ -1716,6 +1842,43 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     const ny = opts.gridSize?.ny ?? (Math.ceil(scenario.size.h / gridStepM) + 1)
     ensureOutFieldSize(nx, ny)
 
+    // HM-F5h cascade gate. We trigger the coarse pre-pass when AP count is
+    // high enough that the per-fragment AP loop dominates frame time; below
+    // that threshold the coarse-pass overhead beats the saving. AP count = 50
+    // is a heuristic — well below where we benchmark (1000+ APs), and the
+    // coarse pass is dirt cheap per fragment so a bit of unnecessary work in
+    // borderline cases is OK.
+    const cullFloor = opts.cullFloorDbm ?? -120
+    const cascadeFactor = (apCount >= 50) ? 4 : 0
+    let mNx = 0, mNy = 0
+    if (cascadeFactor > 0) {
+      mNx = Math.max(1, Math.ceil(nx / cascadeFactor))
+      mNy = Math.max(1, Math.ceil(ny / cascadeFactor))
+      ensureMaskSize(mNx, mNy)
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, maskFbo)
+      gl.viewport(0, 0, mNx, mNy)
+      gl.useProgram(progFieldCoarse)
+
+      gl.uniform2f(gl.getUniformLocation(progFieldCoarse, 'uGridSize'), mNx, mNy)
+      gl.uniform2f(gl.getUniformLocation(progFieldCoarse, 'uOriginM'), originM.x, originM.y)
+      // Coarse step in metres = fine step × cascadeFactor. nx*step ≈ scene
+      // width, so coarse cell centres straddle the same world region the
+      // fine cells will cover.
+      gl.uniform1f(gl.getUniformLocation(progFieldCoarse, 'uGridStepM'), gridStepM * cascadeFactor)
+      gl.uniform1f(gl.getUniformLocation(progFieldCoarse, 'uRxZM'), rxZM)
+      gl.uniform1f(gl.getUniformLocation(progFieldCoarse, 'uRxGainDbi'), opts._rxGainDbi ?? 0)
+      gl.uniform1f(gl.getUniformLocation(progFieldCoarse, 'uCullFloorDbm'), cullFloor)
+
+      gl.activeTexture(gl.TEXTURE0)
+      gl.bindTexture(gl.TEXTURE_2D, apsTex)
+      gl.uniform1i(gl.getUniformLocation(progFieldCoarse, 'uAps'), 0)
+      gl.uniform1i(gl.getUniformLocation(progFieldCoarse, 'uApCount'), apCount)
+
+      gl.bindVertexArray(vao)
+      gl.drawArrays(gl.TRIANGLES, 0, 6)
+    }
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, outFieldFbo)
     gl.viewport(0, 0, nx, ny)
     gl.useProgram(progField)
@@ -1759,6 +1922,14 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.uniform1i(gl.getUniformLocation(progField, 'uAps'), 5)
     gl.uniform1i(gl.getUniformLocation(progField, 'uApCount'), apCount)
 
+    // HM-F5h: bind the coarse mask + tell the shader whether cascade is on.
+    // When cascadeFactor = 0, the shader skips the mask check entirely.
+    gl.activeTexture(gl.TEXTURE6)
+    gl.bindTexture(gl.TEXTURE_2D, maskTex)
+    gl.uniform1i(gl.getUniformLocation(progField, 'uMask'), 6)
+    gl.uniform2i(gl.getUniformLocation(progField, 'uMaskSize'), mNx, mNy)
+    gl.uniform1i(gl.getUniformLocation(progField, 'uCascadeFactor'), cascadeFactor)
+
     gl.bindVertexArray(vao)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
 
@@ -1785,11 +1956,13 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   function dispose() {
     gl.deleteProgram(prog)
     gl.deleteProgram(progField)
+    gl.deleteProgram(progFieldCoarse)
     gl.deleteBuffer(vbo)
     gl.deleteVertexArray(vao)
-    for (const t of [outTex, outFieldTex, wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex, apsTex]) gl.deleteTexture(t)
+    for (const t of [outTex, outFieldTex, wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex, apsTex, maskTex]) gl.deleteTexture(t)
     gl.deleteFramebuffer(outFbo)
     gl.deleteFramebuffer(outFieldFbo)
+    gl.deleteFramebuffer(maskFbo)
   }
 
   return { uploadWalls, uploadCorners, uploadSlabs, uploadAps, renderAp, renderField, setUseGrid, dispose, gl }
