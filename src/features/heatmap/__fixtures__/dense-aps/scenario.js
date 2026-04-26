@@ -5,16 +5,13 @@
 // threshold, so without a fixture this size, the cascade code path has no
 // test coverage and the bench harness has no realistic high-AP scenario.
 //
-// **Known issue surfaced by this fixture (filed for follow-up)**: shader
-// vs JS friis-baseline diff on this scene is ~33 dB on ~80 / 9600 cells
-// (98% identical, but isolated outliers up to 33 dB). Outliers cluster on
-// rows where ray endpoints sit on perimeter / cubicle wall corners, so
-// shader fp32's segSegIntersect t/u boundary check excludes hits that JS
-// fp64 still includes. Same class as HM-F5c-fix's reflection outliers but
-// in the direct-path scalar path. Cascade (F5h) is innocent: same diff
-// observed with cascade disabled (apCount = 49 → gate off). Tracking this
-// as part of the F5c-fix scope; dense-aps becomes the regression fixture
-// when it lands.
+// **Regression fixture for HM-F5c-fix** (resolved 2026-04-26): originally
+// surfaced ~80/9600 outliers up to 33 dB on the friis baseline because rx
+// grid samples coincide with metal-box corners (rx-on-wall: shader fp32
+// computed t ≈ 1+ULP, strict t > 1 rejected the wall hit). Fix landed in
+// geometry.js + propagationGL.js: pad t and u by SEG_HIT_EPS = 1e-6 in
+// both engines (admit t > 1+EPS / u outside [-EPS, 1+EPS] uniformly).
+// Now PASS at F5d gate ≤ 1 dB (max 0.155 dB CCI, 0.093 dB on RSSI/SINR/SNR).
 //
 // Scene shape:
 //   • Single floor 60 m × 40 m, scale 10 px/m

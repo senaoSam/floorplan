@@ -200,6 +200,21 @@ void readWallMaterial(int w, out vec4 itu, out float roughnessM, out bool isMeta
 // (segSegIntersect). Epsilon tightened to 1e-12 to match JS — looser values
 // admit colinear ap→wall configurations as "hits", which then poisons the
 // diffraction gate (dirHits > 0 launches the corner loop and inflates RSSI).
+//
+// HM-F5c-fix: t / u padding by SEG_HIT_EPS (1e-6). Two cases the strict
+// [0, 1] test mishandles in fp32 but JS fp64 catches:
+//   (a) rx sits exactly on a wall endpoint — fp32 t lands ≈1+ULP, naive
+//       t > 1 rejects the wall. dense-aps's metal-box corners (which align
+//       with grid sample points at gridStepM=0.5) need this pad.
+//   (b) two walls share a vertex on the ray — fp32 u splits ±ULP between
+//       them, so without padding one wall is admitted and the other isn't
+//       depending on which side of the cliff fp32 fell.
+// The pad on t is one-sided (1 + EPS upper bound only): admitting t > 0
+// hits is correct for "ray going forward", while t < 0 padding would let
+// walls behind the AP into the loss accumulation. Same caveat lifted from
+// HM-F5c+d's failed earlier attempt — that one rejected at +EPS, the
+// opposite direction; this one admits.
+const float SEG_HIT_EPS = 1e-6;
 vec2 segSegIntersect(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
   vec2 d1 = p2 - p1;
   vec2 d2 = p4 - p3;
@@ -208,7 +223,8 @@ vec2 segSegIntersect(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
   vec2 r = p1 - p3;
   float t = (d2.x * r.y - d2.y * r.x) / denom;
   float u = (d1.x * r.y - d1.y * r.x) / denom;
-  if (t < 0.0 || t > 1.0 || u < 0.0 || u > 1.0) return vec2(0.0, 0.0);
+  if (t < 0.0 || t > 1.0 + SEG_HIT_EPS) return vec2(0.0, 0.0);
+  if (u < -SEG_HIT_EPS || u > 1.0 + SEG_HIT_EPS) return vec2(0.0, 0.0);
   return vec2(1.0, t);
 }
 
@@ -477,6 +493,9 @@ vec2 mirrorPoint(vec2 p, vec2 a, vec2 b) {
 // is fine. Image-source reflection uses this stricter one to match the JS
 // reference's rejection of near-parallel walls.
 // Returns hit point in xy, valid flag in z (>0 = hit).
+// HM-F5c-fix: same t / u padding as segSegIntersect — image-source reflection
+// onto a vertex shared by two walls now picks both walls consistently
+// instead of fp32-jitter-dependent.
 vec3 segSegHit(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
   vec2 d1 = p2 - p1;
   vec2 d2 = p4 - p3;
@@ -485,7 +504,8 @@ vec3 segSegHit(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
   vec2 r = p1 - p3;
   float t = (d2.x * r.y - d2.y * r.x) / denom;
   float u = (d1.x * r.y - d1.y * r.x) / denom;
-  if (t < 0.0 || t > 1.0 || u < 0.0 || u > 1.0) return vec3(0.0, 0.0, 0.0);
+  if (t < 0.0 || t > 1.0 + SEG_HIT_EPS) return vec3(0.0, 0.0, 0.0);
+  if (u < -SEG_HIT_EPS || u > 1.0 + SEG_HIT_EPS) return vec3(0.0, 0.0, 0.0);
   vec2 hit = p1 + d1 * t;
   return vec3(hit, 1.0);
 }
@@ -881,6 +901,10 @@ const float SLAB_SEC_CAP = 3.5;
 const float DIRECTIONAL_BACK_DB = 20.0;
 const float DIRECTIONAL_EDGE_DEG = 15.0;
 
+// HM-F5c-fix: t / u padding mirrors the per-AP shader's segSegIntersect
+// (above in this file). dense-aps caught both axes — rx grids align with
+// metal-box corners (t-side) and cubicle endpoint pairs (u-side).
+const float SEG_HIT_EPS = 1e-6;
 vec2 segSegIntersect(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
   vec2 d1 = p2 - p1;
   vec2 d2 = p4 - p3;
@@ -889,7 +913,8 @@ vec2 segSegIntersect(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
   vec2 r = p1 - p3;
   float t = (d2.x * r.y - d2.y * r.x) / denom;
   float u = (d1.x * r.y - d1.y * r.x) / denom;
-  if (t < 0.0 || t > 1.0 || u < 0.0 || u > 1.0) return vec2(0.0, 0.0);
+  if (t < 0.0 || t > 1.0 + SEG_HIT_EPS) return vec2(0.0, 0.0);
+  if (u < -SEG_HIT_EPS || u > 1.0 + SEG_HIT_EPS) return vec2(0.0, 0.0);
   return vec2(1.0, t);
 }
 

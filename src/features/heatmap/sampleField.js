@@ -77,7 +77,7 @@ export function sampleField(scenario, gridStepM = 0.5, opts = {}) {
       rssi[idx] = agg.rssiDbm
       sinr[idx] = agg.sinrDb
       snr[idx]  = agg.snrDb
-      cci[idx]  = isFinite(agg.cciDbm) ? agg.cciDbm : CCI_MIN_DBM
+      cci[idx]  = isFinite(agg.cciDbm) ? Math.max(agg.cciDbm, CCI_MIN_DBM) : CCI_MIN_DBM
     }
   }
   return { rssi, sinr, snr, cci, nx, ny, gridStepM, originX, originY }

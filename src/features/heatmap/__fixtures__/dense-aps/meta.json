@@ -1,0 +1,104 @@
+{
+  "fixtureId": "dense-aps",
+  "description": "100 APs (10×10 jittered grid) + ~600 walls (cubicle pattern + metal islands). Triggers HM-F5h cascade gate (apCount ≥ 50).",
+  "activeFloorId": "floor-0",
+  "engineOpts": {
+    "gridStepM": 0.5,
+    "maxReflOrder": 0,
+    "enableDiffraction": false,
+    "rxHeightM": 1
+  },
+  "engineFingerprint": "c4754ca30b6bbbca",
+  "gitCommit": "8c701600a46d8214b9cd3c0aa243b4e8fcab3a71",
+  "gitDirty": true,
+  "generatedAt": "2026-04-26T11:45:24.247Z",
+  "grid": {
+    "nx": 121,
+    "ny": 81,
+    "gridStepM": 0.5
+  },
+  "baselines": {
+    "full": {
+      "opts": {
+        "maxReflOrder": 0,
+        "enableDiffraction": false
+      },
+      "appliesTo": [
+        "F5c",
+        "F5d",
+        "F5e",
+        "F5f"
+      ],
+      "stats": {
+        "rssi": {
+          "finite": 9600,
+          "nan": 201,
+          "min": -106.119,
+          "max": -28.438,
+          "mean": -35.071
+        },
+        "sinr": {
+          "finite": 9600,
+          "nan": 201,
+          "min": -11.376,
+          "max": 38.142,
+          "mean": 4.617
+        },
+        "snr": {
+          "finite": 9600,
+          "nan": 201,
+          "min": -11.119,
+          "max": 66.562,
+          "mean": 59.929
+        },
+        "cci": {
+          "finite": 9600,
+          "nan": 201,
+          "min": -120,
+          "max": -31.195,
+          "mean": -39.706
+        }
+      }
+    },
+    "friis": {
+      "opts": {
+        "maxReflOrder": 0,
+        "enableDiffraction": false
+      },
+      "appliesTo": [
+        "F5a",
+        "F5b"
+      ],
+      "stats": {
+        "rssi": {
+          "finite": 9600,
+          "nan": 201,
+          "min": -106.119,
+          "max": -28.438,
+          "mean": -35.071
+        },
+        "sinr": {
+          "finite": 9600,
+          "nan": 201,
+          "min": -11.376,
+          "max": 38.142,
+          "mean": 4.617
+        },
+        "snr": {
+          "finite": 9600,
+          "nan": 201,
+          "min": -11.119,
+          "max": 66.562,
+          "mean": 59.929
+        },
+        "cci": {
+          "finite": 9600,
+          "nan": 201,
+          "min": -120,
+          "max": -31.195,
+          "mean": -39.706
+        }
+      }
+    }
+  }
+}

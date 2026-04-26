@@ -8,6 +8,26 @@ export function len(a) { return Math.hypot(a.x, a.y) }
 export function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y) }
 export function norm(a) { const l = len(a) || 1; return { x: a.x / l, y: a.y / l } }
 
+// Endpoint hysteresis (HM-F5c-fix). Shader fp32 segSegIntersect carries ~1e-7
+// ULP noise on both t (ray-side) and u (wall-side). When a ray:
+//   (a) ends exactly on a wall (rx sits on a wall endpoint, e.g. metal-box
+//       corner that aligns with a grid sample) — fp32 t ≈ 1 ± ULP, strict
+//       t > 1 rejects what JS fp64 admits.
+//   (b) grazes a shared wall vertex (two walls meet at the same point) —
+//       u ≈ 0 ± ULP on one and u ≈ 1 ± ULP on the other; strict u ∈ [0, 1]
+//       admits/rejects them inconsistently.
+// Both engines pad t and u by SEG_HIT_EPS (1e-6, comfortably above fp32 ULP
+// and far below any meaningful boundary). The pad is one-sided on t's lower
+// bound — t < 0 (ray going backwards from AP) stays strict so we don't
+// admit walls behind the AP; t > 1 + EPS (wall past rx) is admitted to
+// rescue the rx-on-wall case. JS pads symmetrically because its fp64 noise
+// is tiny (~1e-15) and the matching pad keeps the two engines aligned in
+// edge cases. A previous fix attempt was symmetric and failed because the
+// EPS test was inverted (≥ EPS → reject), which threw away every t≈0 hit
+// the reflection legs depended on. The current direction (≤ 1+EPS → admit)
+// is safe.
+export const SEG_HIT_EPS = 1e-6
+
 // Segment AB defined by {a:{x,y}, b:{x,y}}.
 // Ray/segment intersection: parametric t along ray (from p0, direction d), u along wall.
 // Returns { t, u, point } or null.
@@ -19,7 +39,7 @@ export function raySegmentIntersect(p0, d, wa, wb) {
   const dx = wa.x - p0.x, dy = wa.y - p0.y
   const t = (dx * sy - dy * sx) / denom
   const u = (dx * ry - dy * rx) / denom
-  if (t <= 1e-6 || u < 0 || u > 1) return null
+  if (t <= 1e-6 || u < -SEG_HIT_EPS || u > 1 + SEG_HIT_EPS) return null
   return { t, u, point: { x: p0.x + rx * t, y: p0.y + ry * t } }
 }
 
@@ -32,7 +52,8 @@ export function segSegIntersect(a1, a2, b1, b2) {
   const dx = b1.x - a1.x, dy = b1.y - a1.y
   const t = (dx * d2.y - dy * d2.x) / denom
   const u = (dx * d1.y - dy * d1.x) / denom
-  if (t < 0 || t > 1 || u < 0 || u > 1) return null
+  if (t < 0 || t > 1 + SEG_HIT_EPS) return null
+  if (u < -SEG_HIT_EPS || u > 1 + SEG_HIT_EPS) return null
   return { t, u, point: { x: a1.x + d1.x * t, y: a1.y + d1.y * t } }
 }
 

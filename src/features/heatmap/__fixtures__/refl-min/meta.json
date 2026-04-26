@@ -8,10 +8,10 @@
     "enableDiffraction": false,
     "rxHeightM": 1
   },
-  "engineFingerprint": "05a72d71579cd5dc",
-  "gitCommit": "3231cbe9cb3a622151220f38454a6760f3669791",
+  "engineFingerprint": "c4754ca30b6bbbca",
+  "gitCommit": "8c701600a46d8214b9cd3c0aa243b4e8fcab3a71",
   "gitDirty": true,
-  "generatedAt": "2026-04-25T15:15:45.013Z",
+  "generatedAt": "2026-04-26T11:45:24.381Z",
   "grid": {
     "nx": 41,
     "ny": 41,
