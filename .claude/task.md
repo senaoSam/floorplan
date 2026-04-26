@@ -151,6 +151,8 @@
 | HM-F2c | ✅   | 跨樓層射線的牆穿透：射線 2D 投影穿過其他樓層的牆時也加牆損；牆僅對 Z 介於 wall.bottomHeight~topHeight 的射線段有效 |
 | HM-F2e | ✅   | 牆 Z 範圍過濾：同樓層也應限制 wall 只對 AP/rx 在 wall.bottomHeight~topHeight 內的射線有效（矮隔間不該阻擋高處訊號） |
 | HM-F3b | ✅   | 樓板材質 UI：Sidebar 或 FloorPanel 暴露 floorSlabMaterialId + 自動同步 floorSlabAttenuationDb |
+| HM-F8  | ⬜   | 頻率相依的牆損失（ITU-R P.2040-3）：`material.dbLoss` 改為頻率函數，依各材質 (a, b) 參數算 `loss_per_m = a · f^b`（f 為 GHz）。資料來源 ITU-R P.2040-3 表 3。propagation 取 AP 真實中心頻率（已含 channel + channelWidth）算每段穿透 loss。預期 5/6 GHz 場景精度 +2-3 dB。**驗收**：basic + refl-min fixture full physics baseline 重生後，shader vs JS max ≤ 1 dB；2.4 GHz 場景數值不應有明顯變化（以 2.4 GHz 為現有材質表的標稱頻率） |
+
 ### 規模目標 + Roadmap 修訂（2026-04-25 討論結論）
 
 > **天花板**：3000 AP / 150K walls 即時拖曳熱圖（拖 ~25ms / 放 ~150ms，可用級）
