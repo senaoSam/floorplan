@@ -19,11 +19,17 @@ function ituFor(material) {
 // Each segment carries an absolute Z range [zLoM, zHiM] (elevation + local
 // bottom/topHeight) so propagation can skip hits whose ray Z sits outside —
 // a half-height partition shouldn't attenuate rays passing over the top.
-// Returns segments in meters: [{ a, b, lossDb, itu, roughnessM, kind, zLoM, zHiM }]
+//
+// HM-F8: each segment carries both `lossDb` (2.4 GHz anchor) and `lossB`
+// (ITU-R P.2040-3 frequency exponent). Propagation derives the per-AP wall
+// dB at evaluation time:  lossDb * (fGhz / 2.4) ** lossB.
+//
+// Returns segments in meters: [{ a, b, lossDb, lossB, itu, roughnessM, kind, zLoM, zHiM }]
 function expandWall(wall, pxToM, elevationM) {
   const ax = wall.startX, ay = wall.startY
   const bx = wall.endX,   by = wall.endY
   const wallLoss = wall.material?.dbLoss ?? 8
+  const wallLossB = wall.material?.lossB ?? 0
   const wallItu = ituFor(wall.material)
   const wallZLo = elevationM + (wall.bottomHeight ?? 0)
   const wallZHi = elevationM + (wall.topHeight ?? 3)
@@ -34,6 +40,7 @@ function expandWall(wall, pxToM, elevationM) {
       a: { x: ax * pxToM, y: ay * pxToM },
       b: { x: bx * pxToM, y: by * pxToM },
       lossDb: wallLoss,
+      lossB: wallLossB,
       itu: wallItu,
       roughnessM: 0.01,
       kind: 'interior',
@@ -57,6 +64,7 @@ function expandWall(wall, pxToM, elevationM) {
         a: pointAt(cursor),
         b: pointAt(s),
         lossDb: wallLoss,
+        lossB: wallLossB,
         itu: wallItu,
         roughnessM: 0.01,
         kind: 'interior',
@@ -65,6 +73,7 @@ function expandWall(wall, pxToM, elevationM) {
       })
     }
     const opLoss = op.material?.dbLoss ?? wallLoss
+    const opLossB = op.material?.lossB ?? wallLossB
     const opItu = ituFor(op.material)
     const opZLo = elevationM + (op.bottomHeight ?? 0)
     const opZHi = elevationM + (op.topHeight ?? (wall.topHeight ?? 3))
@@ -72,6 +81,7 @@ function expandWall(wall, pxToM, elevationM) {
       a: pointAt(s),
       b: pointAt(e),
       lossDb: opLoss,
+      lossB: opLossB,
       itu: opItu,
       roughnessM: 0.01,
       kind: op.type === 'window' ? 'window' : 'door',
@@ -85,6 +95,7 @@ function expandWall(wall, pxToM, elevationM) {
       a: pointAt(cursor),
       b: pointAt(1),
       lossDb: wallLoss,
+      lossB: wallLossB,
       itu: wallItu,
       roughnessM: 0.01,
       kind: 'interior',

@@ -36,11 +36,17 @@ void main() {
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`
 
-// Wall record layout in `uWalls` (RGBA32F texture, 3 texels per wall):
+// Wall record layout in `uWalls` (RGBA32F texture, 4 texels per wall):
 //   texel 0 .rgba = (ax, ay, bx, by)            — endpoints in metres
 //   texel 1 .rgba = (lossDb, zLo, zHi, roughnessM)
+//                   lossDb is the 2.4 GHz anchor (HM-F8); per-AP per-crossing
+//                   dB = lossDb * (fGhz/2.4) ** lossB.
 //   texel 2 .rgba = (ituA, ituB, ituC, ituD) — ITU-R P.2040-3 coefficients;
 //                   ituA < 0 sentinel = metal (Gamma → -1).
+//   texel 3 .rgba = (lossB, _, _, _)            — ITU-R P.2040-3 frequency
+//                   exponent for wall attenuation (HM-F8). lossB == 0 means
+//                   the material is wideband-flat (e.g. metal) — shader
+//                   short-circuits the pow().
 //
 // Slab boundary layout in `uSlabs` (RGBA32F, 1 texel per boundary):
 //   .rgba = (yM, slabDb, holeStart, holeCount)
@@ -67,6 +73,7 @@ uniform vec3  uApPos;          // (x, y, zM) in metres
 uniform float uTxDbm;
 uniform float uCenterMHz;
 uniform float uChannelWidthMHz;
+uniform float uFOver24;        // HM-F8: (centerMHz/1000) / 2.4, host-precomputed
 uniform float uAntGainDbi;     // base AP antenna gain (constant per AP)
 uniform int   uAntMode;        // 0 = omni, 1 = directional, 2 = treat as omni (custom — host fallback handles real pattern)
 uniform float uAntAzimuthDeg;
@@ -172,22 +179,28 @@ float pathLossDb(float d, float freqMhz) {
   return 20.0 * log(dEff)/log(10.0) + 20.0 * log(freqMhz)/log(10.0) - 27.55;
 }
 
-// Read a wall record (3 texels at base index w*3).
-void readWall(int w, out vec2 a, out vec2 b, out float lossDb, out float zLo, out float zHi) {
-  int t0 = w * 3;
+// Read a wall record (4 texels at base index w*4). HM-F8 added texel 3 for
+// lossB (ITU-R frequency exponent) — read alongside lossDb so callers can
+// thread both into wallLossOblique.
+void readWall(int w, out vec2 a, out vec2 b, out float lossDb, out float lossB, out float zLo, out float zHi) {
+  int t0 = w * 4;
   int t1 = t0 + 1;
+  int t3 = t0 + 3;
   ivec2 p0 = ivec2(t0 % 4096, t0 / 4096);
   ivec2 p1 = ivec2(t1 % 4096, t1 / 4096);
+  ivec2 p3 = ivec2(t3 % 4096, t3 / 4096);
   vec4 e0 = texelFetch(uWalls, p0, 0);
   vec4 e1 = texelFetch(uWalls, p1, 0);
+  vec4 e3 = texelFetch(uWalls, p3, 0);
   a = e0.xy;  b = e0.zw;
   lossDb = e1.x;  zLo = e1.y;  zHi = e1.z;
+  lossB  = e3.x;
 }
 
 // Read material (texel 2): ituA<0 sentinel = metal.
 void readWallMaterial(int w, out vec4 itu, out float roughnessM, out bool isMetal) {
-  int t1 = w * 3 + 1;
-  int t2 = w * 3 + 2;
+  int t1 = w * 4 + 1;
+  int t2 = w * 4 + 2;
   ivec2 p1 = ivec2(t1 % 4096, t1 / 4096);
   ivec2 p2 = ivec2(t2 % 4096, t2 / 4096);
   roughnessM = texelFetch(uWalls, p1, 0).w;
@@ -237,14 +250,19 @@ vec2 segSegIntersect(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
 // but the hit count at the call site is what really gates the path. The
 // segSegIntersect 1e-12 epsilon already rejects most degenerate hits before
 // we reach this function, so this guard is defence-in-depth.
-float wallLossOblique(vec2 a, vec2 b, vec2 rayDir, float lossDb) {
+// HM-F8: lossB is the per-material ITU-R frequency exponent. fOver24 is
+// (centerMHz/1000)/2.4. Final per-crossing dB = lossDb * fOver24^lossB * sec.
+// lossB == 0 short-circuits the pow() so wideband-flat materials (e.g. metal)
+// stay numerically identical to pre-F8.
+float wallLossOblique(vec2 a, vec2 b, vec2 rayDir, float lossDb, float lossB, float fOver24) {
   vec2 t = b - a;
   vec2 n = normalize(vec2(-t.y, t.x));
   float rL = length(rayDir);
   vec2 rDir = rL > 1e-12 ? rayDir / rL : vec2(0.0);
   float cosI = abs(dot(rDir, n));
   float sec = 1.0 / max(cosI, 0.2);
-  return lossDb * min(sec, 3.5);
+  float fAdj = lossB == 0.0 ? 1.0 : pow(fOver24, lossB);
+  return lossDb * fAdj * min(sec, 3.5);
 }
 
 // Apply one wall hit: do segSegIntersect + Z filter, accumulate loss if hit.
@@ -252,13 +270,13 @@ float wallLossOblique(vec2 a, vec2 b, vec2 rayDir, float lossDb) {
 // share the same Z-filtered "did we cross this wall?" semantics.
 void applyWallContribution(int w, vec2 ap, float apZ, vec2 rx, float rxZ, vec2 rayDir, inout float total) {
   vec2 a, b;
-  float lossDb, zLo, zHi;
-  readWall(w, a, b, lossDb, zLo, zHi);
+  float lossDb, lossB, zLo, zHi;
+  readWall(w, a, b, lossDb, lossB, zLo, zHi);
   vec2 hit = segSegIntersect(ap, rx, a, b);
   if (hit.x < 0.5) return;
   float zAt = apZ + (rxZ - apZ) * hit.y;
   if (zAt < zLo || zAt > zHi) return;
-  total += wallLossOblique(a, b, rayDir, lossDb);
+  total += wallLossOblique(a, b, rayDir, lossDb, lossB, uFOver24);
 }
 
 // Brute-force: every wall, every fragment. O(N_walls). Used when no grid is
@@ -553,13 +571,13 @@ vec2 accumulateWallLossWithHits(vec2 ap, float apZ, vec2 rx, float rxZ) {
   vec2 rayDir = rx - ap;
   for (int w = 0; w < uWallCount; w++) {
     vec2 a, b;
-    float lossDb, zLo, zHi;
-    readWall(w, a, b, lossDb, zLo, zHi);
+    float lossDb, lossB, zLo, zHi;
+    readWall(w, a, b, lossDb, lossB, zLo, zHi);
     vec2 hit = segSegIntersect(ap, rx, a, b);
     if (hit.x < 0.5) continue;
     float zAt = apZ + (rxZ - apZ) * hit.y;
     if (zAt < zLo || zAt > zHi) continue;
-    acc.x += wallLossOblique(a, b, rayDir, lossDb);
+    acc.x += wallLossOblique(a, b, rayDir, lossDb, lossB, uFOver24);
     acc.y += 1.0;
   }
   return acc;
@@ -701,8 +719,8 @@ float rssiWithReflections(vec2 rx, float rxZ) {
   if (sameFloor) {
     for (int w = 0; w < uWallCount; w++) {
       vec2 wa, wb;
-      float wLossDb, wZLo, wZHi;
-      readWall(w, wa, wb, wLossDb, wZLo, wZHi);
+      float wLossDb, wLossB, wZLo, wZHi;
+      readWall(w, wa, wb, wLossDb, wLossB, wZLo, wZHi);
       vec4 itu;
       float roughM;
       bool isMetal;
@@ -918,43 +936,49 @@ vec2 segSegIntersect(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
   return vec2(1.0, t);
 }
 
-void readWall(int w, out vec2 a, out vec2 b, out float lossDb, out float zLo, out float zHi) {
-  int t0 = w * 3;
+// HM-F8: 4-texel wall record, mirrors per-AP shader's readWall above.
+void readWall(int w, out vec2 a, out vec2 b, out float lossDb, out float lossB, out float zLo, out float zHi) {
+  int t0 = w * 4;
   int t1 = t0 + 1;
+  int t3 = t0 + 3;
   ivec2 p0 = ivec2(t0 % 4096, t0 / 4096);
   ivec2 p1 = ivec2(t1 % 4096, t1 / 4096);
+  ivec2 p3 = ivec2(t3 % 4096, t3 / 4096);
   vec4 e0 = texelFetch(uWalls, p0, 0);
   vec4 e1 = texelFetch(uWalls, p1, 0);
+  vec4 e3 = texelFetch(uWalls, p3, 0);
   a = e0.xy;  b = e0.zw;
   lossDb = e1.x;  zLo = e1.y;  zHi = e1.z;
+  lossB  = e3.x;
 }
 
-float wallLossOblique(vec2 a, vec2 b, vec2 rayDir, float lossDb) {
+float wallLossOblique(vec2 a, vec2 b, vec2 rayDir, float lossDb, float lossB, float fOver24) {
   vec2 t = b - a;
   vec2 n = normalize(vec2(-t.y, t.x));
   float rL = length(rayDir);
   vec2 rDir = rL > 1e-12 ? rayDir / rL : vec2(0.0);
   float cosI = abs(dot(rDir, n));
   float sec = 1.0 / max(cosI, 0.2);
-  return lossDb * min(sec, 3.5);
+  float fAdj = lossB == 0.0 ? 1.0 : pow(fOver24, lossB);
+  return lossDb * fAdj * min(sec, 3.5);
 }
 
-void applyWallContribution(int w, vec2 ap, float apZ, vec2 rx, float rxZ, vec2 rayDir, inout float total) {
+void applyWallContribution(int w, vec2 ap, float apZ, vec2 rx, float rxZ, vec2 rayDir, float fOver24, inout float total) {
   vec2 a, b;
-  float lossDb, zLo, zHi;
-  readWall(w, a, b, lossDb, zLo, zHi);
+  float lossDb, lossB, zLo, zHi;
+  readWall(w, a, b, lossDb, lossB, zLo, zHi);
   vec2 hit = segSegIntersect(ap, rx, a, b);
   if (hit.x < 0.5) return;
   float zAt = apZ + (rxZ - apZ) * hit.y;
   if (zAt < zLo || zAt > zHi) return;
-  total += wallLossOblique(a, b, rayDir, lossDb);
+  total += wallLossOblique(a, b, rayDir, lossDb, lossB, fOver24);
 }
 
-float accumulateWallLossBrute(vec2 ap, float apZ, vec2 rx, float rxZ) {
+float accumulateWallLossBrute(vec2 ap, float apZ, vec2 rx, float rxZ, float fOver24) {
   float total = 0.0;
   vec2 rayDir = rx - ap;
   for (int w = 0; w < uWallCount; w++) {
-    applyWallContribution(w, ap, apZ, rx, rxZ, rayDir, total);
+    applyWallContribution(w, ap, apZ, rx, rxZ, rayDir, fOver24, total);
   }
   return total;
 }
@@ -975,7 +999,7 @@ int readGridWallIdx(int i) {
 
 const int SEEN_BUF = 8;
 
-float accumulateWallLossGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
+float accumulateWallLossGrid(vec2 ap, float apZ, vec2 rx, float rxZ, float fOver24) {
   float total = 0.0;
   vec2 rayDir = rx - ap;
 
@@ -1027,7 +1051,7 @@ float accumulateWallLossGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
       if (dup) continue;
       seenBuf[seenWritePos] = wIdx;
       seenWritePos = (seenWritePos + 1) % SEEN_BUF;
-      applyWallContribution(wIdx, ap, apZ, rx, rxZ, rayDir, total);
+      applyWallContribution(wIdx, ap, apZ, rx, rxZ, rayDir, fOver24, total);
     }
     if (cx == cxEnd && cy == cyEnd) break;
     if (tMaxX < tMaxY) {
@@ -1044,9 +1068,9 @@ float accumulateWallLossGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
   return total;
 }
 
-float accumulateWallLossField(vec2 ap, float apZ, vec2 rx, float rxZ) {
-  if (uGridDims.x == 0) return accumulateWallLossBrute(ap, apZ, rx, rxZ);
-  return accumulateWallLossGrid(ap, apZ, rx, rxZ);
+float accumulateWallLossField(vec2 ap, float apZ, vec2 rx, float rxZ, float fOver24) {
+  if (uGridDims.x == 0) return accumulateWallLossBrute(ap, apZ, rx, rxZ, fOver24);
+  return accumulateWallLossGrid(ap, apZ, rx, rxZ, fOver24);
 }
 
 bool pointInPoly(vec2 q, int start, int count) {
@@ -1190,7 +1214,8 @@ void main() {
     float fsBest = txDbm + antGain + uRxGainDbi - pathLossDbField(dDir, centerMHz);
     if (fsBest < uCullFloorDbm) continue;
 
-    float wallLoss = accumulateWallLossField(apPos.xy, apPos.z, rx, rxZ);
+    float fOver24 = (centerMHz / 1000.0) / 2.4;
+    float wallLoss = accumulateWallLossField(apPos.xy, apPos.z, rx, rxZ, fOver24);
     float slabLoss = accumulateSlabLossField(apPos.xy, apPos.z, rx, rxZ);
     float gain = apGainAt(apPos.xy, rx, antMode, antGain, azDeg, bwDeg);
     float pl = pathLossDbField(dDir, centerMHz) + wallLoss + slabLoss;
@@ -1237,7 +1262,8 @@ void main() {
     float fsBest = txDbm + antGain + uRxGainDbi - pathLossDbField(dDir, centerMHz);
     if (fsBest < uCullFloorDbm) continue;
 
-    float wallLoss = accumulateWallLossField(apPos.xy, apPos.z, rx, rxZ);
+    float fOver24 = (centerMHz / 1000.0) / 2.4;
+    float wallLoss = accumulateWallLossField(apPos.xy, apPos.z, rx, rxZ, fOver24);
     float slabLoss = accumulateSlabLossField(apPos.xy, apPos.z, rx, rxZ);
     float gain = apGainAt(apPos.xy, rx, antMode, antGain, azDeg, bwDeg);
     float pl = pathLossDbField(dDir, centerMHz) + wallLoss + slabLoss;
@@ -1494,19 +1520,22 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     return { data, w, h }
   }
 
-  // walls: array of { a:{x,y}, b:{x,y}, lossDb, zLoM, zHiM, itu, roughnessM }
-  // Now packs 3 texels per wall (12 floats) so reflection (HM-F5c step 2) has
-  // ITU-R P.2040-3 coefficients + roughness on hand without a second texture.
-  // Metal is encoded as itu.a = -1 sentinel (real materials have a > 0).
+  // walls: array of { a:{x,y}, b:{x,y}, lossDb, lossB, zLoM, zHiM, itu, roughnessM }
+  // Packs 4 texels per wall (16 floats):
+  //   t0 = (ax, ay, bx, by)
+  //   t1 = (lossDb, zLoM, zHiM, roughnessM)         lossDb is 2.4 GHz anchor
+  //   t2 = (ituA, ituB, ituC, ituD)                 ituA<0 → metal sentinel
+  //   t3 = (lossB, 0, 0, 0)                          HM-F8 frequency exponent
+  // Reflection (HM-F5c step 2) uses ITU-R coefficients + roughness directly.
   // Also (re)builds the uniform-grid acceleration structure scoped to the
   // walls' AABB so the shader can DDA-walk it. opts.bbox lets the caller
   // override the grid extent when the scenario size doesn't match the wall
   // bounds (e.g. cross-floor walls extending beyond active floor).
   function uploadWalls(walls, opts = {}) {
-    const flat = new Float32Array(walls.length * 12)
+    const flat = new Float32Array(walls.length * 16)
     for (let i = 0; i < walls.length; i++) {
       const w = walls[i]
-      const o = i * 12
+      const o = i * 16
       flat[o     ] = w.a.x;  flat[o + 1] = w.a.y
       flat[o + 2 ] = w.b.x;  flat[o + 3] = w.b.y
       flat[o + 4 ] = w.lossDb
@@ -1524,6 +1553,8 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       } else {
         flat[o + 8] = 0; flat[o + 9] = 0; flat[o + 10] = 0; flat[o + 11] = 0
       }
+      flat[o + 12] = w.lossB ?? 0
+      flat[o + 13] = 0; flat[o + 14] = 0; flat[o + 15] = 0
     }
     const { data, w, h } = pack4096(flat)
     gl.bindTexture(gl.TEXTURE_2D, wallsTex)
@@ -1792,8 +1823,12 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
 
     gl.uniform3f(gl.getUniformLocation(prog, 'uApPos'), ap.pos.x, ap.pos.y, ap.zM ?? 0)
     gl.uniform1f(gl.getUniformLocation(prog, 'uTxDbm'), ap.txDbm)
-    gl.uniform1f(gl.getUniformLocation(prog, 'uCenterMHz'), ap.centerMHz || 5190)
+    const centerMHz = ap.centerMHz || 5190
+    gl.uniform1f(gl.getUniformLocation(prog, 'uCenterMHz'), centerMHz)
     gl.uniform1f(gl.getUniformLocation(prog, 'uChannelWidthMHz'), ap.channelWidth || 20)
+    // HM-F8: per-AP wall-loss frequency scale, host-precomputed so shader
+    // skips the divide. lossB == 0 materials short-circuit pow() inside.
+    gl.uniform1f(gl.getUniformLocation(prog, 'uFOver24'), (centerMHz / 1000) / 2.4)
     gl.uniform1f(gl.getUniformLocation(prog, 'uAntGainDbi'), ap._antGainDbi)
     gl.uniform1i(gl.getUniformLocation(prog, 'uAntMode'),
       ap.antennaMode === 'directional' ? 1 : (ap.antennaMode === 'custom' ? 2 : 0))

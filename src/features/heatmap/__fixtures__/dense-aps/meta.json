@@ -8,10 +8,10 @@
     "enableDiffraction": false,
     "rxHeightM": 1
   },
-  "engineFingerprint": "c4754ca30b6bbbca",
-  "gitCommit": "8c701600a46d8214b9cd3c0aa243b4e8fcab3a71",
+  "engineFingerprint": "6fc708d466f02d22",
+  "gitCommit": "810d27b8d7c7e7dc3eafcecec11d6809139b3ff6",
   "gitDirty": true,
-  "generatedAt": "2026-04-26T11:45:24.247Z",
+  "generatedAt": "2026-04-26T12:18:30.416Z",
   "grid": {
     "nx": 121,
     "ny": 81,
@@ -33,30 +33,30 @@
         "rssi": {
           "finite": 9600,
           "nan": 201,
-          "min": -106.119,
+          "min": -246.207,
           "max": -28.438,
-          "mean": -35.071
+          "mean": -37.525
         },
         "sinr": {
           "finite": 9600,
           "nan": 201,
-          "min": -11.376,
-          "max": 38.142,
-          "mean": 4.617
+          "min": -151.207,
+          "max": 46.042,
+          "mean": 9.124
         },
         "snr": {
           "finite": 9600,
           "nan": 201,
-          "min": -11.119,
+          "min": -151.207,
           "max": 66.562,
-          "mean": 59.929
+          "mean": 57.475
         },
         "cci": {
           "finite": 9600,
           "nan": 201,
           "min": -120,
-          "max": -31.195,
-          "mean": -39.706
+          "max": -32.027,
+          "mean": -47.101
         }
       }
     },
@@ -73,30 +73,30 @@
         "rssi": {
           "finite": 9600,
           "nan": 201,
-          "min": -106.119,
+          "min": -246.207,
           "max": -28.438,
-          "mean": -35.071
+          "mean": -37.525
         },
         "sinr": {
           "finite": 9600,
           "nan": 201,
-          "min": -11.376,
-          "max": 38.142,
-          "mean": 4.617
+          "min": -151.207,
+          "max": 46.042,
+          "mean": 9.124
         },
         "snr": {
           "finite": 9600,
           "nan": 201,
-          "min": -11.119,
+          "min": -151.207,
           "max": 66.562,
-          "mean": 59.929
+          "mean": 57.475
         },
         "cci": {
           "finite": 9600,
           "nan": 201,
           "min": -120,
-          "max": -31.195,
-          "mean": -39.706
+          "max": -32.027,
+          "mean": -47.101
         }
       }
     }

@@ -43,11 +43,19 @@ function pathLossDb(d, freqMhz) {
   return 20 * Math.log10(dEff) + 20 * Math.log10(freqMhz) - 27.55
 }
 
-function wallLossOblique(wall, rayDir) {
+// HM-F8: per-AP centre frequency drives wall loss. lossDb is the 2.4 GHz
+// anchor (existing material constant), lossB is the ITU-R P.2040-3 frequency
+// exponent. fOver24 = fGhz / 2.4, computed once per AP by rssiFromAp and
+// threaded through the wall-loss path. Final per-crossing dB is
+//   lossDb * fOver24 ** lossB * sec(θ) (capped at 3.5).
+// lossB === 0 (e.g. metal) bypasses the pow() so the existing wideband-flat
+// behaviour is preserved.
+function wallLossOblique(wall, rayDir, fOver24) {
   const n = segmentNormal(wall.a, wall.b)
   const cosI = Math.abs(dot(norm(rayDir), n))
   const sec = 1 / Math.max(cosI, 0.2)
-  return wall.lossDb * Math.min(sec, 3.5)
+  const fAdj = wall.lossB ? Math.pow(fOver24, wall.lossB) : 1
+  return wall.lossDb * fAdj * Math.min(sec, 3.5)
 }
 
 // When aZM/bZM are supplied, each wall hit's Z is interpolated along the ray
@@ -55,7 +63,7 @@ function wallLossOblique(wall, rayDir) {
 // skipped. This makes half-height partitions transparent to rays that pass
 // over the top between an AP and a low receiver. Rays with unknown Z (legacy
 // planar mode with no elevation data) bypass the filter and count every hit.
-function accumulateWallLoss(a, b, walls, aZM, bZM) {
+function accumulateWallLoss(a, b, walls, aZM, bZM, fOver24) {
   const rayDir = sub(b, a)
   const haveZ = aZM != null && bZM != null
   let totalLoss = 0
@@ -67,7 +75,7 @@ function accumulateWallLoss(a, b, walls, aZM, bZM) {
       const zAt = aZM + (bZM - aZM) * hit.t
       if (zAt < w.zLoM || zAt > w.zHiM) continue
     }
-    totalLoss += wallLossOblique(w, rayDir)
+    totalLoss += wallLossOblique(w, rayDir, fOver24)
     hits += 1
   }
   return { totalLoss, hits }
@@ -307,6 +315,9 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   const freqMhz = ap.centerMHz || 5190
   const wavelength = C / (freqMhz * 1e6)
   const kWave = (2 * Math.PI) / wavelength
+  // HM-F8: per-AP wall-loss frequency scale (1 at 2.4 GHz, ~2.7 at 5 GHz with
+  // concrete's b=1.99). Threaded through every accumulateWallLoss call.
+  const fOver24 = (freqMhz / 1000) / 2.4
 
   // Absolute Z of AP / rx; 0 when caller didn't provide elevation data.
   const apZM = ap.zM ?? 0
@@ -325,7 +336,7 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   const dxyDir = Math.max(dist(ap.pos, rx), 0.25)
   const dzDir  = apZM - rxZM
   const dDir   = Math.sqrt(dxyDir * dxyDir + dzDir * dzDir)
-  const wallScan = accumulateWallLoss(ap.pos, rx, walls, apZM, rxZM)
+  const wallScan = accumulateWallLoss(ap.pos, rx, walls, apZM, rxZM, fOver24)
   const plDir = pathLossDb(dDir, freqMhz) + wallScan.totalLoss + slabLossDirect
   paths.push(makeScalarPath(ap.txDbm, apGainDbi(ap, rx), plDir, dDir))
 
@@ -362,8 +373,8 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       const d1 = dist(ap.pos, reflPt)
       const d2 = dist(reflPt, rx)
       const reflZM = apZM + (rxZM - apZM) * (d1 / Math.max(d1 + d2, 1e-9))
-      const leg1 = accumulateWallLoss(ap.pos, reflPt, wallsExcl, apZM, reflZM)
-      const leg2 = accumulateWallLoss(reflPt, rx, wallsExcl, reflZM, rxZM)
+      const leg1 = accumulateWallLoss(ap.pos, reflPt, wallsExcl, apZM, reflZM, fOver24)
+      const leg2 = accumulateWallLoss(reflPt, rx, wallsExcl, reflZM, rxZM, fOver24)
       const dTot = d1 + d2
 
       const plRef = pathLossDb(dTot, freqMhz) + leg1.totalLoss + leg2.totalLoss
@@ -379,8 +390,8 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       const d1 = dist(ap.pos, c)
       const d2 = dist(c, rx)
       const cZM = apZM + (rxZM - apZM) * (d1 / Math.max(d1 + d2, 1e-9))
-      const s1 = accumulateWallLoss(ap.pos, c, walls, apZM, cZM)
-      const s2 = accumulateWallLoss(c, rx, walls, cZM, rxZM)
+      const s1 = accumulateWallLoss(ap.pos, c, walls, apZM, cZM, fOver24)
+      const s2 = accumulateWallLoss(c, rx, walls, cZM, rxZM, fOver24)
       if (s1.hits > 1 || s2.hits > 1) continue
       const diff = cornerDiffractionDb(ap.pos, rx, c, wavelength)
       if (!isFinite(diff) || diff > 40) continue

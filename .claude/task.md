@@ -151,7 +151,7 @@
 | HM-F2c | ✅   | 跨樓層射線的牆穿透：射線 2D 投影穿過其他樓層的牆時也加牆損；牆僅對 Z 介於 wall.bottomHeight~topHeight 的射線段有效 |
 | HM-F2e | ✅   | 牆 Z 範圍過濾：同樓層也應限制 wall 只對 AP/rx 在 wall.bottomHeight~topHeight 內的射線有效（矮隔間不該阻擋高處訊號） |
 | HM-F3b | ✅   | 樓板材質 UI：Sidebar 或 FloorPanel 暴露 floorSlabMaterialId + 自動同步 floorSlabAttenuationDb |
-| HM-F8  | ⬜   | 頻率相依的牆損失（ITU-R P.2040-3）：`material.dbLoss` 改為頻率函數，依各材質 (a, b) 參數算 `loss_per_m = a · f^b`（f 為 GHz）。資料來源 ITU-R P.2040-3 表 3。propagation 取 AP 真實中心頻率（已含 channel + channelWidth）算每段穿透 loss。預期 5/6 GHz 場景精度 +2-3 dB。**驗收**：basic + refl-min fixture full physics baseline 重生後，shader vs JS max ≤ 1 dB；2.4 GHz 場景數值不應有明顯變化（以 2.4 GHz 為現有材質表的標稱頻率） |
+| HM-F8  | ✅   | 頻率相依的牆損失（ITU-R P.2040-3，2026-04-26）：每個材質加 `lossB` 頻率指數（取自 P.2040-3 Table 3 — concrete 1.99 / brick 1.21 / drywall 1.62 / wood 1.04 / glass 0.27 / metal 0），per-AP 牆損失 `dbLoss(f) = dbLoss * (f_GHz / 2.4) ** lossB`。`material.dbLoss` 維持 2.4 GHz 標稱 anchor 不變。propagation `rssiFromAp` 算 `fOver24` 一次後 thread 進三條 `accumulateWallLoss` call site。GLSL：wall texture 從 3 → 4 texels/wall（新增 texel3 = lossB），`wallLossOblique` 加 `lossB == 0` short-circuit 跳 `pow()`；renderField FS_FIELD 在 AP loop 內部算 fOver24，renderAp 用 `uFOver24` uniform。**驗收結果**（F5d full gate, ≤1 dB）：refl-min max 0.001 dB ✓、dense-aps max 0.093 dB ✓、basic 維持 HM-F5c-fix-2 的 known 1-cell metal-axis outlier（max 40.8 dB / 1 cell + CCI 54-cell spread），JS vs golden 全 0.000 dB。2.4 GHz 場景數值不變（anchor 校準），5/6 GHz 隨 lossB 物理放大 |
 
 ### 規模目標 + Roadmap 修訂（2026-04-25 討論結論）
 
