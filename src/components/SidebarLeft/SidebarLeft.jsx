@@ -13,6 +13,7 @@ import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorImport } from '@/features/importer/useFloorImport'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
+import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
 import './SidebarLeft.sass'
 
 function SidebarLeft() {
@@ -77,6 +78,9 @@ function SidebarLeft() {
   // Drag-and-drop reorder.
   const [dragIndex, setDragIndex] = useState(null)
   const [dropIndex, setDropIndex] = useState(null)
+
+  // 整層 AP 功率自動規劃。
+  const [autoPowerOpen, setAutoPowerOpen] = useState(false)
 
   useEffect(() => {
     if (editingId && editInputRef.current) {
@@ -317,6 +321,13 @@ function SidebarLeft() {
                     />
                     <span>dB</span>
                   </label>
+                  <button
+                    className="sidebar-left__floor-action"
+                    onClick={(e) => { e.stopPropagation(); setAutoPowerOpen(true) }}
+                    title="對整層 AP 跑 greedy 多起點功率規劃"
+                  >
+                    ⚡ 自動規劃整層 AP 功率
+                  </button>
                 </li>
               )}
               </React.Fragment>
@@ -349,6 +360,14 @@ function SidebarLeft() {
           cancelLabel="繼續對齊"
           onConfirm={confirmSwitch}
           onCancel={() => setPendingSwitch(null)}
+        />
+      )}
+
+      {autoPowerOpen && (
+        <AutoPowerModal
+          open={autoPowerOpen}
+          apIds={[]}
+          onClose={() => setAutoPowerOpen(false)}
         />
       )}
     </aside>

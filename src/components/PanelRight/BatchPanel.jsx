@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react'
+import React, { useCallback, useState } from 'react'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
@@ -10,6 +10,7 @@ import { AP_MODEL_LIST, getAPModelById } from '@/constants/apModels'
 import { ANTENNA_PATTERN_LIST, getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
 import { allowedChannels, channelEntries } from '@/constants/regulatoryDomains'
 import { CHANNEL_WIDTHS, DEFAULT_CHANNEL_WIDTH, allowedWidthsForBand } from '@/constants/channelWidths'
+import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
 import PatternPreview from './PatternPreview'
 import './BatchPanel.sass'
 
@@ -50,6 +51,7 @@ function BatchPanel() {
   const clearSelected = useEditorStore((s) => s.clearSelected)
   const domainId      = useEditorStore((s) => s.regulatoryDomain)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
+  const [autoPowerOpen, setAutoPowerOpen] = useState(false)
 
   const removeWalls      = useWallStore((s) => s.removeWalls)
   const updateWalls      = useWallStore((s) => s.updateWalls)
@@ -411,6 +413,13 @@ function BatchPanel() {
               />
               <span className="batch-panel__unit">dBm</span>
             </div>
+            <button
+              className="batch-panel__btn batch-panel__btn--auto-power"
+              onClick={() => setAutoPowerOpen(true)}
+              style={{ marginTop: 8 }}
+            >
+              ⚡ 自動規劃功率（greedy）
+            </button>
           </section>
 
           {/* 安裝高度（批次變更） */}
@@ -571,6 +580,15 @@ function BatchPanel() {
             })()}
           </section>
         </>
+      )}
+
+      {/* AutoPower modal — 套用後 store 變更會自動觸發熱圖重算 */}
+      {autoPowerOpen && (
+        <AutoPowerModal
+          open={autoPowerOpen}
+          apIds={apIds}
+          onClose={() => setAutoPowerOpen(false)}
+        />
       )}
 
       {/* Scope 批次：類型（In / Out） */}

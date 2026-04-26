@@ -172,7 +172,7 @@ const PHASES = [
         layer: '備援與延伸',
         items: [
           { id: 'HM-F6', done: false, text: 'Web Worker CPU fallback（無 WebGL2 環境降級）' },
-          { id: 'HM-F4', done: false, text: 'autoPowerPlan 自動功率規劃重建' },
+          { id: 'HM-F4', done: true, text: 'autoPowerPlan 自動功率規劃（greedy + 多起點 ±1 dB）' },
           { id: 'HM-B1', done: false, text: 'Gaussian blur 改善 / 參數微調 / 關閉選項' },
         ],
       },

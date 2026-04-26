@@ -110,6 +110,7 @@ src/utils/
   pdfUtils.js                 # renderPdfPageToBlob(), renderAllPdfPages() — PDF.js 渲染
   floorColor.js               # getFloorColor(index) — 參考樓層疊影用色盤（對齊模式）
   autoChannelPlan.js          # greedyChannelAssign() — 同頻最小干擾頻道指派
+  autoPowerPlan.js            # runAutoPowerPlan() — HM-F4 greedy 多起點 ±1 dB 功率規劃
 ```
 
 ### Services
@@ -194,6 +195,10 @@ src/components/
 
   ConfirmDialog/
     ConfirmDialog.jsx         # 通用確認對話框（離開對齊模式等）
+
+  AutoPowerModal/
+    AutoPowerModal.jsx        # HM-F4 自動功率規劃對話框（目標 RSSI 設定 + 進度條 + 結果預覽）
+    AutoPowerModal.sass
 ```
 
 ### Features（核心功能）

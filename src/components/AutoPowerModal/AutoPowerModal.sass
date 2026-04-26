@@ -1,0 +1,206 @@
+@use '@/styles/variables' as *
+
+.auto-power-modal-overlay
+  position: fixed
+  inset: 0
+  z-index: 1000
+  display: flex
+  align-items: center
+  justify-content: center
+  background: rgba(0, 0, 0, 0.5)
+  backdrop-filter: blur(2px)
+
+.auto-power-modal
+  background: $bg-secondary
+  border: 1px solid $border-color
+  border-radius: 10px
+  padding: 18px 22px
+  min-width: 420px
+  max-width: 520px
+  max-height: 80vh
+  overflow-y: auto
+  display: flex
+  flex-direction: column
+  gap: 12px
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4)
+
+  &__header
+    display: flex
+    align-items: baseline
+    gap: 12px
+    border-bottom: 1px solid $border-color
+    padding-bottom: 10px
+
+  &__title
+    font-size: 15px
+    font-weight: 600
+    color: $text-primary
+
+  &__sub
+    font-size: 12px
+    color: $text-secondary
+
+  &__progressbar
+    position: relative
+    height: 5px
+    background: rgba(255, 255, 255, 0.07)
+    border-radius: 3px
+    overflow: hidden
+
+  &__progressbar-fill
+    position: absolute
+    top: 0
+    left: 0
+    height: 100%
+    background: $accent
+    border-radius: 3px
+    transition: width 0.25s ease
+
+  &__progressbar--indeterminate
+    .auto-power-modal__progressbar-fill
+      width: 30%
+      animation: auto-power-modal-indeterminate 1.4s linear infinite
+      transition: none
+
+@keyframes auto-power-modal-indeterminate
+  0%
+    left: -30%
+  100%
+    left: 100%
+
+.auto-power-modal
+  &__section
+    display: flex
+    flex-direction: column
+    gap: 6px
+
+  &__label
+    font-size: 12px
+    font-weight: 600
+    color: $text-secondary
+
+  &__row
+    display: flex
+    align-items: center
+    gap: 8px
+
+  &__input
+    background: rgba(255, 255, 255, 0.06)
+    border: 1px solid $border-color
+    border-radius: 4px
+    color: $text-primary
+    padding: 4px 8px
+    font-size: 13px
+    width: 80px
+
+    &:focus
+      outline: 1px solid $accent
+      border-color: $accent
+
+  &__unit
+    font-size: 12px
+    color: $text-secondary
+
+  &__hint
+    font-size: 11px
+    color: $text-secondary
+    line-height: 1.5
+
+  &__progress
+    display: flex
+    flex-direction: column
+    gap: 4px
+    background: rgba(0, 0, 0, 0.25)
+    padding: 8px 12px
+    border-radius: 6px
+
+  &__progress-row
+    display: flex
+    justify-content: space-between
+    font-size: 12px
+    color: $text-primary
+
+    &:first-child
+      color: $text-secondary
+
+  &__changes
+    display: flex
+    flex-direction: column
+    gap: 4px
+    max-height: 240px
+    overflow-y: auto
+    background: rgba(0, 0, 0, 0.25)
+    padding: 8px 12px
+    border-radius: 6px
+
+  &__change-row
+    display: grid
+    grid-template-columns: 1fr 60px 16px 60px 40px
+    align-items: center
+    gap: 6px
+    font-size: 12px
+    padding: 2px 0
+
+  &__ap-name
+    color: $text-primary
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+
+  &__tx-cur
+    color: $text-secondary
+    text-align: right
+
+  &__tx-arrow
+    color: $text-secondary
+    text-align: center
+
+  &__tx-next
+    color: $text-primary
+    text-align: right
+
+  &__tx-delta
+    text-align: right
+    font-weight: 600
+
+    &--up
+      color: #2ecc71
+
+    &--down
+      color: #e67e22
+
+    &--zero
+      color: $text-secondary
+
+  &__error
+    color: #e74c3c
+    font-size: 12px
+
+  &__actions
+    display: flex
+    gap: 8px
+    justify-content: flex-end
+    border-top: 1px solid $border-color
+    padding-top: 10px
+
+  &__btn
+    padding: 6px 16px
+    border-radius: 6px
+    border: none
+    font-size: 13px
+    cursor: pointer
+    transition: opacity 0.15s, background 0.15s
+
+    &--cancel
+      background: rgba(255, 255, 255, 0.08)
+      color: $text-secondary
+
+      &:hover
+        background: rgba(255, 255, 255, 0.12)
+
+    &--primary
+      background: $accent
+      color: #fff
+
+      &:hover
+        opacity: 0.85
