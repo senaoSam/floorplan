@@ -311,16 +311,18 @@ int readGridWallIdx(int i) {
 // Process one cell's wall list. Walls straddling adjacent cells would
 // otherwise have their loss double-counted, so we keep a small cyclic
 // buffer of the SEEN_BUF most recently applied wall ids and skip any
-// repeats. For typical grid stride (~1 m) and cell-spanning walls
-// (a few cells) this catches the common duplicates. The remaining residue
-// is bounded — at worst ~1 dB extra on the ray, within the F5a/b
-// friis-baseline gate.
+// repeats. SEEN_BUF=16 covers dense-wall scenarios (~60 walls / 30×20 m)
+// where a ray can touch >8 distinct walls per cell-cluster; the original
+// SEEN_BUF=8 surfaced 5-14 dB friis-baseline drift on the dense-walls
+// fixture. 16 is the smallest power of two that empirically clears the
+// dense-walls F5b gate (≤1 dB) without measurable register pressure
+// regression on basic / refl-min / dense-aps.
 //
 // A true "seen" set would need a bitmask texture per fragment, which is
 // exactly what F5b is trying to avoid (fragment-local memory is scarce).
 // The cyclic-buffer approximation keeps the shader stateless across cells
 // and matches BVH-style watertight traversal accuracy in practice.
-const int SEEN_BUF = 8;
+const int SEEN_BUF = 16;
 void processCell(int cx, int cy, vec2 ap, float apZ, vec2 rx, float rxZ,
                  vec2 rayDir, inout float total,
                  inout int seenBuf[SEEN_BUF], inout int seenWritePos) {
@@ -997,7 +999,7 @@ int readGridWallIdx(int i) {
   return int(texelFetch(uGridList, p, 0).r);
 }
 
-const int SEEN_BUF = 8;
+const int SEEN_BUF = 16;
 
 float accumulateWallLossGrid(vec2 ap, float apZ, vec2 rx, float rxZ, float fOver24) {
   float total = 0.0;

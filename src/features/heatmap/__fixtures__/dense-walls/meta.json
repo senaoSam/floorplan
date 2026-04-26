@@ -1,0 +1,104 @@
+{
+  "fixtureId": "dense-walls",
+  "description": "3 APs + ~50 walls (concrete perimeter w/ windows, drywall corridor maze w/ doors, brick/wood interior). Friis-only — stresses SEEN_BUF cyclic-dedup buffer in dense wall scenarios.",
+  "activeFloorId": "floor-0",
+  "engineOpts": {
+    "gridStepM": 0.5,
+    "maxReflOrder": 0,
+    "enableDiffraction": false,
+    "rxHeightM": 1
+  },
+  "engineFingerprint": "6fc708d466f02d22",
+  "gitCommit": "68037b25cd61d6c20c37017c12eee190d27b2211",
+  "gitDirty": true,
+  "generatedAt": "2026-04-26T12:33:28.703Z",
+  "grid": {
+    "nx": 61,
+    "ny": 41,
+    "gridStepM": 0.5
+  },
+  "baselines": {
+    "full": {
+      "opts": {
+        "maxReflOrder": 0,
+        "enableDiffraction": false
+      },
+      "appliesTo": [
+        "F5c",
+        "F5d",
+        "F5e",
+        "F5f"
+      ],
+      "stats": {
+        "rssi": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -230.26,
+          "max": -28.438,
+          "mean": -85.56
+        },
+        "sinr": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -135.26,
+          "max": 66.562,
+          "mean": 9.041
+        },
+        "snr": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -135.26,
+          "max": 66.562,
+          "mean": 9.44
+        },
+        "cci": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -120,
+          "max": -84.188,
+          "mean": -115.963
+        }
+      }
+    },
+    "friis": {
+      "opts": {
+        "maxReflOrder": 0,
+        "enableDiffraction": false
+      },
+      "appliesTo": [
+        "F5a",
+        "F5b"
+      ],
+      "stats": {
+        "rssi": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -230.26,
+          "max": -28.438,
+          "mean": -85.56
+        },
+        "sinr": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -135.26,
+          "max": 66.562,
+          "mean": 9.041
+        },
+        "snr": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -135.26,
+          "max": 66.562,
+          "mean": 9.44
+        },
+        "cci": {
+          "finite": 2400,
+          "nan": 101,
+          "min": -120,
+          "max": -84.188,
+          "mean": -115.963
+        }
+      }
+    }
+  }
+}
