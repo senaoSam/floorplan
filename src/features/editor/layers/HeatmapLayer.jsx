@@ -319,9 +319,17 @@ export default function HeatmapLayer({ floorId }) {
     return () => { cancelled = true; clearTimeout(id) }
   }, [enabled, mode, engine, scenario, reflections, diffraction, liveGridStepM, liveFreqOverrideN, liveCullFloorDbm, liveRssiOnly, liveBlur, liveShowContours, floor?.scale, padding])
 
-  if (!enabled || !scenario || !floor?.scale || !glRef.current || !padding) return null
+  if (!enabled || !scenario || !floor?.scale || !padding) return null
+  // Initialise GL eagerly during render so the KonvaImage mounts on the same
+  // commit that first satisfies enabled+scenario+padding. Previously this was
+  // gated on glRef.current, which is only populated inside the effect — and
+  // because refs don't trigger re-render, the KonvaImage stayed unmounted
+  // until some unrelated state change happened to re-run render. That's why
+  // the heatmap only appeared after the first hover post-Demo-load.
+  const gl = getGL()
+  if (!gl) return null
 
-  const canvas = glRef.current.canvas
+  const canvas = gl.canvas
   const rotation = floor.rotation || 0
   const hasCrop = floor.cropX != null && floor.cropWidth != null
   const cx = floor.imageWidth / 2
