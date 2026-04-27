@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "playwright": {
-      "command": "npx",
-      "args": ["@playwright/mcp@latest", "--isolated"]
+      "command": "fnm",
+      "args": ["exec", "npx.cmd", "-y", "@playwright/mcp@latest", "--isolated"]
     }
   }
 }
