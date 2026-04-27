@@ -119,6 +119,22 @@ uniform int uDiffEnabled;
 uniform sampler2D uCorners;
 uniform int uCornerCount;
 
+// HM-F5j: per-AP precomputed LOS field. Texture is R8 sized (uGridSize),
+// 1 = direct AP→rx ray hits zero walls (LOS), 0 = blocked.
+//   uLosEnabled = 0  → ignore (host didn't bake; legacy path)
+//   uLosEnabled = 1  → strict mode A: LOS=1 short-circuits direct-path wall
+//                       scan (wallLossDir=0, dirHits=0). Reflection loop
+//                       still runs — refl contributions from other walls
+//                       are physically present even when the direct ray
+//                       sees no walls. Diffraction loop is naturally
+//                       skipped (it gates on dirHits>0). Bit-equivalent
+//                       to the no-LOS path mod fp32 round-off.
+//   uLosFastMode = 1 → mode B: LOS=1 also skips reflections. Faster but
+//                       drifts from JS reference; opt-in for drag-time use.
+uniform sampler2D uLosTex;
+uniform int uLosEnabled;
+uniform int uLosFastMode;
+
 const float PI = 3.14159265358979;
 const float SLAB_SEC_CAP = 3.5;
 const float DIRECTIONAL_BACK_DB = 20.0;
@@ -827,12 +843,25 @@ float rssiWithReflections(vec2 rx, float rxZ) {
   float dz = uApPos.z - rxZ;
   float dDir = sqrt(dxyLen * dxyLen + dz * dz);
 
+  // HM-F5j: per-AP LOS lookup. losBit==1 means the host's bake pass
+  // verified the AP→rx ray hits zero walls at this fragment, so the
+  // direct-path wall scan is a guaranteed no-op. We skip the DDA entirely
+  // (dirHits=0, wallLoss=0) — diffraction's dirHits>0 gate then naturally
+  // skips its loop too, matching the JS reference's behaviour.
+  // The bake uses the same Z filter + SEEN_BUF dedup as the runtime DDA, so
+  // shading this short-circuit is bit-equivalent to running the full scan.
+  bool losClear = false;
+  if (uLosEnabled == 1) {
+    ivec2 gpx = ivec2(gl_FragCoord.xy);
+    losClear = texelFetch(uLosTex, gpx, 0).r > 0.5;
+  }
+
   // Need both wall-loss dB and the hit count so the diffraction loop can
   // gate "direct path is blocked" the same way JS does (wallScan.hits > 0).
   // HM-F5i: grid DDA path with SEEN_BUF dedup is now used here (dispatched
   // inside accumulateWallLossWithHits when the grid is uploaded), giving
   // O(√N_walls) instead of O(N_walls).
-  vec2 dirScan = accumulateWallLossWithHits(uApPos.xy, uApPos.z, rx, rxZ);
+  vec2 dirScan = losClear ? vec2(0.0) : accumulateWallLossWithHits(uApPos.xy, uApPos.z, rx, rxZ);
   float wallLossDir = dirScan.x;
   float dirHits     = dirScan.y;
   float slabLossDir = accumulateSlabLoss(uApPos.xy, uApPos.z, rx, rxZ);
@@ -894,7 +923,13 @@ float rssiWithReflections(vec2 rx, float rxZ) {
   // uReflEnabled gates the loop separately from uDiffEnabled so the JS
   // engine's behaviour (refl + diff toggle independently) is preserved
   // when the caller routes diff=on/refl=off through this complex path.
-  if (uReflEnabled == 1 && sameFloor) {
+  // HM-F5j fast mode (B): when uLosFastMode==1 AND LOS=1 we additionally
+  // skip reflections. This is a *physics compromise* — reflections off
+  // other walls can still reach a LOS=1 cell, especially metal (G≈-1).
+  // Off by default; opt-in for drag-time speedup where ~5-15 dB transient
+  // drift is acceptable. Strict mode (uLosFastMode==0) keeps full parity.
+  bool reflSkipByLos = (uLosFastMode == 1) && losClear;
+  if (uReflEnabled == 1 && sameFloor && !reflSkipByLos) {
     for (int w = 0; w < uWallCount; w++) {
       vec2 wa, wb;
       float wLossDb, wLossB, wZLo, wZHi;
@@ -1534,6 +1569,181 @@ void main() {
   outColor = vec4(0.0);
 }`
 
+// HM-F5j: LOS bake. For one AP and a fragment grid, write R8 1/0 indicating
+// whether the AP→rx ray crosses any wall (with the same Z filter the runtime
+// uses). Geometry-only — no Friis, no slab, no antenna gain. Stops on first
+// confirmed hit, so the DDA cost is amortised down to "average walls visited
+// before the first crossing", typically a small constant.
+//
+// The output sampler is later read by FS via `texelFetch(uLosTex, gpx)` —
+// gpx is the same `ivec2(gl_FragCoord.xy)` that produced this texel during
+// bake, so the (cell ↔ texel) mapping is the identity. No bilinear lookup
+// needed; nearest filtering is the only sane mode.
+const FS_LOS = `#version 300 es
+precision highp float;
+precision highp int;
+
+in vec2 vUv;
+out vec4 outColor;
+
+uniform vec2 uGridSize;
+uniform vec2 uOriginM;
+uniform float uGridStepM;
+
+uniform vec3 uApPos;
+uniform float uRxZM;
+
+uniform sampler2D uWalls;
+uniform int uWallCount;
+
+uniform sampler2D uGridIdx;
+uniform sampler2D uGridList;
+uniform ivec2 uGridDims;
+uniform float uGridCellM;
+uniform vec2  uGridOriginM;
+uniform int   uGridListWidth;
+
+const float SEG_HIT_EPS = 1e-6;
+
+vec2 segSegIntersect(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
+  vec2 d1 = p2 - p1;
+  vec2 d2 = p4 - p3;
+  float denom = d1.x * d2.y - d1.y * d2.x;
+  if (abs(denom) < 1e-12) return vec2(0.0, 0.0);
+  vec2 r = p1 - p3;
+  float t = (d2.x * r.y - d2.y * r.x) / denom;
+  float u = (d1.x * r.y - d1.y * r.x) / denom;
+  if (t < 0.0 || t > 1.0 + SEG_HIT_EPS) return vec2(0.0, 0.0);
+  if (u < -SEG_HIT_EPS || u > 1.0 + SEG_HIT_EPS) return vec2(0.0, 0.0);
+  return vec2(1.0, t);
+}
+
+void readWall(int w, out vec2 a, out vec2 b, out float zLo, out float zHi) {
+  int t0 = w * 4;
+  int t1 = t0 + 1;
+  ivec2 p0 = ivec2(t0 % 4096, t0 / 4096);
+  ivec2 p1 = ivec2(t1 % 4096, t1 / 4096);
+  vec4 e0 = texelFetch(uWalls, p0, 0);
+  vec4 e1 = texelFetch(uWalls, p1, 0);
+  a = e0.xy;  b = e0.zw;
+  zLo = e1.y; zHi = e1.z;
+}
+
+// Did this wall block the AP→rx ray (segment hit + Z filter)?
+bool wallBlocks(int w, vec2 ap, float apZ, vec2 rx, float rxZ) {
+  vec2 a, b;
+  float zLo, zHi;
+  readWall(w, a, b, zLo, zHi);
+  vec2 hit = segSegIntersect(ap, rx, a, b);
+  if (hit.x < 0.5) return false;
+  float zAt = apZ + (rxZ - apZ) * hit.y;
+  return zAt >= zLo && zAt <= zHi;
+}
+
+void readGridCell(int cx, int cy, out int start, out int count) {
+  if (cx < 0 || cy < 0 || cx >= uGridDims.x || cy >= uGridDims.y) {
+    start = 0; count = 0; return;
+  }
+  vec4 idx = texelFetch(uGridIdx, ivec2(cx, cy), 0);
+  start = int(idx.x);
+  count = int(idx.y);
+}
+
+int readGridWallIdx(int i) {
+  ivec2 p = ivec2(i % uGridListWidth, i / uGridListWidth);
+  return int(texelFetch(uGridList, p, 0).r);
+}
+
+const int SEEN_BUF = 16;
+
+// Brute-force fallback (no grid). Returns true when any wall blocks the ray.
+bool anyBlockBrute(vec2 ap, float apZ, vec2 rx, float rxZ) {
+  for (int w = 0; w < uWallCount; w++) {
+    if (wallBlocks(w, ap, apZ, rx, rxZ)) return true;
+  }
+  return false;
+}
+
+// Grid-accelerated DDA early-out scan. Same SEEN_BUF cyclic dedup as the
+// runtime accumulators so wall straddling between cells doesn't double-trip
+// (or rather, doesn't waste work re-checking the same wall). Returns on the
+// first confirmed hit — most LOS=0 cells exit after touching a single wall.
+bool anyBlockGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
+  vec2 apG = (ap - uGridOriginM) / uGridCellM;
+  vec2 rxG = (rx - uGridOriginM) / uGridCellM;
+
+  int cx = int(floor(apG.x));
+  int cy = int(floor(apG.y));
+  int cxEnd = int(floor(rxG.x));
+  int cyEnd = int(floor(rxG.y));
+
+  vec2 d = rxG - apG;
+  float dx = d.x;
+  float dy = d.y;
+  int stepX = dx > 0.0 ? 1 : (dx < 0.0 ? -1 : 0);
+  int stepY = dy > 0.0 ? 1 : (dy < 0.0 ? -1 : 0);
+
+  float tMaxX = 1e30;
+  float tDeltaX = 1e30;
+  if (stepX != 0) {
+    float nextX = stepX > 0 ? float(cx + 1) : float(cx);
+    tMaxX = (nextX - apG.x) / dx;
+    tDeltaX = abs(1.0 / dx);
+  }
+  float tMaxY = 1e30;
+  float tDeltaY = 1e30;
+  if (stepY != 0) {
+    float nextY = stepY > 0 ? float(cy + 1) : float(cy);
+    tMaxY = (nextY - apG.y) / dy;
+    tDeltaY = abs(1.0 / dy);
+  }
+
+  int seenBuf[SEEN_BUF];
+  for (int j = 0; j < SEEN_BUF; j++) seenBuf[j] = -1;
+  int seenWritePos = 0;
+
+  float tCur = 0.0;
+  int maxSteps = uGridDims.x + uGridDims.y + 4;
+  for (int i = 0; i < 4096; i++) {
+    if (i >= maxSteps) break;
+    int start, count;
+    readGridCell(cx, cy, start, count);
+    for (int k = 0; k < count; k++) {
+      int wIdx = readGridWallIdx(start + k);
+      bool dup = false;
+      for (int j = 0; j < SEEN_BUF; j++) {
+        if (seenBuf[j] == wIdx) { dup = true; break; }
+      }
+      if (dup) continue;
+      seenBuf[seenWritePos] = wIdx;
+      seenWritePos = (seenWritePos + 1) % SEEN_BUF;
+      if (wallBlocks(wIdx, ap, apZ, rx, rxZ)) return true;
+    }
+    if (cx == cxEnd && cy == cyEnd) break;
+    if (tMaxX < tMaxY) { tCur = tMaxX; tMaxX += tDeltaX; cx += stepX; }
+    else               { tCur = tMaxY; tMaxY += tDeltaY; cy += stepY; }
+    if (tCur > 1.0) break;
+  }
+  return false;
+}
+
+void main() {
+  ivec2 gpx = ivec2(gl_FragCoord.xy);
+  if (gpx.x >= int(uGridSize.x) || gpx.y >= int(uGridSize.y)) {
+    outColor = vec4(0.0);
+    return;
+  }
+  vec2 rx = uOriginM + vec2(float(gpx.x), float(gpx.y)) * uGridStepM;
+  float rxZ = uRxZM;
+
+  bool blocked = uGridDims.x == 0
+    ? anyBlockBrute(uApPos.xy, uApPos.z, rx, rxZ)
+    : anyBlockGrid(uApPos.xy, uApPos.z, rx, rxZ);
+
+  // R8 unsigned-byte target: write 1.0 (→ 255) for clear LOS, 0.0 for blocked.
+  outColor = vec4(blocked ? 0.0 : 1.0);
+}`
+
 function compile(gl, type, src) {
   const sh = gl.createShader(type)
   gl.shaderSource(sh, src)
@@ -1589,6 +1799,9 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // HM-F5h coarse-pass program. Lazily linked because most callers never
   // trigger cascade (small scenes), but cheap enough to compile up-front.
   const progFieldCoarse = link(gl, VS, FS_FIELD_COARSE)
+  // HM-F5j: LOS bake program — one R8 pass per AP, results cached across
+  // frames. Compiled up-front because every refl/diff render uses it.
+  const progLos = link(gl, VS, FS_LOS)
 
   const vao = gl.createVertexArray()
   gl.bindVertexArray(vao)
@@ -1694,6 +1907,28 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // HM-F5g: AP texture (4 RGBA32F texels per AP).
   const apsTex = gl.createTexture()
   let apCount = 0
+
+  // HM-F5j: LOS field cache. Each AP gets its own R8 texture sized to the
+  // sample grid; we recompute only when geometry changes (walls update or
+  // the AP itself moves). `wallsVersion` is bumped in uploadWalls and acts
+  // as a cache-bust signature — any dependent entry whose hash references
+  // the prior version is treated as stale and rebaked.
+  // Cache shape: Map<apKey, { tex, fbo, hash, nx, ny }>
+  // Hash signature combines per-AP geometry (pos x/y/z) with per-frame grid
+  // params (rxZM, gridStepM, originX, originY, nx, ny, wallsVersion).
+  // 1×1 placeholder so the FS sampler binding stays valid even when the
+  // host hasn't called bakeLos (LOS feature is opt-in via opts.losEnabled).
+  const losPlaceholderTex = gl.createTexture()
+  gl.bindTexture(gl.TEXTURE_2D, losPlaceholderTex)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 1, 1, 0, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array([0]))
+
+  const losCache = new Map()
+  let wallsVersion = 0
+
   for (const t of [wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex, apsTex]) {
     gl.bindTexture(gl.TEXTURE_2D, t)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
@@ -1754,6 +1989,16 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, data)
 
     buildGrid(walls, opts.bbox)
+
+    // HM-F5j: any wall-list change invalidates every cached LOS field.
+    // Dropping textures is cheaper than scanning entries; the next bakeLos
+    // call regenerates only the APs that are actually rendered this frame.
+    wallsVersion++
+    for (const entry of losCache.values()) {
+      gl.deleteTexture(entry.tex)
+      gl.deleteFramebuffer(entry.fbo)
+    }
+    losCache.clear()
   }
 
   // HM-F5g: pack APs into a 4-texel-per-AP RGBA32F image. Layout matches the
@@ -1998,6 +2243,114 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   let useGrid = true
   function setUseGrid(v) { useGrid = !!v }
 
+  // HM-F5j: bake one AP's LOS grid into an R8 texture, returning the texture
+  // (and its size, for sampler binding). Cache key is the geometry signature:
+  // moving the AP rebuilds only that entry, walls changing flushes everything
+  // (handled by uploadWalls). Caller MUST have already called uploadWalls so
+  // wallsTex / grid acceleration are populated.
+  //
+  // The returned object's `tex` is owned by the cache — callers must not
+  // delete it. It stays alive until either uploadWalls or dispose() runs.
+  function bakeLosOne(ap, apKey, gridStepM, originM, rxZM, nx, ny) {
+    const apX = ap.pos.x, apY = ap.pos.y, apZ = ap.zM ?? 0
+    // Hash uses fp32 bit patterns to detect any change — including cell-grid
+    // resize, padding adjustments, AP elevation changes during multi-floor
+    // toggles. Bake is geometry-only so antenna gain / channel changes are
+    // legitimately ignored (LOS depends on rays, not radio).
+    const hash = `${apX},${apY},${apZ},${gridStepM},${originM.x},${originM.y},${nx},${ny},${rxZM},${wallsVersion}`
+    const cached = losCache.get(apKey)
+    if (cached && cached.hash === hash) return cached
+
+    // Allocate or resize this AP's texture + FBO. Keeping per-AP FBOs alive
+    // saves a framebufferTexture2D + completeness check per frame.
+    let entry = cached
+    if (!entry) {
+      const tex = gl.createTexture()
+      gl.bindTexture(gl.TEXTURE_2D, tex)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+      const fbo = gl.createFramebuffer()
+      entry = { tex, fbo, hash: '', nx: 0, ny: 0 }
+      losCache.set(apKey, entry)
+    }
+    if (entry.nx !== nx || entry.ny !== ny) {
+      gl.bindTexture(gl.TEXTURE_2D, entry.tex)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, nx, ny, 0, gl.RED, gl.UNSIGNED_BYTE, null)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, entry.fbo)
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, entry.tex, 0)
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        throw new Error('LOS FBO incomplete')
+      }
+      entry.nx = nx; entry.ny = ny
+    }
+
+    // Run the bake pass: same wall texture / grid acceleration as the runtime
+    // shader, just with a stop-on-first-hit DDA writing R8.
+    gl.bindFramebuffer(gl.FRAMEBUFFER, entry.fbo)
+    gl.viewport(0, 0, nx, ny)
+    gl.useProgram(progLos)
+
+    gl.uniform2f(gl.getUniformLocation(progLos, 'uGridSize'), nx, ny)
+    gl.uniform2f(gl.getUniformLocation(progLos, 'uOriginM'), originM.x, originM.y)
+    gl.uniform1f(gl.getUniformLocation(progLos, 'uGridStepM'), gridStepM)
+    gl.uniform3f(gl.getUniformLocation(progLos, 'uApPos'), apX, apY, apZ)
+    gl.uniform1f(gl.getUniformLocation(progLos, 'uRxZM'), rxZM)
+
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, wallsTex)
+    gl.uniform1i(gl.getUniformLocation(progLos, 'uWalls'), 0)
+    gl.uniform1i(gl.getUniformLocation(progLos, 'uWallCount'), wallsCountForLos)
+
+    gl.activeTexture(gl.TEXTURE1)
+    gl.bindTexture(gl.TEXTURE_2D, gridIdxTex)
+    gl.uniform1i(gl.getUniformLocation(progLos, 'uGridIdx'), 1)
+    gl.activeTexture(gl.TEXTURE2)
+    gl.bindTexture(gl.TEXTURE_2D, gridListTex)
+    gl.uniform1i(gl.getUniformLocation(progLos, 'uGridList'), 2)
+    gl.uniform2i(gl.getUniformLocation(progLos, 'uGridDims'), useGrid ? gridDimsX : 0, useGrid ? gridDimsY : 0)
+    gl.uniform1f(gl.getUniformLocation(progLos, 'uGridCellM'), gridCellM)
+    gl.uniform2f(gl.getUniformLocation(progLos, 'uGridOriginM'), gridOriginX, gridOriginY)
+    gl.uniform1i(gl.getUniformLocation(progLos, 'uGridListWidth'), gridListWidth)
+
+    gl.bindVertexArray(vao)
+    gl.drawArrays(gl.TRIANGLES, 0, 6)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+
+    entry.hash = hash
+    return entry
+  }
+
+  // HM-F5j: bake LOS textures for a list of APs. Caller passes a per-AP key
+  // that MUST be stable across frames for the same AP (use ap.id when
+  // available). Stale cache entries (APs no longer in the list) are evicted
+  // here so the cache size tracks the live AP set.
+  // Returns Map<apKey, { tex, nx, ny }> for the FS to bind per-AP.
+  // wallCount is plumbed in as a snapshot from sampleFieldGL because the
+  // shader uniform must match what was uploaded.
+  let wallsCountForLos = 0
+  function bakeLos(apEntries, gridStepM, originM, rxZM, nx, ny, wallCount) {
+    wallsCountForLos = wallCount
+    const seen = new Set()
+    const out = new Map()
+    for (const { ap, key } of apEntries) {
+      seen.add(key)
+      out.set(key, bakeLosOne(ap, key, gridStepM, originM, rxZM, nx, ny))
+    }
+    // Evict entries for APs that disappeared this frame. Cheap: typical N is
+    // dozens, the loop is amortised across the bake we just did.
+    for (const k of [...losCache.keys()]) {
+      if (!seen.has(k)) {
+        const e = losCache.get(k)
+        gl.deleteTexture(e.tex)
+        gl.deleteFramebuffer(e.fbo)
+        losCache.delete(k)
+      }
+    }
+    return out
+  }
+
   // Render one AP and read back nx*ny floats (dBm). Caller can override the
   // grid extent via opts.gridSize when sampling beyond scenario.size (padded
   // grids — see sampleFieldGL).
@@ -2073,6 +2426,15 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, cornersTex)
     gl.uniform1i(gl.getUniformLocation(prog, 'uCorners'), 5)
     gl.uniform1i(gl.getUniformLocation(prog, 'uCornerCount'), cornerCount)
+
+    // HM-F5j: LOS field. opts.losTex is the R8 texture from a prior bakeLos
+    // for this AP; missing → bind placeholder, disable lookup. losFastMode
+    // enables mode B (skip reflections on LOS=1) — off by default.
+    gl.activeTexture(gl.TEXTURE6)
+    gl.bindTexture(gl.TEXTURE_2D, opts.losTex || losPlaceholderTex)
+    gl.uniform1i(gl.getUniformLocation(prog, 'uLosTex'), 6)
+    gl.uniform1i(gl.getUniformLocation(prog, 'uLosEnabled'), opts.losTex ? 1 : 0)
+    gl.uniform1i(gl.getUniformLocation(prog, 'uLosFastMode'), opts.losFastMode ? 1 : 0)
 
     gl.bindVertexArray(vao)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
@@ -2212,13 +2574,19 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.deleteProgram(prog)
     gl.deleteProgram(progField)
     gl.deleteProgram(progFieldCoarse)
+    gl.deleteProgram(progLos)
     gl.deleteBuffer(vbo)
     gl.deleteVertexArray(vao)
-    for (const t of [outTex, outFieldTex, wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex, apsTex, maskTex]) gl.deleteTexture(t)
+    for (const t of [outTex, outFieldTex, wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex, apsTex, maskTex, losPlaceholderTex]) gl.deleteTexture(t)
+    for (const e of losCache.values()) {
+      gl.deleteTexture(e.tex)
+      gl.deleteFramebuffer(e.fbo)
+    }
+    losCache.clear()
     gl.deleteFramebuffer(outFbo)
     gl.deleteFramebuffer(outFieldFbo)
     gl.deleteFramebuffer(maskFbo)
   }
 
-  return { uploadWalls, uploadCorners, uploadSlabs, uploadAps, renderAp, renderField, setUseGrid, dispose, gl }
+  return { uploadWalls, uploadCorners, uploadSlabs, uploadAps, bakeLos, renderAp, renderField, setUseGrid, dispose, gl }
 }

@@ -118,6 +118,25 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
   }
 
   // ---- per-AP fallback (refl on, diff on, or custom AP present) ----
+  // HM-F5j: bake one LOS R8 grid per AP up front. Each subsequent renderAp
+  // pass uses its AP's LOS texture to short-circuit the direct-path wall
+  // scan + diffraction at fragments where the AP→rx ray hits zero walls
+  // (mode A: refl loop still runs to preserve JS parity). The cache inside
+  // propagationGL keeps textures alive across frames so an AP that didn't
+  // move only pays for the bake when walls change.
+  // Skip when the caller opts out (debug: `losEnabled: false`); custom-
+  // pattern APs go through the JS RSSI override below so the LOS short-
+  // circuit on those APs would be wasted work — but the bake is cheap and
+  // the cache key is per-AP, so we still bake them.
+  const losEnabled = opts.losEnabled !== false
+  const losMap = losEnabled
+    ? gl.bakeLos(
+        scenario.aps.map((ap, i) => ({ ap, key: ap.id ?? `_idx_${i}` })),
+        gridStepM, { x: originX, y: originY }, rxZM, nx, ny,
+        scenario.walls.length,
+      )
+    : null
+
   const perApGrids = []
   for (let k = 0; k < scenario.aps.length; k++) {
     const ap = scenario.aps[k]
@@ -126,9 +145,15 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
       _antGainDbi: AP_ANT_GAIN_DBI,
       _rxGainDbi: RX_ANT_GAIN_DBI,
     }
+    const losEntry = losMap?.get(ap.id ?? `_idx_${k}`)
     const { rssi: shaderGrid } = gl.renderAp(
       apForGL, scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta,
-      { ...opts, gridSize: { nx, ny } },
+      {
+        ...opts,
+        gridSize: { nx, ny },
+        losTex: losEntry?.tex,
+        losFastMode: opts.losFastMode === true,
+      },
     )
 
     if (ap.antennaMode === 'custom') {
