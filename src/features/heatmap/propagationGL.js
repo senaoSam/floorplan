@@ -424,6 +424,154 @@ float accumulateWallLoss(vec2 ap, float apZ, vec2 rx, float rxZ) {
   return accumulateWallLossGrid(ap, apZ, rx, rxZ);
 }
 
+// HM-F5i: same DDA + SEEN_BUF dedup as accumulateWallLossGrid, but skips one
+// designated wall index (used for image-source reflection legs — the
+// reflecting wall must not contribute its own loss to either AP→reflPt or
+// reflPt→rx). The exclude check happens BEFORE dedup interaction so the
+// excluded wall doesn't waste a SEEN_BUF slot in dense-wall scenes.
+void processCellExcept(int cx, int cy, vec2 ap, float apZ, vec2 rx, float rxZ,
+                       vec2 rayDir, int excludeW, inout float total,
+                       inout int seenBuf[SEEN_BUF], inout int seenWritePos) {
+  int start, count;
+  readGridCell(cx, cy, start, count);
+  for (int k = 0; k < count; k++) {
+    int wIdx = readGridWallIdx(start + k);
+    if (wIdx == excludeW) continue;
+    bool dup = false;
+    for (int j = 0; j < SEEN_BUF; j++) {
+      if (seenBuf[j] == wIdx) { dup = true; break; }
+    }
+    if (dup) continue;
+    seenBuf[seenWritePos] = wIdx;
+    seenWritePos = (seenWritePos + 1) % SEEN_BUF;
+    applyWallContribution(wIdx, ap, apZ, rx, rxZ, rayDir, total);
+  }
+}
+
+float accumulateWallLossExceptGrid(vec2 ap, float apZ, vec2 rx, float rxZ, int excludeW) {
+  float total = 0.0;
+  vec2 rayDir = rx - ap;
+
+  vec2 apG = (ap - uGridOriginM) / uGridCellM;
+  vec2 rxG = (rx - uGridOriginM) / uGridCellM;
+  int cx = int(floor(apG.x));
+  int cy = int(floor(apG.y));
+  int cxEnd = int(floor(rxG.x));
+  int cyEnd = int(floor(rxG.y));
+  vec2 d = rxG - apG;
+  float dx = d.x;
+  float dy = d.y;
+  int stepX = dx > 0.0 ? 1 : (dx < 0.0 ? -1 : 0);
+  int stepY = dy > 0.0 ? 1 : (dy < 0.0 ? -1 : 0);
+  float tMaxX = 1e30;
+  float tDeltaX = 1e30;
+  if (stepX != 0) {
+    float nextX = stepX > 0 ? float(cx + 1) : float(cx);
+    tMaxX = (nextX - apG.x) / dx;
+    tDeltaX = abs(1.0 / dx);
+  }
+  float tMaxY = 1e30;
+  float tDeltaY = 1e30;
+  if (stepY != 0) {
+    float nextY = stepY > 0 ? float(cy + 1) : float(cy);
+    tMaxY = (nextY - apG.y) / dy;
+    tDeltaY = abs(1.0 / dy);
+  }
+  int seenBuf[SEEN_BUF];
+  for (int j = 0; j < SEEN_BUF; j++) seenBuf[j] = -1;
+  int seenWritePos = 0;
+  float tCur = 0.0;
+  int maxSteps = uGridDims.x + uGridDims.y + 4;
+  for (int i = 0; i < 4096; i++) {
+    if (i >= maxSteps) break;
+    processCellExcept(cx, cy, ap, apZ, rx, rxZ, rayDir, excludeW, total, seenBuf, seenWritePos);
+    if (cx == cxEnd && cy == cyEnd) break;
+    if (tMaxX < tMaxY) { tCur = tMaxX; tMaxX += tDeltaX; cx += stepX; }
+    else               { tCur = tMaxY; tMaxY += tDeltaY; cy += stepY; }
+    if (tCur > 1.0) break;
+  }
+  return total;
+}
+
+// HM-F5i: same DDA + SEEN_BUF dedup as accumulateWallLossGrid, but also
+// returns the hit count so the diffraction code can apply JS's
+// "s1.hits > 1 || s2.hits > 1 → cull" rule. A "hit" is any wall whose
+// segment is crossed by the AP→rx ray AND whose Z band contains the ray's
+// z at the crossing — exactly the gating that applyWallContribution already
+// performs internally, so we re-derive it here to extract both the loss
+// and the boolean did-hit per wall.
+void processCellWithHits(int cx, int cy, vec2 ap, float apZ, vec2 rx, float rxZ,
+                         vec2 rayDir, inout vec2 acc,
+                         inout int seenBuf[SEEN_BUF], inout int seenWritePos) {
+  int start, count;
+  readGridCell(cx, cy, start, count);
+  for (int k = 0; k < count; k++) {
+    int wIdx = readGridWallIdx(start + k);
+    bool dup = false;
+    for (int j = 0; j < SEEN_BUF; j++) {
+      if (seenBuf[j] == wIdx) { dup = true; break; }
+    }
+    if (dup) continue;
+    seenBuf[seenWritePos] = wIdx;
+    seenWritePos = (seenWritePos + 1) % SEEN_BUF;
+
+    vec2 a, b;
+    float lossDb, lossB, zLo, zHi;
+    readWall(wIdx, a, b, lossDb, lossB, zLo, zHi);
+    vec2 hit = segSegIntersect(ap, rx, a, b);
+    if (hit.x < 0.5) continue;
+    float zAt = apZ + (rxZ - apZ) * hit.y;
+    if (zAt < zLo || zAt > zHi) continue;
+    acc.x += wallLossOblique(a, b, rayDir, lossDb, lossB, uFOver24);
+    acc.y += 1.0;
+  }
+}
+
+vec2 accumulateWallLossWithHitsGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
+  vec2 acc = vec2(0.0);
+  vec2 rayDir = rx - ap;
+
+  vec2 apG = (ap - uGridOriginM) / uGridCellM;
+  vec2 rxG = (rx - uGridOriginM) / uGridCellM;
+  int cx = int(floor(apG.x));
+  int cy = int(floor(apG.y));
+  int cxEnd = int(floor(rxG.x));
+  int cyEnd = int(floor(rxG.y));
+  vec2 d = rxG - apG;
+  float dx = d.x;
+  float dy = d.y;
+  int stepX = dx > 0.0 ? 1 : (dx < 0.0 ? -1 : 0);
+  int stepY = dy > 0.0 ? 1 : (dy < 0.0 ? -1 : 0);
+  float tMaxX = 1e30;
+  float tDeltaX = 1e30;
+  if (stepX != 0) {
+    float nextX = stepX > 0 ? float(cx + 1) : float(cx);
+    tMaxX = (nextX - apG.x) / dx;
+    tDeltaX = abs(1.0 / dx);
+  }
+  float tMaxY = 1e30;
+  float tDeltaY = 1e30;
+  if (stepY != 0) {
+    float nextY = stepY > 0 ? float(cy + 1) : float(cy);
+    tMaxY = (nextY - apG.y) / dy;
+    tDeltaY = abs(1.0 / dy);
+  }
+  int seenBuf[SEEN_BUF];
+  for (int j = 0; j < SEEN_BUF; j++) seenBuf[j] = -1;
+  int seenWritePos = 0;
+  float tCur = 0.0;
+  int maxSteps = uGridDims.x + uGridDims.y + 4;
+  for (int i = 0; i < 4096; i++) {
+    if (i >= maxSteps) break;
+    processCellWithHits(cx, cy, ap, apZ, rx, rxZ, rayDir, acc, seenBuf, seenWritePos);
+    if (cx == cxEnd && cy == cyEnd) break;
+    if (tMaxX < tMaxY) { tCur = tMaxX; tMaxX += tDeltaX; cx += stepX; }
+    else               { tCur = tMaxY; tMaxY += tDeltaY; cy += stepY; }
+    if (tCur > 1.0) break;
+  }
+  return acc;
+}
+
 // Point-in-poly via horizontal ray casting against a hole polygon stored in
 // uHolePoly[start .. start+count-1] (each texel = (x, y, _, _)). Mirrors the
 // JS reference exactly so a buggy edge case here doesn't appear as a "shader
@@ -483,13 +631,11 @@ float accumulateSlabLoss(vec2 ap, float apZ, vec2 rx, float rxZ) {
 // 2D wall-loss accumulation that excludes one wall index (used for the two
 // legs of an image-source reflection — the reflecting wall itself must not
 // contribute its own dB to either leg). Otherwise mirrors accumulateWallLoss.
-// We always go through the brute-force path here because:
-//   (a) reflection legs are short (typically a few cells) so grid traversal
-//       overhead dominates,
-//   (b) the grid duplicates wall references across cells, which complicates
-//       "skip exactly this wall" semantics.
-// JS engine does the same (walls.filter(x => x !== w)).
-float accumulateWallLossExcept(vec2 ap, float apZ, vec2 rx, float rxZ, int excludeW) {
+// HM-F5i: dispatches to grid DDA when grid is present (reflection legs in
+// dense-wall scenes spend most of their cost in this loop). Skip semantics
+// are handled inside processCellExcept by checking wIdx == excludeW before
+// dedup interaction.
+float accumulateWallLossExceptBrute(vec2 ap, float apZ, vec2 rx, float rxZ, int excludeW) {
   float total = 0.0;
   vec2 rayDir = rx - ap;
   for (int w = 0; w < uWallCount; w++) {
@@ -497,6 +643,11 @@ float accumulateWallLossExcept(vec2 ap, float apZ, vec2 rx, float rxZ, int exclu
     applyWallContribution(w, ap, apZ, rx, rxZ, rayDir, total);
   }
   return total;
+}
+
+float accumulateWallLossExcept(vec2 ap, float apZ, vec2 rx, float rxZ, int excludeW) {
+  if (uGridDims.x == 0) return accumulateWallLossExceptBrute(ap, apZ, rx, rxZ, excludeW);
+  return accumulateWallLossExceptGrid(ap, apZ, rx, rxZ, excludeW);
 }
 
 // Mirror point p across the infinite line through (a, b). Mirrors JS
@@ -577,10 +728,14 @@ float cornerDiffractionDb(vec2 tx, vec2 rx, vec2 corner, float wavelengthM) {
   return knifeEdgeLossDb(v);
 }
 
-// Brute-force wall-loss accumulation but also returns hit count, so the
-// diffraction code can apply JS's "s1.hits > 1 || s2.hits > 1 → cull" rule.
-// Out: x = total dB, y = hits as float (caller compares > 1.0).
-vec2 accumulateWallLossWithHits(vec2 ap, float apZ, vec2 rx, float rxZ) {
+// Wall-loss accumulation that also returns hit count, so the diffraction
+// code can apply JS's "s1.hits > 1 || s2.hits > 1 → cull" rule (and the
+// direct path can gate diffraction with "any hit at all"). Out: x = total dB,
+// y = hits as float (caller compares > 1.0 / > 0.0).
+// HM-F5i: dispatches to grid DDA when grid is present. SEEN_BUF dedup
+// guarantees each wall is counted at most once even when the ray crosses
+// multiple cells that all reference it.
+vec2 accumulateWallLossWithHitsBrute(vec2 ap, float apZ, vec2 rx, float rxZ) {
   vec2 acc = vec2(0.0);
   vec2 rayDir = rx - ap;
   for (int w = 0; w < uWallCount; w++) {
@@ -595,6 +750,11 @@ vec2 accumulateWallLossWithHits(vec2 ap, float apZ, vec2 rx, float rxZ) {
     acc.y += 1.0;
   }
   return acc;
+}
+
+vec2 accumulateWallLossWithHits(vec2 ap, float apZ, vec2 rx, float rxZ) {
+  if (uGridDims.x == 0) return accumulateWallLossWithHitsBrute(ap, apZ, rx, rxZ);
+  return accumulateWallLossWithHitsGrid(ap, apZ, rx, rxZ);
 }
 
 // AP antenna gain in dBi for a ray heading from AP to target. Mirrors
@@ -669,8 +829,9 @@ float rssiWithReflections(vec2 rx, float rxZ) {
 
   // Need both wall-loss dB and the hit count so the diffraction loop can
   // gate "direct path is blocked" the same way JS does (wallScan.hits > 0).
-  // Brute-force is mandatory here — the grid path doesn't surface hit counts
-  // and would also double-count walls that span multiple cells.
+  // HM-F5i: grid DDA path with SEEN_BUF dedup is now used here (dispatched
+  // inside accumulateWallLossWithHits when the grid is uploaded), giving
+  // O(√N_walls) instead of O(N_walls).
   vec2 dirScan = accumulateWallLossWithHits(uApPos.xy, uApPos.z, rx, rxZ);
   float wallLossDir = dirScan.x;
   float dirHits     = dirScan.y;
