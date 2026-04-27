@@ -121,6 +121,7 @@ function HeatmapControl() {
           <label className="heatmap-control__line">
             <span>引擎</span>
             <select
+              className="heatmap-control__select"
               value={engine}
               onChange={(e) => setEngine(e.target.value)}
               title="JS = 完整物理 (full parity); Shader = WebGL2 加速 (HM-F5a, 暫無反射/繞射/多頻點)"
@@ -132,6 +133,7 @@ function HeatmapControl() {
           <label className="heatmap-control__line">
             <span>拖曳模式</span>
             <select
+              className="heatmap-control__select"
               value={dragMode}
               onChange={(e) => setDragMode(e.target.value)}
               title="Live = 拖曳即時重算（降畫質）；Solo = 拖 AP 只重算被拖那一顆，拖牆/Scope 凍結（Hamina 風格）"
