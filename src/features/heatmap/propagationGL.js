@@ -552,6 +552,18 @@ float knifeEdgeLossDb(float v) {
 float cornerDiffractionDb(vec2 tx, vec2 rx, vec2 corner, float wavelengthM) {
   float d1 = length(corner - tx);
   float d2 = length(rx - corner);
+  // Degenerate near-endpoint cull. When rx (or AP) sits closer than ~10 cm
+  // to a corner, fp32 evaluation of v = h * sqrt((2/λ)·(d1+d2)/(d1·d2))
+  // becomes unstable: d2 → 0 inflates 1/d2 catastrophically while h → 0
+  // shrinks; the ratio is well-defined in fp64 (knife-edge gives large
+  // loss at the edge), but in fp32 it collapses to v ≈ 0 → -6 dB, which
+  // turns the diffraction path into a "shortcut" that out-bids the direct
+  // ray and produces a bright square at every corner near a probe cell.
+  // JS reference doesn't trip this because fp64 keeps the (d2, h) ratio
+  // honest; the cull below is a fp32-only guard. 0.1 m is well below grid
+  // resolution (gridStepM ≥ 0.5 m) so it can't shadow a real diffraction
+  // contribution.
+  if (d1 < 0.1 || d2 < 0.1) return 1e30;
   // Project corner onto AP→rx; t in [0,1] means corner sits between them.
   vec2 ab = rx - tx;
   float l2 = dot(ab, ab);
