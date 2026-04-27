@@ -14,11 +14,23 @@ export const HEATMAP_MODES = ['rssi', 'sinr', 'snr', 'cci']
 // HeatmapControl toggle (HM-T3) so users can flip engines side-by-side.
 export const HEATMAP_ENGINES = ['js', 'shader']
 
+// Drag-time recompute strategy.
+// - live: recompute every frame with the drag-lod compromises (HM-drag-lod —
+//   refl/diff off, RSSI-only when applicable, etc). Position-accurate, full
+//   N_AP aggregation, slight numeric drift on dragend.
+// - solo: HM-drag-solo, Hamina-style. Snapshot the heatmap on dragstart;
+//   while dragging an AP, overlay only that AP's single-AP RSSI grid (full
+//   resolution, no LOD compromise — single AP is already 1/N_AP work). While
+//   dragging walls/scopes, freeze (no recompute). Optimised for 1000+ AP
+//   scenes where live mode still can't hit 60 FPS.
+export const HEATMAP_DRAG_MODES = ['live', 'solo']
+
 // Heatmap UI / compute options.
 export const useHeatmapStore = create((set) => ({
   enabled: false,
   mode: 'rssi',
   engine: 'shader',
+  dragMode: 'live',
   reflections: true,
   diffraction: true,
   gridStepM: 0.5,
@@ -32,6 +44,7 @@ export const useHeatmapStore = create((set) => ({
   setEnabled:     (v) => set({ enabled: v }),
   setMode:        (v) => set({ mode: v }),
   setEngine:      (v) => set({ engine: v }),
+  setDragMode:    (v) => set({ dragMode: v }),
   setReflections: (v) => set({ reflections: v }),
   setDiffraction: (v) => set({ diffraction: v }),
   setGridStepM:   (v) => set({ gridStepM: v }),

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Layer, Image as KonvaImage } from 'react-konva'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
@@ -43,6 +43,7 @@ export default function HeatmapLayer({ floorId }) {
   const enabled     = useHeatmapStore((s) => s.enabled)
   const mode        = useHeatmapStore((s) => s.mode)
   const engine      = useHeatmapStore((s) => s.engine)
+  const dragMode    = useHeatmapStore((s) => s.dragMode)
   const reflections = useHeatmapStore((s) => s.reflections)
   const diffraction = useHeatmapStore((s) => s.diffraction)
   const gridStepM   = useHeatmapStore((s) => s.gridStepM)
@@ -64,6 +65,18 @@ export default function HeatmapLayer({ floorId }) {
   // "Timer fired → run → sampleFieldGL → renderAp → readPixels" stack the user
   // saw in DevTools every frame.
   const imageNodeRef = useRef(null)
+  // HM-drag-solo: separate offscreen canvas holding the snapshot taken at
+  // dragstart. Acts as the visible base layer while the drag is in progress so
+  // (a) drag-AP can render only the dragged AP into gl.canvas without losing
+  // the rest of the field's visual context, (b) drag-wall/scope can freeze
+  // the heatmap entirely while dragging.
+  const snapshotCanvasRef = useRef(null)
+  const snapshotImageNodeRef = useRef(null)
+  // displayMode controls which Konva Image is visible:
+  //   'main'        — main gl.canvas (default; live mode + idle)
+  //   'solo-ap'     — snapshot at 0.3 opacity + main (single-AP render) on top
+  //   'solo-frozen' — snapshot at 1.0 opacity, main hidden
+  const [displayMode, setDisplayMode] = useState('main')
 
   const getGL = () => {
     if (!glRef.current) {
@@ -225,56 +238,144 @@ export default function HeatmapLayer({ floorId }) {
     }
   }, [scenario])
 
-  // HM-drag-lod: while any object is being dragged we render a coarser grid
-  // and force a low frequency-sample count so the per-frame cost drops by
-  // roughly an order of magnitude. The position / wall / AP geometry stays
-  // physically correct — only sub-meter detail and reflection-zone numerical
-  // smoothness degrade. On dragend the drag overlays clear and the next
-  // effect run snaps back to full quality (~35 ms typical).
+  // Drag state. Two modes (HeatmapStore.dragMode):
+  //   live — recompute every frame with HM-drag-lod compromises (refl/diff off,
+  //          blur off, RSSI-only when applicable). Position-accurate; full
+  //          N_AP aggregation; cost dominated by the per-fragment AP loop.
+  //   solo — HM-drag-solo / Hamina style. Snapshot the heatmap on dragstart;
+  //          while dragging an AP render only THAT AP into gl.canvas (full
+  //          resolution — single AP is already 1/N_AP work, no need to LOD);
+  //          while dragging walls/scopes, freeze the heatmap (no recompute).
+  //          On dragend the next effect run does a full-quality recompute and
+  //          atomically swaps back.
   const isDragging = !!(dragAP || dragWall || dragScope)
-  const liveGridStepM     = isDragging ? gridStepM * 1 : gridStepM
+  const isSolo     = dragMode === 'solo' && isDragging
+  const isSoloAP   = isSolo && !!dragAP && !dragWall && !dragScope
+  const isSoloFreeze = isSolo && (dragWall || dragScope) && !dragAP
+
+  // Live-mode drag compromises (HM-drag-lod). Only apply when actively dragging
+  // in live mode — solo mode bypasses these by taking the dedicated solo path.
+  const lodActive = dragMode === 'live' && isDragging
+  const liveGridStepM     = lodActive ? gridStepM * 1 : gridStepM
   const liveFreqOverrideN = undefined
   // Cull threshold: -120 (default) is exact for full quality. -95 dBm matches
   // the noise floor so any AP whose free-space-only RSSI sits below it cannot
   // change SINR / CCI / SNR meaningfully — still lossless within colormap
-  // resolution but lets faraway APs get culled per-fragment, skipping their
-  // wall DDA. Only applied while dragging; rest snaps back to -120.
-  const liveCullFloorDbm = isDragging ? -95 : undefined
-  const liveBlur         = isDragging ? 0     : blur
-  const liveShowContours = isDragging ? false : showContours
-  // Drop reflections / diffraction during drag — both are O(N_walls) per AP
-  // (reflection 22× cost, diffraction 128× on a 25-AP/25-wall scene), so
-  // keeping them on shreds the per-frame budget. p50 RSSI delta is < 1 dB
-  // in the typical coverage range, so the visual jump on dragend is small.
-  const liveMaxReflOrder      = isDragging ? 0     : (reflections ? 1 : 0)
-  const liveEnableDiffraction = isDragging ? false : diffraction
-  // RSSI / SNR mode never reads cci/sinr fields, so the shader can skip the
-  // expensive per-fragment co-channel AP loop while dragging. SINR/CCI modes
-  // still need it. dragend triggers a full re-render so SNR's sentinel doesn't
-  // linger.
-  const liveRssiOnly = isDragging && (mode === 'rssi' || mode === 'snr')
+  // resolution but lets faraway APs get culled per-fragment.
+  const liveCullFloorDbm = lodActive ? -95 : undefined
+  const liveBlur         = lodActive ? 0     : blur
+  const liveShowContours = lodActive ? false : showContours
+  // Drop reflections / diffraction during live drag — both are O(N_walls) per
+  // AP. p50 RSSI delta < 1 dB in typical coverage range.
+  const liveMaxReflOrder      = lodActive ? 0     : (reflections ? 1 : 0)
+  const liveEnableDiffraction = lodActive ? false : diffraction
+  // RSSI / SNR mode never reads cci/sinr fields, so skip the per-fragment
+  // co-channel AP loop during live drag.
+  const liveRssiOnly = lodActive && (mode === 'rssi' || mode === 'snr')
 
+
+  // HM-drag-solo snapshot: when solo drag begins, copy the current gl.canvas
+  // pixels into a separate offscreen canvas. The snapshot becomes the visible
+  // base layer for the duration of the drag, freeing gl.canvas to be either
+  // overwritten with the single-AP overlay (drag AP) or left alone (freeze).
+  // The transition out (dragend → 'main') happens *after* the next full
+  // recompute writes fresh pixels into gl.canvas, so there is no black-frame
+  // gap.
+  useEffect(() => {
+    if (!enabled) return
+    if (!isSolo) return
+    const gl = glRef.current
+    if (!gl || !gl.canvas) return
+    const src = gl.canvas
+    const w = src.width
+    const h = src.height
+    if (w <= 0 || h <= 0) return
+    // Allocate / resize once. Reuse across drags as long as size matches.
+    let snap = snapshotCanvasRef.current
+    if (!snap || snap.width !== w || snap.height !== h) {
+      snap = document.createElement('canvas')
+      snap.width = w
+      snap.height = h
+      snapshotCanvasRef.current = snap
+    }
+    const ctx = snap.getContext('2d')
+    ctx.clearRect(0, 0, w, h)
+    ctx.drawImage(src, 0, 0)
+    setDisplayMode(isSoloAP ? 'solo-ap' : 'solo-frozen')
+    // Intentionally only run on transitions INTO the solo state; transitions
+    // between solo-ap / solo-frozen during one drag are rare (would require
+    // the user to release one object and grab another within the same
+    // gesture, which the drag overlay store doesn't surface as a continuous
+    // drag). The displayMode update above still tracks them if it happens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, isSolo])
 
   useEffect(() => {
     if (!enabled || !scenario || !floor?.scale || !padding) return
     let cancelled = false
     const run = () => {
-      // Engine choice: shader is HM-F5a (Friis + walls + slab + openings only;
-      // reflections / diffraction silently ignored at this stage). Falls back
-      // to JS if the GL context can't be created (no WebGL2, lost context).
+      const gl = getGL()
+      if (!gl) return
+      const totalWm = scenario.size.w + padding.left + padding.right
+      const totalHm = scenario.size.h + padding.top  + padding.bottom
+      const outW = Math.max(1, Math.round(totalWm * floor.scale))
+      const outH = Math.max(1, Math.round(totalHm * floor.scale))
+
+      // ----- HM-drag-solo: freeze path -----
+      // Drag wall / scope while dragMode === 'solo' → don't recompute at all.
+      // The snapshot Konva Image is already showing the dragstart frame.
+      if (isSoloFreeze) return
+
+      // ----- HM-drag-solo: single-AP path -----
+      // Drag AP while dragMode === 'solo' → render only the dragged AP into
+      // gl.canvas. Full grid step / no LOD compromise (single AP is already
+      // 1/N_AP work). Snapshot at 0.3 opacity provides context underneath.
       let field
-      if (engine === 'shader') {
-        try {
-          field = sampleFieldGL(scenario, liveGridStepM, {
-            maxReflOrder: liveMaxReflOrder,
-            enableDiffraction: liveEnableDiffraction,
-            padding,
-            freqOverrideN: liveFreqOverrideN,
-            cullFloorDbm: liveCullFloorDbm,
-            rssiOnly: liveRssiOnly,
-          })
-        } catch (e) {
-          console.warn('[Heatmap] shader engine failed, falling back to JS:', e.message)
+      const isSoloAPRun = isSoloAP && dragAP
+      if (isSoloAPRun) {
+        const soloAP = scenario.aps.find((a) => a.id === dragAP.id)
+        if (!soloAP) return
+        const soloScenario = { ...scenario, aps: [soloAP] }
+        // Reflections / diffraction stay ON in solo: 1 AP × refl/diff is cheap,
+        // and these contribute most to the visual difference users care about
+        // when positioning a single AP near walls.
+        const soloOpts = {
+          maxReflOrder: reflections ? 1 : 0,
+          enableDiffraction: diffraction,
+          padding,
+        }
+        if (engine === 'shader') {
+          try {
+            field = sampleFieldGL(soloScenario, gridStepM, soloOpts)
+          } catch (e) {
+            console.warn('[Heatmap] solo shader path failed, falling back to JS:', e.message)
+            field = sampleField(soloScenario, gridStepM, soloOpts)
+          }
+        } else {
+          field = sampleField(soloScenario, gridStepM, soloOpts)
+        }
+      } else {
+        // ----- live mode + idle: full recompute (with optional LOD) -----
+        if (engine === 'shader') {
+          try {
+            field = sampleFieldGL(scenario, liveGridStepM, {
+              maxReflOrder: liveMaxReflOrder,
+              enableDiffraction: liveEnableDiffraction,
+              padding,
+              freqOverrideN: liveFreqOverrideN,
+              cullFloorDbm: liveCullFloorDbm,
+              rssiOnly: liveRssiOnly,
+            })
+          } catch (e) {
+            console.warn('[Heatmap] shader engine failed, falling back to JS:', e.message)
+            field = sampleField(scenario, liveGridStepM, {
+              maxReflOrder: liveMaxReflOrder,
+              enableDiffraction: liveEnableDiffraction,
+              padding,
+              freqOverrideN: liveFreqOverrideN,
+            })
+          }
+        } else {
           field = sampleField(scenario, liveGridStepM, {
             maxReflOrder: liveMaxReflOrder,
             enableDiffraction: liveEnableDiffraction,
@@ -282,42 +383,42 @@ export default function HeatmapLayer({ floorId }) {
             freqOverrideN: liveFreqOverrideN,
           })
         }
-      } else {
-        field = sampleField(scenario, liveGridStepM, {
-          maxReflOrder: liveMaxReflOrder,
-          enableDiffraction: liveEnableDiffraction,
-          padding,
-          freqOverrideN: liveFreqOverrideN,
-        })
       }
       if (cancelled) return
-      // outW/outH cover the *padded* meter range so the heatmap canvas pixel
-      // mapping (1 m → floor.scale px) stays consistent. KonvaImage below
-      // shifts and sizes the canvas so only the plan-rect pixels are visible.
-      const totalWm = scenario.size.w + padding.left + padding.right
-      const totalHm = scenario.size.h + padding.top  + padding.bottom
-      const outW = Math.max(1, Math.round(totalWm * floor.scale))
-      const outH = Math.max(1, Math.round(totalHm * floor.scale))
-      const gl = getGL()
-      if (!gl) return
+
       // Mode selects which sampled field feeds the renderer. heatmapGL reads
       // `field.rssi` by convention, so we swap the active field into that slot.
-      const modeCfg = getModeConfig(mode)
+      // Solo-AP runs always render in RSSI (single AP has no SINR / CCI).
+      const modeCfg = isSoloAPRun ? getModeConfig('rssi') : getModeConfig(mode)
       const activeField = field[modeCfg.field] ?? field.rssi
       const renderField = { rssi: activeField, nx: field.nx, ny: field.ny }
-      gl.render(renderField, outW, outH, 1 / floor.scale, liveBlur, liveShowContours, {
+      // Solo-AP keeps blur / contours at user settings; live LOD overrides them.
+      const useBlur     = isSoloAPRun ? blur         : liveBlur
+      const useContours = isSoloAPRun ? showContours : liveShowContours
+      gl.render(renderField, outW, outH, 1 / floor.scale, useBlur, useContours, {
         anchors: modeCfg.anchors,
       })
-      // Imperative repaint — the canvas pixels were just rewritten in place.
-      // Konva's image node still points at the same canvas object, so React
-      // doesn't need to re-render; we just nudge the layer to redraw.
+      // After a fresh full render (i.e. not the single-AP solo overlay),
+      // atomically reveal the main canvas. We delay this state update until
+      // *after* gl.render() returns so the browser cannot paint a frame
+      // where the snapshot has been hidden but the main canvas still holds
+      // stale or in-progress pixels.
+      if (!isSoloAPRun && displayMode !== 'main') {
+        setDisplayMode('main')
+      }
       const node = imageNodeRef.current
       const layer = node?.getLayer?.()
       if (layer) layer.batchDraw()
     }
     const id = setTimeout(run, 0)
     return () => { cancelled = true; clearTimeout(id) }
-  }, [enabled, mode, engine, scenario, reflections, diffraction, liveGridStepM, liveFreqOverrideN, liveCullFloorDbm, liveRssiOnly, liveBlur, liveShowContours, floor?.scale, padding])
+    // displayMode intentionally NOT a dep — it's only set inside this effect,
+    // and re-running when it changes would loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, mode, engine, scenario, reflections, diffraction,
+      liveGridStepM, liveFreqOverrideN, liveCullFloorDbm, liveRssiOnly,
+      liveBlur, liveShowContours, floor?.scale, padding,
+      isSoloAP, isSoloFreeze, isDragging, dragAP, gridStepM, blur, showContours])
 
   if (!enabled || !scenario || !floor?.scale || !padding) return null
   // Initialise GL eagerly during render so the KonvaImage mounts on the same
@@ -360,19 +461,43 @@ export default function HeatmapLayer({ floorId }) {
         ctx.rect(0, 0, floor.imageWidth, floor.imageHeight)
       }
 
+  // HM-drag-solo: visibility plan
+  //   displayMode === 'main'        — main canvas only
+  //   displayMode === 'solo-ap'     — snapshot at 0.3 (under) + main (single-AP, on top)
+  //   displayMode === 'solo-frozen' — snapshot at 1.0 (only); main hidden
+  const showSnapshot = displayMode !== 'main' && !!snapshotCanvasRef.current
+  const showMain     = displayMode !== 'solo-frozen'
+  const snapshotOpacity = displayMode === 'solo-ap' ? 0.3 : 1.0
+
   return (
     <Layer listening={false} clipFunc={clipFunc}>
-      <KonvaImage
-        ref={imageNodeRef}
-        image={canvas}
-        x={cx}
-        y={cy}
-        offsetX={cx + padLpx}
-        offsetY={cy + padTpx}
-        width={fullW}
-        height={fullH}
-        rotation={rotation}
-      />
+      {showSnapshot && (
+        <KonvaImage
+          ref={snapshotImageNodeRef}
+          image={snapshotCanvasRef.current}
+          x={cx}
+          y={cy}
+          offsetX={cx + padLpx}
+          offsetY={cy + padTpx}
+          width={fullW}
+          height={fullH}
+          rotation={rotation}
+          opacity={snapshotOpacity}
+        />
+      )}
+      {showMain && (
+        <KonvaImage
+          ref={imageNodeRef}
+          image={canvas}
+          x={cx}
+          y={cy}
+          offsetX={cx + padLpx}
+          offsetY={cy + padTpx}
+          width={fullW}
+          height={fullH}
+          rotation={rotation}
+        />
+      )}
     </Layer>
   )
 }

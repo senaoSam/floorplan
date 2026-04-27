@@ -35,6 +35,8 @@ function HeatmapControl() {
   const setShowContours = useHeatmapStore((s) => s.setShowContours)
   const engine       = useHeatmapStore((s) => s.engine)
   const setEngine    = useHeatmapStore((s) => s.setEngine)
+  const dragMode     = useHeatmapStore((s) => s.dragMode)
+  const setDragMode  = useHeatmapStore((s) => s.setDragMode)
   const hover        = useHoverReadoutStore((s) => s.reading)
 
   const [panelOpen, setPanelOpen] = useState(false)
@@ -125,6 +127,17 @@ function HeatmapControl() {
             >
               <option value="js">JS (full parity)</option>
               <option value="shader">Shader (F5a, fast)</option>
+            </select>
+          </label>
+          <label className="heatmap-control__line">
+            <span>拖曳模式</span>
+            <select
+              value={dragMode}
+              onChange={(e) => setDragMode(e.target.value)}
+              title="Live = 拖曳即時重算（降畫質）；Solo = 拖 AP 只重算被拖那一顆，拖牆/Scope 凍結（Hamina 風格）"
+            >
+              <option value="live">Live (即時重算)</option>
+              <option value="solo">Solo (單 AP / 凍結)</option>
             </select>
           </label>
           <label className="heatmap-control__line">
