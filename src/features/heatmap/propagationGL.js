@@ -730,7 +730,10 @@ float rssiWithReflections(vec2 rx, float rxZ) {
   addPathHN(N, startHz, stepHz, tauDir, tauRef, perpDir, paraDir, Hperp, Hpara);
 
   // ---- 1st-order image-source reflections ----
-  if (sameFloor) {
+  // uReflEnabled gates the loop separately from uDiffEnabled so the JS
+  // engine's behaviour (refl + diff toggle independently) is preserved
+  // when the caller routes diff=on/refl=off through this complex path.
+  if (uReflEnabled == 1 && sameFloor) {
     for (int w = 0; w < uWallCount; w++) {
       vec2 wa, wb;
       float wLossDb, wLossB, wZLo, wZHi;
@@ -847,7 +850,10 @@ void main() {
   vec2 rx = uOriginM + vec2(float(gpx.x), float(gpx.y)) * uGridStepM;
   float rxZ = uRxZM;
 
-  if (uReflEnabled == 1) {
+  // Refl OR diff routes through the complex coherent-sum path; the loops
+  // inside are gated separately so refl=off/diff=on stays independent
+  // from refl=on/diff=off.
+  if (uReflEnabled == 1 || uDiffEnabled == 1) {
     outColor = vec4(rssiWithReflections(rx, rxZ), 0.0, 0.0, 1.0);
     return;
   }
