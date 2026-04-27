@@ -16,7 +16,7 @@ const RSSI_ANCHORS = [
   [-45, 255, 128,  13, 0.88],
   [-55, 255, 217,  26, 0.86],
   [-65, 102, 217,  64, 0.84],
-  [-75,  26, 191, 204, 0.80],
+  [-75, 160, 160, 160, 0.80],
 ]
 
 // SINR — 0 dB ≈ equal signal and interference. 25+ dB ≈ clean.
@@ -25,7 +25,7 @@ const SINR_ANCHORS = [
   [25, 255, 128,  13, 0.88],
   [15, 255, 217,  26, 0.86],
   [ 5, 102, 217,  64, 0.84],
-  [-5,  26, 191, 204, 0.80],
+  [-5, 160, 160, 160, 0.80],
 ]
 
 // SNR — without co-channel interferers; same band as SINR but upshifted.
@@ -34,7 +34,7 @@ const SNR_ANCHORS = [
   [45, 255, 128,  13, 0.88],
   [30, 255, 217,  26, 0.86],
   [15, 102, 217,  64, 0.84],
-  [ 0,  26, 191, 204, 0.80],
+  [ 0, 160, 160, 160, 0.80],
 ]
 
 // CCI — aggregate co-channel interference power in dBm. Lower is better, so we
@@ -45,7 +45,7 @@ const CCI_ANCHORS = [
   [ -55, 255, 128,  13, 0.88],
   [ -70, 255, 217,  26, 0.86],
   [ -85, 102, 217,  64, 0.84],
-  [-100,  26, 191, 204, 0.80],
+  [-100, 160, 160, 160, 0.80],
 ]
 
 export const HEATMAP_MODE_CONFIG = {
