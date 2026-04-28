@@ -36,6 +36,13 @@ const CULL_FLOOR_DBM = -120
 
 let glInstance = null
 function getGL() {
+  // Drop a cached instance whose context died (e.g. Windows TDR after a heavy
+  // brute-force pass on a large scenario). Without this, subsequent runs would
+  // keep dispatching against a dead context and silently return zeroed grids.
+  if (glInstance && glInstance.gl.isContextLost()) {
+    try { glInstance.dispose() } catch (_) {}
+    glInstance = null
+  }
   if (!glInstance) glInstance = createPropagationGL()
   return glInstance
 }

@@ -2440,6 +2440,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.drawArrays(gl.TRIANGLES, 0, 6)
 
     const out = new Float32Array(nx * ny)
+    if (gl.isContextLost()) throw new Error('GL context lost during renderAp (likely TDR on heavy brute-force scene)')
     gl.readPixels(0, 0, nx, ny, gl.RED, gl.FLOAT, out)
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     return { rssi: out, nx, ny }
@@ -2551,6 +2552,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.drawArrays(gl.TRIANGLES, 0, 6)
 
     const packed = new Float32Array(nx * ny * 4)
+    if (gl.isContextLost()) throw new Error('GL context lost during renderField (likely TDR on heavy brute-force scene)')
     gl.readPixels(0, 0, nx, ny, gl.RGBA, gl.FLOAT, packed)
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
 

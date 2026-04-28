@@ -94,6 +94,12 @@ function buildSyntheticScenario({ nWalls, nAps, seed }) {
 const FRIIS_OPTS = { maxReflOrder: 0, enableDiffraction: false }
 const FULL_OPTS  = { maxReflOrder: 1, enableDiffraction: true }
 const GRID_STEP_M = 0.5
+// walls × aps above this skips the brute-force shader pass. Brute is O(N_walls)
+// per fragment, so at 100 AP × 2000 walls a single dispatch can exceed the
+// Windows TDR limit (~2 s) — when that fires, the GPU resets and Chrome
+// disables WebGL globally for every tab until the browser restarts. Grid path
+// stays on regardless since it's the production-default and stays well under.
+const BRUTE_LIMIT = 100_000
 
 // Run one engine N times and return per-run + aggregate timings (ms). The
 // first run primes shader compilation / JIT; we report median of the rest.
@@ -127,8 +133,14 @@ export default function HeatmapBenchPage() {
   const [running, setRunning] = useState(false)
   const [rows, setRows] = useState([])
   const [opts, setOpts] = useState('friis')
+  // 'all' runs every engine for cross-comparison; 'shader' skips JS when you're
+  // iterating on the GL path and the JS column is just dead weight (esp. at
+  // nWalls=2000 where JS dominates the wall-clock budget); 'js' is the inverse.
+  const [engines, setEngines] = useState('shader')
 
   const benchOpts = opts === 'friis' ? FRIIS_OPTS : FULL_OPTS
+  const runJs = engines === 'all' || engines === 'js'
+  const runShader = engines === 'all' || engines === 'shader'
 
   async function runBench() {
     setRunning(true)
@@ -143,28 +155,36 @@ export default function HeatmapBenchPage() {
       const { scenario } = buildSyntheticScenario({ ...scale, seed: 0xC0FFEE })
 
       // Warm-up: prime JIT + shader compile + texture upload.
-      sampleField(scenario, GRID_STEP_M, benchOpts)
-      try { sampleFieldGL(scenario, GRID_STEP_M, benchOpts) } catch (_) {}
+      if (runJs) sampleField(scenario, GRID_STEP_M, benchOpts)
+      if (runShader) { try { sampleFieldGL(scenario, GRID_STEP_M, benchOpts) } catch (_) {} }
 
       // JS — full physics or friis only, per dropdown.
-      const jsT = await timeRuns(() => sampleField(scenario, GRID_STEP_M, benchOpts))
+      const jsT = runJs
+        ? await timeRuns(() => sampleField(scenario, GRID_STEP_M, benchOpts))
+        : null
 
-      // Shader with grid (F5b).
-      setUseGrid(true)
       let shaderGridT = null, shaderGridErr = null
-      try {
-        shaderGridT = await timeRuns(() => sampleFieldGL(scenario, GRID_STEP_M, benchOpts))
-      } catch (e) { shaderGridErr = e.message }
-
-      // Shader without grid (F5a brute force) — apples-to-apples vs JS-friis
-      // to isolate the grid speedup from the GPU vs CPU effect.
-      setUseGrid(false)
       let shaderBruteT = null, shaderBruteErr = null
-      try {
-        shaderBruteT = await timeRuns(() => sampleFieldGL(scenario, GRID_STEP_M, benchOpts))
-      } catch (e) { shaderBruteErr = e.message }
-      // Restore default for downstream consumers.
-      setUseGrid(true)
+      if (runShader) {
+        // Shader with grid (F5b).
+        setUseGrid(true)
+        try {
+          shaderGridT = await timeRuns(() => sampleFieldGL(scenario, GRID_STEP_M, benchOpts))
+        } catch (e) { shaderGridErr = e.message }
+
+        // Shader without grid (F5a brute force) — apples-to-apples vs JS-friis
+        // to isolate the grid speedup from the GPU vs CPU effect.
+        if (scale.nWalls * scale.nAps > BRUTE_LIMIT) {
+          shaderBruteErr = `skipped (walls×aps ${scale.nWalls * scale.nAps} > ${BRUTE_LIMIT}, TDR risk)`
+        } else {
+          setUseGrid(false)
+          try {
+            shaderBruteT = await timeRuns(() => sampleFieldGL(scenario, GRID_STEP_M, benchOpts))
+          } catch (e) { shaderBruteErr = e.message }
+          // Restore default for downstream consumers.
+          setUseGrid(true)
+        }
+      }
 
       out.push({
         ...scale,
@@ -200,6 +220,18 @@ export default function HeatmapBenchPage() {
             {running ? 'Running…' : 'Run bench'}
           </button>
         </div>
+        <div className="stage-row">
+          <span style={{ color: '#888', marginRight: 8 }}>engines:</span>
+          <button className={engines === 'all' ? 'active' : ''} onClick={() => setEngines('all')}>
+            all
+          </button>
+          <button className={engines === 'shader' ? 'active' : ''} onClick={() => setEngines('shader')}>
+            shader only
+          </button>
+          <button className={engines === 'js' ? 'active' : ''} onClick={() => setEngines('js')}>
+            JS only
+          </button>
+        </div>
         <p style={{ marginTop: 8, color: '#888' }}>
           Note: shader engine is HM-F5a (no reflections / diffraction / multi-frequency). Picking
           "full physics" here only changes JS — it lets you see how big the JS workload is when
@@ -222,7 +254,7 @@ export default function HeatmapBenchPage() {
           </thead>
           <tbody>
             {rows.map((r) => {
-              const js = r.jsT.median
+              const js = r.jsT?.median
               const sb = r.shaderBruteT?.median
               const sg = r.shaderGridT?.median
               const ratio = (a, b) => (a == null || b == null ? '—' : `${(a / b).toFixed(2)}×`)
@@ -231,8 +263,12 @@ export default function HeatmapBenchPage() {
                   <td>{r.nAps}</td>
                   <td>{r.nWalls}</td>
                   <td>{fmt(js)}</td>
-                  <td>{fmt(sb)}</td>
-                  <td>{fmt(sg)}</td>
+                  <td title={r.shaderBruteErr ?? ''} style={r.shaderBruteErr ? { color: '#888', cursor: 'help' } : null}>
+                    {sb == null && r.shaderBruteErr ? '— *' : fmt(sb)}
+                  </td>
+                  <td title={r.shaderGridErr ?? ''} style={r.shaderGridErr ? { color: '#888', cursor: 'help' } : null}>
+                    {sg == null && r.shaderGridErr ? '— *' : fmt(sg)}
+                  </td>
                   <td>{ratio(sb, js)}</td>
                   <td>{ratio(sg, sb)}</td>
                   <td>{ratio(js, sg)}</td>
