@@ -34,6 +34,7 @@ import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { buildScenario } from '@/features/heatmap/buildScenario'
 import { probeAt } from '@/features/heatmap/hoverProbe'
 import { warmupGL as warmupHeatmapGL } from '@/features/heatmap/sampleFieldGL'
+import { useWarmupStore } from '@/store/useWarmupStore'
 import './Editor2D.sass'
 
 const SCALE_BY    = 1.08
@@ -202,11 +203,18 @@ function Editor2D() {
   // this, the first sampleFieldGL call (e.g. clicking "Load Demo" with the
   // heatmap auto-enabled) pays ~450ms / AP for GLSL compile + first-draw
   // pipeline init. Defer to idle so we don't fight the initial Stage layout.
+  // While running, flip useWarmupStore so DropZone / DemoLoader can show a
+  // spinner — we don't want a floor plan dropped mid-warmup, since the first
+  // real render would then re-pay the compile cost the warmup is hiding.
   useEffect(() => {
     const ric = window.requestIdleCallback ?? ((cb) => setTimeout(cb, 200))
     const cancel = window.cancelIdleCallback ?? clearTimeout
-    const handle = ric(() => warmupHeatmapGL())
-    return () => cancel(handle)
+    const setWarmingUp = useWarmupStore.getState().setWarmingUp
+    setWarmingUp(true)
+    const handle = ric(() => {
+      try { warmupHeatmapGL() } finally { setWarmingUp(false) }
+    })
+    return () => { cancel(handle); setWarmingUp(false) }
   }, [])
 
   // ── 容器尺寸監聽（rAF 批次，避免 Panel 動畫期間多次 resize 抖動）

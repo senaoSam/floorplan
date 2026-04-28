@@ -23,6 +23,15 @@
     opacity: 0.4
     margin-bottom: 4px
 
+  &__spinner
+    width: 36px
+    height: 36px
+    margin-bottom: 8px
+    border: 3px solid rgba(255, 255, 255, 0.15)
+    border-top-color: $accent
+    border-radius: 50%
+    animation: drop-zone-spin 0.8s linear infinite
+
   &__title
     font-size: 16px
     color: $text-primary
@@ -54,3 +63,7 @@
   &--loading
     cursor: default
     opacity: 0.7
+
+@keyframes drop-zone-spin
+  to
+    transform: rotate(360deg)

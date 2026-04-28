@@ -26,3 +26,15 @@
 
   &:disabled
     cursor: default
+
+  &__spinner
+    width: 12px
+    height: 12px
+    border: 2px solid rgba(255, 255, 255, 0.25)
+    border-top-color: $accent
+    border-radius: 50%
+    animation: demo-loader-spin 0.8s linear infinite
+
+@keyframes demo-loader-spin
+  to
+    transform: rotate(360deg)

@@ -3,6 +3,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
+import { useWarmupStore } from '@/store/useWarmupStore'
 import { buildDemoSampleObjects } from '@/mock/demoSampleScenario'
 import './DemoLoader.sass'
 
@@ -25,9 +26,10 @@ function DemoLoader() {
   const setWalls           = useWallStore((s) => s.setWalls)
   const setAPs             = useAPStore((s) => s.setAPs)
   const setHeatmapEnabled  = useHeatmapStore((s) => s.setEnabled)
+  const warmingUp          = useWarmupStore((s) => s.warmingUp)
 
   const handleLoad = async () => {
-    if (loading) return
+    if (loading || warmingUp) return
     setLoading(true)
     try {
       const img = new window.Image()
@@ -51,15 +53,18 @@ function DemoLoader() {
     }
   }
 
+  const busy = loading || warmingUp
+  const label = warmingUp ? '初始化熱力圖引擎…' : loading ? '載入中…' : '載入 Demo 平面圖'
+
   return (
     <button
       className="demo-loader"
       onClick={handleLoad}
-      disabled={loading}
-      title="再次點擊可新增另一個 Demo 樓層"
+      disabled={busy}
+      title={warmingUp ? '熱力圖引擎初始化中，請稍候' : '再次點擊可新增另一個 Demo 樓層'}
     >
-      {loading ? '⏳' : '🗺'}
-      <span>{loading ? '載入中…' : '載入 Demo 平面圖'}</span>
+      {busy ? <span className="demo-loader__spinner" /> : '🗺'}
+      <span>{label}</span>
     </button>
   )
 }
