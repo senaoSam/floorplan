@@ -1071,15 +1071,24 @@ float rssiWithReflections(vec2 rx, float rxZ) {
       float d2 = length(rx - corner);
       float dTotC = d1 + d2;
       float cZM = uApPos.z + (rxZ - uApPos.z) * (d1 / max(dTotC, 1e-9));
+      // HM-F5f: hoist the geometric diffraction cull above the per-leg wall
+      // scans. cornerDiffractionDb is pure 2D geometry (no DDA), so when the
+      // corner sits past the AP-rx segment endpoints (1e30 sentinel) or the
+      // knife-edge loss already exceeds 40 dB, we can skip both DDAs entirely.
+      // Output is identical: the original order culled by s1.y/s2.y > 1
+      // first then diff > 40; the two checks are independent (wall hit
+      // count vs knife-edge geometry), and the second always runs after the
+      // first either way, so reordering only changes which work gets paid
+      // for on cells that ultimately get culled.
+      float diff = cornerDiffractionDb(uApPos.xy, rx, corner, wavelengthM);
+      if (diff >= 1e29 || diff > 40.0) continue;
+
       // Per-leg wall accumulation with hit count — JS culls if either leg
       // crosses more than one wall, since the corner is supposed to be the
       // single obstruction. >1 means the diffracted path is blocked too.
       vec2 s1 = s1Skip ? vec2(0.0) : accumulateWallLossWithHits(uApPos.xy, uApPos.z, corner, cZM);
       vec2 s2 = accumulateWallLossWithHits(corner, cZM, rx, rxZ);
       if (s1.y > 1.0 || s2.y > 1.0) continue;
-
-      float diff = cornerDiffractionDb(uApPos.xy, rx, corner, wavelengthM);
-      if (diff >= 1e29 || diff > 40.0) continue;
 
       float plDiff = pathLossDb(dTotC, uCenterMHz) + s1.x + s2.x + diff;
       float rxDbD  = uTxDbm + apGainDbi(corner) + uRxGainDbi - plDiff;
