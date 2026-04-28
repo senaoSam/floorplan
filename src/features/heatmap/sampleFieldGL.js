@@ -144,6 +144,17 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
       )
     : null
 
+  // HM-F5k: bake AP→corner geometry + AP→wall mirror textures once per AP.
+  // The savings only land in the refl/diff loops, so we still bake for
+  // custom-pattern APs (cheap, JS path replaces the shader output anyway —
+  // the bake's wasted work is dominated by the JS RSSI compute that
+  // follows). opts.apGeoEnabled lets callers turn this off (debug parity
+  // check vs unbaked path).
+  const apGeoEnabled = opts.apGeoEnabled !== false
+  const apGeoMap = apGeoEnabled
+    ? gl.bakeApGeo(scenario.aps.map((ap, i) => ({ ap, key: ap.id ?? `_idx_${i}` })))
+    : null
+
   const perApGrids = []
   for (let k = 0; k < scenario.aps.length; k++) {
     const ap = scenario.aps[k]
@@ -152,7 +163,9 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
       _antGainDbi: AP_ANT_GAIN_DBI,
       _rxGainDbi: RX_ANT_GAIN_DBI,
     }
-    const losEntry = losMap?.get(ap.id ?? `_idx_${k}`)
+    const apKey = ap.id ?? `_idx_${k}`
+    const losEntry = losMap?.get(apKey)
+    const apGeoEntry = apGeoMap?.get(apKey)
     const { rssi: shaderGrid } = gl.renderAp(
       apForGL, scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta,
       {
@@ -160,6 +173,7 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
         gridSize: { nx, ny },
         losTex: losEntry?.tex,
         losFastMode: opts.losFastMode === true,
+        apGeoEntry,
       },
     )
 

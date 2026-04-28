@@ -135,6 +135,28 @@ uniform sampler2D uLosTex;
 uniform int uLosEnabled;
 uniform int uLosFastMode;
 
+// HM-F5k: per-AP precomputed corner / wall geometry, baked once when AP or
+// walls change and reused across every fragment.
+//   uApCornersGeo (RGBA32F, 1×N_corners): per corner
+//     .r = d1 (length AP→corner in metres)
+//     .g = geomLos (1.0 = AP→corner crosses zero walls geometrically;
+//                   0.0 = at least one wall geometrically crosses, must run
+//                   the s1 wall scan in shader)
+//     geomLos is conservative (no Z filter): when 1.0 the s1 DDA is a
+//     guaranteed no-op for every fragment, so we skip it. When 0.0 we still
+//     must run the scan because the Z filter (which depends on cZM, a
+//     fragment-local quantity) may rescue some hits.
+//   uApWallMirror (RGBA32F, 1×N_walls): per wall
+//     .rg = apImg.xy = mirrorPoint(AP, wall.a, wall.b)
+//     The reflection loop reads this instead of recomputing mirrorPoint per
+//     fragment.
+//   uApGeoEnabled = 0  → host did not bake (refl/diff path stays on
+//                        per-fragment compute, identical to pre-F5k).
+//                 = 1  → both textures populated for the current AP.
+uniform sampler2D uApCornersGeo;
+uniform sampler2D uApWallMirror;
+uniform int uApGeoEnabled;
+
 const float PI = 3.14159265358979;
 const float SLAB_SEC_CAP = 3.5;
 const float DIRECTIONAL_BACK_DB = 20.0;
@@ -939,7 +961,14 @@ float rssiWithReflections(vec2 rx, float rxZ) {
       bool isMetal;
       readWallMaterial(w, itu, roughM, isMetal);
 
-      vec2 apImg = mirrorPoint(uApPos.xy, wa, wb);
+      // HM-F5k: precomputed AP-mirror across this wall when baked. mirrorPoint
+      // depends only on (AP, wall) so it's per-AP-constant; the bake hoists
+      // 1 sub + 1 normalize + 1 dot + 1 sub-mul-mul out of the per-fragment
+      // loop. Geometry is identical to JS — same n = unit segment normal,
+      // same p - 2(p-a)·n·n.
+      vec2 apImg = uApGeoEnabled == 1
+        ? texelFetch(uApWallMirror, ivec2(w, 0), 0).xy
+        : mirrorPoint(uApPos.xy, wa, wb);
       vec3 hit = segSegHit(apImg, rx, wa, wb);
       if (hit.z < 0.5) continue;
       vec2 reflPt = hit.xy;
@@ -1000,14 +1029,27 @@ float rssiWithReflections(vec2 rx, float rxZ) {
     float wavelengthM = C_LIGHT / f;
     for (int ci = 0; ci < uCornerCount; ci++) {
       vec2 corner = texelFetch(uCorners, ivec2(ci % 4096, ci / 4096), 0).xy;
-      float d1 = length(corner - uApPos.xy);
+      // HM-F5k: pull AP→corner geometry from the precomputed texture when
+      // baked. d1 is exact (deterministic per (AP, corner)); geomLos==1
+      // means zero walls cross AP→corner geometrically, so the s1 DDA is
+      // guaranteed empty and we can skip it (mirror semantics of HM-F5j's
+      // direct-path LOS short-circuit).
+      float d1;
+      bool s1Skip = false;
+      if (uApGeoEnabled == 1) {
+        vec4 g = texelFetch(uApCornersGeo, ivec2(ci, 0), 0);
+        d1 = g.r;
+        s1Skip = g.g > 0.5;
+      } else {
+        d1 = length(corner - uApPos.xy);
+      }
       float d2 = length(rx - corner);
       float dTotC = d1 + d2;
       float cZM = uApPos.z + (rxZ - uApPos.z) * (d1 / max(dTotC, 1e-9));
       // Per-leg wall accumulation with hit count — JS culls if either leg
       // crosses more than one wall, since the corner is supposed to be the
       // single obstruction. >1 means the diffracted path is blocked too.
-      vec2 s1 = accumulateWallLossWithHits(uApPos.xy, uApPos.z, corner, cZM);
+      vec2 s1 = s1Skip ? vec2(0.0) : accumulateWallLossWithHits(uApPos.xy, uApPos.z, corner, cZM);
       vec2 s2 = accumulateWallLossWithHits(corner, cZM, rx, rxZ);
       if (s1.y > 1.0 || s2.y > 1.0) continue;
 
@@ -1929,6 +1971,22 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   const losCache = new Map()
   let wallsVersion = 0
 
+  // HM-F5k: per-AP precomputed corner / wall geometry cache. Mirrors losCache
+  // semantics — invalidated when walls change (uploadWalls bumps
+  // wallsVersion) or when the AP itself moves (hash includes pos).
+  // Cache shape: Map<apKey, { cornersTex, mirrorTex, hash, cornerCount, wallCount }>
+  // The textures are owned by the cache; callers must not delete them.
+  const apGeoCache = new Map()
+  // 1×1 placeholder so the FS sampler bindings stay valid even when host
+  // didn't bake (uApGeoEnabled=0 then short-circuits all reads).
+  const apGeoPlaceholderTex = gl.createTexture()
+  gl.bindTexture(gl.TEXTURE_2D, apGeoPlaceholderTex)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array(4))
+
   for (const t of [wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex, apsTex]) {
     gl.bindTexture(gl.TEXTURE_2D, t)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
@@ -1938,6 +1996,12 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   }
   // Grid metadata captured by uploadWalls and consumed in renderAp.
   let gridDimsX = 0, gridDimsY = 0, gridCellM = 1, gridOriginX = 0, gridOriginY = 0, gridListWidth = 1
+  // HM-F5k: host-side snapshots of walls / corners so the AP→corner +
+  // AP→wall-mirror bake can run on CPU without re-reading texture data. We
+  // only stash a light view (endpoint coords + index) — full material data
+  // is irrelevant for the bake (it's purely geometric).
+  let bakeWalls = []   // [{ ax, ay, bx, by }] — same indices as wallsTex
+  let bakeCorners = [] // [{ x, y }] — same indices as cornersTex
 
   function pack4096(values, valuesPerTexel = 4) {
     const totalTexels = Math.max(1, Math.ceil(values.length / valuesPerTexel))
@@ -1960,6 +2024,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // override the grid extent when the scenario size doesn't match the wall
   // bounds (e.g. cross-floor walls extending beyond active floor).
   function uploadWalls(walls, opts = {}) {
+    bakeWalls = walls.map((w) => ({ ax: w.a.x, ay: w.a.y, bx: w.b.x, by: w.b.y }))
     const flat = new Float32Array(walls.length * 16)
     for (let i = 0; i < walls.length; i++) {
       const w = walls[i]
@@ -1999,6 +2064,15 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       gl.deleteFramebuffer(entry.fbo)
     }
     losCache.clear()
+    // HM-F5k: same semantics for the AP→corner / AP→wall-mirror cache.
+    // Wall geometry feeds into both d1/geomLos (needs wall segments for
+    // intersection tests) and apImg (mirrorPoint depends on the wall line),
+    // so any wall edit must invalidate every entry.
+    for (const entry of apGeoCache.values()) {
+      gl.deleteTexture(entry.cornersTex)
+      gl.deleteTexture(entry.mirrorTex)
+    }
+    apGeoCache.clear()
   }
 
   // HM-F5g: pack APs into a 4-texel-per-AP RGBA32F image. Layout matches the
@@ -2052,6 +2126,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // stays valid; uCornerCount = 0 makes the shader skip the loop entirely.
   function uploadCorners(corners) {
     cornerCount = corners?.length ?? 0
+    bakeCorners = (corners ?? []).map((c) => ({ x: c.x, y: c.y }))
     const totalTexels = Math.max(1, cornerCount)
     const tw = Math.min(4096, totalTexels)
     const th = Math.ceil(totalTexels / 4096)
@@ -2063,6 +2138,13 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     }
     gl.bindTexture(gl.TEXTURE_2D, cornersTex)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, tw, th, 0, gl.RGBA, gl.FLOAT, data)
+    // HM-F5k: corner topology is a per-AP cache key dimension (same AP, more
+    // corners → larger texture); invalidate so the next bake resizes.
+    for (const entry of apGeoCache.values()) {
+      gl.deleteTexture(entry.cornersTex)
+      gl.deleteTexture(entry.mirrorTex)
+    }
+    apGeoCache.clear()
   }
 
   // Build the uniform acceleration grid:
@@ -2351,6 +2433,120 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     return out
   }
 
+  // HM-F5k: CPU-side AP→corner / AP→wall geometry bake. The data is purely
+  // 2D scalar/point math, so a small JS pass per AP is faster than spinning
+  // up another shader program + framebuffer + readPixels (and this runs at
+  // most once per AP per wall-edit, not per frame). See SEG_HIT_EPS in
+  // geometry.js for the matching JS-side admit-pad rule.
+  const BAKE_SEG_EPS = 1e-6
+  function geomLosClear(ax, ay, bx, by, walls) {
+    // Returns true iff the segment AP→corner crosses zero walls
+    // *geometrically* (no Z filter). The JS check matches segSegIntersect's
+    // padded admit rule so the shader's strict t/u test never disagrees.
+    for (let i = 0; i < walls.length; i++) {
+      const w = walls[i]
+      const d1x = bx - ax, d1y = by - ay
+      const d2x = w.bx - w.ax, d2y = w.by - w.ay
+      const denom = d1x * d2y - d1y * d2x
+      if (Math.abs(denom) < 1e-12) continue   // parallel
+      const rx = ax - w.ax, ry = ay - w.ay
+      const t = (d2x * ry - d2y * rx) / denom
+      const u = (d1x * ry - d1y * rx) / denom
+      if (t < 0 || t > 1 + BAKE_SEG_EPS) continue
+      if (u < -BAKE_SEG_EPS || u > 1 + BAKE_SEG_EPS) continue
+      return false
+    }
+    return true
+  }
+
+  function bakeApGeoOne(ap, apKey) {
+    // Hash combines per-AP geometry (pos) with the wall topology version.
+    // Antenna gain, frequency, channel — none affect mirrorPoint or the
+    // geometric LOS test, so they don't bust the cache.
+    const apX = ap.pos.x, apY = ap.pos.y
+    const hash = `${apX},${apY},${wallsVersion},${bakeCorners.length},${bakeWalls.length}`
+    const cached = apGeoCache.get(apKey)
+    if (cached && cached.hash === hash) return cached
+
+    // Allocate or resize textures. Layout:
+    //   cornersTex: 1 row × N_corners texels, RGBA32F, .rg = (d1, geomLos)
+    //   mirrorTex:  1 row × N_walls texels,   RGBA32F, .rg = (apImg.x, apImg.y)
+    let entry = cached
+    if (!entry) {
+      const cornersTex = gl.createTexture()
+      gl.bindTexture(gl.TEXTURE_2D, cornersTex)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+      const mirrorTex = gl.createTexture()
+      gl.bindTexture(gl.TEXTURE_2D, mirrorTex)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+      entry = { cornersTex, mirrorTex, hash: '', cornerCount: 0, wallCount: 0 }
+      apGeoCache.set(apKey, entry)
+    }
+
+    // ---- corners pass ----
+    const nC = Math.max(1, bakeCorners.length)
+    const cData = new Float32Array(nC * 4)
+    for (let i = 0; i < bakeCorners.length; i++) {
+      const c = bakeCorners[i]
+      const dx = c.x - apX, dy = c.y - apY
+      const d1 = Math.sqrt(dx * dx + dy * dy)
+      const los = geomLosClear(apX, apY, c.x, c.y, bakeWalls) ? 1.0 : 0.0
+      cData[i * 4    ] = d1
+      cData[i * 4 + 1] = los
+    }
+    gl.bindTexture(gl.TEXTURE_2D, entry.cornersTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, nC, 1, 0, gl.RGBA, gl.FLOAT, cData)
+
+    // ---- wall-mirror pass ----
+    const nW = Math.max(1, bakeWalls.length)
+    const mData = new Float32Array(nW * 4)
+    for (let i = 0; i < bakeWalls.length; i++) {
+      const w = bakeWalls[i]
+      // mirrorPoint(AP, w.a, w.b): n = unit segment normal; apImg = AP - 2((AP-w.a)·n)·n
+      const tx = w.bx - w.ax, ty = w.by - w.ay
+      const tlen = Math.hypot(tx, ty) || 1
+      const nx = -ty / tlen, ny = tx / tlen
+      const k = (apX - w.ax) * nx + (apY - w.ay) * ny
+      mData[i * 4    ] = apX - 2 * k * nx
+      mData[i * 4 + 1] = apY - 2 * k * ny
+    }
+    gl.bindTexture(gl.TEXTURE_2D, entry.mirrorTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, nW, 1, 0, gl.RGBA, gl.FLOAT, mData)
+
+    entry.hash = hash
+    entry.cornerCount = bakeCorners.length
+    entry.wallCount = bakeWalls.length
+    return entry
+  }
+
+  // HM-F5k: bake AP→corner + AP→wall-mirror textures for a list of APs.
+  // Mirrors bakeLos's lifetime semantics — caller passes a stable per-AP
+  // key, stale entries are evicted, returned Map gives renderAp the texture
+  // handles via opts.apGeoEntry.
+  function bakeApGeo(apEntries) {
+    const seen = new Set()
+    const out = new Map()
+    for (const { ap, key } of apEntries) {
+      seen.add(key)
+      out.set(key, bakeApGeoOne(ap, key))
+    }
+    for (const k of [...apGeoCache.keys()]) {
+      if (!seen.has(k)) {
+        const e = apGeoCache.get(k)
+        gl.deleteTexture(e.cornersTex)
+        gl.deleteTexture(e.mirrorTex)
+        apGeoCache.delete(k)
+      }
+    }
+    return out
+  }
+
   // Render one AP and read back nx*ny floats (dBm). Caller can override the
   // grid extent via opts.gridSize when sampling beyond scenario.size (padded
   // grids — see sampleFieldGL).
@@ -2435,6 +2631,19 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.uniform1i(gl.getUniformLocation(prog, 'uLosTex'), 6)
     gl.uniform1i(gl.getUniformLocation(prog, 'uLosEnabled'), opts.losTex ? 1 : 0)
     gl.uniform1i(gl.getUniformLocation(prog, 'uLosFastMode'), opts.losFastMode ? 1 : 0)
+
+    // HM-F5k: per-AP precomputed AP→corner / AP→wall-mirror textures.
+    // opts.apGeoEntry is the cache record from bakeApGeo for this AP; when
+    // missing the shader's uApGeoEnabled=0 short-circuits all reads to the
+    // unbaked compute path (mirrorPoint + d1 inline).
+    const apGeoEntry = opts.apGeoEntry
+    gl.activeTexture(gl.TEXTURE7)
+    gl.bindTexture(gl.TEXTURE_2D, apGeoEntry?.cornersTex || apGeoPlaceholderTex)
+    gl.uniform1i(gl.getUniformLocation(prog, 'uApCornersGeo'), 7)
+    gl.activeTexture(gl.TEXTURE8)
+    gl.bindTexture(gl.TEXTURE_2D, apGeoEntry?.mirrorTex || apGeoPlaceholderTex)
+    gl.uniform1i(gl.getUniformLocation(prog, 'uApWallMirror'), 8)
+    gl.uniform1i(gl.getUniformLocation(prog, 'uApGeoEnabled'), apGeoEntry ? 1 : 0)
 
     gl.bindVertexArray(vao)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
@@ -2579,16 +2788,21 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.deleteProgram(progLos)
     gl.deleteBuffer(vbo)
     gl.deleteVertexArray(vao)
-    for (const t of [outTex, outFieldTex, wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex, apsTex, maskTex, losPlaceholderTex]) gl.deleteTexture(t)
+    for (const t of [outTex, outFieldTex, wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex, apsTex, maskTex, losPlaceholderTex, apGeoPlaceholderTex]) gl.deleteTexture(t)
     for (const e of losCache.values()) {
       gl.deleteTexture(e.tex)
       gl.deleteFramebuffer(e.fbo)
     }
     losCache.clear()
+    for (const e of apGeoCache.values()) {
+      gl.deleteTexture(e.cornersTex)
+      gl.deleteTexture(e.mirrorTex)
+    }
+    apGeoCache.clear()
     gl.deleteFramebuffer(outFbo)
     gl.deleteFramebuffer(outFieldFbo)
     gl.deleteFramebuffer(maskFbo)
   }
 
-  return { uploadWalls, uploadCorners, uploadSlabs, uploadAps, bakeLos, renderAp, renderField, setUseGrid, dispose, gl }
+  return { uploadWalls, uploadCorners, uploadSlabs, uploadAps, bakeLos, bakeApGeo, renderAp, renderField, setUseGrid, dispose, gl }
 }
