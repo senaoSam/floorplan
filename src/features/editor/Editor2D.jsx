@@ -210,11 +210,15 @@ function Editor2D() {
   }, [])
 
   // ── 容器尺寸監聽（rAF 批次，避免 Panel 動畫期間多次 resize 抖動）
+  // 0×0 回報會在 CanvasArea 把這個 pane 切成 display:none 時出現，但我們
+  // 不想清空 size — 那會在切回 2D 時讓 Stage 渲染 0×0 的一幀，再跳到實際
+  // 尺寸（縮小版 → fit 的閃爍）。隱藏期間保留上次的有效尺寸即可。
   useEffect(() => {
     if (!containerRef.current) return
     let rafId = null
     const observer = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect
+      if (width === 0 || height === 0) return
       if (rafId) cancelAnimationFrame(rafId)
       rafId = requestAnimationFrame(() => { setSize({ width, height }) })
     })

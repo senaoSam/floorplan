@@ -3,7 +3,7 @@ import { Canvas, extend, useFrame, useLoader, useThree } from '@react-three/fibe
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { useFloorStore } from '@/store/useFloorStore'
-import { useEditorStore } from '@/store/useEditorStore'
+import { useEditorStore, VIEW_MODE } from '@/store/useEditorStore'
 import WallLayer3D from './WallLayer3D'
 import APLayer3D from './APLayer3D'
 import ScopeLayer3D from './ScopeLayer3D'
@@ -183,6 +183,12 @@ function Viewer3D() {
   const show3DAllFloors = useEditorStore((s) => s.show3DAllFloors)
   const toggleLayer     = useEditorStore((s) => s.toggleLayer)
   const clearSelected   = useEditorStore((s) => s.clearSelected)
+  // CanvasArea now keeps Viewer3D mounted but hidden when viewMode === 2D, so
+  // we'd otherwise burn GPU rendering an invisible scene. Drop the r3f loop
+  // to demand-only when hidden; OrbitControls re-invalidates on user input,
+  // so this is safe.
+  const viewMode        = useEditorStore((s) => s.viewMode)
+  const isVisible       = viewMode === VIEW_MODE.THREE_D
 
   const visibleFloors = show3DAllFloors
     ? floors
@@ -222,6 +228,7 @@ function Viewer3D() {
       <Canvas
         camera={{ position: camPos, fov: 50, near: 0.1, far: 2000 }}
         style={{ width: '100%', height: '100%', background: '#0f172a' }}
+        frameloop={isVisible ? 'always' : 'demand'}
         onPointerMissed={() => clearSelected()}
       >
       <ambientLight intensity={0.6} />
