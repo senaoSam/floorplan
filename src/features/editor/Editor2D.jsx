@@ -33,6 +33,7 @@ import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { buildScenario } from '@/features/heatmap/buildScenario'
 import { probeAt } from '@/features/heatmap/hoverProbe'
+import { warmupGL as warmupHeatmapGL } from '@/features/heatmap/sampleFieldGL'
 import './Editor2D.sass'
 
 const SCALE_BY    = 1.08
@@ -196,6 +197,17 @@ function Editor2D() {
     }
     return best
   }, [activeFloorId, viewport.scale])
+
+  // Warm up heatmap GL programs once when the canvas first mounts. Without
+  // this, the first sampleFieldGL call (e.g. clicking "Load Demo" with the
+  // heatmap auto-enabled) pays ~450ms / AP for GLSL compile + first-draw
+  // pipeline init. Defer to idle so we don't fight the initial Stage layout.
+  useEffect(() => {
+    const ric = window.requestIdleCallback ?? ((cb) => setTimeout(cb, 200))
+    const cancel = window.cancelIdleCallback ?? clearTimeout
+    const handle = ric(() => warmupHeatmapGL())
+    return () => cancel(handle)
+  }, [])
 
   // ── 容器尺寸監聽（rAF 批次，避免 Panel 動畫期間多次 resize 抖動）
   useEffect(() => {

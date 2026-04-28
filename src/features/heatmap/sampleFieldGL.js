@@ -242,6 +242,33 @@ export function disposeGL() {
   }
 }
 
+// Warm up shader programs so the user's first real heatmap render doesn't pay
+// ~450ms / AP for GLSL compile + program link + first-draw pipeline init.
+// Triggered once when Editor2D mounts (idle callback). Subsequent calls are
+// no-ops. Runs both paths (aggregated + per-AP refl/diff) on a 1×1 m dummy
+// scenario so every program the real render might dispatch is already cached.
+let __warmedUp = false
+export function warmupGL() {
+  if (__warmedUp) return
+  __warmedUp = true
+  const dummyAp = {
+    id: '__warmup_ap__',
+    pos: { x: 0.5, y: 0.5 },
+    zM: 1, txDbm: 20, frequency: 5, channelWidth: 20, antennaMode: 'omni',
+  }
+  const dummyScenario = {
+    size: { w: 1, h: 1 },
+    walls: [], corners: [], aps: [dummyAp],
+    floorBoundaries: [], rxElevationM: 0,
+  }
+  try {
+    sampleFieldGL(dummyScenario, 1.0, { maxReflOrder: 0, enableDiffraction: false })
+    sampleFieldGL(dummyScenario, 1.0, { maxReflOrder: 1, enableDiffraction: true })
+  } catch (e) {
+    console.warn('[Heatmap] warmup failed:', e.message)
+  }
+}
+
 // Bench / debug: switch the shader between brute-force (per-wall loop) and
 // grid traversal at runtime. Useful for measuring the F5b speedup on a fixed
 // scenario without rebuilding textures.
