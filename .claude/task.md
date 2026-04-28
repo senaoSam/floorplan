@@ -291,7 +291,7 @@ JS 引擎僅保留作為 (a) golden test 真相來源 (b) HM-F9 autoPowerPlan wo
 | 10-5b | ✅   | 非 active 樓層的牆 / AP / Scope 視覺弱化（dimOpacity 0.28 套到所有 material） |
 | 10-5c | ✅   | 單樓層 / 全樓層切換（Viewer3D 左上 toggle + useEditorStore.show3DAllFloors） |
 | 10-5d | ✅   | `floor.floorHeight` 編輯 UI（SidebarLeft active 樓層下方 inline 輸入） |
-| 10-5e | ⬜   | 3D heatmap 樓板貼圖：每個樓層的 heatmap canvas 貼到對應 elevation 的地板上（依賴 HM-F2/F3） |
+| 10-5e | ✅   | **3D heatmap 樓板貼圖（MVP, 2026-04-28）**：active floor 的 heatmap canvas 貼到該樓層地板上方 0.02 m。`src/features/viewer3d/HeatmapPlane3D.jsx` per-floor 跑 buildScenario / sampleFieldGL / heatmapGL（自帶 createHeatmapGL instance — 與 2D HeatmapLayer 的 module-singleton GL 隔離），產出 canvas 用 `THREE.CanvasTexture` 貼 plane，meshBasicMaterial transparent opacity 0.7 + depthWrite false 避免 z-fight。狀態 / mode / 開關全跟 2D 同步（共用 useHeatmapStore），cross-floor physics 透過同一個 buildScenario(crossFloor) 自動繼承。**FloorStack 內 `{isActive && <HeatmapPlane3D ... />}`** — MVP 範圍只 active floor，避免多樓層各跑 sampleFieldGL；多樓層全顯示留作後續迭代。**HeatmapControl 從 Editor2D hoist 到 CanvasArea** 同層級，2D / 3D 視圖共用同一個開關/設定面板，省去切換 view mode 才能調整。**驗收**（瀏覽器 MCP）：3D viewer 地板出現完整 RSSI 色帶 + 等高線；切 SINR mode 即時換色彩 pattern（與 RSSI 視覺差異明顯）；3D 直接點 HeatmapControl 開關按鈕能即時 enable/disable，地板恢復 floor image 無殘留 |
 | 10-5f | ⬜   | 3D FloorHole 立體視覺化：把 hole 的垂直延伸範圍（bottomFloorId→topFloorId）畫成半透明柱體（依賴 HM-F2a 的資料欄位） |
 
 ---

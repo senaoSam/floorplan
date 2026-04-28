@@ -236,7 +236,8 @@ src/features/
     DropZone.sass
 
   viewer3d/
-    Viewer3D.jsx              # React Three Fiber 3D 場景（佔位，未來 3D 視覺化）
+    Viewer3D.jsx              # React Three Fiber 3D 場景
+    HeatmapPlane3D.jsx        # 10-5e：active floor heatmap canvas 貼到 3D 地板上方
 
   heatmap/
     buildScenario.js          # 主系統 state → heatmap engine scenario 格式
