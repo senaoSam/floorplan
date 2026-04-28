@@ -135,6 +135,21 @@ uniform sampler2D uLosTex;
 uniform int uLosEnabled;
 uniform int uLosFastMode;
 
+// HM-F5l: per-fragment refl/diff cull threshold. If the AP's free-space-only
+// RSSI at this fragment is already below uCullFloorDbm, the reflection and
+// diffraction loops can be skipped entirely. Physics: refl path travels
+// d1+d2 ≥ d (triangle inequality) with extra Fresnel attenuation (|Γ|≤1);
+// diffraction adds knife-edge loss on top of an even longer path. So
+// FS-only direct < cullFloor implies refl ≤ FS-only direct < cullFloor and
+// diff < cullFloor. Skipping is bit-equivalent to the runtime path producing
+// values < cullFloor that the host aggregator would clamp anyway. The direct
+// Friis path itself still runs (cheap) so the per-AP RSSI grid stays
+// consistent with no-cull behaviour.
+//
+// Threaded as the same uniform the aggregated FS_FIELD path already uses;
+// renderAp binds it from opts.cullFloorDbm (defaults to -120 dBm).
+uniform float uCullFloorDbm;
+
 // HM-F5k: per-AP precomputed corner / wall geometry, baked once when AP or
 // walls change and reused across every fragment.
 //   uApCornersGeo (RGBA32F, 1×N_corners): per corner
@@ -865,6 +880,16 @@ float rssiWithReflections(vec2 rx, float rxZ) {
   float dz = uApPos.z - rxZ;
   float dDir = sqrt(dxyLen * dxyLen + dz * dz);
 
+  // HM-F5l: free-space-RSSI cull. Refl/diff paths travel ≥ direct distance
+  // with extra Fresnel / knife-edge attenuation, so FS-only direct < floor
+  // means every other path is also below floor — skip the loops entirely.
+  // The direct Friis path keeps running so the output dBm is still computed
+  // correctly (just below floor). apGainDbi is direction-aware (lobe gain),
+  // so we use uAntGainDbi here as the upper bound (boresight gain), which
+  // is a strict superset of any apGainDbi(rx) value the runtime would pick.
+  float fsBest = uTxDbm + uAntGainDbi + uRxGainDbi - pathLossDb(dDir, uCenterMHz);
+  bool cullByFloor = fsBest < uCullFloorDbm;
+
   // HM-F5j: per-AP LOS lookup. losBit==1 means the host's bake pass
   // verified the AP→rx ray hits zero walls at this fragment, so the
   // direct-path wall scan is a guaranteed no-op. We skip the DDA entirely
@@ -951,7 +976,7 @@ float rssiWithReflections(vec2 rx, float rxZ) {
   // Off by default; opt-in for drag-time speedup where ~5-15 dB transient
   // drift is acceptable. Strict mode (uLosFastMode==0) keeps full parity.
   bool reflSkipByLos = (uLosFastMode == 1) && losClear;
-  if (uReflEnabled == 1 && sameFloor && !reflSkipByLos) {
+  if (uReflEnabled == 1 && sameFloor && !reflSkipByLos && !cullByFloor) {
     for (int w = 0; w < uWallCount; w++) {
       vec2 wa, wb;
       float wLossDb, wLossB, wZLo, wZHi;
@@ -1025,7 +1050,7 @@ float rssiWithReflections(vec2 rx, float rxZ) {
   // Mirrors JS: enableDiffraction && wallScan.hits > 0 && sameFloorRay.
   // Each path is polarization-neutral (scalar amp into both H channels),
   // matching makeScalarPath in propagation.js.
-  if (uDiffEnabled == 1 && dirHits > 0.0 && sameFloor) {
+  if (uDiffEnabled == 1 && dirHits > 0.0 && sameFloor && !cullByFloor) {
     float wavelengthM = C_LIGHT / f;
     for (int ci = 0; ci < uCornerCount; ci++) {
       vec2 corner = texelFetch(uCorners, ivec2(ci % 4096, ci / 4096), 0).xy;
@@ -2614,6 +2639,9 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.uniform1i(gl.getUniformLocation(prog, 'uReflEnabled'),
       opts.maxReflOrder && opts.maxReflOrder > 0 ? 1 : 0)
     gl.uniform1i(gl.getUniformLocation(prog, 'uFreqOverrideN'), opts.freqOverrideN ?? 0)
+    // HM-F5l: same cull floor the aggregated path uses. Default -120 dBm
+    // matches JS aggregateApContributions's "below this is no signal".
+    gl.uniform1f(gl.getUniformLocation(prog, 'uCullFloorDbm'), opts.cullFloorDbm ?? -120)
 
     // HM-F5c step 3: knife-edge diffraction toggle + corners texture.
     gl.uniform1i(gl.getUniformLocation(prog, 'uDiffEnabled'),
