@@ -68,11 +68,24 @@ function HeatmapControl() {
           <div className="heatmap-control__readout-row heatmap-control__readout-pos">
             ({hover.at.x.toFixed(2)}, {hover.at.y.toFixed(2)}) m
           </div>
-          {hover.perAp.map((v, i) => (
-            <div key={i} className="heatmap-control__readout-row">
-              <b>{hover.apList[i]?.name ?? `AP-${i + 1}`}</b> <span>{v.toFixed(1)}</span>
-            </div>
-          ))}
+          {(() => {
+            let best = -1
+            let bestVal = -Infinity
+            for (let i = 0; i < hover.perAp.length; i++) {
+              const v = hover.perAp[i]
+              if (isFinite(v) && v > bestVal) { bestVal = v; best = i }
+            }
+            if (best < 0) return null
+            const ap = hover.apList[best]
+            return (
+              <div className="heatmap-control__readout-row">
+                <b>{ap?.name ?? `AP-${best + 1}`}</b>
+                <span>
+                  {bestVal.toFixed(1)} dBm · ch {ap?.channel ?? '—'} · {ap?.channelWidth ? `${ap.channelWidth} MHz` : '—'}
+                </span>
+              </div>
+            )
+          })()}
         </div>
       )}
 
