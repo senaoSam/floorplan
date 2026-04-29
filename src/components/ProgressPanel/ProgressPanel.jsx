@@ -177,8 +177,8 @@ const PHASES = [
       {
         layer: '備援與延伸',
         items: [
-          { id: 'HM-F4', done: true, text: 'autoPowerPlan 自動功率規劃（greedy + 多起點 ±1 dB）' },
-          { id: 'HM-F9', done: false, text: 'autoPowerPlan 進 Web Worker（不卡 main thread + 真實 progress + cancel）' },
+          { id: 'HM-F4', done: true, text: 'autoPowerPlan 自動功率規劃（greedy + 多起點 ±1 dB；cost v2 = 4 個獨立 loss term L_coverage / L_outlier / L_quality / L_excess 加權）' },
+          { id: 'HM-F9', done: true, text: 'autoPowerPlan 進 Web Worker（不卡 main thread + 真實 progress + cancel + 規劃品質分數）' },
           { id: 'HM-B1', done: false, text: 'Gaussian blur 改善 / 參數微調 / 關閉選項' },
         ],
       },
@@ -204,7 +204,7 @@ const PHASES = [
           { id: '10-5c', done: true, text: '單樓層 / 全樓層顯示切換' },
           { id: '10-5d', done: true, text: 'floor.floorHeight 編輯 UI' },
           { id: '10-5e', done: false, text: '3D heatmap 樓板貼圖（依賴 HM-F2/F3）' },
-          { id: '10-5f', done: false, text: '3D FloorHole 立體柱體' },
+          { id: '10-5f', done: true, text: '3D FloorHole 立體柱體（跨樓層 ExtrudeGeometry）' },
         ],
       },
     ],

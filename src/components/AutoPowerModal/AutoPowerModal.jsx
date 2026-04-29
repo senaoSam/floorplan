@@ -28,6 +28,13 @@ function formatMs(ms) {
   const s = total % 60
   return `${m}:${String(s).padStart(2, '0')}`
 }
+
+// Convert a [0, 1] cost to a 0–100 quality score for human display.
+const qualityScore = (cost) =>
+  cost == null || !isFinite(cost) ? null : Math.max(0, Math.min(100, Math.round(100 * (1 - cost))))
+
+// Format a [0, 1] loss term as a percentage string.
+const fmtPct = (x) => x == null || !isFinite(x) ? '—' : `${(x * 100).toFixed(1)}%`
 function AutoPowerModal({ open, apIds, onClose }) {
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
   const floors = useFloorStore((s) => s.floors)
@@ -243,8 +250,9 @@ function AutoPowerModal({ open, apIds, onClose }) {
 
             <section className="auto-power-modal__section">
               <p className="auto-power-modal__hint">
-                演算法：3 起點（max / mid / min txPower）greedy ±1 dB 局部搜尋。
-                cost = (1 − coverage) + 0.2 × sinrShortfall（粗 grid 2 m）。預估 30 秒~2 分鐘。
+                演算法：3 起點（max / mid / min txPower）greedy ±1 dB 局部搜尋。<br/>
+                cost = 0.5 覆蓋缺 + 0.2 死角 + 0.2 品質缺 + 0.1 過量罰（每項 [0, 1] 正規化）。<br/>
+                規劃品質 = 100 × (1 − cost)。粗 grid 2 m，預估 30 秒~2 分鐘。
               </p>
             </section>
           </>
@@ -271,17 +279,29 @@ function AutoPowerModal({ open, apIds, onClose }) {
                   </span>
                 </div>
                 <div className="auto-power-modal__progress-row">
+                  <span>規劃品質</span>
+                  <span>{qualityScore(progress.cost) ?? '—'} / 100</span>
+                </div>
+                <div className="auto-power-modal__progress-row">
                   <span>覆蓋率（≥ {targetRssi} dBm）</span>
-                  <span>{(progress.coverage * 100).toFixed(1)}%</span>
+                  <span>{fmtPct(progress.coverage)}</span>
                 </div>
-                <div className="auto-power-modal__progress-row">
-                  <span>SINR 不足比例（&lt; {targetSinr} dB）</span>
-                  <span>{(progress.sinrShortfall * 100).toFixed(1)}%</span>
-                </div>
-                <div className="auto-power-modal__progress-row">
-                  <span>cost</span>
-                  <span>{progress.cost.toFixed(4)}</span>
-                </div>
+                {progress.terms && (
+                  <>
+                    <div className="auto-power-modal__progress-row">
+                      <span>死角嚴重度（P95 RSSI 缺）</span>
+                      <span>{fmtPct(progress.terms.L_outlier)}</span>
+                    </div>
+                    <div className="auto-power-modal__progress-row">
+                      <span>已覆蓋區品質缺口</span>
+                      <span>{fmtPct(progress.terms.L_quality)}</span>
+                    </div>
+                    <div className="auto-power-modal__progress-row">
+                      <span>過量發射</span>
+                      <span>{fmtPct(progress.terms.L_excess)}</span>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </section>
@@ -292,18 +312,32 @@ function AutoPowerModal({ open, apIds, onClose }) {
           <section className="auto-power-modal__section">
             <p className="auto-power-modal__label">規劃結果（目標 RSSI {targetRssi} dBm / SINR {targetSinr} dB）</p>
             <div className="auto-power-modal__progress">
+              <div className="auto-power-modal__progress-row auto-power-modal__progress-row--score">
+                <span>規劃品質</span>
+                <span>
+                  <strong>{qualityScore(result.score.cost) ?? '—'}</strong> / 100
+                </span>
+              </div>
               <div className="auto-power-modal__progress-row">
                 <span>覆蓋率（≥ {targetRssi} dBm）</span>
-                <span>{(result.score.coverage * 100).toFixed(1)}%</span>
+                <span>{fmtPct(result.score.coverage)}</span>
               </div>
-              <div className="auto-power-modal__progress-row">
-                <span>SINR 不足比例（&lt; {targetSinr} dB）</span>
-                <span>{(result.score.sinrShortfall * 100).toFixed(1)}%</span>
-              </div>
-              <div className="auto-power-modal__progress-row">
-                <span>cost</span>
-                <span>{result.score.cost.toFixed(4)}</span>
-              </div>
+              {result.score.terms && (
+                <>
+                  <div className="auto-power-modal__progress-row">
+                    <span>死角嚴重度（P95 RSSI 缺）</span>
+                    <span>{fmtPct(result.score.terms.L_outlier)}</span>
+                  </div>
+                  <div className="auto-power-modal__progress-row">
+                    <span>已覆蓋區品質缺口</span>
+                    <span>{fmtPct(result.score.terms.L_quality)}</span>
+                  </div>
+                  <div className="auto-power-modal__progress-row">
+                    <span>過量發射</span>
+                    <span>{fmtPct(result.score.terms.L_excess)}</span>
+                  </div>
+                </>
+              )}
             </div>
             <p className="auto-power-modal__label" style={{ marginTop: 12 }}>各 AP 功率變更</p>
             <div className="auto-power-modal__changes">
