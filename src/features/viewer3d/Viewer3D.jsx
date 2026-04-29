@@ -97,9 +97,35 @@ function FloorStack({ floor, elevation, isActive }) {
 // sidebar) we tween target + camera position together for a short window so
 // the view glides instead of snapping. Outside that window OrbitControls owns
 // the camera fully — keeping it hijacked per-frame breaks orbit/pan/zoom.
-function CameraRig({ target }) {
+function CameraRig({ target, cameraStateRef, entryPose }) {
   const controlsRef = useRef()
   const { camera, gl } = useThree()
+
+  // Expose live camera + controls + a tween command so the parent can read
+  // the current pose on demand AND drive an animated pose change without us
+  // hijacking every frame.
+  useEffect(() => {
+    if (!cameraStateRef) return
+    cameraStateRef.current = {
+      camera,
+      controls: controlsRef.current,
+      tweenTo: ({ camPos, target: tgt, duration }) => {
+        if (camPos) desiredCam.current.set(camPos[0], camPos[1], camPos[2])
+        else desiredCam.current.copy(camera.position)
+        if (tgt) desiredTarget.current.set(tgt[0], tgt[1], tgt[2])
+        else if (controlsRef.current) desiredTarget.current.copy(controlsRef.current.target)
+        // Snapshot starting pose for fixed-duration interpolation.
+        startCam.current.copy(camera.position)
+        startTarget.current.copy(controlsRef.current?.target ?? desiredTarget.current)
+        tweenStartMs.current = performance.now()
+        tweenDurMs.current = duration > 0 ? duration : 0
+        tweening.current = true
+      },
+    }
+    return () => {
+      if (cameraStateRef.current?.camera === camera) cameraStateRef.current = null
+    }
+  }, [cameraStateRef, camera])
 
   // Tween endpoints + active flag. We only drive the camera during a lift;
   // as soon as target/camera are close enough we hand control back so the
@@ -107,41 +133,104 @@ function CameraRig({ target }) {
   const desiredTarget = useRef(new THREE.Vector3(...target))
   const desiredCam    = useRef(new THREE.Vector3())
   const tweening      = useRef(false)
+  const mounted       = useRef(false)
+  // Optional fixed-duration tween (used by the parent's tweenTo({duration})).
+  // When set, useFrame interpolates start→desired over `durationMs` ignoring
+  // the default critically-damped lerp so the user sees a slow, linear-ish
+  // glide rather than a snap.
+  const startTarget   = useRef(new THREE.Vector3())
+  const startCam      = useRef(new THREE.Vector3())
+  const tweenStartMs  = useRef(0)
+  const tweenDurMs    = useRef(0)
 
   // On target prop change, set new goal and compute the matching camera goal
   // that preserves the user's current orbit pose (same offset to the target).
+  // First mount is special: controls.target is still the default (0,0,0) so
+  // the offset would be wrong — instead snap controls.target to the prop and
+  // leave camera.position alone (already set via Canvas `camera` prop). If an
+  // entryPose is provided we kick off the 2D→3D entry animation right after
+  // the snap, since CameraRig owns the moment controls become ready.
   useEffect(() => {
     const controls = controlsRef.current
     if (!controls) return
+    if (!mounted.current) {
+      controls.target.set(target[0], target[1], target[2])
+      controls.update()
+      tweening.current = false
+      mounted.current = true
+      if (entryPose) {
+        const tgt = entryPose.target ?? target
+        desiredCam.current.set(entryPose.camPos[0], entryPose.camPos[1], entryPose.camPos[2])
+        desiredTarget.current.set(tgt[0], tgt[1], tgt[2])
+        startCam.current.copy(camera.position)
+        startTarget.current.copy(controls.target)
+        tweenStartMs.current = performance.now()
+        tweenDurMs.current = entryPose.duration > 0 ? entryPose.duration : 0
+        tweening.current = true
+      }
+      return
+    }
     const nextTarget = new THREE.Vector3(...target)
     const camOffset = new THREE.Vector3().copy(camera.position).sub(controls.target)
     desiredTarget.current.copy(nextTarget)
     desiredCam.current.copy(nextTarget).add(camOffset)
     tweening.current = true
-  }, [target, camera])
-
-  // Initialise on mount so the first render doesn't try to tween from 0.
-  useEffect(() => {
-    const controls = controlsRef.current
-    if (!controls) return
-    controls.target.set(target[0], target[1], target[2])
-    controls.update()
-    tweening.current = false
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [target, camera, entryPose])
 
   useFrame((_, dt) => {
     const controls = controlsRef.current
     if (!controls) return
     if (!tweening.current) return   // idle → OrbitControls fully in charge
-    // Frame-rate independent critically-damped-ish lerp.
+
+    if (tweenDurMs.current > 0) {
+      // Fixed-duration tween: interpolate the camera offset in *spherical*
+      // space (radius, azimuth, polar) around the moving target so the orbit
+      // angles change linearly. Cartesian lerp of camera.position would also
+      // glide visually but azimuth (atan2 of offset.xz) jumps fast near the
+      // top-down singularity where offset.xz ≈ (0,0).
+      const elapsed = performance.now() - tweenStartMs.current
+      const t = Math.min(1, elapsed / tweenDurMs.current)
+      const e = t * t * (3 - 2 * t)  // smoothstep
+
+      // Lerp target in cartesian (target moves slowly or not at all).
+      controls.target.lerpVectors(startTarget.current, desiredTarget.current, e)
+
+      // Compute start/end offsets relative to their respective targets, take
+      // their spherical decompositions, lerp the three scalars, rebuild a
+      // cartesian offset, and add it to the *current* (interpolated) target.
+      const offStart = new THREE.Vector3().subVectors(startCam.current, startTarget.current)
+      const offEnd   = new THREE.Vector3().subVectors(desiredCam.current, desiredTarget.current)
+      const sStart = new THREE.Spherical().setFromVector3(offStart)
+      const sEnd   = new THREE.Spherical().setFromVector3(offEnd)
+      // Wrap theta to the shorter arc so we don't take the long way round.
+      let dTheta = sEnd.theta - sStart.theta
+      if (dTheta >  Math.PI) dTheta -= 2 * Math.PI
+      if (dTheta < -Math.PI) dTheta += 2 * Math.PI
+      const s = new THREE.Spherical(
+        sStart.radius + (sEnd.radius - sStart.radius) * e,
+        sStart.phi    + (sEnd.phi    - sStart.phi)    * e,
+        sStart.theta  + dTheta * e,
+      )
+      const off = new THREE.Vector3().setFromSpherical(s)
+      camera.position.copy(controls.target).add(off)
+      controls.update()
+      if (t >= 1) {
+        controls.target.copy(desiredTarget.current)
+        camera.position.copy(desiredCam.current)
+        controls.update()
+        tweening.current = false
+        tweenDurMs.current = 0
+      }
+      return
+    }
+
+    // Default: frame-rate independent critically-damped-ish lerp (used when
+    // active floor changes — quick snap into place).
     const k = 8
     const alpha = 1 - Math.exp(-k * Math.min(dt, 0.1))
     controls.target.lerp(desiredTarget.current, alpha)
     camera.position.lerp(desiredCam.current, alpha)
     controls.update()
-    // Stop the tween once we're visually settled so user orbit input isn't
-    // fought on subsequent frames.
     const done =
       controls.target.distanceToSquared(desiredTarget.current) < 1e-4 &&
       camera.position.distanceToSquared(desiredCam.current) < 1e-4
@@ -208,10 +297,54 @@ function Viewer3D() {
     [w, h, activeElev],
   )
 
-  // Pick an initial camera distance that fits the floor into view from an
-  // elevated 3/4 angle. Bigger floors → step back proportionally.
+  // Initial pose: near-top-down birds-eye so the user enters 3D looking down
+  // at the active floor — easy to map back to the 2D editor. We can't sit at
+  // exactly (target.x, *, target.z) because that's an OrbitControls gimbal
+  // singularity (offset = (0, *, 0) → atan2 collapses, internal spherical
+  // decomposition picks an arbitrary azimuth, typically 45°). Nudge offset.z
+  // a hair so azimuth resolves to 0°. Distance scales with floor diagonal.
   const diag = Math.max(Math.sqrt(w * w + h * h), 8)
-  const camPos = [w / 2 + diag * 0.6, activeElev + diag * 0.7, h / 2 + diag * 0.9]
+  const camPos = [w / 2, activeElev + 1.0 + diag * 1.3, h / 2 + 0.001]
+
+  const cameraStateRef = useRef(null)
+
+  // 進 3D 立刻啟動「2D → 3D 落地」的 5 秒鏡頭過渡：俯瞰起手 → 3/4
+  // perspective。Pose 是當下測試樓層手動 tune 出來的世界座標，後續可改成
+  // 相對 target 的 offset 讓多樓層通用。
+  const entryPose = useMemo(
+    () => ({ camPos: [41.617, 31.053, 56.264], target: center, duration: 1500 }),
+    [center],
+  )
+  const handleLogCamera = () => {
+    const state = cameraStateRef.current
+    if (!state) {
+      console.warn('[Viewer3D] camera not ready')
+      return
+    }
+    const { camera, controls } = state
+    const fmt = (v) => Number(v.toFixed(3))
+    const pos = camera.position
+    const tgt = controls?.target
+    // Azimuth (yaw around world Y) + polar (tilt from world Y) describe the
+    // orbit angles OrbitControls itself uses internally. Compute from the
+    // camera→target offset so the numbers stay in sync with what the user
+    // sees, regardless of camera.rotation order.
+    let azimuthDeg = null
+    let polarDeg = null
+    if (tgt) {
+      const off = pos.clone().sub(tgt)
+      const r = off.length()
+      azimuthDeg = fmt(THREE.MathUtils.radToDeg(Math.atan2(off.x, off.z)))
+      polarDeg   = fmt(THREE.MathUtils.radToDeg(Math.acos(Math.min(1, Math.max(-1, off.y / r)))))
+    }
+    console.log('[Viewer3D] camera pose', {
+      camera: { x: fmt(pos.x), y: fmt(pos.y), z: fmt(pos.z) },
+      target: tgt ? { x: fmt(tgt.x), y: fmt(tgt.y), z: fmt(tgt.z) } : null,
+      distance: tgt ? fmt(pos.distanceTo(tgt)) : null,
+      azimuthDeg,   // 0° = 從 +Z 方向看；繞 Y 軸水平旋轉
+      polarDeg,     // 0° = 正上往下俯瞰；90° = 水平視角
+    })
+  }
 
   return (
     <div className="viewer3d">
@@ -223,6 +356,14 @@ function Viewer3D() {
           title={show3DAllFloors ? '切換為只顯示當前樓層' : '切換為顯示全部樓層'}
         >
           {show3DAllFloors ? '🏢 全樓層' : '🏠 單樓層'}
+        </button>
+        <button
+          type="button"
+          className="viewer3d__floors-btn"
+          onClick={handleLogCamera}
+          title="把目前相機位置與 target 印到 console"
+        >
+          📷 Log Camera
         </button>
       </div>
       <Canvas
@@ -256,7 +397,7 @@ function Viewer3D() {
         />
       )}
 
-      <CameraRig target={center} />
+      <CameraRig target={center} cameraStateRef={cameraStateRef} entryPose={entryPose} />
       </Canvas>
     </div>
   )
