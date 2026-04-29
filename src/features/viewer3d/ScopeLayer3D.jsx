@@ -1,14 +1,13 @@
 import React, { useMemo } from 'react'
 import * as THREE from 'three'
 import { useScopeStore } from '@/store/useScopeStore'
-import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 
-// Match 2D ScopeLayer / FloorHoleLayer color choices so the 3D overlay reads
-// as the same object type across views.
+// Match 2D ScopeLayer color choices so the 3D overlay reads as the same
+// object type across views. Floor holes have moved to FloorHoleVolume3D
+// (rendered as vertical columns spanning bottomFloorId → topFloorId).
 const STYLES = {
-  in:   { fill: '#2ed573', fillAlpha: 0.40, stroke: '#2ed573' },
-  out:  { fill: '#ff4757', fillAlpha: 0.18, stroke: '#ff4757' },
-  hole: { fill: '#a855f7', fillAlpha: 0.25, stroke: '#7c3aed' },
+  in:  { fill: '#2ed573', fillAlpha: 0.40, stroke: '#2ed573' },
+  out: { fill: '#ff4757', fillAlpha: 0.18, stroke: '#ff4757' },
 }
 
 // Build a flat (XY) THREE.Shape from a flat [x0,y0,x1,y1,...] point list in
@@ -89,15 +88,12 @@ function pointsToMeters(pts, pxToM) {
 
 export default function ScopeLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
   const scopes = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
-  const holes  = useFloorHoleStore((s) => s.floorHolesByFloor[floorId] ?? [])
 
   if (!pxToM) return null
-  if (!scopes.length && !holes.length) return null
+  if (!scopes.length) return null
 
   return (
     <group>
-      {/* Scopes sit closest to the floor (in/out shaded polygon). Holes go
-          slightly higher so they visibly cut through if they overlap. */}
       {scopes.map((z) => {
         const style = STYLES[z.type] ?? STYLES.in
         return (
@@ -110,15 +106,6 @@ export default function ScopeLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
           />
         )
       })}
-      {holes.map((h) => (
-        <PolygonFill
-          key={h.id}
-          pointsM={pointsToMeters(h.points, pxToM)}
-          yOffset={0.015}
-          style={STYLES.hole}
-          dimOpacity={dimOpacity}
-        />
-      ))}
     </group>
   )
 }

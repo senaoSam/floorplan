@@ -8,6 +8,7 @@ import WallLayer3D from './WallLayer3D'
 import APLayer3D from './APLayer3D'
 import ScopeLayer3D from './ScopeLayer3D'
 import HeatmapPlane3D from './HeatmapPlane3D'
+import FloorHoleVolume3D from './FloorHoleVolume3D'
 import { computeFloorElevations } from './floorStacking'
 import './Viewer3D.sass'
 
@@ -143,6 +144,14 @@ function CameraRig({ target, cameraStateRef, entryPose }) {
   const tweenStartMs  = useRef(0)
   const tweenDurMs    = useRef(0)
 
+  // Track the target values we last reacted to so we only kick off a tween
+  // when the *numeric* target actually changes. The `target` prop is a fresh
+  // array on every Viewer3D render (e.g. new floor added → useMemo recomputes
+  // with same numbers but fresh array), and previously that triggered the
+  // "else" branch each render → tween toward current pose, which fights any
+  // ongoing user orbit input.
+  const lastTarget = useRef([NaN, NaN, NaN])
+
   // On target prop change, set new goal and compute the matching camera goal
   // that preserves the user's current orbit pose (same offset to the target).
   // First mount is special: controls.target is still the default (0,0,0) so
@@ -158,6 +167,7 @@ function CameraRig({ target, cameraStateRef, entryPose }) {
       controls.update()
       tweening.current = false
       mounted.current = true
+      lastTarget.current = [target[0], target[1], target[2]]
       if (entryPose) {
         const tgt = entryPose.target ?? target
         desiredCam.current.set(entryPose.camPos[0], entryPose.camPos[1], entryPose.camPos[2])
@@ -170,6 +180,11 @@ function CameraRig({ target, cameraStateRef, entryPose }) {
       }
       return
     }
+    // Skip if the numeric target didn't actually change — `target` is often a
+    // fresh array each render (Viewer3D recomputes it on any state change).
+    const [lx, ly, lz] = lastTarget.current
+    if (lx === target[0] && ly === target[1] && lz === target[2]) return
+    lastTarget.current = [target[0], target[1], target[2]]
     const nextTarget = new THREE.Vector3(...target)
     const camOffset = new THREE.Vector3().copy(camera.position).sub(controls.target)
     desiredTarget.current.copy(nextTarget)
@@ -386,6 +401,12 @@ function Viewer3D() {
           isActive={f.id === activeFloorId}
         />
       ))}
+
+      {/* 10-5f: floor-hole vertical extents rendered at scene root so a single
+          column can span multiple floors regardless of which FloorStack groups
+          are mounted (e.g. single-floor view still shows the whole column when
+          its home floor is active). */}
+      <FloorHoleVolume3D activeFloorId={activeFloorId} />
 
       {/* Ground grid anchored to the active floor size, placed just under the
           active floor's elevation so orientation is clear even when viewing
