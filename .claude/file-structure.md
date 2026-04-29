@@ -25,9 +25,14 @@ floorplan/
       opencv/
         opencv.js             # OpenCV.js 4.10.0（lazy load，AI 牆壁辨識用，不進 bundle）
     workers/
-      aiWalls.classic.worker.js  # 16-3a classic-mode worker（importScripts opencv.js）
+      aiWalls.classic.worker.js  # 16-3a + 16-3e + 16-3f + 16-3h classic-mode worker（importScripts opencv.js）
                                  #   不走 Vite bundling，避免 ES module worker 限制 importScripts
-                                 #   邏輯與 src/utils/opencv/preprocessCore.js 同步維護
+                                 #   pipeline: binarize → long-line mask → HoughLinesP → mergeCollinear → extendEndpoints
+                                 #   options: blurKernel / invert / morphKernel / morphDilatePx /
+                                 #            houghThreshold / minLineLengthRatio / maxLineGapPx /
+                                 #            mergeAngleTolDeg / mergeOffsetTol / mergeGapTol /
+                                 #            extendMissThreshold / extendMaxStepsPx
+                                 #   merge 邏輯與 src/utils/aiWalls/mergeSegments.js 同步維護
   sampleImg/                  # 範例圖片（原始）
 ```
 
@@ -126,6 +131,12 @@ src/utils/
     preprocessCore.js         # 16-3a 二值化純運算（main / worker 共用，吃 ImageData）
                               #   - preprocessImageData(cv, imageData, opts) → { binaryImageData, width, height, whitePixels }
                               #   - 內部用 arena 自動釋放所有 Mat，不外洩 handle
+  aiWalls/
+    mergeSegments.js          # 16-3h Graph-based collinear segment merge（純 JS）
+                              #   - mergeCollinearSegments(segments, { angleTolDeg, offsetTol, gapTol })
+                              #   - Union-Find: edge = 角度近 + 法向 offset 近 + 沿軸 gap 近
+                              #   - 合併：長度加權平均方向、投影 min/max 取端點
+                              #   - 邏輯同步 inline 於 public/workers/aiWalls.classic.worker.js
 ```
 
 ### Services
@@ -276,9 +287,14 @@ src/features/
 
   aiWalls/
     debugPage/
-      AIWallsDebugPage.jsx    # 16-3a dev-only 頁面（route: #/ai-walls-debug）
-                              #   選測試圖 → 跑 preprocessImage → 並排顯示原圖與二值圖
-                              #   參數：blurKernel、invert；顯示 elapsed ms、白像素比例
+      AIWallsDebugPage.jsx    # 16-3a + 16-3e + 16-3f + 16-3h dev-only 頁面（route: #/ai-walls-debug）
+                              #   選測試圖 → binarize + long-line mask + HoughLinesP + mergeCollinear → 四欄顯示
+                              #     (原圖 / Otsu binary / long-line mask × original / morph + 紅(raw)/綠(merged) 線段)
+                              #   參數：blurKernel / invert / morphKernel / morphDilatePx /
+                              #         houghThreshold / minLineLengthRatio / maxLineGapPx /
+                              #         mergeAngleTolDeg / mergeOffsetTol / mergeGapTol
+                              #   Overlay 切換 raw / merged / both；showSegments toggle 不需重跑 worker
+                              #   統計：binarize/morph/hough/merge 分項耗時、raw vs merged 線段數與總長
 ```
 
 ### Workers
