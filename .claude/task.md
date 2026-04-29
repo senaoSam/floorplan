@@ -349,8 +349,44 @@ JS 引擎僅保留作為 (a) golden test 真相來源 (b) HM-F9 autoPowerPlan wo
 | ---- | ---- | ------------------------------------------------------------ |
 | 16-1 | ⬜   | AI 自動量測比例尺（辨識圖面標註）                            |
 | 16-2 | ⬜   | AI 自動描繪建築範圍（Scoping）                               |
-| 16-3 | ⬜   | AI 自動偵測牆壁、門、窗、電梯結構                            |
+| 16-3 | ⬜   | AI 自動偵測牆壁、門、窗（展開為 16-3a ~ 16-3o，見下）|
 | 16-4 | ⬜   | AI 自動建議 AP 放置位置                                      |
+
+#### 16-3 AI 牆壁辨識（純前端 OpenCV.js 路線）
+
+> **目標**：使用者上傳平面圖後，自動偵測牆線並轉成 wall segments 寫入 `useWallStore`。
+>
+> **技術選型**：純前端 OpenCV.js + 自製 pipeline，離線、免後端、隱私好。對 CAD 匯出圖召回 90%+，掃描圖 70-85%，手繪圖 ~50%。配合半自動 review UX 達到「使用者再修幾條就能用」。
+>
+> **設計理念（evidence-based scoring，非 hard rule pipeline）**：
+> - 不要早期硬刪 connected component，改用「標記低可信」逐步累積證據，最後 graph topology 救回短牆
+> - 牆 vs 非牆的關鍵 feature：**parallel pair（成對牆厚）** + **oriented ROI 黑像素密度** + **與牆 graph 的拓撲連接性**
+> - dominant orientation clustering 取代寫死 0/45/90，支援斜向建築
+> - graph-based collinear merge（u/n 投影統一處理任意角度）取代兩兩比對
+> - 實心填色牆走 contour + skeletonize 分支，與線條牆 pipeline 並存
+>
+> **MVP 切入點（先做地基，跑 baseline 再加 feature）**：
+> - 第一版只做 16-3a + 16-3b + 16-3c + 16-3e + 16-3f 的最小版本
+> - 跑 3-5 張不同風格測試圖看 baseline，再客觀評估後續 feature ROI
+> - OpenCV.js 大圖 skeletonize 跑在 Web Worker（沿用 HM-F9 worker pattern）
+
+| #     | 狀態 | Task |
+| ----- | ---- | ---- |
+| 16-3a | ⬜   | OpenCV.js 整合與圖片載入 pipeline：CDN / 本地 wasm 載入策略、Mat 物件 lifecycle 管理（手動 delete 防 memory leak）、灰階 + 高斯 blur + Otsu / adaptiveThreshold + 反相，二值圖牆線為白、背景為黑 |
+| 16-3b | ⬜   | 圖框與外邊界偵測：findContours 找最大封閉輪廓 → 內縮 N px 當分析 ROI，後續所有處理只在 ROI 內，順便解掉「上傳圖有多餘白邊」 |
+| 16-3c | ⬜   | Deskew：Hough 統計線段角度直方圖估主方向 → warpAffine 旋轉校正。**必須在角度量化前做**，否則掃描圖歪 2-3° 整片誤判 |
+| 16-3d | ⬜   | Connected component scoring（不刪除、只打分數）：對每個 component 計算 area / aspect ratio / stroke thickness / foreground density / 主方向夾角 / 鄰近 component 密度。文字特徵=小面積+局部密集+方向亂；牆特徵=細長+對齊主方向+黑密度高。輸出 confidence map 給後續 stage 參考 |
+| 16-3e | ⬜   | 分方向 morphology 強化：horizontal kernel `Size(15,1)` + vertical kernel `Size(1,15)`（kernel 長度依 deskew 後主方向 + 估計牆厚動態調），對角 kernel optional。把水平、垂直牆線連起來，斷裂的虛線變實線 |
+| 16-3f | ⬜   | HoughLinesP 線段抽取：minLineLength = imageDiagonal × 0.01~0.03（相對尺度，不要寫死 px）；maxLineGap = estimatedWallThickness × 1.5~3。先估牆厚再決定參數 |
+| 16-3g | ⬜   | 角度 clustering（取代寫死 45°）：收集所有線段角度做 1D clustering（k-means / mean shift / histogram peak），找 dominant orientations，依群心吸附。支援 30°/60° 斜向建築 |
+| 16-3h | ⬜   | Graph-based collinear merge：node = candidate segment，edge = `angleDiff < tol && offsetDiff < tol && projGap < tol`（用方向向量 u 與法向量 n 的投影統一處理任意角度），connected components 後對每個 component 投影最小/最大端點為合併線段。比兩兩比對乾淨且無順序問題 |
+| 16-3i | ⬜   | Wall thickness 估計（parallel pair detection）：對每條合併後線段，往法向量 n 方向掃近距離平行線段，找成對的 → 距離分布做 histogram peak 估典型牆厚。**這是區分「牆」vs「家具邊 / 尺寸線 / 地磚縫」的關鍵 feature**，非牆長直線不會成對 |
+| 16-3j | ⬜   | Oriented ROI density scoring：對每條候選線段建 oriented ROI（長度=線長、寬=estimatedWallThickness、方向=line angle），計算前景密度。真牆密度高且穩定，家具/尺寸線密度低 |
+| 16-3k | ⬜   | 實心填色牆分支（contour + skeleton）：步驟 16-3a 之後判斷黑像素佔比，超過閾值走 contour 路線。findContours → 過濾非牆 blob → Zhang-Suen thinning（**JS 端實作 + Web Worker 跑大圖**）→ skeleton graph pruning → 轉中心線 + 估局部厚度（distance transform） |
+| 16-3l | ⬜   | 候選 confidence scoring 整合：`score = w1·lengthScore + w2·densityScore + w3·pairedLineScore + w4·topologyScore + w5·angleClusterScore − w6·symbolPenalty − w7·borderPenalty − w8·dimensionLinePenalty − w9·textClusterPenalty − w10·furnitureShapePenalty`。權重不寫死，做成可調 preset（CAD / 掃描 / 手繪），之後評估「依輸入特徵自動選 preset」|
+| 16-3m | ⬜   | Web Worker 化：OpenCV.js 整套 pipeline 跑在 worker（沿用 HM-F9 pattern：`?worker` import + ES module worker、`run` / `cancel` / `progress` 訊息協定）。大圖 skeletonize 不卡 UI；提供進度條 + ETA + 中止鈕 |
+| 16-3n | ⬜   | 半自動 Review UI：偵測完成後進入 review mode，候選牆依 confidence 分層顯示（高=實線、中=虛線、低=半透明）。使用者點擊切換保留/刪除、可手動補畫漏線、確認後一次寫入 `useWallStore`。預設材質取 `MATERIALS.CONCRETE`（與手動繪牆一致），高度用樓層預設值。Review modal Portal 渲染避開 PanelRight transform |
+| 16-3o | ⬜   | 整合入口：Toolbar 加「AI 偵測牆壁」按鈕（active floor 必須有 floorImage 才 enable），點擊後跑 worker pipeline → 開 Review UI。完成後寫入 wallStore 走 Undo/Redo（與 7-4 整合，誤判可一鍵還原） |
 
 ### Layer 17 — 進階顯示
 | #    | 狀態 | Task                                                         |
