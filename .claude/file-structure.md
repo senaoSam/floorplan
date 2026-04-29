@@ -20,7 +20,15 @@ floorplan/
     settings.local.json       # Claude Code 本地設定
   public/
     test-floorplan.png        # Demo 測試用平面圖
-  sampleImg/                  # 範例圖片
+    sample-walls/             # AI walls debug page 用的測試圖（複製自 sampleImg/）
+    vendor/
+      opencv/
+        opencv.js             # OpenCV.js 4.10.0（lazy load，AI 牆壁辨識用，不進 bundle）
+    workers/
+      aiWalls.classic.worker.js  # 16-3a classic-mode worker（importScripts opencv.js）
+                                 #   不走 Vite bundling，避免 ES module worker 限制 importScripts
+                                 #   邏輯與 src/utils/opencv/preprocessCore.js 同步維護
+  sampleImg/                  # 範例圖片（原始）
 ```
 
 ## src/
@@ -112,6 +120,12 @@ src/utils/
   autoChannelPlan.js          # greedyChannelAssign() — 同頻最小干擾頻道指派
   autoPowerPlan.js            # runAutoPowerPlan() — HM-F4 greedy 多起點 ±1 dB 功率規劃
                               # （HM-F9 後實際執行於 src/workers/autoPowerPlan.worker.js，main thread 不直接呼叫）
+  opencv/
+    loader.js                 # OpenCV.js main-thread lazy loader（注入 script、cache window.cv、處理 onRuntimeInitialized）
+                              #   目前 16-3a 流程跑在 worker，這支保留供未來 main-thread 預覽用
+    preprocessCore.js         # 16-3a 二值化純運算（main / worker 共用，吃 ImageData）
+                              #   - preprocessImageData(cv, imageData, opts) → { binaryImageData, width, height, whitePixels }
+                              #   - 內部用 arena 自動釋放所有 Mat，不外洩 handle
 ```
 
 ### Services
@@ -259,6 +273,12 @@ src/features/
     heatmapGL.js              # WebGL2 colormap/blur/contour renderer（吃 sampleField 出的 grid）
     hoverProbe.js             # 單點 probeAt(scenario, rx) — 供 hover 讀值使用
     modes.js                  # RSSI / SINR / SNR / CCI 視覺化模式 + 色階 anchors
+
+  aiWalls/
+    debugPage/
+      AIWallsDebugPage.jsx    # 16-3a dev-only 頁面（route: #/ai-walls-debug）
+                              #   選測試圖 → 跑 preprocessImage → 並排顯示原圖與二值圖
+                              #   參數：blurKernel、invert；顯示 elapsed ms、白像素比例
 ```
 
 ### Workers
@@ -266,6 +286,7 @@ src/features/
 ```
 src/workers/
   autoPowerPlan.worker.js     # HM-F9：在 Web Worker 裡跑 runAutoPowerPlan
+                              # （AI walls worker 是 classic mode，不在這，見 public/workers/）
                               # message 協定：
                               #   in  { type:'run', payload:{floor,walls,aps,scopes,apIdsToPlan,userOpts} }
                               #   in  { type:'cancel' }

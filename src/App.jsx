@@ -8,6 +8,7 @@ import DemoLoader from '@/components/DemoLoader/DemoLoader'
 import StressLoader from '@/components/StressLoader/StressLoader'
 import HeatmapDiffPage from '@/features/heatmap/diffPage/HeatmapDiffPage'
 import HeatmapBenchPage from '@/features/heatmap/diffPage/HeatmapBenchPage'
+import AIWallsDebugPage from '@/features/aiWalls/debugPage/AIWallsDebugPage'
 import './styles/App.sass'
 
 function useHashRoute() {
@@ -28,6 +29,9 @@ function App() {
   }
   if (hash === '#/heatmap-bench') {
     return <HeatmapBenchPage />
+  }
+  if (hash === '#/ai-walls-debug') {
+    return <AIWallsDebugPage />
   }
 
   return (

@@ -372,7 +372,7 @@ JS 引擎僅保留作為 (a) golden test 真相來源 (b) HM-F9 autoPowerPlan wo
 
 | #     | 狀態 | Task |
 | ----- | ---- | ---- |
-| 16-3a | ⬜   | OpenCV.js 整合與圖片載入 pipeline：CDN / 本地 wasm 載入策略、Mat 物件 lifecycle 管理（手動 delete 防 memory leak）、灰階 + 高斯 blur + Otsu / adaptiveThreshold + 反相，二值圖牆線為白、背景為黑 |
+| 16-3a | ✅   | OpenCV.js 整合與圖片載入 pipeline：本地 bundle（`public/vendor/opencv/opencv.js` v4.10.0，~10MB）、`src/utils/opencv/preprocessCore.js`（grayscale → Gaussian blur → Otsu → invert + arena Mat lifecycle）、整套跑在 `public/workers/aiWalls.classic.worker.js`（**classic worker** — Vite 預設 ES module worker 不能 importScripts，且 eval 10MB opencv.js 卡 1-2 分鐘，所以這支獨立放 public 走 classic mode + importScripts 快路徑；run/cancel/progress/done 協定 + transferable ImageData）、dev page `#/ai-walls-debug` 可選 4 張測試圖跑 baseline。**踩坑記錄**：(1) ES module worker 不能 importScripts → 改 classic mode 放 public 不走 Vite bundle；(2) OpenCV.js 4.x 的 `cv` Module 物件**本身是 thenable**（有 `.then` method），async function 裡 `return cv` 會被 engine 當 thenable 鏈式解析，造成 await 永遠 hang——**必須用 `return { cv }` 包一層**避開 promise assimilation；(3) 白像素計數用 `cv.countNonZero` 走 wasm SIMD，比 JS for loop 快數十倍。`src/utils/opencv/loader.js` 保留供未來 main-thread 預覽。 |
 | 16-3b | ⬜   | 圖框與外邊界偵測：findContours 找最大封閉輪廓 → 內縮 N px 當分析 ROI，後續所有處理只在 ROI 內，順便解掉「上傳圖有多餘白邊」 |
 | 16-3c | ⬜   | Deskew：Hough 統計線段角度直方圖估主方向 → warpAffine 旋轉校正。**必須在角度量化前做**，否則掃描圖歪 2-3° 整片誤判 |
 | 16-3d | ⬜   | Connected component scoring（不刪除、只打分數）：對每個 component 計算 area / aspect ratio / stroke thickness / foreground density / 主方向夾角 / 鄰近 component 密度。文字特徵=小面積+局部密集+方向亂；牆特徵=細長+對齊主方向+黑密度高。輸出 confidence map 給後續 stage 參考 |
@@ -384,7 +384,7 @@ JS 引擎僅保留作為 (a) golden test 真相來源 (b) HM-F9 autoPowerPlan wo
 | 16-3j | ⬜   | Oriented ROI density scoring：對每條候選線段建 oriented ROI（長度=線長、寬=estimatedWallThickness、方向=line angle），計算前景密度。真牆密度高且穩定，家具/尺寸線密度低 |
 | 16-3k | ⬜   | 實心填色牆分支（contour + skeleton）：步驟 16-3a 之後判斷黑像素佔比，超過閾值走 contour 路線。findContours → 過濾非牆 blob → Zhang-Suen thinning（**JS 端實作 + Web Worker 跑大圖**）→ skeleton graph pruning → 轉中心線 + 估局部厚度（distance transform） |
 | 16-3l | ⬜   | 候選 confidence scoring 整合：`score = w1·lengthScore + w2·densityScore + w3·pairedLineScore + w4·topologyScore + w5·angleClusterScore − w6·symbolPenalty − w7·borderPenalty − w8·dimensionLinePenalty − w9·textClusterPenalty − w10·furnitureShapePenalty`。權重不寫死，做成可調 preset（CAD / 掃描 / 手繪），之後評估「依輸入特徵自動選 preset」|
-| 16-3m | ⬜   | Web Worker 化：OpenCV.js 整套 pipeline 跑在 worker（沿用 HM-F9 pattern：`?worker` import + ES module worker、`run` / `cancel` / `progress` 訊息協定）。大圖 skeletonize 不卡 UI；提供進度條 + ETA + 中止鈕 |
+| 16-3m | 🟡   | Web Worker 化：OpenCV.js 整套 pipeline 跑在 worker（沿用 HM-F9 pattern：`?worker` import + ES module worker、`run` / `cancel` / `progress` 訊息協定）。大圖 skeletonize 不卡 UI；提供進度條 + ETA + 中止鈕。**已於 16-3a 提前建立基礎**（`src/workers/aiWalls.worker.js`），後續 stage 直接擴 worker 內 pipeline；剩 ETA + 進度比例待補 |
 | 16-3n | ⬜   | 半自動 Review UI：偵測完成後進入 review mode，候選牆依 confidence 分層顯示（高=實線、中=虛線、低=半透明）。使用者點擊切換保留/刪除、可手動補畫漏線、確認後一次寫入 `useWallStore`。預設材質取 `MATERIALS.CONCRETE`（與手動繪牆一致），高度用樓層預設值。Review modal Portal 渲染避開 PanelRight transform |
 | 16-3o | ⬜   | 整合入口：Toolbar 加「AI 偵測牆壁」按鈕（active floor 必須有 floorImage 才 enable），點擊後跑 worker pipeline → 開 Review UI。完成後寫入 wallStore 走 Undo/Redo（與 7-4 整合，誤判可一鍵還原） |
 
