@@ -1,11 +1,15 @@
-import React, { useState, useCallback, useRef } from 'react'
+import React, { useState, useCallback, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { runAutoPowerPlan } from '@/utils/autoPowerPlan'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import './AutoPowerModal.sass'
+
+// HM-F9: run the greedy plan in a Web Worker so the main thread stays
+// responsive (modal progress / cancel / overall UI) while the search churns.
+// Vite resolves `?worker` imports to a Worker constructor.
+import AutoPowerWorker from '@/workers/autoPowerPlan.worker.js?worker'
 
 // HM-F4 — Auto power plan modal.
 // Lets the user pick a target RSSI / scope, runs greedy multi-start search,
@@ -39,12 +43,25 @@ function AutoPowerModal({ open, apIds, onClose }) {
   const [progress, setProgress] = useState(null)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
-  const abortRef = useRef(false)
+  // Active worker instance — null when idle. Held in a ref so cancel/cleanup
+  // can terminate it without bouncing through state.
+  const workerRef = useRef(null)
 
   const targetIds = apIds && apIds.length > 0 ? apIds : aps.map((a) => a.id)
   const targetAPs = aps.filter((a) => targetIds.includes(a.id))
 
-  const handleRun = useCallback(async () => {
+  // Tear the worker down if the modal unmounts mid-run, otherwise the search
+  // would silently keep churning + post messages to a dead component.
+  useEffect(() => {
+    return () => {
+      if (workerRef.current) {
+        workerRef.current.terminate()
+        workerRef.current = null
+      }
+    }
+  }, [])
+
+  const handleRun = useCallback(() => {
     if (!floor || !floor.scale) {
       setError('當前樓層未設定比例尺，無法執行自動規劃')
       return
@@ -57,35 +74,61 @@ function AutoPowerModal({ open, apIds, onClose }) {
     setError(null)
     setResult(null)
     setProgress(null)
-    abortRef.current = false
 
-    try {
-      const r = await runAutoPowerPlan({
+    // Spin up a fresh worker per run so a previously-terminated worker can't
+    // leak state into this one.
+    const worker = new AutoPowerWorker()
+    workerRef.current = worker
+
+    worker.onmessage = (e) => {
+      const msg = e.data
+      if (!msg || !msg.type) return
+      if (msg.type === 'progress') {
+        setProgress(msg.state)
+      } else if (msg.type === 'done') {
+        const r = msg.result
+        if (r.aborted) {
+          setError('已取消')
+        } else if (r.error) {
+          setError(`錯誤：${r.error}`)
+        } else {
+          // Rehydrate Map from entries; keep the rest of the result as-is.
+          setResult({
+            aborted: r.aborted,
+            txMap: r.txMapEntries ? new Map(r.txMapEntries) : null,
+            score: r.score,
+            opts: r.opts,
+          })
+        }
+        worker.terminate()
+        if (workerRef.current === worker) workerRef.current = null
+        setRunning(false)
+      } else if (msg.type === 'error') {
+        setError(`執行失敗：${msg.message}`)
+        worker.terminate()
+        if (workerRef.current === worker) workerRef.current = null
+        setRunning(false)
+      }
+    }
+
+    worker.onerror = (e) => {
+      setError(`Worker 錯誤：${e.message ?? 'unknown'}`)
+      worker.terminate()
+      if (workerRef.current === worker) workerRef.current = null
+      setRunning(false)
+    }
+
+    worker.postMessage({
+      type: 'run',
+      payload: {
         floor,
         walls,
         aps,
         scopes,
         apIdsToPlan: targetIds,
         userOpts: { targetRssiDbm: targetRssi, targetSinrDb: targetSinr },
-        onProgress: async (st) => {
-          setProgress(st)
-          // 讓出 main thread 給 React 重繪 + 響應 cancel。
-          await new Promise((res) => setTimeout(res, 0))
-          return !abortRef.current
-        },
-      })
-      if (r.aborted) {
-        setError('已取消')
-      } else if (r.error) {
-        setError(`錯誤：${r.error}`)
-      } else {
-        setResult(r)
-      }
-    } catch (e) {
-      setError(`執行失敗：${e.message}`)
-    } finally {
-      setRunning(false)
-    }
+      },
+    })
   }, [floor, walls, aps, scopes, targetIds, targetRssi, targetSinr])
 
   const handleApply = useCallback(() => {
@@ -106,7 +149,12 @@ function AutoPowerModal({ open, apIds, onClose }) {
 
   const handleCancel = useCallback(() => {
     if (running) {
-      abortRef.current = true
+      // Polite cancel: ask the worker to wind down at the next progress
+      // checkpoint so we get a clean { aborted: true } 'done' message + a
+      // rendered "已取消" state. The worker tears itself down in onmessage.
+      if (workerRef.current) {
+        workerRef.current.postMessage({ type: 'cancel' })
+      }
     } else {
       onClose()
     }

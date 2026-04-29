@@ -111,6 +111,7 @@ src/utils/
   floorColor.js               # getFloorColor(index) — 參考樓層疊影用色盤（對齊模式）
   autoChannelPlan.js          # greedyChannelAssign() — 同頻最小干擾頻道指派
   autoPowerPlan.js            # runAutoPowerPlan() — HM-F4 greedy 多起點 ±1 dB 功率規劃
+                              # （HM-F9 後實際執行於 src/workers/autoPowerPlan.worker.js，main thread 不直接呼叫）
 ```
 
 ### Services
@@ -258,6 +259,21 @@ src/features/
     heatmapGL.js              # WebGL2 colormap/blur/contour renderer（吃 sampleField 出的 grid）
     hoverProbe.js             # 單點 probeAt(scenario, rx) — 供 hover 讀值使用
     modes.js                  # RSSI / SINR / SNR / CCI 視覺化模式 + 色階 anchors
+```
+
+### Workers
+
+```
+src/workers/
+  autoPowerPlan.worker.js     # HM-F9：在 Web Worker 裡跑 runAutoPowerPlan
+                              # message 協定：
+                              #   in  { type:'run', payload:{floor,walls,aps,scopes,apIdsToPlan,userOpts} }
+                              #   in  { type:'cancel' }
+                              #   out { type:'progress', state }
+                              #   out { type:'done', result:{aborted,error?,txMapEntries?,score?,opts?} }
+                              #   out { type:'error', message }
+                              # txMap 跨 postMessage 序列化為 entries array
+                              # （main 端 new Map(entries) 還原）
 ```
 
 ### Styles

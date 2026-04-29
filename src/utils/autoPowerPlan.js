@@ -107,6 +107,7 @@ async function greedyFromStart(baseScenario, aps, apsToPlan, txMap, opts, onProg
         txMap.set(ap.id, cur)
         // 每 8 次 evaluate 讓出 main thread 一次，避免 UI 卡死。
         if (onProgress && stats.startEvals % 8 === 0) {
+          updateMsPerEvalEma(stats)
           const cont = await onProgress({
             iter, cost: best.cost, coverage: best.coverage, sinrShortfall: best.sinrShortfall,
             phase: 'searching',
@@ -121,6 +122,7 @@ async function greedyFromStart(baseScenario, aps, apsToPlan, txMap, opts, onProg
     txMap.set(bestApId, txMap.get(bestApId) + bestDelta)
     best = bestSnapshot
     if (onProgress) {
+      updateMsPerEvalEma(stats)
       const cont = await onProgress({
         iter: iter + 1, cost: best.cost, coverage: best.coverage, sinrShortfall: best.sinrShortfall,
         phase: 'step',
@@ -134,19 +136,64 @@ async function greedyFromStart(baseScenario, aps, apsToPlan, txMap, opts, onProg
   stats.startEndedAt = performance.now()
   stats.lastStartMs = stats.startEndedAt - t0
   stats.lastStartEvals = stats.startEvals
+  // Track the max evaluate count we've seen across completed starts. Apply a
+  // 30% headroom so a slightly slower next start doesn't immediately blow
+  // past the budget and force the live-bump branch on every progress tick.
+  const HEADROOM = 1.3
+  const seen = Math.ceil(stats.startEvals * HEADROOM)
+  if (seen > (stats.expectedStartEvals ?? 0)) {
+    stats.expectedStartEvals = seen
+  }
   return best
 }
 
-// ETA 估算（C 方案）：
-// 起點 1 期間：startsCompleted=0，沒校準資料 → 回傳 null（modal 只顯示已用時間）
-// 起點 2/3 期間：用「上一個起點的耗時」當每起點預期成本，
-//                 ETA = (剩餘完整起點數 × lastStartMs) + 當前起點剩餘比例 × lastStartMs
-// 為避免極端誤差，當前起點的剩餘比例用 max(0, 1 − currentEvals/lastStartEvals) 估。
+// EMA on per-evaluate cost. Snapshot total elapsed / total evaluates each
+// progress tick; let alpha smooth out short-term jitter. Called inside the
+// progress wrapper in runAutoPowerPlan below.
+function updateMsPerEvalEma(stats) {
+  const now = performance.now()
+  const totalEvals = stats.cumulativeEvals + stats.startEvals
+  if (totalEvals <= 0) return
+  const elapsed = now - stats.startedAt
+  const sample = elapsed / totalEvals
+  const alpha = 0.2
+  stats.msPerEvalEma = stats.msPerEvalEma == null
+    ? sample
+    : (1 - alpha) * stats.msPerEvalEma + alpha * sample
+}
+
+// ETA 估算（per-evaluate model）：
+//
+// 舊版用「上一個起點的總耗時」當每起點預期成本，問題是 max/mid/min 三起點
+// 的收斂速度差異很大（min 通常比 max 慢 ~2×），切換起點瞬間 ETA 大幅跳動。
+//
+// 新版用兩個指標：
+//   (a) msPerEvalEma — 每次 evaluate 平均耗時，EMA(α=0.2) 平滑跨起點
+//   (b) expectedStartEvals — 後續起點預期 evaluate 數的上界
+//
+// expectedStartEvals 兩條動態擴展，避免「ETA 倒數到 0 → 又跳回 12 秒」：
+//   1. 起點完成後 → max(seen, headroom × seen)，給 30% buffer 避免下一個
+//      起點稍慢就突破上界
+//   2. 當前起點 startEvals 已超過上界 → 當場提升為「當前 evals × 1.2」，
+//      讓 ETA 在起點末尾平滑遞減而不是 clamp 到 0 後突然回升
+//
+// 起點 1 期間沒有 expectedStartEvals 樣本 → 回傳 null（顯示「校準中…」）。
 function estimateEtaMs(stats) {
   if (stats.startsCompleted === 0) return null
-  const fullStartsLeft = stats.totalStarts - stats.startsCompleted - 1  // 不含當前起點
-  const remainingRatio = Math.max(0, 1 - stats.startEvals / Math.max(1, stats.lastStartEvals))
-  return fullStartsLeft * stats.lastStartMs + remainingRatio * stats.lastStartMs
+  if (!stats.expectedStartEvals || !stats.msPerEvalEma) return null
+
+  // Dynamic upper-bound bump: if the current start has already eaten through
+  // the expected budget, bump expectation to "current + 20%" so the user
+  // sees a smoothly extending ETA instead of "5s remaining" stuck while the
+  // search keeps churning, then a sudden jump to "12s remaining".
+  const liveBudget = stats.startEvals > stats.expectedStartEvals
+    ? Math.ceil(stats.startEvals * 1.2)
+    : stats.expectedStartEvals
+
+  const startsRemaining = stats.totalStarts - stats.startsCompleted - 1
+  const currentRemaining = Math.max(0, liveBudget - stats.startEvals)
+  const evalsLeft = startsRemaining * liveBudget + currentRemaining
+  return stats.msPerEvalEma * evalsLeft
 }
 
 // 主入口。回傳 { txMapBest, score } 或 { aborted: true }。
@@ -182,8 +229,11 @@ export async function runAutoPowerPlan({
     startsCompleted: 0,
     startedAt: performance.now(),
     startEvals: 0,         // 當前起點累計 evaluate 次數
-    lastStartMs: 0,        // 上一個起點總耗時（校準依據）
+    cumulativeEvals: 0,    // 已完成起點的 evaluate 總和
+    lastStartMs: 0,        // 上一個起點總耗時（向後相容，目前沒人讀）
     lastStartEvals: 0,
+    expectedStartEvals: 0, // 後續起點預期 evaluate 數上界（含 headroom）
+    msPerEvalEma: null,    // 每次 evaluate 平均耗時（EMA 平滑）
   }
 
   for (let s = 0; s < starts.length; s++) {
@@ -217,6 +267,10 @@ export async function runAutoPowerPlan({
       bestScore = score
       bestTxMap = new Map(txMap)
     }
+    // Roll the just-finished start's evaluate count into the cumulative
+    // counter so msPerEval EMA stays accurate after we reset startEvals=0
+    // for the next start.
+    stats.cumulativeEvals += stats.startEvals
     stats.startsCompleted++
   }
 
