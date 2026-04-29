@@ -270,7 +270,7 @@ const PHASES = [
         items: [
           { id: '16-1', done: false, text: 'AI 自動量測比例尺' },
           { id: '16-2', done: false, text: 'AI 自動描繪建築範圍' },
-          { id: '16-3', done: false, text: 'AI 自動偵測牆壁/門/窗' },
+          { id: '16-3', done: false, text: 'AI 自動偵測牆壁/門/窗（a/e/f/h ✓；b/c/d/g/i~o 待）' },
           { id: '16-4', done: false, text: 'AI 自動建議 AP 位置' },
         ],
       },
