@@ -51,6 +51,9 @@ export default function AIWallsDebugPage() {
   const [picked, setPicked] = useState(TEST_IMAGES[0].url)
   const [blurKernel, setBlurKernel] = useState(3)
   const [invert, setInvert] = useState(true)
+  const [deskewEnabled, setDeskewEnabled] = useState(true)
+  const [deskewMinDeg, setDeskewMinDeg] = useState(0.3)
+  const [deskewMaxDeg, setDeskewMaxDeg] = useState(15)
   const [morphKernel, setMorphKernel] = useState(15)
   const [morphDilatePx, setMorphDilatePx] = useState(3)
   const [houghThreshold, setHoughThreshold] = useState(50)
@@ -139,7 +142,7 @@ export default function AIWallsDebugPage() {
           }
           const {
             binaryImageData, morphImageData, width, height,
-            whitePixels, morphWhitePixels,
+            whitePixels, deskew, deskewWhitePixels, morphWhitePixels,
             segments, segStats, mergedSegments, mergedStats,
             timings, elapsedMs,
           } = m.result
@@ -174,6 +177,8 @@ export default function AIWallsDebugPage() {
             elapsedMs: Math.round(elapsedMs),
             whitePixels,
             whiteRatio: (whitePixels / (width * height)).toFixed(3),
+            deskew,
+            deskewWhitePixels,
             morphWhitePixels,
             morphWhiteRatio: (morphWhitePixels / (width * height)).toFixed(3),
             segCount: segStats.count,
@@ -205,6 +210,9 @@ export default function AIWallsDebugPage() {
             options: {
               blurKernel,
               invert,
+              deskewEnabled,
+              deskewMinDeg,
+              deskewMaxDeg,
               morphKernel,
               morphDilatePx,
               houghThreshold,
@@ -230,7 +238,7 @@ export default function AIWallsDebugPage() {
 
   return (
     <div style={{ padding: 16, fontFamily: 'system-ui', color: '#eee', background: '#1e1e1e', minHeight: '100vh' }}>
-      <h2>AI Walls Debug — 16-3a preprocess + 16-3e morph + 16-3f HoughLinesP + 16-3h merge</h2>
+      <h2>AI Walls Debug — 16-3a preprocess + 16-3c deskew + 16-3e morph + 16-3f HoughLinesP + 16-3h merge</h2>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
         <label>
@@ -251,6 +259,25 @@ export default function AIWallsDebugPage() {
           <input type="checkbox" checked={invert}
             onChange={(e) => setInvert(e.target.checked)} disabled={busy} />
           &nbsp;Invert (walls = white)
+        </label>
+        <label title="Estimate skew via Hough angle histogram and warpAffine to true axes. Skipped if |angle| outside min/max range.">
+          <input type="checkbox" checked={deskewEnabled}
+            onChange={(e) => setDeskewEnabled(e.target.checked)} disabled={busy} />
+          &nbsp;Deskew
+        </label>
+        <label title="If estimated |skew| < this many degrees, image is treated as already aligned (no rotation).">
+          ⤳ min°:&nbsp;
+          <input type="number" min={0} max={5} step={0.1}
+            value={deskewMinDeg}
+            onChange={(e) => setDeskewMinDeg(Number(e.target.value) || 0)}
+            style={{ width: 50 }} disabled={busy || !deskewEnabled} />
+        </label>
+        <label title="If estimated |skew| > this many degrees, refuse to rotate (probably misdetection on a rotated building, not real skew).">
+          ⤳ max°:&nbsp;
+          <input type="number" min={1} max={45} step={1}
+            value={deskewMaxDeg}
+            onChange={(e) => setDeskewMaxDeg(Number(e.target.value) || 15)}
+            style={{ width: 50 }} disabled={busy || !deskewEnabled} />
         </label>
         <label title="Long-line detection kernel (H + V). 0 = skip. Bigger = require longer continuous run to qualify as a wall.">
           Morph K:&nbsp;
@@ -342,10 +369,28 @@ export default function AIWallsDebugPage() {
           <div>
             {stats.width}×{stats.height} · total {stats.elapsedMs}ms
             (binarize {stats.timings?.binarizeMs}ms +
+             deskew {stats.timings?.deskewMs}ms +
              morph {stats.timings?.morphMs}ms +
              hough {stats.timings?.houghMs}ms +
              merge {stats.timings?.mergeMs}ms +
              extend {stats.timings?.extendMs}ms)
+          </div>
+          <div>
+            Deskew:&nbsp;
+            {stats.deskew?.applied ? (
+              <span style={{ color: '#ffd24a' }}>
+                applied {stats.deskew.angleDeg.toFixed(2)}° ·
+                {stats.deskew.samples} samples ·
+                peak weight {stats.deskew.peakWeight}px
+              </span>
+            ) : (
+              <span style={{ opacity: 0.6 }}>
+                skipped ({stats.deskew?.reason})
+                {stats.deskew?.accepted
+                  ? ` · estimated ${stats.deskew.angleDeg.toFixed(2)}° from ${stats.deskew.samples} samples`
+                  : ''}
+              </span>
+            )}
           </div>
           <div>
             binary white {stats.whitePixels} ({stats.whiteRatio}) ·

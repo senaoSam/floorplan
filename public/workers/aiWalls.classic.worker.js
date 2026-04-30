@@ -1,14 +1,19 @@
-// 16-3a + 16-3f — AI walls preprocessing & line extraction worker.
+// 16-3a + 16-3c + 16-3f — AI walls preprocessing & line extraction worker.
 //
 // Pipeline:
 //   1. preprocess        : grayscale -> Gaussian blur -> Otsu (+ invert)
-//   2. long-line mask    : OPEN(H)∪OPEN(V) → dilate → AND src — preserves
+//   2. deskew (16-3c)    : HoughLinesP angle histogram → strongest peak in
+//                          [-45°, +45°] gives skew; warpAffine rotates the
+//                          binary so axis-aligned walls become truly axis-
+//                          aligned. Skipped if peak < minDeg (already aligned)
+//                          or > maxDeg (probably misdetection on rotated bldg).
+//   3. long-line mask    : OPEN(H)∪OPEN(V) → dilate → AND src — preserves
 //                          original line thickness while removing isolated
 //                          text/furniture marks
-//   3. HoughLinesP       : extract candidate wall line segments
-//   4. mergeCollinear    : graph-based merge of collinear segments to handle
+//   4. HoughLinesP       : extract candidate wall line segments
+//   5. mergeCollinear    : graph-based merge of collinear segments to handle
 //                          door-gap fragmentation
-//   5. extendEndpoints   : walk along each merged segment's direction one px
+//   6. extendEndpoints   : walk along each merged segment's direction one px
 //                          at a time, extending while the morph mask is white
 //                          — recovers the last few px Hough drops near walls'
 //                          ends
@@ -33,6 +38,12 @@
 //
 // `options` (all optional):
 //   { blurKernel: 3, invert: true,
+//     deskewEnabled: true,        // false = skip deskew entirely
+//     deskewMinDeg: 0.3,          // |skew| < this → already aligned, no-op
+//     deskewMaxDeg: 15,           // |skew| > this → likely a rotated building,
+//                                 // not skew; refuse to rotate
+//     deskewVoteThreshold: 80,    // HoughLinesP vote threshold for skew probe
+//     deskewMinSamples: 30,       // need this many segments to trust the peak
 //     morphKernel: 15,            // 0 = skip morph mask
 //     morphDilatePx: 3,           // mask dilation (tolerance) before AND-ing
 //     houghThreshold: 50,
@@ -89,6 +100,122 @@ function binarize(cv, src, options) {
     gray.delete()
     blurred.delete()
     // thresh ownership transferred to caller
+  }
+}
+
+// 16-3c — Estimate skew angle from HoughLinesP segments.
+//
+// Why HoughLinesP not the regular HoughLines: probabilistic returns segment
+// endpoints (so we can length-weight) and short walls / dimension lines
+// don't dominate. The standard rho/theta accumulator would also work but
+// gives every collinear pixel one vote, biasing toward long ink runs (e.g.
+// a single thick page frame line outweighs a real wall cluster).
+//
+// Voting model: for every detected segment, compute its angle in
+// [0°, 180°), fold to [-45°, +45°] mod 90° (since walls in floor plans
+// are axis-aligned to **either** horizontal or vertical — both feed the
+// same skew estimate), bin to 0.5° resolution, weight by segment length.
+//
+// Returns { angleDeg, samples, totalLengthPx, peakWeight, accepted }.
+// `angleDeg` is the rotation needed to *unrotate* the image: rotating by
+// `-angleDeg` brings axis-aligned walls back to true axes.
+function estimateSkewAngleDeg(cv, thresh, options) {
+  const W = thresh.cols, H = thresh.rows
+  const diag = Math.sqrt(W * W + H * H)
+  // Use slightly looser params than the main Hough pass — we want enough
+  // samples to estimate the peak even on sparser inputs.
+  const minLineLength = Math.max(20, Math.round(diag * 0.03))
+  const maxLineGap = 4
+  const voteThreshold = Math.max(20, Math.round(options?.deskewVoteThreshold ?? 80))
+
+  const lines = new cv.Mat()
+  try {
+    cv.HoughLinesP(thresh, lines, 1, Math.PI / 180, voteThreshold, minLineLength, maxLineGap)
+    const n = lines.rows
+    if (n === 0) {
+      return { angleDeg: 0, samples: 0, totalLengthPx: 0, peakWeight: 0, accepted: false }
+    }
+
+    // 0.5° bins across [-45°, +45°] = 180 bins.
+    const BIN_SIZE_DEG = 0.5
+    const BINS = Math.round(90 / BIN_SIZE_DEG)
+    const hist = new Float64Array(BINS)
+    const data = lines.data32S
+    let totalLengthPx = 0
+
+    for (let i = 0; i < n; i++) {
+      const x1 = data[i * 4 + 0], y1 = data[i * 4 + 1]
+      const x2 = data[i * 4 + 2], y2 = data[i * 4 + 3]
+      const dx = x2 - x1, dy = y2 - y1
+      const len = Math.hypot(dx, dy)
+      if (len < 1) continue
+      // angle in (-90°, 90°]
+      let angDeg = Math.atan2(dy, dx) * 180 / Math.PI
+      // fold to [-45°, +45°] modulo 90° — both H and V walls vote for the
+      // same skew. A wall at 89° and a wall at -1° both indicate ~-1° skew.
+      while (angDeg <= -45) angDeg += 90
+      while (angDeg >   45) angDeg -= 90
+      const bin = Math.max(0, Math.min(BINS - 1,
+        Math.floor((angDeg + 45) / BIN_SIZE_DEG)))
+      hist[bin] += len
+      totalLengthPx += len
+    }
+
+    // Find peak.
+    let peakIdx = 0, peakWeight = 0
+    for (let i = 0; i < BINS; i++) {
+      if (hist[i] > peakWeight) { peakWeight = hist[i]; peakIdx = i }
+    }
+    // Centre-of-mass refine within ±1 bin around the peak for sub-bin
+    // resolution. Cheap and avoids quantization to 0.5°.
+    const i0 = Math.max(0, peakIdx - 1)
+    const i1 = Math.min(BINS - 1, peakIdx + 1)
+    let wSum = 0, wxSum = 0
+    for (let i = i0; i <= i1; i++) {
+      wSum += hist[i]
+      wxSum += hist[i] * (i + 0.5)
+    }
+    const refinedBin = wSum > 0 ? wxSum / wSum : peakIdx + 0.5
+    const angleDeg = refinedBin * BIN_SIZE_DEG - 45
+
+    return {
+      angleDeg,
+      samples: n,
+      totalLengthPx: Math.round(totalLengthPx),
+      peakWeight: Math.round(peakWeight),
+      accepted: true,
+    }
+  } finally {
+    lines.delete()
+  }
+}
+
+// Rotate a single-channel Mat about its centre by `angleDeg` (CCW positive).
+// Border filled with 0 (black; matches our inverted convention where walls
+// are white on black). Image dimensions kept the same — corners may be
+// clipped but for small skew angles (< 15°) the centre stays inside.
+//
+// Returns a new Mat owned by the caller (must delete).
+function deskewMat(cv, src, angleDeg) {
+  const center = new cv.Point(src.cols / 2, src.rows / 2)
+  const M = cv.getRotationMatrix2D(center, angleDeg, 1.0)
+  const out = new cv.Mat()
+  try {
+    cv.warpAffine(
+      src, out, M,
+      new cv.Size(src.cols, src.rows),
+      cv.INTER_LINEAR,
+      cv.BORDER_CONSTANT,
+      new cv.Scalar(0, 0, 0, 0),
+    )
+    // After bilinear interpolation the binary may have grey edges; re-threshold.
+    cv.threshold(out, out, 127, 255, cv.THRESH_BINARY)
+    return out
+  } catch (e) {
+    out.delete()
+    throw e
+  } finally {
+    M.delete()
   }
 }
 
@@ -378,6 +505,44 @@ function runPipeline(cv, imageData, options) {
     thresh = bin.thresh
     const tBinarize = performance.now() - t1
 
+    // ---- Deskew (16-3c) ----
+    const deskewEnabled = options.deskewEnabled !== false
+    const deskewMinDeg = options.deskewMinDeg ?? 0.3
+    const deskewMaxDeg = options.deskewMaxDeg ?? 15
+    const deskewMinSamples = options.deskewMinSamples ?? 30
+    const tD0 = performance.now()
+    let deskewInfo = {
+      enabled: deskewEnabled,
+      angleDeg: 0,
+      samples: 0,
+      totalLengthPx: 0,
+      peakWeight: 0,
+      applied: false,
+      reason: deskewEnabled ? 'pending' : 'disabled',
+    }
+    if (deskewEnabled) {
+      const est = estimateSkewAngleDeg(cv, thresh, options)
+      deskewInfo = Object.assign(deskewInfo, est, { applied: false })
+      if (!est.accepted) {
+        deskewInfo.reason = 'no-segments'
+      } else if (est.samples < deskewMinSamples) {
+        deskewInfo.reason = `too-few-samples (${est.samples} < ${deskewMinSamples})`
+      } else if (Math.abs(est.angleDeg) < deskewMinDeg) {
+        deskewInfo.reason = 'within-min-deg'
+      } else if (Math.abs(est.angleDeg) > deskewMaxDeg) {
+        deskewInfo.reason = 'exceeds-max-deg'
+      } else {
+        // Apply: rotate by -angleDeg to unrotate the skew.
+        const rotated = deskewMat(cv, thresh, -est.angleDeg)
+        thresh.delete()
+        thresh = rotated
+        deskewInfo.applied = true
+        deskewInfo.reason = 'applied'
+      }
+    }
+    const deskewWhitePixels = deskewInfo.applied ? cv.countNonZero(thresh) : bin.whitePixels
+    const tDeskew = performance.now() - tD0
+
     const morphKernel = options.morphKernel ?? 15
     const morphDilatePx = options.morphDilatePx ?? 3
     const t2 = performance.now()
@@ -416,6 +581,8 @@ function runPipeline(cv, imageData, options) {
       width: thresh.cols,
       height: thresh.rows,
       whitePixels: bin.whitePixels,
+      deskew: deskewInfo,
+      deskewWhitePixels,
       morphWhitePixels: cv.countNonZero(morph),
       segments,
       segStats,
@@ -426,6 +593,7 @@ function runPipeline(cv, imageData, options) {
       },
       timings: {
         binarizeMs: Math.round(tBinarize),
+        deskewMs:   Math.round(tDeskew),
         morphMs:    Math.round(tMorph),
         houghMs:    Math.round(tHough),
         mergeMs:    Math.round(tMerge),
