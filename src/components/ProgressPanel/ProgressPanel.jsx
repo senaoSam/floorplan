@@ -284,7 +284,7 @@ const PHASES = [
           { id: '16-3l', done: true,  text: 'Confidence scoring 整合（length+paired+density minimal viable）' },
           { id: '16-3m', done: true,  text: 'Web Worker 化（隨 16-3a 提前完成）' },
           { id: '16-3n', done: false, text: '半自動 Review UI + 寫入 wallStore' },
-          { id: '16-3o', done: false, text: 'Toolbar「AI 偵測牆壁」入口 + Undo/Redo 整合' },
+          { id: '16-3o', done: true,  text: 'Toolbar「AI 偵測牆壁」入口 + 三桶分寫 + Undo/Redo 整合' },
           { id: '16-4', done: false, text: 'AI 自動建議 AP 位置' },
         ],
       },

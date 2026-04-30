@@ -1,0 +1,110 @@
+@use '@/styles/variables' as *
+
+.ai-walls-modal-overlay
+  position: fixed
+  inset: 0
+  z-index: 1000
+  display: flex
+  align-items: center
+  justify-content: center
+  background: rgba(0, 0, 0, 0.5)
+  backdrop-filter: blur(2px)
+
+.ai-walls-modal
+  background: $bg-secondary
+  border: 1px solid $border-color
+  border-radius: 10px
+  padding: 18px 22px
+  min-width: 460px
+  max-width: 580px
+  max-height: 85vh
+  overflow-y: auto
+  display: flex
+  flex-direction: column
+  gap: 12px
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4)
+
+  &__header
+    display: flex
+    align-items: baseline
+    gap: 12px
+    border-bottom: 1px solid $border-color
+    padding-bottom: 10px
+
+  &__title
+    font-size: 15px
+    font-weight: 600
+    color: $text-primary
+
+  &__sub
+    font-size: 12px
+    color: $text-secondary
+
+  &__row
+    display: flex
+    gap: 10px
+    align-items: center
+    flex-wrap: wrap
+    font-size: 13px
+    color: $text-secondary
+
+  &__stats
+    font-size: 12px
+    line-height: 1.6
+    color: $text-secondary
+
+  &__bucket
+    display: inline-block
+    padding: 1px 6px
+    border-radius: 3px
+    margin-right: 6px
+    &--high
+      background: rgba(59, 255, 123, 0.15)
+      color: #3bff7b
+    &--medium
+      background: rgba(255, 210, 74, 0.15)
+      color: #ffd24a
+    &--low
+      background: rgba(136, 136, 136, 0.15)
+      color: #888
+
+  &__error
+    color: #ff6b6b
+    font-size: 12px
+
+  &__preview
+    border: 1px solid $border-color
+    border-radius: 4px
+    background: #000
+    max-width: 100%
+    max-height: 280px
+    object-fit: contain
+
+  &__actions
+    display: flex
+    gap: 8px
+    justify-content: flex-end
+    border-top: 1px solid $border-color
+    padding-top: 10px
+
+  &__btn
+    background: $bg-primary
+    border: 1px solid $border-color
+    color: $text-primary
+    padding: 6px 14px
+    border-radius: 4px
+    font-size: 13px
+    cursor: pointer
+    &:hover:not(:disabled)
+      background: rgba(255, 255, 255, 0.05)
+    &:disabled
+      opacity: 0.4
+      cursor: not-allowed
+    &--primary
+      background: #3a86ff
+      border-color: #3a86ff
+      color: #fff
+      &:hover:not(:disabled)
+        background: #2c6fd9
+    &--danger
+      color: #ff6b6b

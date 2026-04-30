@@ -1,7 +1,9 @@
 import React, { useState } from 'react'
 import { useEditorStore, EDITOR_MODE, VIEW_MODE } from '@/store/useEditorStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
+import { useFloorStore } from '@/store/useFloorStore'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
+import AIWallsModal from '@/components/AIWallsModal/AIWallsModal'
 import './Toolbar.sass'
 
 const TOOL_GROUPS = [
@@ -31,7 +33,12 @@ function Toolbar() {
   const redoLen = useHistoryStore((s) => s.redoStack.length)
   const undo = useHistoryStore((s) => s.undo)
   const redo = useHistoryStore((s) => s.redo)
+  const activeFloorId = useFloorStore((s) => s.activeFloorId)
+  const floors = useFloorStore((s) => s.floors)
+  const activeFloor = floors.find((f) => f.id === activeFloorId)
+  const aiEnabled = !!(activeFloor && activeFloor.imageUrl)
   const [pendingMode, setPendingMode] = useState(null)
+  const [aiOpen, setAiOpen] = useState(false)
 
   const isAlignMode = editorMode === EDITOR_MODE.ALIGN_FLOOR
 
@@ -66,6 +73,15 @@ function Toolbar() {
       </div>
 
       <div className="toolbar__actions">
+        <button
+          className="toolbar__btn"
+          onClick={() => setAiOpen(true)}
+          disabled={!aiEnabled}
+          title={aiEnabled ? 'AI 偵測牆壁（從底圖自動辨識）' : '此樓層需先匯入底圖'}
+        >
+          <span className="toolbar__btn-icon">🤖</span>
+          <span className="toolbar__btn-label">AI 牆</span>
+        </button>
         <div className="toolbar__history">
           <button
             className="toolbar__btn toolbar__btn--history"
@@ -100,6 +116,8 @@ function Toolbar() {
           3D
         </button>
       </div>
+
+      <AIWallsModal open={aiOpen} onClose={() => setAiOpen(false)} />
 
       {pendingMode && (
         <ConfirmDialog
