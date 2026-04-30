@@ -278,7 +278,7 @@ const PHASES = [
           { id: '16-3f', done: true,  text: 'HoughLinesP 線段抽取' },
           { id: '16-3g', done: false, text: '角度 clustering（dominant orientations）' },
           { id: '16-3h', done: true,  text: 'Graph-based collinear merge + endpoint extension' },
-          { id: '16-3i', done: false, text: 'Wall thickness pair detection（牆 vs 家具/尺寸線）' },
+          { id: '16-3i', done: true,  text: 'Wall thickness pair detection（牆 vs 家具/尺寸線）' },
           { id: '16-3j', done: false, text: 'Oriented ROI density scoring' },
           { id: '16-3k', done: false, text: '實心填色牆分支（contour + skeleton）' },
           { id: '16-3l', done: false, text: 'Confidence scoring 整合（多權重 preset）' },

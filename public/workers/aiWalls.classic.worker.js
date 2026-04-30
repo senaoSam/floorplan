@@ -417,6 +417,96 @@ function mergeCollinearSegments(segments, options) {
 }
 // ---- end inline ----
 
+// ---- Inlined from src/utils/aiWalls/estimateWallThickness.js — keep in sync ----
+// 16-3i — parallel-pair detection + thickness histogram peak.
+function _thickFeatures(seg) {
+  const [x1, y1, x2, y2] = seg
+  const dx = x2 - x1, dy = y2 - y1
+  const len = Math.hypot(dx, dy)
+  if (len < 1e-6) return null
+  let cx = dx / len, cy = dy / len
+  if (cx < 0 || (cx === 0 && cy < 0)) { cx = -cx; cy = -cy }
+  const angle = Math.atan2(cy, cx)
+  const nx = -cy, ny = cx
+  const t1 = x1 * cx + y1 * cy
+  const t2 = x2 * cx + y2 * cy
+  const tMin = Math.min(t1, t2), tMax = Math.max(t1, t2)
+  const midX = (x1 + x2) / 2, midY = (y1 + y2) / 2
+  const offset = midX * nx + midY * ny
+  return { len, ux: cx, uy: cy, angle, offset, tMin, tMax }
+}
+function estimateWallThickness(segments, options) {
+  const pairAngleTolDeg = options?.pairAngleTolDeg ?? 5
+  const minThicknessPx  = options?.minThicknessPx  ?? 2
+  const maxThicknessPx  = options?.maxThicknessPx  ?? 30
+  const overlapRatio    = options?.overlapRatio    ?? 0.7
+  const relMaxRatio     = options?.relMaxRatio     ?? 0.3
+  const angleTol = (pairAngleTolDeg * Math.PI) / 180
+  const n = segments.length
+  const perSegment = new Array(n)
+  for (let i = 0; i < n; i++) perSegment[i] = { paired: false, pairedDist: null, pairedIdx: null }
+  if (n < 2) return { estimatedPx: null, pairedCount: 0, totalCount: n, histogram: [], perSegment }
+  const feats = new Array(n)
+  for (let i = 0; i < n; i++) feats[i] = _thickFeatures(segments[i])
+  for (let i = 0; i < n; i++) {
+    const a = feats[i]; if (!a) continue
+    let bestDist = Infinity, bestJ = -1
+    for (let j = 0; j < n; j++) {
+      if (j === i) continue
+      const b = feats[j]; if (!b) continue
+      if (_angleDiff(a.angle, b.angle) > angleTol) continue
+      const dist = Math.abs(b.offset - a.offset)
+      if (dist < minThicknessPx || dist > maxThicknessPx) continue
+      const minLen = Math.min(a.len, b.len)
+      if (minLen <= 0) continue
+      if (dist > minLen * relMaxRatio) continue
+      const overlap = Math.max(0, Math.min(a.tMax, b.tMax) - Math.max(a.tMin, b.tMin))
+      if (overlap / minLen < overlapRatio) continue
+      if (dist < bestDist) { bestDist = dist; bestJ = j }
+    }
+    if (bestJ >= 0) perSegment[i] = { paired: true, pairedDist: bestDist, pairedIdx: bestJ }
+  }
+  const binCount = Math.ceil(maxThicknessPx) + 1
+  const hist = new Float64Array(binCount)
+  let pairedCount = 0, totalLengthPaired = 0
+  for (let i = 0; i < n; i++) {
+    const ps = perSegment[i]
+    if (!ps.paired) continue
+    pairedCount++
+    const w = feats[i] ? feats[i].len : 1
+    const bin = Math.max(0, Math.min(binCount - 1, Math.round(ps.pairedDist)))
+    hist[bin] += w
+    totalLengthPaired += w
+  }
+  // Median paired distance — robust against scale-bar / pattern outliers.
+  let estimatedPx = null
+  if (pairedCount > 0) {
+    const dists = []
+    for (let i = 0; i < n; i++) {
+      const ps = perSegment[i]
+      if (ps.paired) dists.push(ps.pairedDist)
+    }
+    dists.sort((a, b) => a - b)
+    const mid = Math.floor(dists.length / 2)
+    estimatedPx = dists.length % 2 === 0 ? (dists[mid - 1] + dists[mid]) / 2 : dists[mid]
+  }
+  // Length-weighted peak kept for diagnostics.
+  let peakPx = null
+  if (pairedCount > 0 && totalLengthPaired > 0) {
+    let peakIdx = 0, peakWeight = 0
+    for (let i = 0; i < binCount; i++) {
+      if (hist[i] > peakWeight) { peakWeight = hist[i]; peakIdx = i }
+    }
+    const i0 = Math.max(0, peakIdx - 1)
+    const i1 = Math.min(binCount - 1, peakIdx + 1)
+    let wSum = 0, wxSum = 0
+    for (let i = i0; i <= i1; i++) { wSum += hist[i]; wxSum += hist[i] * i }
+    peakPx = wSum > 0 ? wxSum / wSum : peakIdx
+  }
+  return { estimatedPx, peakPx, pairedCount, totalCount: n, histogram: Array.from(hist), perSegment }
+}
+// ---- end inline ----
+
 // Endpoint extension: walk outward along the segment direction one px at a
 // time, sampling the mask. Stop after `missThreshold` consecutive zero
 // samples; otherwise keep extending to the last hit.
@@ -543,37 +633,130 @@ function runPipeline(cv, imageData, options) {
     const deskewWhitePixels = deskewInfo.applied ? cv.countNonZero(thresh) : bin.whitePixels
     const tDeskew = performance.now() - tD0
 
-    const morphKernel = options.morphKernel ?? 15
-    const morphDilatePx = options.morphDilatePx ?? 3
-    const t2 = performance.now()
-    morph = morphOpenHV(cv, thresh, morphKernel, morphDilatePx)
-    const tMorph = performance.now() - t2
+    // ---- Stage runner: morph → hough → merge → extend → thickness ----
+    // Re-runnable so we can do a second pass with thickness-adapted K and
+    // maxLineGap once the first pass has given us an estimatedPx.
+    function runMorphAndHough(K, maxLineGapPxOverride) {
+      const dilatePx = options.morphDilatePx ?? 3
+      const tA = performance.now()
+      const m = morphOpenHV(cv, thresh, K, dilatePx)
+      const morphMs = performance.now() - tA
 
-    const t3 = performance.now()
-    const { segments, segStats } = extractSegments(cv, morph, options)
-    const tHough = performance.now() - t3
+      const tB = performance.now()
+      const houghOpts = { ...options }
+      if (maxLineGapPxOverride != null) houghOpts.maxLineGapPx = maxLineGapPxOverride
+      const { segments, segStats } = extractSegments(cv, m, houghOpts)
+      const houghMs = performance.now() - tB
 
-    const t4 = performance.now()
-    const mergeAngleTolDeg = options.mergeAngleTolDeg ?? 5
-    const mergedRaw = mergeAngleTolDeg > 0
-      ? mergeCollinearSegments(segments, {
-          angleTolDeg: mergeAngleTolDeg,
-          offsetTol:   options.mergeOffsetTol ?? 4,
-          gapTol:      options.mergeGapTol ?? 12,
-        })
-      : segments.map((s) => [...s])
-    const tMerge = performance.now() - t4
+      const tC = performance.now()
+      const mergeAngleTolDeg = options.mergeAngleTolDeg ?? 5
+      const mergedRaw = mergeAngleTolDeg > 0
+        ? mergeCollinearSegments(segments, {
+            angleTolDeg: mergeAngleTolDeg,
+            offsetTol:   options.mergeOffsetTol ?? 4,
+            gapTol:      options.mergeGapTol ?? 12,
+          })
+        : segments.map((s) => [...s])
+      const mergeMs = performance.now() - tC
 
-    const t5 = performance.now()
-    const extendMissThreshold = options.extendMissThreshold ?? 3
-    const extendMaxStepsPx = options.extendMaxStepsPx ?? 30
-    const mergedSegments = extendEndpoints(morph, mergedRaw, extendMissThreshold, extendMaxStepsPx)
-    const tExtend = performance.now() - t5
+      const tD = performance.now()
+      const extendMissThreshold = options.extendMissThreshold ?? 3
+      const extendMaxStepsPx = options.extendMaxStepsPx ?? 30
+      const mergedSegments = extendEndpoints(m, mergedRaw, extendMissThreshold, extendMaxStepsPx)
+      const extendMs = performance.now() - tD
 
-    let mergedTotalLength = 0
-    for (const [x1, y1, x2, y2] of mergedSegments) {
-      mergedTotalLength += Math.hypot(x2 - x1, y2 - y1)
+      let mergedTotalLength = 0
+      for (const [x1, y1, x2, y2] of mergedSegments) {
+        mergedTotalLength += Math.hypot(x2 - x1, y2 - y1)
+      }
+
+      const tE = performance.now()
+      const wallThickness = estimateWallThickness(mergedSegments, {
+        pairAngleTolDeg: options.pairAngleTolDeg ?? 5,
+        minThicknessPx:  options.minThicknessPx  ?? 2,
+        maxThicknessPx:  options.maxThicknessPx  ?? 30,
+        overlapRatio:    options.pairOverlapRatio ?? 0.7,
+        relMaxRatio:     options.relMaxRatio      ?? 0.3,
+      })
+      const thicknessMs = performance.now() - tE
+
+      return {
+        morph: m, segments, segStats, mergedSegments,
+        mergedStats: { count: mergedSegments.length, totalLengthPx: Math.round(mergedTotalLength) },
+        wallThickness,
+        timings: { morphMs, houghMs, mergeMs, extendMs, thicknessMs },
+      }
     }
+
+    // Pass 1 — initial K from options (default 15).
+    const initialK = options.morphKernel ?? 15
+    let pass = runMorphAndHough(initialK, options.maxLineGapPx)
+    let usedK = initialK
+    let usedMaxGap = options.maxLineGapPx ?? 8
+    let adapted = null
+
+    // Pass 2 — if 16-3i estimatedPx looks credible AND the current K is too
+    // far from "thickness × 3", re-run with adapted parameters. Wall fills
+    // in floor plans typically span ~3× thickness through morph dilate, so
+    // K ≈ 3 × estimatedPx is the rule of thumb. Skipped when estimatedPx
+    // is null (no pairs found, e.g. single-line drawings) or when initialK
+    // is already in tolerance — saves the cost of a second pass.
+    const adaptEnabled = options.adaptiveMorph !== false
+    if (adaptEnabled) {
+      const est = pass.wallThickness?.estimatedPx
+      const pairedRatio = pass.wallThickness?.pairedCount /
+        Math.max(1, pass.wallThickness?.totalCount ?? 1)
+      // Need a minimum confidence in the estimate before trusting it as a
+      // basis for reshaping the whole pipeline. Three guards:
+      //   (a) ≥ 5 pairs (statistical mass)
+      //   (b) ≥ 30% paired ratio — single-line floor plans typically only
+      //       hit ~15-25% (occasional opposite-wall coincidences); double-
+      //       line drawings hit ~50%+. 30% is the empirical separator.
+      //   (c) estimated thickness must be small relative to typical segment
+      //       length: thickness > 50 px is almost certainly capturing an
+      //       opposite-wall pair, not a single wall's two edges.
+      const trustEstimate = est != null
+        && pass.wallThickness.pairedCount >= 5
+        && pairedRatio >= 0.30
+        && est <= 50
+      if (trustEstimate) {
+        // Target K = 3 × thickness (rule of thumb: morph dilate covers wall
+        // body). Capped at max(initialK, 19) — protects against
+        // overestimation (e.g. scale-bar bias) blowing K up to a value that
+        // would erase thin walls. K can shrink freely (initial defaults err
+        // large for safety), but only grow modestly.
+        const upperCap = Math.max(initialK, 19)
+        const targetK = Math.max(3, Math.min(upperCap, Math.round(est * 3)))
+        // Only re-run if the change is meaningful (>= 4 px difference); otherwise
+        // we'd waste time recomputing essentially the same morph.
+        if (Math.abs(targetK - initialK) >= 4) {
+          // Make K odd (matches the "kernel size" convention; even kernels
+          // are technically fine for MORPH_RECT but odd is the norm).
+          const targetKOdd = targetK % 2 === 0 ? targetK + 1 : targetK
+          const targetGap = Math.max(2, Math.round(est * 2))
+          pass.morph.delete()
+          const pass2 = runMorphAndHough(targetKOdd, targetGap)
+          adapted = {
+            initialK, targetK: targetKOdd,
+            initialMaxGap: usedMaxGap, targetMaxGap: targetGap,
+            firstPassEstimatedPx: est,
+            firstPassPairedCount: pass.wallThickness.pairedCount,
+            firstPassTotalCount: pass.wallThickness.totalCount,
+          }
+          pass = pass2
+          usedK = targetKOdd
+          usedMaxGap = targetGap
+        }
+      }
+    }
+
+    morph = pass.morph
+    const { segments, segStats, mergedSegments, mergedStats, wallThickness } = pass
+    const tMorph = pass.timings.morphMs
+    const tHough = pass.timings.houghMs
+    const tMerge = pass.timings.mergeMs
+    const tExtend = pass.timings.extendMs
+    const tThickness = pass.timings.thicknessMs
 
     return {
       binaryImageData: matToImageData(cv, thresh),
@@ -587,10 +770,11 @@ function runPipeline(cv, imageData, options) {
       segments,
       segStats,
       mergedSegments,
-      mergedStats: {
-        count: mergedSegments.length,
-        totalLengthPx: Math.round(mergedTotalLength),
-      },
+      mergedStats,
+      wallThickness,
+      adaptive: adapted,
+      morphKernelUsed: usedK,
+      maxLineGapUsed: usedMaxGap,
       timings: {
         binarizeMs: Math.round(tBinarize),
         deskewMs:   Math.round(tDeskew),
@@ -598,6 +782,7 @@ function runPipeline(cv, imageData, options) {
         houghMs:    Math.round(tHough),
         mergeMs:    Math.round(tMerge),
         extendMs:   Math.round(tExtend),
+        thicknessMs: Math.round(tThickness),
       },
     }
   } finally {

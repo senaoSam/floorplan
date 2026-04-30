@@ -5,10 +5,10 @@ import React, { useEffect, useRef, useState } from 'react'
 const WORKER_URL = `${import.meta.env.BASE_URL}workers/aiWalls.classic.worker.js`
 
 const TEST_IMAGES = [
-  { label: 'test-floorplan.png',       url: `${import.meta.env.BASE_URL}test-floorplan.png` },
-  { label: 'sample-walls/myProj.png',  url: `${import.meta.env.BASE_URL}sample-walls/myProj.png` },
-  { label: 'sample-walls/tmp1.png',    url: `${import.meta.env.BASE_URL}sample-walls/tmp1.png` },
-  { label: 'sample-walls/tmp2.png',    url: `${import.meta.env.BASE_URL}sample-walls/tmp2.png` },
+  { label: 'test-floorplan.png',  url: `${import.meta.env.BASE_URL}test-floorplan.png` },
+  { label: 'sample-walls/1.png',  url: `${import.meta.env.BASE_URL}sample-walls/1.png` },
+  { label: 'sample-walls/2.jpg',  url: `${import.meta.env.BASE_URL}sample-walls/2.jpg` },
+  { label: 'sample-walls/3.png',  url: `${import.meta.env.BASE_URL}sample-walls/3.png` },
 ]
 
 function loadImage(url) {
@@ -44,6 +44,35 @@ function drawSegments(canvas, segments, color) {
   ctx.restore()
 }
 
+// Draw merged segments split by paired-flag — paired in green, unpaired in
+// dim grey. Lets you eyeball whether 16-3i pair detection is catching the
+// real walls and rejecting furniture / dimension lines.
+function drawSegmentsByPair(canvas, segments, perSegment, pairedColor, unpairedColor) {
+  const ctx = canvas.getContext('2d')
+  ctx.save()
+  ctx.lineWidth = 1.5
+  // Unpaired pass first so paired draws on top.
+  ctx.strokeStyle = unpairedColor
+  ctx.beginPath()
+  for (let i = 0; i < segments.length; i++) {
+    if (perSegment?.[i]?.paired) continue
+    const [x1, y1, x2, y2] = segments[i]
+    ctx.moveTo(x1 + 0.5, y1 + 0.5)
+    ctx.lineTo(x2 + 0.5, y2 + 0.5)
+  }
+  ctx.stroke()
+  ctx.strokeStyle = pairedColor
+  ctx.beginPath()
+  for (let i = 0; i < segments.length; i++) {
+    if (!perSegment?.[i]?.paired) continue
+    const [x1, y1, x2, y2] = segments[i]
+    ctx.moveTo(x1 + 0.5, y1 + 0.5)
+    ctx.lineTo(x2 + 0.5, y2 + 0.5)
+  }
+  ctx.stroke()
+  ctx.restore()
+}
+
 export default function AIWallsDebugPage() {
   const [status, setStatus] = useState('idle')
   const [progressMsg, setProgressMsg] = useState('')
@@ -65,6 +94,12 @@ export default function AIWallsDebugPage() {
   const [mergeOffsetTol, setMergeOffsetTol] = useState(4)
   const [mergeGapTol, setMergeGapTol] = useState(12)
   const [extendMissThreshold, setExtendMissThreshold] = useState(3)
+  const [pairAngleTolDeg, setPairAngleTolDeg] = useState(5)
+  const [minThicknessPx, setMinThicknessPx] = useState(2)
+  const [maxThicknessPx, setMaxThicknessPx] = useState(30)
+  const [pairOverlapRatio, setPairOverlapRatio] = useState(0.7)
+  const [pairRelMaxRatio, setPairRelMaxRatio] = useState(0.3)
+  const [adaptiveMorph, setAdaptiveMorph] = useState(true)
   const [stats, setStats] = useState(null)
   const srcCanvasRef = useRef(null)
   const binCanvasRef = useRef(null)
@@ -95,7 +130,7 @@ export default function AIWallsDebugPage() {
   useEffect(() => {
     const last = lastResultRef.current
     if (!last) return
-    const { morphImageData, segments, mergedSegments } = last
+    const { morphImageData, segments, mergedSegments, perSegment } = last
     const segCanvas = segCanvasRef.current
     if (!segCanvas) return
     segCanvas.width = morphImageData.width
@@ -103,8 +138,16 @@ export default function AIWallsDebugPage() {
     const ctx = segCanvas.getContext('2d')
     ctx.putImageData(morphImageData, 0, 0)
     if (showSegments) {
-      if (overlayMode === 'raw' || overlayMode === 'both') drawSegments(segCanvas, segments, '#ff3b3b')
-      if (overlayMode === 'merged' || overlayMode === 'both') drawSegments(segCanvas, mergedSegments, '#3bff7b')
+      if (overlayMode === 'raw') {
+        drawSegments(segCanvas, segments, '#ff3b3b')
+      } else if (overlayMode === 'merged') {
+        drawSegments(segCanvas, mergedSegments, '#3bff7b')
+      } else if (overlayMode === 'both') {
+        drawSegments(segCanvas, segments, '#ff3b3b')
+        drawSegments(segCanvas, mergedSegments, '#3bff7b')
+      } else if (overlayMode === 'paired') {
+        drawSegmentsByPair(segCanvas, mergedSegments, perSegment, '#3bff7b', '#666')
+      }
     }
   }, [showSegments, overlayMode])
 
@@ -144,6 +187,7 @@ export default function AIWallsDebugPage() {
             binaryImageData, morphImageData, width, height,
             whitePixels, deskew, deskewWhitePixels, morphWhitePixels,
             segments, segStats, mergedSegments, mergedStats,
+            wallThickness, adaptive, morphKernelUsed, maxLineGapUsed,
             timings, elapsedMs,
           } = m.result
 
@@ -166,11 +210,22 @@ export default function AIWallsDebugPage() {
           const segCtx = segCanvas.getContext('2d')
           segCtx.putImageData(morphImageData, 0, 0)
           if (showSegments) {
-            if (overlayMode === 'raw' || overlayMode === 'both') drawSegments(segCanvas, segments, '#ff3b3b')
-            if (overlayMode === 'merged' || overlayMode === 'both') drawSegments(segCanvas, mergedSegments, '#3bff7b')
+            if (overlayMode === 'raw') {
+              drawSegments(segCanvas, segments, '#ff3b3b')
+            } else if (overlayMode === 'merged') {
+              drawSegments(segCanvas, mergedSegments, '#3bff7b')
+            } else if (overlayMode === 'both') {
+              drawSegments(segCanvas, segments, '#ff3b3b')
+              drawSegments(segCanvas, mergedSegments, '#3bff7b')
+            } else if (overlayMode === 'paired') {
+              drawSegmentsByPair(segCanvas, mergedSegments, wallThickness?.perSegment, '#3bff7b', '#666')
+            }
           }
 
-          lastResultRef.current = { morphImageData, segments, mergedSegments }
+          lastResultRef.current = {
+            morphImageData, segments, mergedSegments,
+            perSegment: wallThickness?.perSegment,
+          }
 
           setStats({
             width, height,
@@ -188,6 +243,8 @@ export default function AIWallsDebugPage() {
             minLineLength: segStats.minLineLength,
             maxLineGap: segStats.maxLineGap,
             houghThreshold: segStats.threshold,
+            wallThickness,
+            adaptive, morphKernelUsed, maxLineGapUsed,
             timings,
           })
           setStatus('done')
@@ -222,6 +279,12 @@ export default function AIWallsDebugPage() {
               mergeOffsetTol,
               mergeGapTol,
               extendMissThreshold,
+              pairAngleTolDeg,
+              minThicknessPx,
+              maxThicknessPx,
+              pairOverlapRatio,
+              relMaxRatio: pairRelMaxRatio,
+              adaptiveMorph,
             },
           },
         },
@@ -354,6 +417,7 @@ export default function AIWallsDebugPage() {
             <option value="raw">Raw (red)</option>
             <option value="merged">Merged (green)</option>
             <option value="both">Both</option>
+            <option value="paired">Paired only (16-3i)</option>
           </select>
         </label>
         <button onClick={run} disabled={busy}>Run</button>
@@ -361,6 +425,50 @@ export default function AIWallsDebugPage() {
         <span style={{ opacity: 0.7 }}>
           status: {status}{progressMsg ? ` — ${progressMsg}` : ''}
         </span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+        <strong style={{ opacity: 0.7 }}>16-3i pair detection:</strong>
+        <label title="Pair search: max angle difference (deg) for two segments to count as parallel">
+          ⤳ pair angle:&nbsp;
+          <input type="number" min={0} max={20} step={0.5}
+            value={pairAngleTolDeg}
+            onChange={(e) => setPairAngleTolDeg(Number(e.target.value) || 0)}
+            style={{ width: 50 }} disabled={busy} />
+        </label>
+        <label title="Min wall thickness (px). Below = same line, not a pair.">
+          ⤳ min thick:&nbsp;
+          <input type="number" min={0} max={20} step={1}
+            value={minThicknessPx}
+            onChange={(e) => setMinThicknessPx(Number(e.target.value) || 0)}
+            style={{ width: 50 }} disabled={busy} />
+        </label>
+        <label title="Max wall thickness (px). Above = unrelated parallel.">
+          ⤳ max thick:&nbsp;
+          <input type="number" min={5} max={200} step={1}
+            value={maxThicknessPx}
+            onChange={(e) => setMaxThicknessPx(Number(e.target.value) || 30)}
+            style={{ width: 50 }} disabled={busy} />
+        </label>
+        <label title="Min along-axis overlap / min(len_i, len_j). 0 = any touch counts.">
+          ⤳ overlap:&nbsp;
+          <input type="number" min={0} max={1} step={0.05}
+            value={pairOverlapRatio}
+            onChange={(e) => setPairOverlapRatio(Number(e.target.value) || 0)}
+            style={{ width: 50 }} disabled={busy} />
+        </label>
+        <label title="Distance must be <= relMax × min(len). Wall is much longer than thick — kills 'two long diagonals across the room' false pairs.">
+          ⤳ relMax:&nbsp;
+          <input type="number" min={0.05} max={1} step={0.05}
+            value={pairRelMaxRatio}
+            onChange={(e) => setPairRelMaxRatio(Number(e.target.value) || 0.3)}
+            style={{ width: 50 }} disabled={busy} />
+        </label>
+        <label title="If 16-3i pass-1 produces a credible thickness estimate AND it disagrees with current Morph K, re-run pass 2 with K ≈ 3 × thickness and maxLineGap ≈ 2 × thickness.">
+          <input type="checkbox" checked={adaptiveMorph}
+            onChange={(e) => setAdaptiveMorph(e.target.checked)} disabled={busy} />
+          &nbsp;Adaptive morph (re-run pass 2)
+        </label>
       </div>
 
       {error && <div style={{ color: '#ff6b6b', marginBottom: 12 }}>Error: {error}</div>}
@@ -401,6 +509,37 @@ export default function AIWallsDebugPage() {
             &nbsp;→&nbsp;
             <span style={{ color: '#3bff7b' }}>merged {stats.mergedCount} segs / {stats.mergedTotalLength}px</span>
             &nbsp;· minLen {stats.minLineLength}px, maxGap {stats.maxLineGap}px, thr {stats.houghThreshold}
+          </div>
+          <div>
+            Wall thickness:&nbsp;
+            {stats.wallThickness?.estimatedPx != null ? (
+              <span style={{ color: '#ffd24a' }}>
+                ~{stats.wallThickness.estimatedPx.toFixed(2)} px (median)
+              </span>
+            ) : (
+              <span style={{ opacity: 0.5 }}>n/a</span>
+            )}
+            {stats.wallThickness?.peakPx != null && (
+              <span style={{ opacity: 0.7 }}>
+                &nbsp;· peak {stats.wallThickness.peakPx.toFixed(2)} px (len-weighted)
+              </span>
+            )}
+            &nbsp;· paired {stats.wallThickness?.pairedCount ?? 0} / {stats.wallThickness?.totalCount ?? 0}
+            &nbsp;· thickness {stats.timings?.thicknessMs}ms
+          </div>
+          <div>
+            Adaptive: {stats.adaptive ? (
+              <span style={{ color: '#9bd' }}>
+                pass-1 K={stats.adaptive.initialK} → pass-2 K={stats.adaptive.targetK} ·
+                gap {stats.adaptive.initialMaxGap}→{stats.adaptive.targetMaxGap} ·
+                trigger est ~{stats.adaptive.firstPassEstimatedPx?.toFixed(2)}px
+                ({stats.adaptive.firstPassPairedCount}/{stats.adaptive.firstPassTotalCount} paired)
+              </span>
+            ) : (
+              <span style={{ opacity: 0.5 }}>
+                no re-run · used K={stats.morphKernelUsed} maxGap={stats.maxLineGapUsed}
+              </span>
+            )}
           </div>
         </div>
       )}
