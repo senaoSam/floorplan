@@ -507,6 +507,80 @@ function estimateWallThickness(segments, options) {
 }
 // ---- end inline ----
 
+// 16-3l density probe: oriented ROI along each segment.
+//
+// For each segment, sample a thin band centered on the segment with width
+// ≈ wall thickness, return foreground (white) pixel ratio. Real walls fill
+// the band (~0.8-1.0); furniture edges / dimension lines / dashed marks
+// have gaps and run < 0.5.
+//
+// Sampling strategy: walk along the segment in 1 px steps; at each step
+// sample N transverse points perpendicular to the segment direction. Total
+// hit ratio = hits / (segLen * N).
+function sampleSegmentDensity(mask, segments, halfWidthPx) {
+  const W = mask.cols, H = mask.rows
+  const data = mask.data
+  const halfW = Math.max(1, Math.round(halfWidthPx))
+  const out = new Float32Array(segments.length)
+  for (let s = 0; s < segments.length; s++) {
+    const [x1, y1, x2, y2] = segments[s]
+    const dx = x2 - x1, dy = y2 - y1
+    const segLen = Math.hypot(dx, dy)
+    if (segLen < 2) { out[s] = 0; continue }
+    const ux = dx / segLen, uy = dy / segLen
+    // Perpendicular unit vector.
+    const nx = -uy, ny = ux
+    const steps = Math.max(2, Math.round(segLen))
+    let hits = 0, total = 0
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps
+      const cx = x1 + dx * t
+      const cy = y1 + dy * t
+      // Transverse sample across the band — 2*halfW + 1 points.
+      for (let k = -halfW; k <= halfW; k++) {
+        const px = Math.round(cx + nx * k)
+        const py = Math.round(cy + ny * k)
+        if (px < 0 || py < 0 || px >= W || py >= H) { total++; continue }
+        if (data[py * W + px] > 0) hits++
+        total++
+      }
+    }
+    out[s] = total > 0 ? hits / total : 0
+  }
+  return out
+}
+
+// ---- Inlined from src/utils/aiWalls/scoreSegments.js — keep in sync ----
+const _W_LENGTH = 0.30
+const _W_PAIRED = 0.45
+const _W_DENSITY = 0.25
+const _TH_HIGH = 0.65
+const _TH_MEDIUM = 0.35
+function scoreSegments({ segments, perSegment, imageDiagonal, densitySamples }) {
+  const n = segments.length
+  const out = new Array(n)
+  for (let i = 0; i < n; i++) {
+    const [x1, y1, x2, y2] = segments[i]
+    const len = Math.hypot(x2 - x1, y2 - y1)
+    const lengthRaw = imageDiagonal > 0 ? len / imageDiagonal : 0
+    const lengthScore = Math.max(0, Math.min(1, lengthRaw / 0.05))
+    const pairedScore = perSegment?.[i]?.paired ? 1.0 : 0.3
+    const densityRaw = densitySamples ? densitySamples[i] : 0.5
+    const densityScore = Math.max(0, Math.min(1, (densityRaw - 0.4) / 0.5))
+    const score = _W_LENGTH * lengthScore + _W_PAIRED * pairedScore + _W_DENSITY * densityScore
+    out[i] = {
+      score, lengthScore, pairedScore, densityScore, densityRaw,
+      bucket: score >= _TH_HIGH ? 'high' : (score >= _TH_MEDIUM ? 'medium' : 'low'),
+    }
+  }
+  return {
+    perSegment: out,
+    thresholds: { high: _TH_HIGH, medium: _TH_MEDIUM },
+    weights: { length: _W_LENGTH, paired: _W_PAIRED, density: _W_DENSITY },
+  }
+}
+// ---- end inline ----
+
 // Endpoint extension: walk outward along the segment direction one px at a
 // time, sampling the mask. Stop after `missThreshold` consecutive zero
 // samples; otherwise keep extending to the last hit.
@@ -680,11 +754,29 @@ function runPipeline(cv, imageData, options) {
       })
       const thicknessMs = performance.now() - tE
 
+      // 16-3l — oriented density + per-segment confidence score.
+      // Half-width = max(2, est/2 + 1) so ROI brackets the wall body even
+      // when est is null (single-line images): default to 3 px.
+      const tF = performance.now()
+      const halfW = wallThickness.estimatedPx != null
+        ? Math.max(2, Math.round(wallThickness.estimatedPx / 2) + 1)
+        : 3
+      const densitySamples = sampleSegmentDensity(m, mergedSegments, halfW)
+      const W = m.cols, H = m.rows
+      const imageDiagonal = Math.sqrt(W * W + H * H)
+      const scoring = scoreSegments({
+        segments: mergedSegments,
+        perSegment: wallThickness.perSegment,
+        imageDiagonal,
+        densitySamples,
+      })
+      const scoringMs = performance.now() - tF
+
       return {
         morph: m, segments, segStats, mergedSegments,
         mergedStats: { count: mergedSegments.length, totalLengthPx: Math.round(mergedTotalLength) },
-        wallThickness,
-        timings: { morphMs, houghMs, mergeMs, extendMs, thicknessMs },
+        wallThickness, scoring,
+        timings: { morphMs, houghMs, mergeMs, extendMs, thicknessMs, scoringMs },
       }
     }
 
@@ -751,12 +843,13 @@ function runPipeline(cv, imageData, options) {
     }
 
     morph = pass.morph
-    const { segments, segStats, mergedSegments, mergedStats, wallThickness } = pass
+    const { segments, segStats, mergedSegments, mergedStats, wallThickness, scoring } = pass
     const tMorph = pass.timings.morphMs
     const tHough = pass.timings.houghMs
     const tMerge = pass.timings.mergeMs
     const tExtend = pass.timings.extendMs
     const tThickness = pass.timings.thicknessMs
+    const tScoring = pass.timings.scoringMs
 
     return {
       binaryImageData: matToImageData(cv, thresh),
@@ -772,6 +865,7 @@ function runPipeline(cv, imageData, options) {
       mergedSegments,
       mergedStats,
       wallThickness,
+      scoring,
       adaptive: adapted,
       morphKernelUsed: usedK,
       maxLineGapUsed: usedMaxGap,
@@ -783,6 +877,7 @@ function runPipeline(cv, imageData, options) {
         mergeMs:    Math.round(tMerge),
         extendMs:   Math.round(tExtend),
         thicknessMs: Math.round(tThickness),
+        scoringMs:  Math.round(tScoring),
       },
     }
   } finally {

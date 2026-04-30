@@ -281,7 +281,7 @@ const PHASES = [
           { id: '16-3i', done: true,  text: 'Wall thickness pair detection（牆 vs 家具/尺寸線）' },
           { id: '16-3j', done: false, text: 'Oriented ROI density scoring' },
           { id: '16-3k', done: false, text: '實心填色牆分支（contour + skeleton）' },
-          { id: '16-3l', done: false, text: 'Confidence scoring 整合（多權重 preset）' },
+          { id: '16-3l', done: true,  text: 'Confidence scoring 整合（length+paired+density minimal viable）' },
           { id: '16-3m', done: true,  text: 'Web Worker 化（隨 16-3a 提前完成）' },
           { id: '16-3n', done: false, text: '半自動 Review UI + 寫入 wallStore' },
           { id: '16-3o', done: false, text: 'Toolbar「AI 偵測牆壁」入口 + Undo/Redo 整合' },

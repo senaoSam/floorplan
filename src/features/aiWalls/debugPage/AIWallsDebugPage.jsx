@@ -44,6 +44,28 @@ function drawSegments(canvas, segments, color) {
   ctx.restore()
 }
 
+// Draw merged segments coloured by confidence bucket — high (green),
+// medium (yellow), low (dim grey). 16-3l confidence visual gate.
+function drawSegmentsByBucket(canvas, segments, scoringPer) {
+  const ctx = canvas.getContext('2d')
+  ctx.save()
+  ctx.lineWidth = 1.5
+  const buckets = { low: '#666', medium: '#ffd24a', high: '#3bff7b' }
+  // Draw low → medium → high so high stays on top.
+  for (const b of ['low', 'medium', 'high']) {
+    ctx.strokeStyle = buckets[b]
+    ctx.beginPath()
+    for (let i = 0; i < segments.length; i++) {
+      if (scoringPer?.[i]?.bucket !== b) continue
+      const [x1, y1, x2, y2] = segments[i]
+      ctx.moveTo(x1 + 0.5, y1 + 0.5)
+      ctx.lineTo(x2 + 0.5, y2 + 0.5)
+    }
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
 // Draw merged segments split by paired-flag — paired in green, unpaired in
 // dim grey. Lets you eyeball whether 16-3i pair detection is catching the
 // real walls and rejecting furniture / dimension lines.
@@ -130,7 +152,7 @@ export default function AIWallsDebugPage() {
   useEffect(() => {
     const last = lastResultRef.current
     if (!last) return
-    const { morphImageData, segments, mergedSegments, perSegment } = last
+    const { morphImageData, segments, mergedSegments, perSegment, scoringPer } = last
     const segCanvas = segCanvasRef.current
     if (!segCanvas) return
     segCanvas.width = morphImageData.width
@@ -147,6 +169,8 @@ export default function AIWallsDebugPage() {
         drawSegments(segCanvas, mergedSegments, '#3bff7b')
       } else if (overlayMode === 'paired') {
         drawSegmentsByPair(segCanvas, mergedSegments, perSegment, '#3bff7b', '#666')
+      } else if (overlayMode === 'confidence') {
+        drawSegmentsByBucket(segCanvas, mergedSegments, scoringPer)
       }
     }
   }, [showSegments, overlayMode])
@@ -187,7 +211,7 @@ export default function AIWallsDebugPage() {
             binaryImageData, morphImageData, width, height,
             whitePixels, deskew, deskewWhitePixels, morphWhitePixels,
             segments, segStats, mergedSegments, mergedStats,
-            wallThickness, adaptive, morphKernelUsed, maxLineGapUsed,
+            wallThickness, scoring, adaptive, morphKernelUsed, maxLineGapUsed,
             timings, elapsedMs,
           } = m.result
 
@@ -219,12 +243,15 @@ export default function AIWallsDebugPage() {
               drawSegments(segCanvas, mergedSegments, '#3bff7b')
             } else if (overlayMode === 'paired') {
               drawSegmentsByPair(segCanvas, mergedSegments, wallThickness?.perSegment, '#3bff7b', '#666')
+            } else if (overlayMode === 'confidence') {
+              drawSegmentsByBucket(segCanvas, mergedSegments, scoring?.perSegment)
             }
           }
 
           lastResultRef.current = {
             morphImageData, segments, mergedSegments,
             perSegment: wallThickness?.perSegment,
+            scoringPer: scoring?.perSegment,
           }
 
           setStats({
@@ -243,7 +270,7 @@ export default function AIWallsDebugPage() {
             minLineLength: segStats.minLineLength,
             maxLineGap: segStats.maxLineGap,
             houghThreshold: segStats.threshold,
-            wallThickness,
+            wallThickness, scoring,
             adaptive, morphKernelUsed, maxLineGapUsed,
             timings,
           })
@@ -418,6 +445,7 @@ export default function AIWallsDebugPage() {
             <option value="merged">Merged (green)</option>
             <option value="both">Both</option>
             <option value="paired">Paired only (16-3i)</option>
+            <option value="confidence">Confidence buckets (16-3l)</option>
           </select>
         </label>
         <button onClick={run} disabled={busy}>Run</button>
@@ -527,6 +555,23 @@ export default function AIWallsDebugPage() {
             &nbsp;· paired {stats.wallThickness?.pairedCount ?? 0} / {stats.wallThickness?.totalCount ?? 0}
             &nbsp;· thickness {stats.timings?.thicknessMs}ms
           </div>
+          {stats.scoring?.perSegment && (() => {
+            const counts = { high: 0, medium: 0, low: 0 }
+            for (const p of stats.scoring.perSegment) counts[p.bucket]++
+            const total = stats.scoring.perSegment.length || 1
+            return (
+              <div>
+                Confidence:&nbsp;
+                <span style={{ color: '#3bff7b' }}>high {counts.high} ({Math.round(counts.high * 100 / total)}%)</span>
+                &nbsp;·&nbsp;
+                <span style={{ color: '#ffd24a' }}>medium {counts.medium} ({Math.round(counts.medium * 100 / total)}%)</span>
+                &nbsp;·&nbsp;
+                <span style={{ color: '#888' }}>low {counts.low} ({Math.round(counts.low * 100 / total)}%)</span>
+                &nbsp;· thresholds high≥{stats.scoring.thresholds.high} medium≥{stats.scoring.thresholds.medium}
+                &nbsp;· scoring {stats.timings?.scoringMs}ms
+              </div>
+            )
+          })()}
           <div>
             Adaptive: {stats.adaptive ? (
               <span style={{ color: '#9bd' }}>
