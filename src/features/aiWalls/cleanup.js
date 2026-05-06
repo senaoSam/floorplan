@@ -17,7 +17,12 @@ const DEFAULT_CONFIG = {
   // interior gets extended to the wall and splits it. Closes the dangling /
   // undershoot / overshoot cases that splitCrossingSegments (strict inequality)
   // misses.
-  tJunctionTolerance: 6,
+  // Sized for realistic near-miss budget at L-corners: dilate radius (2) +
+  // anti-aliasing edge drift (~2) + corner truncation from extracted host
+  // ending short of the true corner (~3) ≈ 7 px. Setting 8 gives a small
+  // safety margin. Still far below typical room separation (≥50 px), so no
+  // risk of false welds between parallel walls in different rooms.
+  tJunctionTolerance: 8,
   // Drop walls with both endpoints unconnected to any junction. After
   // repairTJunctions runs, surviving orphans are typically image noise
   // (text, scale tick marks, isolated artifacts).
@@ -566,6 +571,56 @@ function attachOpenings(walls, openings, attachDistance, sameOrientBonus = 0) {
   })
 }
 
+// Diagnose an orphan: for each endpoint, compute the smallest tolerance T
+// that would allow repairTJunctions to weld it to some perpendicular host.
+// repairTJunctions accepts a host iff perpDist ≤ T AND projection lies
+// within [host.start - T, host.end + T]. So the rescue tolerance is
+//   T = max(perpDist, max(0, host.start - proj, proj - host.end))
+// per host, minimized over hosts. minimized again over the two endpoints
+// gives the wall's rescue tolerance (only one endpoint must weld to escape
+// the orphan filter).
+function diagnoseOrphan(seg, walls) {
+  const ends = [
+    { ex: seg.x1, ey: seg.y1, label: 'start' },
+    { ex: seg.x2, ey: seg.y2, label: 'end'   },
+  ]
+  const perEnd = ends.map(({ ex, ey, label }) => {
+    let bestT = Infinity
+    let bestPerp = Infinity
+    let bestPast = Infinity
+    for (const host of walls) {
+      if (host.orientation === seg.orientation) continue
+      let perpDist, pastEnd
+      if (host.orientation === 'horizontal') {
+        perpDist = Math.abs(ey - host.y1)
+        pastEnd = Math.max(0, host.x1 - ex, ex - host.x2)
+      } else {
+        perpDist = Math.abs(ex - host.x1)
+        pastEnd = Math.max(0, host.y1 - ey, ey - host.y2)
+      }
+      const T = Math.max(perpDist, pastEnd)
+      if (T < bestT) { bestT = T; bestPerp = perpDist; bestPast = pastEnd }
+    }
+    return { label, rescueT: bestT, perpDist: bestPerp, pastEnd: bestPast }
+  })
+  // Wall rescue tolerance = min over endpoints (only one weld needed).
+  const best = perEnd[0].rescueT <= perEnd[1].rescueT ? perEnd[0] : perEnd[1]
+  return {
+    ends: perEnd,
+    rescueTolerance: best.rescueT,
+    bestPerpDist: best.perpDist,
+    bestPastEnd: best.pastEnd,
+  }
+}
+
+// Stable key for tracking which segments survived a step. Uses raw x/y so it
+// remains comparable as long as the segment object itself isn't mutated
+// (steps that filter by reference are safe; coalesce mutates so use keys
+// captured BEFORE coalesce runs).
+function segKey(s) {
+  return `${s.orientation}|${s.x1},${s.y1}|${s.x2},${s.y2}|${s.type ?? ''}`
+}
+
 export function cleanupVectors(rawByType, configOverride = {}) {
   const cfg = {
     ...DEFAULT_CONFIG,
@@ -574,12 +629,19 @@ export function cleanupVectors(rawByType, configOverride = {}) {
     merge:     { ...DEFAULT_CONFIG.merge,     ...(configOverride.merge     || {}) },
   }
 
+  const debug = { removed: { tooShort: [], orphans: [], tinyClusters: [] } }
+
   const after = {}
   for (const type of ['wall', 'door', 'window']) {
     let segs = (rawByType[type] || []).map(s => ({ ...s, type }))
 
     // 1
+    const beforeShort = segs
     segs = removeShortSegments(segs, cfg.minLength[type])
+    if (type === 'wall') {
+      const kept = new Set(segs.map(segKey))
+      for (const s of beforeShort) if (!kept.has(segKey(s))) debug.removed.tooShort.push(s)
+    }
     // 2
     segs = mergeCollinearSegments(segs, cfg.merge.axisTolerance, cfg.merge.gapTolerance)
     // 3
@@ -622,11 +684,28 @@ export function cleanupVectors(rawByType, configOverride = {}) {
   // 4 — junctions on wall graph (preliminary, used to detect orphans)
   let nodes = detectJunctions(after.wall)
   if (cfg.removeOrphans) {
+    const beforeOrphans = after.wall
     after.wall = removeOrphanWalls(after.wall, nodes)
+    const kept = new Set(after.wall.map(segKey))
+    // For each removed orphan, compute the nearest perpendicular wall's
+    // perp distance and whether the endpoint projects inside that wall's
+    // range. This tells us whether bumping tJunctionTolerance would have
+    // saved it (small perpDist + inRange) vs. it being unrescuable noise
+    // (large perpDist or projection outside any host).
+    for (const s of beforeOrphans) {
+      if (kept.has(segKey(s))) continue
+      const diag = diagnoseOrphan(s, after.wall)
+      debug.removed.orphans.push({ ...s, diag })
+    }
     nodes = detectJunctions(after.wall)
   }
   // Drop tiny self-contained noise clusters by bbox size (e.g. "+" markers).
+  const beforeTiny = after.wall
   after.wall = removeTinyClusters(after.wall, cfg.maxNoiseClusterSize)
+  {
+    const kept = new Set(after.wall.map(segKey))
+    for (const s of beforeTiny) if (!kept.has(segKey(s))) debug.removed.tinyClusters.push(s)
+  }
   nodes = detectJunctions(after.wall)
 
   // 7 — attach openings to their nearest wall…
@@ -646,5 +725,5 @@ export function cleanupVectors(rawByType, configOverride = {}) {
     nodes = detectJunctions(after.wall)
   }
 
-  return { walls: after.wall, doors, windows, nodes, config: cfg }
+  return { walls: after.wall, doors, windows, nodes, config: cfg, debug }
 }

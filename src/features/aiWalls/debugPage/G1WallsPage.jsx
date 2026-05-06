@@ -239,6 +239,7 @@ export default function G1WallsPage() {
   const windowMaskRef  = useRef(null)
   const vectorRef      = useRef(null)
   const cleanRef       = useRef(null)
+  const removedRef     = useRef(null)
   const graphRef       = useRef(null)
   const imgRef         = useRef(null)
 
@@ -300,6 +301,64 @@ export default function G1WallsPage() {
       drawVecs(cctx, cleaned.doors,   'door',   'thin')
       drawVecs(cctx, cleaned.walls,   'wall',   'thin')
 
+      // Removed walls overlay → diagnostic canvas. Cleaned walls drawn in
+      // light gray for context; walls killed by each cleanup step in distinct
+      // colors so we can pinpoint which step ate a wall that should have lived.
+      const rem = removedRef.current
+      rem.width = w; rem.height = h
+      const rctx = rem.getContext('2d')
+      rctx.fillStyle = '#fff'
+      rctx.fillRect(0, 0, w, h)
+      rctx.lineCap = 'butt'
+      rctx.strokeStyle = '#d0d0d0'
+      rctx.lineWidth = 1
+      for (const v of cleaned.walls) {
+        rctx.beginPath()
+        rctx.moveTo(v.x1 + 0.5, v.y1 + 0.5)
+        rctx.lineTo(v.x2 + 0.5, v.y2 + 0.5)
+        rctx.stroke()
+      }
+      const drawRemoved = (list, color) => {
+        rctx.strokeStyle = color
+        rctx.lineWidth = 2
+        for (const v of list) {
+          rctx.beginPath()
+          rctx.moveTo(v.x1 + 0.5, v.y1 + 0.5)
+          rctx.lineTo(v.x2 + 0.5, v.y2 + 0.5)
+          rctx.stroke()
+        }
+      }
+      drawRemoved(cleaned.debug.removed.tooShort,     '#ef4444') // red
+      drawRemoved(cleaned.debug.removed.orphans,      '#f97316') // orange
+      drawRemoved(cleaned.debug.removed.tinyClusters, '#a855f7') // purple
+
+      // Orphan diagnosis — rescueT is the tolerance needed to save the wall:
+      // smallest T such that some perpendicular host satisfies both perpDist≤T
+      // and projection within [host.start-T, host.end+T]. So bumping
+      // tJunctionTolerance to ≥rescueT would rescue the wall.
+      if (cleaned.debug.removed.orphans.length) {
+        console.table(cleaned.debug.removed.orphans.map(o => ({
+          orient: o.orientation,
+          x1: o.x1, y1: o.y1, x2: o.x2, y2: o.y2,
+          length: o.orientation === 'horizontal'
+            ? Math.abs(o.x2 - o.x1) : Math.abs(o.y2 - o.y1),
+          rescueT:    o.diag?.rescueTolerance?.toFixed?.(1) ?? '∞',
+          perpDist:   o.diag?.bestPerpDist?.toFixed?.(1)    ?? '∞',
+          pastEnd:    o.diag?.bestPastEnd?.toFixed?.(1)     ?? '∞',
+        })))
+      }
+
+      // Label each orphan with its rescueT on the canvas.
+      rctx.fillStyle = '#f97316'
+      rctx.font = '11px system-ui'
+      for (const o of cleaned.debug.removed.orphans) {
+        const cx = (o.x1 + o.x2) / 2
+        const cy = (o.y1 + o.y2) / 2
+        const t = o.diag?.rescueTolerance
+        const label = Number.isFinite(t) ? `T=${t.toFixed(0)}` : 'T=∞'
+        rctx.fillText(label, cx + 4, cy - 4)
+      }
+
       // Topology graph → third canvas (View 3): wall edges + junction nodes.
       const gph = graphRef.current
       gph.width = w; gph.height = h
@@ -339,6 +398,11 @@ export default function G1WallsPage() {
           door:   { count: cleaned.doors.length,   length: Math.round(sumLen(cleaned.doors)),   attached: attachedCount(cleaned.doors) },
           window: { count: cleaned.windows.length, length: Math.round(sumLen(cleaned.windows)), attached: attachedCount(cleaned.windows) },
           nodes:  cleaned.nodes.length,
+        },
+        removed: {
+          tooShort:     cleaned.debug.removed.tooShort.length,
+          orphans:      cleaned.debug.removed.orphans.length,
+          tinyClusters: cleaned.debug.removed.tinyClusters.length,
         },
       })
     } catch (e) {
@@ -414,6 +478,14 @@ export default function G1WallsPage() {
             &nbsp;·&nbsp;
             <span style={{ color: '#eab308' }}>{stats.clean.nodes} nodes</span>
           </div>
+          <div>
+            removed walls —&nbsp;
+            <span style={{ color: '#ef4444' }}>tooShort {stats.removed.tooShort}</span>
+            &nbsp;·&nbsp;
+            <span style={{ color: '#f97316' }}>orphans {stats.removed.orphans}</span>
+            &nbsp;·&nbsp;
+            <span style={{ color: '#a855f7' }}>tinyClusters {stats.removed.tinyClusters}</span>
+          </div>
         </div>
       )}
 
@@ -433,6 +505,15 @@ export default function G1WallsPage() {
             View 2 — Cleaned vectors (Steps 1–7)
           </div>
           <canvas ref={cleanRef} style={{ maxWidth: '100%', border: '1px solid #3bff7b', background: '#fff' }} />
+        </div>
+        <div>
+          <div style={{ marginBottom: 4, opacity: 0.7 }}>
+            View 2.5 — Removed walls (cleaned in gray; removed:&nbsp;
+            <span style={{ color: '#ef4444' }}>tooShort</span>&nbsp;·&nbsp;
+            <span style={{ color: '#f97316' }}>orphans</span>&nbsp;·&nbsp;
+            <span style={{ color: '#a855f7' }}>tinyClusters</span>)
+          </div>
+          <canvas ref={removedRef} style={{ maxWidth: '100%', border: '1px solid #ef4444', background: '#fff' }} />
         </div>
         <div>
           <div style={{ marginBottom: 4, opacity: 0.7 }}>
