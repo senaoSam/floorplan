@@ -12,8 +12,18 @@ const DEFAULT_CONFIG = {
   blackThreshold: 50,
   yellow: { r: 180, g: 150, b: 120 },
   blue:   { r: 130, g: 120, b: 150 },
-  minSegmentLength: 8,
-  mergeTolerance: 5,
+  // minSegmentLength must exceed wall thickness — otherwise the "orthogonal
+  // pass" (column-scan over horizontal walls, row-scan over vertical walls)
+  // emits one short segment per scanline of length ≈ thickness, producing
+  // dense comb teeth flanking every wall.
+  minSegmentLength: 14,
+  mergeTolerance: 14,
+  // Dilation closes anti-aliasing gaps AND extends short wall stubs (e.g. the
+  // tiny wall between window-and-door on a continuous wall line — typically
+  // 8-12 px) past the minSegmentLength threshold. Radius 2 makes 10-px stubs
+  // become 14 px, which survives extraction. Wall thickness after dilation 2
+  // is ≈12 px, still within mergeTolerance=14 so single centerline is kept.
+  dilateRadius: 2,
 }
 
 const TYPE_COLORS = {
@@ -44,6 +54,30 @@ function buildMasks(imageData, cfg) {
     }
   }
   return masks
+}
+
+// Square structuring element dilation. Closes the 2–4 px anti-aliasing gap
+// at wall↔opening interfaces so extracted endpoints overlap.
+function dilateMask(mask, w, h, radius) {
+  if (radius <= 0) return mask
+  const out = new Uint8Array(w * h)
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (mask[y * w + x]) { out[y * w + x] = 1; continue }
+      let hit = 0
+      for (let dy = -radius; dy <= radius && !hit; dy++) {
+        const ny = y + dy
+        if (ny < 0 || ny >= h) continue
+        for (let dx = -radius; dx <= radius; dx++) {
+          const nx = x + dx
+          if (nx < 0 || nx >= w) continue
+          if (mask[ny * w + nx]) { hit = 1; break }
+        }
+      }
+      if (hit) out[y * w + x] = 1
+    }
+  }
+  return out
 }
 
 function extractHorizontalSegments(mask, width, height, minLength) {
@@ -134,7 +168,13 @@ function mergeVerticalSegments(segments, tolerance) {
 
 function extractVectors(imageData, cfg) {
   const { width, height } = imageData
-  const masks = buildMasks(imageData, cfg)
+  const rawMasks = buildMasks(imageData, cfg)
+  // Dilate so wall↔opening anti-aliasing gap closes and shared endpoints align.
+  const masks = {
+    wall:   dilateMask(rawMasks.wall,   width, height, cfg.dilateRadius),
+    door:   dilateMask(rawMasks.door,   width, height, cfg.dilateRadius),
+    window: dilateMask(rawMasks.window, width, height, cfg.dilateRadius),
+  }
   const result = {}
   for (const type of ['wall', 'door', 'window']) {
     const mask = masks[type]
@@ -337,6 +377,11 @@ export default function G1WallsPage() {
         <label>Merge tol:&nbsp;
           <input type="number" min={0} max={20} value={cfg.mergeTolerance}
                  onChange={setNum('mergeTolerance')} style={{ width: 60 }} disabled={busy} />
+        </label>
+        <label title="dilate masks by N px to close wall↔opening anti-aliasing gap">
+          Dilate:&nbsp;
+          <input type="number" min={0} max={4} value={cfg.dilateRadius}
+                 onChange={setNum('dilateRadius')} style={{ width: 60 }} disabled={busy} />
         </label>
         <label>Stroke:&nbsp;
           <select value={strokeMode} onChange={(e) => setStrokeMode(e.target.value)} disabled={busy}>
