@@ -9,10 +9,10 @@ const DEFAULT_CONFIG = {
   attachDistance:  12,
   // axis-coalesce tolerance — pulls near-collinear segments to a shared axis
   // even when their gap exceeds merge.gapTolerance (e.g. walls split by a door).
-  // 8 handles the column-vs-thin-wall centerline offset: a 24 px thick column
-  // (post-dilation) and 12 px thin wall sharing an outer edge have centerlines
-  // (24-12)/2 = 6 px apart. Tolerance 6 was borderline; 8 absorbs rounding.
-  coalesceTolerance: 8,
+  // 12 handles thicker columns: a 32 px thick column with 12 px thin wall
+  // sharing an outer edge have centerlines (32-12)/2 = 10 px apart. Chain-based
+  // grouping keeps the spread bounded by adjacent pairs anyway.
+  coalesceTolerance: 12,
   // T-junction repair tolerance — endpoint that's within N px of another wall's
   // interior gets extended to the wall and splits it. Closes the dangling /
   // undershoot / overshoot cases that splitCrossingSegments (strict inequality)
@@ -27,6 +27,12 @@ const DEFAULT_CONFIG = {
   // ~20×20 px. Real floorplan areas have bbox ≥ 100×100 px, so 30 catches
   // noise without risk of nuking legitimate structures.
   maxNoiseClusterSize: 30,
+  // Synthesize wall stubs between collinear openings. The 8-15 px wall stub
+  // between adjacent door/window/door fragments is often filtered by
+  // minSegmentLength but architecturally MUST exist (two openings can't touch
+  // directly). 30 covers typical short stubs without bridging gaps where there
+  // really is just empty space.
+  maxInferredStubLength: 30,
   // Bonus subtracted from same-orientation candidate's distance when picking
   // an opening's parent wall. Architectural reality: doors/windows almost
   // always replace a section of same-direction wall, not attach perpendicular
@@ -355,6 +361,52 @@ function removeTinyClusters(walls, maxSize) {
   })
 }
 
+// Synthesize missing wall stubs between collinear openings. After cleanup the
+// floorplan often shows window-and-door pairs on the same axis with a small
+// gap that, in the source, was a short wall pixel-stub too short to survive
+// minSegmentLength. Architecturally that gap MUST be a wall — openings can't
+// touch directly. Fill it.
+function inferWallStubs(openings, maxStubLength) {
+  if (openings.length < 2 || maxStubLength <= 0) return []
+  const stubs = []
+  const seen = new Set()
+  for (let i = 0; i < openings.length; i++) {
+    for (let j = i + 1; j < openings.length; j++) {
+      const a = openings[i], b = openings[j]
+      if (a.orientation !== b.orientation) continue
+      const aAxis = a.orientation === 'horizontal' ? a.y1 : a.x1
+      const bAxis = b.orientation === 'horizontal' ? b.y1 : b.x1
+      if (aAxis !== bAxis) continue
+      let gapStart, gapEnd
+      if (a.orientation === 'horizontal') {
+        const aMin = Math.min(a.x1, a.x2), aMax = Math.max(a.x1, a.x2)
+        const bMin = Math.min(b.x1, b.x2), bMax = Math.max(b.x1, b.x2)
+        if (aMax < bMin)      { gapStart = aMax; gapEnd = bMin }
+        else if (bMax < aMin) { gapStart = bMax; gapEnd = aMin }
+        else continue
+      } else {
+        const aMin = Math.min(a.y1, a.y2), aMax = Math.max(a.y1, a.y2)
+        const bMin = Math.min(b.y1, b.y2), bMax = Math.max(b.y1, b.y2)
+        if (aMax < bMin)      { gapStart = aMax; gapEnd = bMin }
+        else if (bMax < aMin) { gapStart = bMax; gapEnd = aMin }
+        else continue
+      }
+      const gapLen = gapEnd - gapStart
+      if (gapLen <= 0 || gapLen > maxStubLength) continue
+      const key = a.orientation === 'horizontal'
+        ? `H|${gapStart},${aAxis}|${gapEnd},${aAxis}`
+        : `V|${aAxis},${gapStart}|${aAxis},${gapEnd}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      stubs.push(a.orientation === 'horizontal'
+        ? { x1: gapStart, y1: aAxis, x2: gapEnd, y2: aAxis, orientation: 'horizontal', type: 'wall', synthesized: true }
+        : { x1: aAxis, y1: gapStart, x2: aAxis, y2: gapEnd, orientation: 'vertical',  type: 'wall', synthesized: true }
+      )
+    }
+  }
+  return stubs
+}
+
 // Step 4 — junction nodes. Endpoints sharing the same (x,y) form a node.
 function detectJunctions(segments) {
   const buckets = new Map()
@@ -581,8 +633,18 @@ export function cleanupVectors(rawByType, configOverride = {}) {
   let doors   = attachOpenings(after.wall, after.door,   cfg.attachDistance, cfg.sameOrientBonus)
   let windows = attachOpenings(after.wall, after.window, cfg.attachDistance, cfg.sameOrientBonus)
   // …then align: snap to wall axis (same-orient) or extend to centerline (perp).
-  doors   = alignOpeningsToWalls(after.wall, doors)
-  windows = alignOpeningsToWalls(after.wall, windows)
+  doors   = alignOpeningsToWalls(after.wall, doors,   cfg.coalesceTolerance)
+  windows = alignOpeningsToWalls(after.wall, windows, cfg.coalesceTolerance)
+
+  // Architectural gap-fill: synthesize wall stubs between collinear openings.
+  // The 8-15 px wall between a window and an adjacent door (filtered out by
+  // minSegmentLength in raw extraction) MUST exist architecturally — openings
+  // can't touch directly.
+  const stubs = inferWallStubs([...doors, ...windows], cfg.maxInferredStubLength)
+  if (stubs.length) {
+    after.wall = [...after.wall, ...stubs]
+    nodes = detectJunctions(after.wall)
+  }
 
   return { walls: after.wall, doors, windows, nodes, config: cfg }
 }
