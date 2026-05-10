@@ -39,15 +39,6 @@ function WallPanel({ floorId, wallId }) {
         <button className="panel-delete-btn" onClick={handleDelete}>刪除</button>
       </div>
 
-      {/* 端點座標（除錯用，方便比對對齊問題） */}
-      <section className="wall-panel__section">
-        <p className="wall-panel__label">端點座標 (px)</p>
-        <div style={{ fontFamily: 'monospace', fontSize: 12, lineHeight: 1.5 }}>
-          <div>start: ({wall.startX.toFixed(2)}, {wall.startY.toFixed(2)})</div>
-          <div>end:&nbsp;&nbsp; ({wall.endX.toFixed(2)}, {wall.endY.toFixed(2)})</div>
-        </div>
-      </section>
-
       {/* 材質選擇 */}
       <section className="wall-panel__section">
         <p className="wall-panel__label">材質</p>

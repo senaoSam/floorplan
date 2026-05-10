@@ -2,8 +2,10 @@
 //   dbLoss — 2.4 GHz 標稱單次穿透衰減（dB）。HM-F8 之後改為頻率函數的 anchor：
 //            wallLossDb(f_GHz) = dbLoss * (f_GHz / 2.4) ** lossB
 //            這樣 2.4 GHz 場景數值不變，5/6 GHz 隨 ITU-R P.2040-3 frequency 指數放大。
-//   lossB  — 頻率指數，取自 ITU-R P.2040-3 表 3 的 attenuation coefficient b 欄位。
-//            metal 維持寬頻高損失（lossB ≈ 0），其餘材質 b∈[0.27, 1.99]。
+//   lossB  — 頻率指數，沿用 ITU-R P.2040 b 欄位的「介電常數頻率指數」會把
+//            5/6 GHz 算到不合理的數十 dB（例 CONCRETE b=1.99 → 5GHz 52 dB 穿透）。
+//            這裡以實測穿透損失隨頻率的合理增幅手動校準（per decade 幾 dB），
+//            metal 寬頻高損失維持 lossB=0。
 //   itu    — ITU-R P.2040-3 Table 3 介電/導電率係數，供反射時推 Fresnel 複數係數
 //            eta' = a * f_GHz^b        (相對介電常數實部)
 //            sigma = c * f_GHz^d (S/m) (導電率)
@@ -13,7 +15,7 @@ export const MATERIALS = {
     id: 'glass',
     label: '玻璃',
     dbLoss: 2,
-    lossB: 0.27,
+    lossB: 0.3,
     color: '#48c9b0',   // 青綠
     itu: { a: 6.31, b: 0, c: 0.0036, d: 1.3394 },
   },
@@ -21,7 +23,7 @@ export const MATERIALS = {
     id: 'drywall',
     label: '輕隔間 (石膏板)',
     dbLoss: 3,
-    lossB: 1.62,
+    lossB: 0.5,
     color: '#f39c12',   // 琥珀橘
     itu: { a: 2.73, b: 0, c: 0.0085, d: 0.9395 },
   },
@@ -29,7 +31,7 @@ export const MATERIALS = {
     id: 'wood',
     label: '木板',
     dbLoss: 4,
-    lossB: 1.04,
+    lossB: 0.4,
     color: '#a04000',   // 深棕
     itu: { a: 1.99, b: 0, c: 0.0047, d: 1.0718 },
   },
@@ -37,7 +39,7 @@ export const MATERIALS = {
     id: 'brick',
     label: '磚牆',
     dbLoss: 8,
-    lossB: 1.21,
+    lossB: 0.6,
     color: '#cb4335',   // 磚紅
     itu: { a: 3.91, b: 0, c: 0.0238, d: 0.16 },
   },
@@ -45,7 +47,7 @@ export const MATERIALS = {
     id: 'concrete',
     label: '混凝土',
     dbLoss: 12,
-    lossB: 1.99,
+    lossB: 0.6,
     color: '#bdc3c7',   // 灰白
     itu: { a: 5.24, b: 0, c: 0.0462, d: 0.7822 },
   },
