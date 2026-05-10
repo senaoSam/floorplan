@@ -45,6 +45,7 @@ src/
                               #   #/heatmap-diff      → HeatmapDiffPage
                               #   #/heatmap-bench     → HeatmapBenchPage
                               #   #/ai-walls-debug    → AIWallsDebugPage
+                              #   #/vectorize         → VectorizePage
 ```
 
 ### Store（Zustand 狀態管理）
@@ -273,6 +274,13 @@ src/features/
                               #   參數：blurKernel / invert / morphKernel / morphDilatePx /
                               #         houghThreshold / minLineLengthRatio / maxLineGapPx /
                               #         mergeAngleTolDeg / mergeOffsetTol / mergeGapTol
+
+  vectorize/
+    VectorizePage.jsx         # 圖片向量化頁面 (route: #/vectorize)
+                              #   上傳 → POST https://analyzetovec.onrender.com/vectorize
+                              #   雙欄顯示 src 與向量化結果（wall/door/window 著色）
+                              #   Apply：用 floorplanFromLines 轉成 walls，
+                              #          importFloorFromUrl 建立新樓層後切回主編輯器
 
   channel/                    # （頻道規劃相關 helper，視需要看內檔）
   floor/                      # （樓層管理相關 helper）

@@ -9,6 +9,7 @@ import StressLoader from '@/components/StressLoader/StressLoader'
 import HeatmapDiffPage from '@/features/heatmap/diffPage/HeatmapDiffPage'
 import HeatmapBenchPage from '@/features/heatmap/diffPage/HeatmapBenchPage'
 import AIWallsDebugPage from '@/features/aiWalls/debugPage/AIWallsDebugPage'
+import VectorizePage from '@/features/vectorize/VectorizePage'
 import './styles/App.sass'
 
 function useHashRoute() {
@@ -32,6 +33,9 @@ function App() {
   }
   if (hash === '#/ai-walls-debug') {
     return <AIWallsDebugPage />
+  }
+  if (hash === '#/vectorize') {
+    return <VectorizePage />
   }
 
   return (
