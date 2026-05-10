@@ -5,7 +5,6 @@ import CanvasArea from '@/components/CanvasArea/CanvasArea'
 import PanelRight from '@/components/PanelRight/PanelRight'
 import ProgressPanel from '@/components/ProgressPanel/ProgressPanel'
 import DemoLoader from '@/components/DemoLoader/DemoLoader'
-import SourceLoader from '@/components/SourceLoader/SourceLoader'
 import StressLoader from '@/components/StressLoader/StressLoader'
 import HeatmapDiffPage from '@/features/heatmap/diffPage/HeatmapDiffPage'
 import HeatmapBenchPage from '@/features/heatmap/diffPage/HeatmapBenchPage'
@@ -49,7 +48,6 @@ function App() {
       </div>
       <StressLoader />
       <DemoLoader />
-      <SourceLoader />
       <ProgressPanel />
     </div>
   )

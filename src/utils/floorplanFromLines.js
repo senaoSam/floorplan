@@ -27,11 +27,11 @@ const DEFAULTS = {
   axisTolerance: 2,    // px; line counts as same row/column if axis diff <= this
   gapTolerance: 1,     // px; walls merge if gap on the major axis <= this
   snapDistance: 4,     // px; wall endpoints within this radius collapse to one
-  wallMaterial: MATERIALS.METAL,
+  wallMaterial: MATERIALS.CONCRETE,
   topHeight: 3.0,
   bottomHeight: 0,
   // Opening vertical extents (m). Real heights aren't carried in the JSON, so
-  // pick reasonable defaults that match `demoSampleScenario`.
+  // pick reasonable defaults (door 0–2.1 m, window 0.9–2.1 m).
   doorBottomHeight: 0,
   doorTopHeight: 2.1,
   windowBottomHeight: 0.9,

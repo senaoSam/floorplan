@@ -3,20 +3,63 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
+import { useEditorStore } from '@/store/useEditorStore'
 import { useWarmupStore } from '@/store/useWarmupStore'
-import { buildDemoSampleObjects } from '@/mock/demoSampleScenario'
+import { floorplanFromLines } from '@/utils/floorplanFromLines'
+import { greedyChannelAssign } from '@/utils/autoChannelPlan'
+import { generateId } from '@/utils/id'
+import { DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
+import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
 import './DemoLoader.sass'
 
-const DEMO_SRC = import.meta.env.BASE_URL + 'test-floorplan.png'
+const IMG_SRC  = import.meta.env.BASE_URL + 'sample-walls/example3.png'
+const SRC_IMG  = import.meta.env.BASE_URL + 'source.png'
+const JSON_SRC = import.meta.env.BASE_URL + 'source.json'
 const BASE_NAME = 'Demo'
 
-// Pick the first available "Demo", "Demo-2", "Demo-3"… name given the floors already present.
 function nextDemoName(floors) {
   const taken = new Set(floors.map((f) => f.name))
   if (!taken.has(BASE_NAME)) return BASE_NAME
   let n = 2
   while (taken.has(`${BASE_NAME}-${n}`)) n++
   return `${BASE_NAME}-${n}`
+}
+
+// Hand-picked centres (in example3.png pixel space, 685x511) of the five
+// largest rooms in the floor plan: double garage, family living, gourmet
+// kitchen, home theatre, master suite.
+const DEMO_AP_POSITIONS_NORM = [
+  { x:  85 / 685, y: 360 / 511 }, // double garage
+  { x: 415 / 685, y: 175 / 511 }, // family living
+  { x: 510 / 685, y: 250 / 511 }, // gourmet kitchen
+  { x: 410 / 685, y: 400 / 511 }, // home theatre
+  { x: 615 / 685, y: 400 / 511 }, // master suite
+]
+
+function buildDemoAPs(canvasWidth, canvasHeight, regulatoryDomain) {
+  const aps = DEMO_AP_POSITIONS_NORM.map((p, i) => ({
+    id: generateId('ap'),
+    x: p.x * canvasWidth,
+    y: p.y * canvasHeight,
+    z: 2.4,
+    txPower: 20,
+    frequency: 5,
+    channel: 36,
+    channelWidth: DEFAULT_CHANNEL_WIDTH[5],
+    antennaMode: 'omni',
+    azimuth: 0,
+    beamwidth: 60,
+    patternId: null,
+    mountType: 'ceiling',
+    modelId: DEFAULT_AP_MODEL_ID,
+    name: `AP-${String(i + 1).padStart(2, '0')}`,
+    color: '#4fc3f7',
+  }))
+  const assignments = greedyChannelAssign(aps, regulatoryDomain)
+  return aps.map((ap) => {
+    const picked = assignments.get(ap.id)
+    return picked ? { ...ap, channel: picked.channel } : ap
+  })
 }
 
 function DemoLoader() {
@@ -26,29 +69,53 @@ function DemoLoader() {
   const setWalls           = useWallStore((s) => s.setWalls)
   const setAPs             = useAPStore((s) => s.setAPs)
   const setHeatmapEnabled  = useHeatmapStore((s) => s.setEnabled)
+  const regulatoryDomain   = useEditorStore((s) => s.regulatoryDomain)
   const warmingUp          = useWarmupStore((s) => s.warmingUp)
 
   const handleLoad = async () => {
     if (loading || warmingUp) return
     setLoading(true)
     try {
-      const img = new window.Image()
-      img.onload = () => {
-        // Treat the whole Demo image as a 30 x 18 m office so the heatmap grid
-        // count stays modest and dragging is smooth.
-        const pxPerM = img.naturalWidth / 30
-        const floor = importFloorFromUrl(DEMO_SRC, img.naturalWidth, img.naturalHeight, nextDemoName(floors), pxPerM)
-        // Seed this new Demo floor with the canned scenario: walls + 2 APs at
-        // (4,4) / (4,14) m, mapped 1:1 via px/m scale.
-        const { walls, aps } = buildDemoSampleObjects(pxPerM)
-        setWalls(floor.id, walls)
-        setAPs(floor.id, aps)
-        setHeatmapEnabled(true)
-        setLoading(false)
-      }
-      img.onerror = () => setLoading(false)
-      img.src = DEMO_SRC
-    } catch {
+      const loadImg = (src) => new Promise((resolve, reject) => {
+        const i = new window.Image()
+        i.onload = () => resolve(i)
+        i.onerror = reject
+        i.src = src
+      })
+      const [img, srcImg, json] = await Promise.all([
+        loadImg(IMG_SRC),
+        loadImg(SRC_IMG),
+        fetch(JSON_SRC).then((r) => {
+          if (!r.ok) throw new Error(`fetch source.json failed: ${r.status}`)
+          return r.json()
+        }),
+      ])
+
+      // source.json coordinates were authored against `source.png`. Rescale
+      // them to fit `example3.png` so they land inside the canvas.
+      const scale = img.naturalWidth / srcImg.naturalWidth
+
+      const pxPerM = img.naturalWidth / 30
+      const floor = importFloorFromUrl(
+        IMG_SRC,
+        img.naturalWidth,
+        img.naturalHeight,
+        nextDemoName(floors),
+        pxPerM,
+      )
+
+      const lines = (Array.isArray(json) ? json : json.lines ?? []).map((l) => ({
+        ...l,
+        x1: l.x1 * scale, y1: l.y1 * scale,
+        x2: l.x2 * scale, y2: l.y2 * scale,
+      }))
+      const { walls } = floorplanFromLines(lines)
+      setWalls(floor.id, walls)
+      setAPs(floor.id, buildDemoAPs(img.naturalWidth, img.naturalHeight, regulatoryDomain))
+      setHeatmapEnabled(true)
+    } catch (e) {
+      console.error('[DemoLoader] load failed', e)
+    } finally {
       setLoading(false)
     }
   }

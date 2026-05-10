@@ -46,7 +46,7 @@ export const MATERIALS = {
     label: '混凝土',
     dbLoss: 12,
     lossB: 1.99,
-    color: '#2e86c1',   // 藍灰
+    color: '#bdc3c7',   // 灰白
     itu: { a: 5.24, b: 0, c: 0.0462, d: 0.7822 },
   },
   METAL: {
