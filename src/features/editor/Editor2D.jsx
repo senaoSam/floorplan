@@ -28,6 +28,7 @@ import LayerToggle from '@/components/LayerToggle/LayerToggle'
 import DevicePlanningPanel from '@/components/DevicePlanningPanel/DevicePlanningPanel'
 import RegulatorySelector from '@/components/RegulatorySelector/RegulatorySelector'
 import DropZone from '@/features/importer/DropZone'
+import ScaleBar from '@/components/ScaleBar/ScaleBar'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
@@ -1301,6 +1302,10 @@ function Editor2D() {
           </div>
           <div style={{ pointerEvents: 'auto' }}><RegulatorySelector /></div>
         </div>
+      )}
+
+      {activeFloor?.scale && (
+        <ScaleBar floorPxPerM={activeFloor.scale} viewportScale={viewport.scale} />
       )}
 
       {showScaleDialog && (

@@ -168,14 +168,14 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
           setHoverCursor={setHoverCursor}
         />
       )}
-      {/* 名稱標籤 */}
+      {/* 名稱標籤（icon 上方） */}
       <Text
         text={ap.name}
         fontSize={11 * s}
         fill="#fff"
         align="center"
         offsetX={22 * s}
-        offsetY={-16 * s}
+        offsetY={25 * s}
         width={44 * s}
         shadowColor="#000"
         shadowBlur={4}
