@@ -2,30 +2,119 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
+import { useAIPreviewStore } from '@/store/useAIPreviewStore'
 import { floorplanFromLines } from '@/utils/floorplanFromLines'
 import './AIWallsModal.sass'
 
 // AI Wall flow:
-//   1. Prompt user for API key (temporary — will move to settings later).
-//   2. Pull a source image (currently just reuses the active floor's imageUrl;
-//      placeholder for a future server-fetched image).
-//   3. POST the image to the Python vectorize API.
+//   1. Prompt user for the Gemini API key (temporary input — will move to
+//      settings later).
+//   2. Send the active floor's image to Gemini (gemini-3-pro-image-preview)
+//      with a prompt that strips everything except walls/doors/windows and
+//      re-renders them as clean colored lines.
+//   3. POST the cleaned image to the Python vectorize API.
 //   4. Convert the returned line list into walls via floorplanFromLines
 //      and REPLACE the active floor's walls.
 //   5. Auto-derive px/m from the returned door segments:
 //      sort door lengths, trim top & bottom 25%, average the middle 50%
 //      (if <4 doors, just average all), then divide by REAL_DOOR_WIDTH_M.
 
-const API_URL = 'https://analyzetovec.onrender.com/vectorize'
+const VECTORIZE_API_URL = 'https://analyzetovec.onrender.com/vectorize'
 const REAL_DOOR_WIDTH_M = 0.9
 
-// Placeholder for the upstream "fetch image" step. The product spec calls
-// for first fetching an image from somewhere before vectorizing — until that
-// endpoint exists, just hand back a Blob of the active floor's own image.
-async function fetchSourceImage(floor /* , apiKey */) {
-  const res = await fetch(floor.imageUrl)
-  if (!res.ok) throw new Error(`讀取底圖失敗 (HTTP ${res.status})`)
-  return await res.blob()
+const GEMINI_MODEL = 'gemini-3-pro-image-preview'
+const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent`
+const GEMINI_PROMPT = [
+  '過濾成簡單乾淨線圖,直接產新圖片,不用其他回應',
+  '1.除了門,窗,及柱子外,移除所有不是牆壁的部分',
+  '2.去掉任何文字描述及標記、註記',
+  '3.牆用#000,門用#FFD42A,窗戶用#4FAEE3,都是單直線 ',
+  '4.從牆面施工的角度, 移除不需要的線條',
+  '5.特別注意門窗兩側必須要連接著牆壁,門應該是關門狀態,注意門是否合理,千萬不要扇形',
+  'note 所有東西皆以直線標示,門不要有扇形或雙線,門只能是直線',
+].join('\n')
+
+// Read a Blob/File as base64 (without the "data:...;base64," prefix).
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result
+      const comma = typeof result === 'string' ? result.indexOf(',') : -1
+      if (comma < 0) reject(new Error('FileReader 結果格式錯誤'))
+      else resolve(result.slice(comma + 1))
+    }
+    reader.onerror = () => reject(reader.error || new Error('讀取圖片失敗'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+function base64ToBlob(b64, mimeType) {
+  const bin = atob(b64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return new Blob([bytes], { type: mimeType || 'image/png' })
+}
+
+// Walk a streamGenerateContent response (a JSON array of chunks) and return
+// the first inlineData image part it can find.
+function extractFirstImagePart(payload) {
+  const chunks = Array.isArray(payload) ? payload : [payload]
+  for (const chunk of chunks) {
+    const candidates = chunk?.candidates ?? []
+    for (const c of candidates) {
+      const parts = c?.content?.parts ?? []
+      for (const p of parts) {
+        const inline = p?.inlineData || p?.inline_data
+        if (inline?.data) {
+          return { data: inline.data, mimeType: inline.mimeType || inline.mime_type || 'image/png' }
+        }
+      }
+    }
+  }
+  return null
+}
+
+// Step 2 — hand the floor image to Gemini and get back a cleaned-up image
+// (walls/doors/windows only) as a Blob.
+async function fetchCleanedImageFromGemini(floor, apiKey) {
+  const srcRes = await fetch(floor.imageUrl)
+  if (!srcRes.ok) throw new Error(`讀取底圖失敗 (HTTP ${srcRes.status})`)
+  const srcBlob = await srcRes.blob()
+  const b64 = await blobToBase64(srcBlob)
+
+  const body = {
+    contents: [{
+      role: 'user',
+      parts: [
+        { inlineData: { mimeType: srcBlob.type || 'image/png', data: b64 } },
+        { text: GEMINI_PROMPT },
+      ],
+    }],
+    generationConfig: {
+      responseModalities: ['IMAGE', 'TEXT'],
+      imageConfig: { /*aspectRatio: 'Auto',*/ imageSize: '1K' },
+    },
+    tools: [{ googleSearch: {} }],
+  }
+
+  const res = await fetch(`${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`
+    try {
+      const j = await res.json()
+      detail = j?.error?.message || j?.error || detail
+    } catch { /* ignore */ }
+    throw new Error(`Gemini API 失敗：${detail}`)
+  }
+  const payload = await res.json()
+  const img = extractFirstImagePart(payload)
+  if (!img) throw new Error('Gemini 回應未包含圖片')
+  return { cleanedBlob: base64ToBlob(img.data, img.mimeType) }
 }
 
 function autoScaleFromDoors(lines) {
@@ -61,6 +150,7 @@ export default function AIWallsModal({ open, onClose }) {
   const floor = floors.find((f) => f.id === activeFloorId)
   const setFloorScale = useFloorStore((s) => s.setFloorScale)
   const setWalls = useWallStore((s) => s.setWalls)
+  const setGeminiPreview = useAIPreviewStore((s) => s.setGeminiPreview)
 
   // step: api-key | running | done | error
   const [step, setStep] = useState('api-key')
@@ -92,15 +182,14 @@ export default function AIWallsModal({ open, onClose }) {
     setError(null)
     setStep('running')
     try {
-      setProgressMsg('取得來源圖片…')
-      const blob = await fetchSourceImage(floor, apiKey)
+      setProgressMsg('Gemini 清理底圖中…')
+      const { cleanedBlob } = await fetchCleanedImageFromGemini(floor, apiKey.trim())
 
-      setProgressMsg('上傳並向量化…')
+      setProgressMsg('Python向量化…')
       const fd = new FormData()
-      fd.append('file', blob, 'floorplan.png')
-      const res = await fetch(API_URL, {
+      fd.append('file', cleanedBlob, 'floorplan.png')
+      const res = await fetch(VECTORIZE_API_URL, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}` },
         body: fd,
       })
       if (!res.ok) {
@@ -117,11 +206,26 @@ export default function AIWallsModal({ open, onClose }) {
       }
 
       setProgressMsg('轉換並寫入樓層…')
-      const { walls, stats } = floorplanFromLines(data.lines)
-      const scaleInfo = autoScaleFromDoors(data.lines)
+      // Gemini may return the cleaned image at a different resolution than the
+      // original floor image (e.g. 685×511 → 1200×895). The vectorize API's
+      // coordinates are in the cleaned image's pixel space, so remap them back
+      // to the original image's pixel space before building walls.
+      const sx = floor.imageWidth  / data.image_size.width
+      const sy = floor.imageHeight / data.image_size.height
+      const remappedLines = data.lines.map((l) => ({
+        type: l.type,
+        x1: l.x1 * sx, y1: l.y1 * sy,
+        x2: l.x2 * sx, y2: l.y2 * sy,
+      }))
+      const { walls, stats } = floorplanFromLines(remappedLines)
+      const scaleInfo = autoScaleFromDoors(remappedLines)
 
       setWalls(floor.id, walls)
       if (scaleInfo) setFloorScale(floor.id, scaleInfo.pxPerM)
+
+      // Persist Gemini cleaned image (what the vectorizer saw) outside the
+      // modal so the user can toggle it on/off from the canvas after closing.
+      setGeminiPreview(URL.createObjectURL(cleanedBlob))
 
       setResult({
         lines: data.lines,
@@ -137,7 +241,7 @@ export default function AIWallsModal({ open, onClose }) {
       setError(e?.message || String(e))
       setStep('error')
     }
-  }, [floor, apiKey, setWalls, setFloorScale])
+  }, [floor, apiKey, setWalls, setFloorScale, setGeminiPreview])
 
   if (!open) return null
 
@@ -163,13 +267,13 @@ export default function AIWallsModal({ open, onClose }) {
         {step === 'api-key' && floor?.imageUrl && (
           <>
             <div className="ai-walls-modal__row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
-              <label style={{ fontSize: 13, color: 'inherit' }}>API key</label>
+              <label style={{ fontSize: 13, color: 'inherit' }}>Gemini API key</label>
               <input
                 type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') run() }}
-                placeholder="輸入暫時性的 API key"
+                placeholder="貼上 Gemini API key"
                 autoFocus
                 style={{
                   background: '#0f0f12', border: '1px solid #2a2a30',

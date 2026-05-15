@@ -1,0 +1,43 @@
+@use '@/styles/variables' as *
+
+.gemini-preview-btn
+  position: absolute
+  bottom: 12px
+  left: 50%
+  transform: translateX(-50%)
+  z-index: 60
+  background: rgba(15, 23, 42, 0.85)
+  border: 1px solid rgba(255, 255, 255, 0.18)
+  color: $text-primary
+  padding: 6px 14px
+  border-radius: 6px
+  font-size: 12px
+  cursor: pointer
+  backdrop-filter: blur(6px)
+  user-select: none
+  pointer-events: auto
+  &:hover
+    background: rgba(30, 41, 59, 0.95)
+  &--active
+    border-color: #3a86ff
+    color: #cfe1ff
+
+.gemini-preview-popover
+  position: absolute
+  inset: 0
+  z-index: 200
+  display: flex
+  align-items: center
+  justify-content: center
+  background: rgba(0, 0, 0, 0.55)
+  backdrop-filter: blur(2px)
+  pointer-events: auto
+
+  &__img
+    max-width: 90%
+    max-height: 90%
+    object-fit: contain
+    border: 1px solid rgba(255, 255, 255, 0.2)
+    border-radius: 6px
+    background: #000
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5)

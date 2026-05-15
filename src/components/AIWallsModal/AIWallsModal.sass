@@ -80,10 +80,28 @@
     max-height: 280px
     object-fit: contain
 
+  &__previews
+    display: flex
+    gap: 10px
+    justify-content: center
+
+  &__preview-item
+    flex: 1
+    min-width: 0
+    display: flex
+    flex-direction: column
+    align-items: center
+    gap: 4px
+
+  &__preview-label
+    font-size: 12px
+    color: $text-secondary
+
   &__actions
     display: flex
     gap: 8px
     justify-content: flex-end
+    align-items: center
     border-top: 1px solid $border-color
     padding-top: 10px
 
@@ -108,3 +126,5 @@
         background: #2c6fd9
     &--danger
       color: #ff6b6b
+    &--center
+      margin: 0 auto
