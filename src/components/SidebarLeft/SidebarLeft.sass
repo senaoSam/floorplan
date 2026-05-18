@@ -9,6 +9,64 @@
   flex-direction: column
   flex-shrink: 0
   overflow-y: auto
+  transition: width 0.18s ease
+
+  // Collapsed mode: narrow strip showing only the expand button + floor chips
+  &--collapsed
+    width: 36px
+    overflow: visible
+    align-items: center
+    padding-top: 6px
+    gap: 6px
+
+  &__collapse-btn
+    width: 26px
+    height: 26px
+    border: none
+    border-radius: 4px
+    background: transparent
+    color: $text-secondary
+    cursor: pointer
+    font-size: 18px
+    line-height: 1
+    display: flex
+    align-items: center
+    justify-content: center
+    flex-shrink: 0
+
+    &:hover
+      background: rgba(255, 255, 255, 0.08)
+      color: $text-primary
+
+  &__floor-list--collapsed
+    padding: 4px 0
+    display: flex
+    flex-direction: column
+    gap: 4px
+    width: 100%
+    align-items: center
+
+  &__floor-chip
+    width: 28px
+    height: 28px
+    display: flex
+    align-items: center
+    justify-content: center
+    border-radius: 6px
+    font-size: 11px
+    font-weight: 600
+    color: $text-secondary
+    cursor: pointer
+    user-select: none
+    transition: background 0.12s, color 0.12s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.08)
+      color: $text-primary
+
+    &--active
+      background: rgba($accent, 0.18)
+      color: $accent
 
   &__section
     padding: 8px 0

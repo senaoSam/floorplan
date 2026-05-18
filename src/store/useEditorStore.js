@@ -39,6 +39,7 @@ export const useEditorStore = create((set, get) => ({
   regulatoryDomain: 'TW',
   autoChannelOnPlace: true,
   panelCollapsed: false,
+  sidebarCollapsed: false,
   showFloorImage: true,
   showScopes: true,
   showFloorHoles: true,
@@ -98,6 +99,7 @@ export const useEditorStore = create((set, get) => ({
   setRegulatoryDomain: (id) => set({ regulatoryDomain: id }),
   toggleAutoChannelOnPlace: () => set((s) => ({ autoChannelOnPlace: !s.autoChannelOnPlace })),
   togglePanelCollapsed: () => set((s) => ({ panelCollapsed: !s.panelCollapsed })),
+  toggleSidebarCollapsed: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   toggleLayer: (key) => set((s) => ({ [key]: !s[key] })),
 
   setAlignRefFloors: (ids) => set({ alignRefFloors: ids }),

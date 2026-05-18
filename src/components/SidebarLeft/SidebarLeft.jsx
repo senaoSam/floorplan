@@ -54,6 +54,9 @@ function SidebarLeft() {
   const editorMode = useEditorStore((s) => s.editorMode)
   const isAlignMode = editorMode === EDITOR_MODE.ALIGN_FLOOR
 
+  const sidebarCollapsed     = useEditorStore((s) => s.sidebarCollapsed)
+  const toggleSidebarCollapsed = useEditorStore((s) => s.toggleSidebarCollapsed)
+
   const requestSetActive = (id) => {
     if (id === activeFloorId) return
     if (isAlignMode) {
@@ -187,6 +190,35 @@ function SidebarLeft() {
 
   const handleDragEnd = () => { setDragIndex(null); setDropIndex(null) }
 
+  if (sidebarCollapsed) {
+    return (
+      <aside className="sidebar-left sidebar-left--collapsed">
+        <button
+          className="sidebar-left__collapse-btn"
+          title="展開樓層面板"
+          onClick={toggleSidebarCollapsed}
+        >
+          ›
+        </button>
+        <ul className="sidebar-left__floor-list sidebar-left__floor-list--collapsed">
+          {floors.map((floor) => {
+            const isActive = activeFloorId === floor.id
+            return (
+              <li
+                key={floor.id}
+                className={`sidebar-left__floor-chip${isActive ? ' sidebar-left__floor-chip--active' : ''}`}
+                title={floor.name}
+                onClick={() => requestSetActive(floor.id)}
+              >
+                {floor.name}
+              </li>
+            )
+          })}
+        </ul>
+      </aside>
+    )
+  }
+
   return (
     <aside className="sidebar-left">
       <section className="sidebar-left__section">
@@ -199,6 +231,13 @@ function SidebarLeft() {
             disabled={isLoading}
           >
             ＋
+          </button>
+          <button
+            className="sidebar-left__icon-btn"
+            title="收合樓層面板"
+            onClick={toggleSidebarCollapsed}
+          >
+            ‹
           </button>
           <input
             ref={fileInputRef}
