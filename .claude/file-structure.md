@@ -311,6 +311,17 @@ src/features/
                               #   route 含：switchId, points[3]（L-shape）, cableM, zDropM, routeStatus
                               #   公式：(|Δx|+|Δy|)/scale × (1+slackDirect=1.20) + Z_drop(AP)
                               #   Z_drop = floor.floorHeight - ap.z（不加 slack）
+    geometry.js               # 純幾何 helper（cable graph 用）
+                              #   - cumulativeLengths(points) — 累積弧長
+                              #   - footOnSegment(p, a, b)     — 線段 perpendicular foot (clamp)
+                              #   - closestPointOnPolyline()    — 走每段、回傳 chainage + foot
+                              #   - segmentIntersection()       — proper 交點（含 touching flag）
+    buildGraph.js             # cable-spec §5 Steps 1, 3, 4, 5, 7（per-floor 圖）
+                              #   buildFloorGraph({ floor, aps, switches, trays })
+                              #   → { nodes, adj, endpointNodeIds{aps,switches}, warnings }
+                              #   weight 一律 meters，沿 tray 用 chainage 差（非 euclidean）
+                              #   SLACK_TRAY = 0.10, SLACK_DIRECT = 0.20
+                              #   Step 2/6/10（riser）尚未做（12-3 系列）
 
   channel/                    # （頻道規劃相關 helper，視需要看內檔）
   floor/                      # （樓層管理相關 helper）
