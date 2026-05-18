@@ -32,6 +32,11 @@ export function getSwitchKindColor(kind) {
 // Cable tray defaults
 export const DEFAULT_TRAY_MAGNET_PX = 100
 
+// Riser defaults — riser is a GLOBAL object (cable-spec §2):
+// shape: { id, name, x, y, floorIds: [floorId,...], magnetDistance }
+// xy is shared across every floor the riser passes through.
+export const DEFAULT_RISER_MAGNET_PX = 100
+
 export const useCableStore = create((set, get) => ({
   // { [floorId]: Switch[] }
   switchesByFloor: {},
@@ -41,6 +46,11 @@ export const useCableStore = create((set, get) => ({
   // Tray shape: { id, points: [{x,y}, ...], magnetDistance }
   // points are canvas coords (image px); magnetDistance is canvas px.
   traysByFloor: {},
+
+  // Global risers — one entry per physical riser, regardless of how many
+  // floors it spans. cable-spec §2: { id, name, x, y, floorIds, magnetDistance }
+  risers: [],
+  globalRiserCounter: 0,
 
   getSwitches: (floorId) => get().switchesByFloor[floorId] ?? [],
 
@@ -143,6 +153,42 @@ export const useCableStore = create((set, get) => ({
     set((state) => {
       const { [floorId]: _s, ...restS } = state.switchesByFloor
       const { [floorId]: _t, ...restT } = state.traysByFloor
-      return { switchesByFloor: restS, traysByFloor: restT }
+      // Risers are global — only drop this floor from their floorIds.
+      // Risers that end up with zero floors are kept (user can re-add floors)
+      // since removing them silently would surprise users mid-edit.
+      const risers = state.risers.map((r) => ({
+        ...r,
+        floorIds: (r.floorIds ?? []).filter((id) => id !== floorId),
+      }))
+      return { switchesByFloor: restS, traysByFloor: restT, risers }
     }),
+
+  // ── Riser actions ─────────────────────────────────────────────────────
+
+  nextRiserName: () => {
+    const next = get().globalRiserCounter + 1
+    return `RISER-${String(next).padStart(2, '0')}`
+  },
+
+  addRiser: (riser) =>
+    set((state) => ({
+      globalRiserCounter: state.globalRiserCounter + 1,
+      risers: [...state.risers, riser],
+    })),
+
+  updateRiser: (riserId, patch) =>
+    set((state) => ({
+      risers: state.risers.map((r) => (r.id === riserId ? { ...r, ...patch } : r)),
+    })),
+
+  removeRiser: (riserId) =>
+    set((state) => ({ risers: state.risers.filter((r) => r.id !== riserId) })),
+
+  removeRisers: (riserIds) =>
+    set((state) => {
+      const idSet = new Set(riserIds)
+      return { risers: state.risers.filter((r) => !idSet.has(r.id)) }
+    }),
+
+  setRisers: (risers) => set({ risers }),
 }))

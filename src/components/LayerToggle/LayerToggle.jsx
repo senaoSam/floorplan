@@ -11,6 +11,7 @@ const LAYERS = [
   { key: 'showAPInfo',     label: 'AP 資訊' },
   { key: 'showSwitches',   label: 'Switch' },
   { key: 'showCableTrays', label: '線槽' },
+  { key: 'showRisers',     label: 'Riser' },
   { key: 'showCables',     label: '線纜' },
 ]
 

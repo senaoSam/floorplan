@@ -6,7 +6,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
-import { useCableStore, DEFAULT_SWITCH, DEFAULT_TRAY_MAGNET_PX } from '@/store/useCableStore'
+import { useCableStore, DEFAULT_SWITCH, DEFAULT_TRAY_MAGNET_PX, DEFAULT_RISER_MAGNET_PX } from '@/store/useCableStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { MATERIALS, MATERIAL_LIST, OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
@@ -21,6 +21,7 @@ import WallLayer from './layers/WallLayer'
 import { getFloorColor } from '@/utils/floorColor'
 import APLayer from './layers/APLayer'
 import SwitchLayer from './layers/SwitchLayer'
+import RiserLayer from './layers/RiserLayer'
 import CableTrayLayer from './layers/CableTrayLayer'
 import CableLayer from './layers/CableLayer'
 import ScopeLayer from './layers/ScopeLayer'
@@ -109,7 +110,7 @@ function Editor2D() {
 
   const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected, togglePanelCollapsed,
           selectedItems, setSelectedItems, toggleSelectedItem,
-          showFloorImage, showScopes, showFloorHoles, showWalls, showAPs, showSwitches, showCables, showCableTrays,
+          showFloorImage, showScopes, showFloorHoles, showWalls, showAPs, showSwitches, showCables, showCableTrays, showRisers,
           autoChannelOnPlace, regulatoryDomain,
           alignRefFloors, alignRefOpacity } = useEditorStore()
   const isSelectMode    = editorMode === EDITOR_MODE.SELECT
@@ -121,6 +122,7 @@ function Editor2D() {
   const isAPMode        = editorMode === EDITOR_MODE.PLACE_AP
   const isSwitchMode    = editorMode === EDITOR_MODE.PLACE_SWITCH
   const isTrayMode      = editorMode === EDITOR_MODE.DRAW_CABLE_TRAY
+  const isRiserMode     = editorMode === EDITOR_MODE.PLACE_RISER
   const isScopeMode     = editorMode === EDITOR_MODE.DRAW_SCOPE
   const isFloorHoleMode = editorMode === EDITOR_MODE.DRAW_FLOOR_HOLE
   const isCropMode      = editorMode === EDITOR_MODE.CROP_IMAGE
@@ -160,6 +162,8 @@ function Editor2D() {
   const addSwitch     = useCableStore((s) => s.addSwitch)
   const nextSwitchName = useCableStore((s) => s.nextSwitchName)
   const addTray       = useCableStore((s) => s.addTray)
+  const addRiser      = useCableStore((s) => s.addRiser)
+  const nextRiserName = useCableStore((s) => s.nextRiserName)
 
   const addScope = useScopeStore((s) => s.addScope)
 
@@ -303,6 +307,8 @@ function Editor2D() {
   const removeSwitches  = useCableStore((s) => s.removeSwitches)
   const removeTray      = useCableStore((s) => s.removeTray)
   const removeTrays     = useCableStore((s) => s.removeTrays)
+  const removeRiser     = useCableStore((s) => s.removeRiser)
+  const removeRisers    = useCableStore((s) => s.removeRisers)
 
   // Commit current tray draft if it has ≥ 2 vertices, else discard. Defined
   // here (above the keyboard effect) because the Esc handler references it.
@@ -340,6 +346,7 @@ function Editor2D() {
           case 'floor_hole': return (useFloorHoleStore.getState().floorHolesByFloor[fid] ?? []).some((h) => h.id === sid)
           case 'switch':     return (useCableStore.getState().switchesByFloor[fid] ?? []).some((sw) => sw.id === sid)
           case 'cable_tray': return (useCableStore.getState().traysByFloor[fid] ?? []).some((t) => t.id === sid)
+          case 'cable_riser': return useCableStore.getState().risers.some((r) => r.id === sid && (r.floorIds ?? []).includes(fid))
           case 'floor_image':return true
           case 'floor_align':return true
           default:           return false
@@ -407,12 +414,14 @@ function Editor2D() {
           const holeIds  = items.filter((it) => it.type === 'floor_hole').map((it) => it.id)
           const swIds    = items.filter((it) => it.type === 'switch').map((it) => it.id)
           const trayIds  = items.filter((it) => it.type === 'cable_tray').map((it) => it.id)
+          const riserIds = items.filter((it) => it.type === 'cable_riser').map((it) => it.id)
           if (wallIds.length)  removeWalls(activeFloorId, wallIds)
           if (apIds.length)    removeAPs(activeFloorId, apIds)
           if (scopeIds.length) removeScopes(activeFloorId, scopeIds)
           if (holeIds.length)  removeFloorHoles(activeFloorId, holeIds)
           if (swIds.length)    removeSwitches(activeFloorId, swIds)
           if (trayIds.length)  removeTrays(activeFloorId, trayIds)
+          if (riserIds.length) removeRisers(riserIds)
           clearSelected()
           return
         }
@@ -440,6 +449,10 @@ function Editor2D() {
         }
         if (selectedId && selectedType === 'cable_tray') {
           removeTray(activeFloorId, selectedId)
+          clearSelected()
+        }
+        if (selectedId && selectedType === 'cable_riser') {
+          removeRiser(selectedId)
           clearSelected()
         }
       }
@@ -479,7 +492,7 @@ function Editor2D() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, selectedType, activeFloorId, isWallMode, isDoorWindowMode, isAlignMode, isTrayMode, trayDraftPoints, finishTrayDraft, removeWall, removeWalls, updateWall, removeAP, removeAPs, removeScope, removeScopes, removeFloorHole, removeFloorHoles, removeSwitch, removeSwitches, removeTray, removeTrays, clearSelected])
+  }, [selectedId, selectedType, activeFloorId, isWallMode, isDoorWindowMode, isAlignMode, isTrayMode, trayDraftPoints, finishTrayDraft, removeWall, removeWalls, updateWall, removeAP, removeAPs, removeScope, removeScopes, removeFloorHole, removeFloorHoles, removeSwitch, removeSwitches, removeTray, removeTrays, removeRiser, removeRisers, clearSelected])
 
   // ── 切換模式時清除繪製狀態 ────────────────────────────
   useEffect(() => {
@@ -643,8 +656,19 @@ function Editor2D() {
       }
     }
 
+    // Risers visible on this floor (riser xy is global; floorIds gates visibility)
+    if (showRisers) {
+      const risers = useCableStore.getState().risers
+      for (const r of risers) {
+        if (!(r.floorIds ?? []).includes(activeFloorId)) continue
+        if (r.x >= minX && r.x <= maxX && r.y >= minY && r.y <= maxY) {
+          hits.push({ id: r.id, type: 'cable_riser' })
+        }
+      }
+    }
+
     return hits
-  }, [activeFloorId, showWalls, showAPs, showScopes, showFloorHoles, showSwitches, showCableTrays])
+  }, [activeFloorId, showWalls, showAPs, showScopes, showFloorHoles, showSwitches, showCableTrays, showRisers])
 
   // ── 中鍵：防止預設行為（開新分頁等）/ 左鍵：框選起點 ────
   const handleMouseDown = useCallback((e) => {
@@ -925,6 +949,22 @@ function Editor2D() {
       return
     }
 
+    // Riser 放置 — new riser starts attached to the active floor only.
+    // The user expands floorIds via the right panel after placement.
+    if (isRiserMode) {
+      const id = generateId('riser')
+      addRiser({
+        id,
+        name: nextRiserName(),
+        x: pos.x, y: pos.y,
+        floorIds: [activeFloorId],
+        magnetDistance: DEFAULT_RISER_MAGNET_PX,
+      })
+      // Auto-select so the panel opens for the user to add more floors.
+      setSelected(id, 'cable_riser')
+      return
+    }
+
     // 範圍區域
     if (isScopeMode) {
       // 吸附第一點：距離 < SNAP_PX / scale → 閉合多邊形
@@ -1035,6 +1075,7 @@ function Editor2D() {
     isWallMode, wallDrawStart, activeFloorId, snapToWallEndpoint,
     isAPMode, nextAPName, autoChannelOnPlace, regulatoryDomain,
     isSwitchMode, addSwitch, nextSwitchName,
+    isRiserMode, addRiser, nextRiserName,
     isTrayMode, snapToTrayVertex,
     isScopeMode, scopePoints, viewport.scale, addScope,
     isFloorHoleMode, floorHolePoints, addFloorHole,
@@ -1129,6 +1170,7 @@ function Editor2D() {
     isAPMode        ? cursorAP    :
     isSwitchMode                       ? 'crosshair' :
     isTrayMode                         ? 'crosshair' :
+    isRiserMode                        ? 'crosshair' :
     isDoorWindowMode                   ? 'crosshair' :
     isMarqueeMode                      ? 'crosshair' :
     isCropMode                         ? 'crosshair' :
@@ -1168,6 +1210,7 @@ function Editor2D() {
     [EDITOR_MODE.PLACE_AP]:        { label: '放置 AP 模式', hint: '左鍵點擊放置 AP' },
     [EDITOR_MODE.PLACE_SWITCH]:    { label: '放置 Switch 模式', hint: '左鍵點擊放置 Switch / IDF / MDF / Router；右側面板可調類型與規格' },
     [EDITOR_MODE.DRAW_CABLE_TRAY]: { label: '繪製線槽模式', hint: '左鍵點擊新增頂點；右鍵或 Esc 完成（≥ 2 點才會建立）；磁吸範圍可在右側面板調整' },
+    [EDITOR_MODE.PLACE_RISER]:    { label: '放置 Riser 模式', hint: '左鍵點擊放置 Riser；放完用右側面板加入跨樓層' },
     [EDITOR_MODE.DRAW_SCOPE]:      { label: '範圍模式',     hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.DRAW_FLOOR_HOLE]: { label: '中庭模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.CROP_IMAGE]:      { label: '裁切模式', hint: '左鍵點擊兩點定義裁切區域；右鍵或 Esc 取消' },
@@ -1399,6 +1442,26 @@ function Editor2D() {
                 onDelete={(id) => { removeSwitch(activeFloorId, id); clearSelected() }}
                 setHoverCursor={setHoverCursor}
                 dimmed={isDoorWindowMode}
+              />
+            )}
+
+            {activeFloorId && showRisers && (
+              <RiserLayer
+                floorId={activeFloorId}
+                selectedRiserId={selectedType === 'cable_riser' ? selectedId : null}
+                selectedItems={selectedItems}
+                onRiserClick={(id, e) => {
+                  if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'cable_riser'); return }
+                  setSelected(id, 'cable_riser')
+                }}
+                onRiserDragMove={() => { /* riser xy is global — defer overlay until 12-3b graph */ }}
+                onRiserDragEnd={() => {}}
+                onRightMouseDown={handleRightMouseDown}
+                viewportScale={viewport.scale}
+                onDelete={(id) => { removeRiser(id); clearSelected() }}
+                setHoverCursor={setHoverCursor}
+                dimmed={isDoorWindowMode}
+                isPlacingMode={isRiserMode}
               />
             )}
 

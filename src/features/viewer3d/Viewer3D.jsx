@@ -9,6 +9,7 @@ import APLayer3D from './APLayer3D'
 import ScopeLayer3D from './ScopeLayer3D'
 import HeatmapPlane3D from './HeatmapPlane3D'
 import FloorHoleVolume3D from './FloorHoleVolume3D'
+import RiserLayer3D from './RiserLayer3D'
 import { computeFloorElevations } from './floorStacking'
 import './Viewer3D.sass'
 
@@ -407,6 +408,10 @@ function Viewer3D() {
           are mounted (e.g. single-floor view still shows the whole column when
           its home floor is active). */}
       <FloorHoleVolume3D activeFloorId={activeFloorId} />
+
+      {/* 12-3a: Risers are global vertical shafts spanning their floorIds.
+          Rendered at scene root for the same reason as FloorHoleVolume3D. */}
+      <RiserLayer3D activeFloorId={activeFloorId} />
 
       {/* Ground grid anchored to the active floor size, placed just under the
           active floor's elevation so orientation is clear even when viewing

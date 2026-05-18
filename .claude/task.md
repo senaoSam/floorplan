@@ -13,7 +13,7 @@
 | ---- | ---- | ------------------------------------------------------------------------------------------ |
 | 11-1 | ✅   | Switch / IDF / MDF 放置與屬性面板（port 數、PoE budget、kind）                              |
 | 11-2 | ✅   | AP↔Switch 預設 Manhattan 連線（+20% slack + Z_drop，same-floor 限制；無 switch → unroutable）|
-| 11-3 | ⬜   | PoE 預算 + port 容量 over-capacity warning（不進 routing）                                  |
+| 11-3 | ✅   | PoE 預算 + port 容量 over-capacity warning（不進 routing）                                  |
 
 **11-1 細節**
 - 新增 `useCableStore` 的 `switchesByFloor`（或拆 `useSwitchStore`）
@@ -42,8 +42,8 @@
 | 12-1  | ✅   | Cable Tray polyline 繪製 + magnet 半徑視覺化                                                                       |
 | 12-2a | ✅   | Graph builder Steps 1-7（endpoint snap 只挑最近 tray + tray intersection + chainage sort）                          |
 | 12-2b | ✅   | Stage 3 routing（Dijkstra + connected component + same-floor fallback + unroutable 標記）                          |
-| 12-2c | ⬜   | 線長計算（chainage-based）+ CableLayer 渲染（tray / fallback / unroutable 三態）                                    |
-| 12-3a | ⬜   | Cable Riser 點 + magnet（跨樓層共用 xy + floorIds）                                                                |
+| 12-2c | ✅   | 線長計算（chainage-based）+ CableLayer 渲染（tray / fallback / unroutable 三態）                                    |
+| 12-3a | ✅   | Cable Riser 點 + magnet（跨樓層共用 xy + floorIds）                                                                |
 | 12-3b | ⬜   | Riser graph 整合（Steps 6/9/10：snap 多 tray + 相鄰樓層垂直邊）                                                     |
 | 12-4  | ⏸️   | **延後**：Hybrid routing（走一段 tray 再 Manhattan 收尾）。理由：需要 multi-source Dijkstra + virtual Manhattan edge，圖會炸；MVP 嚴格版 fallback 全 Manhattan |
 

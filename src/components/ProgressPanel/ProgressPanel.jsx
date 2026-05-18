@@ -215,7 +215,7 @@ const PHASES = [
         items: [
           { id: '11-1', done: true, text: 'Switch / IDF / MDF 放置與屬性面板（port 數、PoE budget、kind）' },
           { id: '11-2', done: true, text: 'AP↔Switch 預設 Manhattan 連線（+20% slack + Z_drop，same floor 限制）' },
-          { id: '11-3', done: false, text: 'PoE 預算 + port 容量 over-capacity warning（不進 routing）' },
+          { id: '11-3', done: true, text: 'PoE 預算 + port 容量 over-capacity warning（不進 routing）' },
         ],
       },
       {
@@ -224,8 +224,8 @@ const PHASES = [
           { id: '12-1', done: true, text: 'Cable Tray polyline 繪製 + magnet 半徑視覺化' },
           { id: '12-2a', done: true, text: 'Graph builder Steps 1-7（endpoint snap 只挑最近 tray + tray intersection + chainage sort）' },
           { id: '12-2b', done: true, text: 'Stage 3 routing（Dijkstra + connected component + same-floor fallback + unroutable 標記）' },
-          { id: '12-2c', done: false, text: '線長計算（chainage-based）+ CableLayer 渲染（tray / fallback / unroutable 三態）' },
-          { id: '12-3a', done: false, text: 'Cable Riser 點 + magnet（跨樓層共用 xy + floorIds）' },
+          { id: '12-2c', done: true, text: '線長計算（chainage-based）+ CableLayer 渲染（tray / fallback / unroutable 三態）' },
+          { id: '12-3a', done: true, text: 'Cable Riser 點 + magnet（跨樓層共用 xy + floorIds）' },
           { id: '12-3b', done: false, text: 'Riser graph 整合（Steps 6/9/10：snap 多 tray + 相鄰樓層垂直邊）' },
           { id: '12-4', done: false, text: '⏸️ 延後：Hybrid routing（走一段 tray 再 Manhattan 收尾）' },
         ],

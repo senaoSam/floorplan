@@ -89,11 +89,14 @@ src/store/
                               #     shape: { id, name, x, y, kind, mountHeight, model, portCount, poeBudget }
                               #   - traysByFloor {} — Cable Tray polylines
                               #     shape: { id, points: [{x,y},...], magnetDistance }
-                              #   - SWITCH_KINDS / DEFAULT_SWITCH / DEFAULT_TRAY_MAGNET_PX / getSwitchKindColor()
+                              #   - risers [] — global cable risers（跨樓層共用 xy）
+                              #     shape: { id, name, x, y, floorIds: [...], magnetDistance }
+                              #   - SWITCH_KINDS / DEFAULT_SWITCH / DEFAULT_TRAY_MAGNET_PX / DEFAULT_RISER_MAGNET_PX / getSwitchKindColor()
                               #   - Switch: addSwitch / updateSwitch / removeSwitch(es) / setSwitches / nextSwitchName(kind)
                               #   - Tray:   addTray / updateTray / removeTray(s) / setTrays
-                              #   - clearFloor() 同時清掉本樓層的 switches + trays
-                              #   - 未來：risers（跨樓層）、slack 參數（cable-spec §2）
+                              #   - Riser:  addRiser / updateRiser / removeRiser(s) / setRisers / nextRiserName()
+                              #   - clearFloor() 同時清掉本樓層的 switches + trays，並從每個 riser 的 floorIds 移除該樓層
+                              #   - 未來：slack 參數（cable-spec §2）
 
   useHeatmapStore.js          # Heatmap 開關與計算參數
                               #   - enabled, reflections, diffraction, gridStepM, blur, showContours
@@ -193,6 +196,7 @@ src/components/
     SwitchPanel.jsx           #   Switch 屬性：kind（switch/idf/mdf/router）、型號、port 數、PoE budget、安裝高度、刪除
                               #     + Port 用量 / PoE 用量 warning + 已連接 AP 清單（依 computeRoutes 結果）
     CableTrayPanel.jsx        #   Cable Tray 屬性：節點數、線長（公尺）、magnetDistance、刪除
+    RiserPanel.jsx            #   Cable Riser 屬性：跨樓層 checkbox（依 elevation 排序）、magnetDistance、xy 顯示、刪除
     ScopePanel.jsx            #   範圍屬性：in/out 切換、頂點、刪除
     FloorHolePanel.jsx        #   中庭屬性：說明、頂點、刪除
     FloorImagePanel.jsx       #   平面圖屬性：旋轉、透明度、裁切
@@ -235,6 +239,8 @@ src/features/
       APLayer.jsx             # AP 圖層：同心圓(頻段色碼 2.4G=橘 / 5G=青 / 6G=紫)、拖曳、標籤
       SwitchLayer.jsx         # Switch/IDF/MDF/Router 圖層：方形 chassis + kind 色碼、拖曳、命名標籤
                               #   依 cable-spec §9 stacking 順序，畫在 APLayer 之下、CableTrayLayer 之上
+      RiserLayer.jsx          # Cable Riser 圖層：紫色方形 + 上下箭頭剖面 icon、circular magnet halo
+                              #   只在 floorIds 包含 activeFloor 時顯示；xy 跨樓層共用（拖曳同步）
       CableTrayLayer.jsx      # Cable Tray polyline + 磁吸範圍視覺化（半透明膠囊狀填色）
                               #   編輯模式或 hover/select 才顯示 magnet halo
                               #   含 DraftTray 子元件：繪製中即時 ghost line 與 magnet 預覽
@@ -260,6 +266,8 @@ src/features/
     APLayer3D.jsx             # 3D AP marker（柱體 + 標籤）
     ScopeLayer3D.jsx          # 3D 範圍多邊形
     FloorHoleVolume3D.jsx     # 3D 中庭挖洞
+    RiserLayer3D.jsx          # 3D Cable Riser 垂直管：從最底樓 elevation 到最頂樓 ceiling 的紫色 cylinder
+                              #   掛在 scene root（跟 FloorHoleVolume3D 同位階）
     OpeningDetail3D.jsx       # 門窗 3D 細節
     HeatmapPlane3D.jsx        # active floor heatmap canvas 貼到 3D 地板上方
     floorStacking.js          # 多樓層堆疊位置計算

@@ -15,6 +15,7 @@ export const EDITOR_MODE = {
   ALIGN_FLOOR: 'align_floor',
   PLACE_SWITCH: 'place_switch',
   DRAW_CABLE_TRAY: 'draw_cable_tray',
+  PLACE_RISER: 'place_riser',
 }
 
 // 視角模式
@@ -34,7 +35,7 @@ export const useEditorStore = create((set, get) => ({
   viewMode: VIEW_MODE.TWO_D,
   selectedId: null,
   // [SELECTABLE-TYPE] 新增物件類型時在此 JSDoc 加字串
-  selectedType: null, // 'wall' | 'ap' | 'scope' | 'floor_hole' | 'floor_image' | 'floor_align' | 'switch' | 'cable_tray' | null
+  selectedType: null, // 'wall' | 'ap' | 'scope' | 'floor_hole' | 'floor_image' | 'floor_align' | 'switch' | 'cable_tray' | 'cable_riser' | null
   // 批次選取 — [{ id, type }]
   selectedItems: [],
   regulatoryDomain: 'TW',
@@ -50,6 +51,7 @@ export const useEditorStore = create((set, get) => ({
   showSwitches: true,
   showCables: true,
   showCableTrays: true,
+  showRisers: true,
 
   // Align-mode reference overlay. `alignRefFloors` is a Set of floor IDs that
   // should render as semi-transparent reference layers while in ALIGN_FLOOR

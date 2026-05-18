@@ -34,14 +34,17 @@ function takeSnapshot(floorId) {
     floorHoles: structuredClone(useFloorHoleStore.getState().floorHolesByFloor[floorId] ?? []),
     switches:   structuredClone(useCableStore.getState().switchesByFloor[floorId] ?? []),
     trays:      structuredClone(useCableStore.getState().traysByFloor[floorId] ?? []),
-    // 未來：cables, cameras, risers ...
+    // Risers are global (one record spans multiple floors). Snapshot the full
+    // array on every per-floor snapshot so undo restores cross-floor edits.
+    risers:     structuredClone(useCableStore.getState().risers ?? []),
+    // 未來：cables, cameras ...
   }
 }
 
 // 【擴充點 B】新增 store 時，在此加入還原邏輯
 function restoreSnapshot(snapshot) {
   if (!snapshot) return
-  const { floorId, walls, aps, scopes, floorHoles, switches, trays } = snapshot
+  const { floorId, walls, aps, scopes, floorHoles, switches, trays, risers } = snapshot
   _restoring = true
   useWallStore.getState().setWalls(floorId, walls)
   useAPStore.getState().setAPs(floorId, aps)
@@ -53,7 +56,8 @@ function restoreSnapshot(snapshot) {
   }))
   useCableStore.getState().setSwitches(floorId, switches ?? [])
   useCableStore.getState().setTrays(floorId, trays ?? [])
-  // 未來：restoreSnapshot 加入 cables, risers, cameras ...
+  useCableStore.getState().setRisers(risers ?? [])
+  // 未來：restoreSnapshot 加入 cables, cameras ...
   _restoring = false
 }
 
@@ -146,6 +150,7 @@ function commitPending() {
     floorHoles: structuredClone(raw.floorHoles),
     switches: structuredClone(raw.switches),
     trays:    structuredClone(raw.trays),
+    risers:   structuredClone(raw.risers ?? []),
   })
 }
 
@@ -187,12 +192,19 @@ let _prevScopes = useScopeStore.getState().scopesByFloor
 let _prevHoles = useFloorHoleStore.getState().floorHolesByFloor
 let _prevSwitches = useCableStore.getState().switchesByFloor
 let _prevTrays    = useCableStore.getState().traysByFloor
+let _prevRisers   = useCableStore.getState().risers
 
 function onStoreChange(storeName, prevRef, currentRef) {
   if (_restoring) return
   const floorId = useFloorStore.getState().activeFloorId
   if (!floorId) return
-  if (prevRef[floorId] === currentRef[floorId]) return
+  // Per-floor stores: skip when this floor's slice didn't change.
+  // Global stores (risers): prevRef IS the array — skip if identical ref.
+  if (storeName === 'risers') {
+    if (prevRef === currentRef) return
+  } else if (prevRef[floorId] === currentRef[floorId]) {
+    return
+  }
 
   // P-3：只記錄「變化前」的 raw array reference，延到 idle 才 clone。
   // 連續變化時 _pendingRaw 已存在就直接忽略（保留最初那份 = 正確的 undo 目標）。
@@ -210,6 +222,8 @@ function onStoreChange(storeName, prevRef, currentRef) {
     floorHoles: storeName === 'holes'    ? (prevRef[floorId] ?? []) : (useFloorHoleStore.getState().floorHolesByFloor[floorId] ?? []),
     switches:   storeName === 'switches' ? (prevRef[floorId] ?? []) : (useCableStore.getState().switchesByFloor[floorId] ?? []),
     trays:      storeName === 'trays'    ? (prevRef[floorId] ?? []) : (useCableStore.getState().traysByFloor[floorId] ?? []),
+    // Risers are global — prevRef is the prev full array directly.
+    risers:     storeName === 'risers'   ? (prevRef ?? [])           : (useCableStore.getState().risers ?? []),
   }
 
   schedulePushRaw(raw)
@@ -257,5 +271,10 @@ useCableStore.subscribe((state) => {
   if (curT !== _prevTrays) {
     onStoreChange('trays', _prevTrays, curT)
     _prevTrays = curT
+  }
+  const curR = state.risers
+  if (curR !== _prevRisers) {
+    onStoreChange('risers', _prevRisers, curR)
+    _prevRisers = curR
   }
 })
