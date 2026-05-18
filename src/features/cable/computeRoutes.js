@@ -58,8 +58,8 @@ export function computeRoutes({ floor, aps, switches, trays = [] }) {
         if (bestSwitch && bestDist !== Infinity) {
           const nodePath = reconstructPath(prev, apNodeId, bestSwNode) ?? [apNodeId, bestSwNode]
           const points = nodePath.map((id) => {
-            const xy = g.nodes.get(id).xy
-            return { x: xy.x, y: xy.y }
+            const n = g.nodes.get(id)
+            return { x: n.xy.x, y: n.xy.y, kind: n.kind }
           })
           out.set(ap.id, {
             apId: ap.id,

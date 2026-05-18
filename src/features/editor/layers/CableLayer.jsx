@@ -47,30 +47,82 @@ function CableLayer({ floorId, viewportScale }) {
             : ap
           return <UnroutableBadge key={r.apId} ap={apLive} s={inverseScale} />
         }
-        const flat = r.points.flatMap((p) => [p.x, p.y])
-        const isTray = r.routeStatus === 'tray'
-        return (
-          <Group key={r.apId}>
-            <Line
-              points={flat}
-              stroke={isTray ? '#22d3ee' : '#9ca3af'}
-              strokeWidth={(isTray ? 1.6 : 1.2) * inverseScale}
-              dash={isTray ? null : [14 * inverseScale, 10 * inverseScale]}
-              opacity={isTray ? 0.95 : 0.7}
-              lineCap="round"
-              lineJoin="round"
-            />
-            {/* Corner dot for the L bend, makes intent obvious */}
-            {r.points.length === 3 && (
-              <Circle
-                x={r.points[1].x}
-                y={r.points[1].y}
-                radius={2 * inverseScale}
-                fill={isTray ? '#22d3ee' : '#9ca3af'}
-                opacity={0.85}
+        if (r.routeStatus === 'fallback-manhattan') {
+          const flat = r.points.flatMap((p) => [p.x, p.y])
+          return (
+            <Group key={r.apId}>
+              <Line
+                points={flat}
+                stroke="#9ca3af"
+                strokeWidth={1.2 * inverseScale}
+                dash={[14 * inverseScale, 10 * inverseScale]}
+                opacity={0.7}
+                lineCap="round"
+                lineJoin="round"
               />
-            )}
-          </Group>
+              {r.points.length === 3 && (
+                <Circle
+                  x={r.points[1].x}
+                  y={r.points[1].y}
+                  radius={2 * inverseScale}
+                  fill="#9ca3af"
+                  opacity={0.85}
+                />
+              )}
+            </Group>
+          )
+        }
+        // routeStatus === 'tray' — split into per-segment drop / tray legs so
+        // the short drop from endpoint to its tray foot reads as dashed
+        // (cable-spec §9), while the run along the tray stays solid cyan.
+        return <TrayRoute key={r.apId} route={r} s={inverseScale} />
+      })}
+    </Group>
+  )
+}
+
+// A graph-routed path: endpoint → endpoint-foot → tray nodes... → endpoint-foot → endpoint.
+// Segments touching an 'endpoint' node are drop legs (dashed); the rest run
+// along the tray (solid). Drop-foot nodes (where the leg meets the tray) and
+// tray vertex / cross nodes get a small dot so the topology is readable.
+function TrayRoute({ route, s }) {
+  const pts = route.points
+  if (!pts || pts.length < 2) return null
+  const tray  = '#22d3ee'
+  return (
+    <Group>
+      {pts.slice(0, -1).map((p, i) => {
+        const q = pts[i + 1]
+        const isDrop = p.kind === 'endpoint' || q.kind === 'endpoint'
+        return (
+          <Line
+            key={i}
+            points={[p.x, p.y, q.x, q.y]}
+            stroke={tray}
+            strokeWidth={(isDrop ? 1.4 : 1.6) * s}
+            dash={isDrop ? [6 * s, 4 * s] : null}
+            opacity={isDrop ? 0.85 : 0.95}
+            lineCap="round"
+            lineJoin="round"
+          />
+        )
+      })}
+      {pts.map((p, i) => {
+        // Skip the AP / Switch nodes themselves — those endpoints already have
+        // their own icons. Only mark intermediate tray geometry.
+        if (p.kind === 'endpoint') return null
+        const isFoot = p.kind === 'endpoint-foot'
+        return (
+          <Circle
+            key={`d${i}`}
+            x={p.x}
+            y={p.y}
+            radius={(isFoot ? 2.5 : 2) * s}
+            fill={tray}
+            stroke={isFoot ? '#0e7490' : null}
+            strokeWidth={isFoot ? 0.6 * s : 0}
+            opacity={0.9}
+          />
         )
       })}
     </Group>
