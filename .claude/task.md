@@ -115,3 +115,39 @@
 | fallback Manhattan    | `slackDirect = 0.20`             |
 
 AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
+
+---
+
+## Phase 8 — Cable Summary & QA
+
+> Cable 規劃工具的「結果頁」。12-3b 之後 routing 完整可用，但缺一個全局視圖
+> 把 routing 結果彙整成 BOM + 暴露 graph builder 已產出的 warnings 給使用者看。
+
+### Layer 13 — Cable Summary / Warnings
+
+| #     | 狀態 | Task                                                                              |
+| ----- | ---- | --------------------------------------------------------------------------------- |
+| 13-1  | ⬜   | CableSummaryPanel — 全建築 BOM（總線長、per-floor、per-routeStatus、unroutable 列表） |
+| 13-2  | ⬜   | Warnings 顯示 — buildGraph 已產生的 warnings（tray touching、共線重疊）顯示給使用者     |
+| 13-3  | ⬜   | DemoLoader cable 範例 — 既有 demo 加上 switch + tray + riser 種子資料                  |
+
+**13-1 細節**
+- 浮動 panel（類似 LayerToggle / HeatmapControl）放在畫布左下
+- 內容：
+  - 總線長（公尺）— 全建築總和
+  - Per-floor 列表：該樓層線長、AP 數
+  - Per-routeStatus 計數：via tray / fallback-manhattan / unroutable
+  - Unroutable AP 列表（顯示 AP 名 + 樓層；點擊可跳到該 AP）
+- 資料來源：computeRoutes 一次得到所有 route，前端聚合
+- 對應 spec §8 Stage 4 — Cost & Render
+
+**13-2 細節**
+- buildGraph / buildBuildingGraph 已有 warnings: string[]，但目前無處顯示
+- 把 warnings 顯示在 CableSummaryPanel（或獨立區塊）
+- 至少包含：tray-tray endpoint touching、共線重疊
+- 視覺：warning 圖示 + 訊息列表
+
+**13-3 細節**
+- 既有 DemoLoader 只放 5 個 AP + 牆面 + 平面圖
+- 加上：1–2 個 switch、1–2 條 tray（範例形狀）、可選 riser（若新增第二樓層 demo）
+- 讓使用者一鍵看到完整 cable 系統運作，不用自己手動放

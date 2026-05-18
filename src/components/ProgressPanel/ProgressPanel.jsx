@@ -234,6 +234,19 @@ const PHASES = [
     ],
   },
   {
+    phase: 'Phase 8 — Cable Summary & QA',
+    groups: [
+      {
+        layer: 'Layer 13 — Cable Summary / Warnings',
+        items: [
+          { id: '13-1', done: false, text: 'CableSummaryPanel — 全建築 BOM（總線長、per-floor、per-routeStatus、unroutable 列表）' },
+          { id: '13-2', done: false, text: 'Warnings 顯示 — buildGraph 已產生的 warnings（tray touching、共線重疊）' },
+          { id: '13-3', done: false, text: 'DemoLoader cable 範例 — 既有 demo 加上 switch + tray + riser 種子資料' },
+        ],
+      },
+    ],
+  },
+  {
     phase: 'Phase 9 — AI 輔助',
     groups: [
       {
