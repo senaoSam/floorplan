@@ -230,6 +230,9 @@ src/features/
       APLayer.jsx             # AP 圖層：同心圓(頻段色碼 2.4G=橘 / 5G=青 / 6G=紫)、拖曳、標籤
       SwitchLayer.jsx         # Switch/IDF/MDF/Router 圖層：方形 chassis + kind 色碼、拖曳、命名標籤
                               #   依 cable-spec §9 stacking 順序，畫在 APLayer 之下、CableTrayLayer 之上
+      CableLayer.jsx          # Stage 3 路由結果：每個 AP → 最近同樓層 Switch 的 L-shape 線
+                              #   virtual layer（每次 store 變動重算 computeRoutes）
+                              #   三態：tray 實線 / fallback-manhattan 虛線淡灰 / unroutable 紅色驚嘆號
       ScopeLayer.jsx          # 範圍圖層：多邊形(in=綠, out=紅)、第一點吸附、刪除
       FloorHoleLayer.jsx      # 中庭圖層：紫色多邊形
       ScaleLayer.jsx          # 比例尺圖層：兩點 + 距離標籤 + ghost 線
@@ -292,6 +295,13 @@ src/features/
                               #   雙欄顯示 src 與向量化結果（wall/door/window 著色）
                               #   Apply：用 floorplanFromLines 轉成 walls，
                               #          importFloorFromUrl 建立新樓層後切回主編輯器
+
+  cable/
+    computeRoutes.js          # Stage 3 fallback Manhattan routing（spec §6 / §7）
+                              #   computeRoutes({ floor, aps, switches }) → Map<apId, route>
+                              #   route 含：switchId, points[3]（L-shape）, cableM, zDropM, routeStatus
+                              #   公式：(|Δx|+|Δy|)/scale × (1+slackDirect=1.20) + Z_drop(AP)
+                              #   Z_drop = floor.floorHeight - ap.z（不加 slack）
 
   channel/                    # （頻道規劃相關 helper，視需要看內檔）
   floor/                      # （樓層管理相關 helper）

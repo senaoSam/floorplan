@@ -21,6 +21,7 @@ import WallLayer from './layers/WallLayer'
 import { getFloorColor } from '@/utils/floorColor'
 import APLayer from './layers/APLayer'
 import SwitchLayer from './layers/SwitchLayer'
+import CableLayer from './layers/CableLayer'
 import ScopeLayer from './layers/ScopeLayer'
 import FloorHoleLayer from './layers/FloorHoleLayer'
 import ScaleLayer from './layers/ScaleLayer'
@@ -104,7 +105,7 @@ function Editor2D() {
 
   const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected, togglePanelCollapsed,
           selectedItems, setSelectedItems, toggleSelectedItem,
-          showFloorImage, showScopes, showFloorHoles, showWalls, showAPs, showSwitches,
+          showFloorImage, showScopes, showFloorHoles, showWalls, showAPs, showSwitches, showCables,
           autoChannelOnPlace, regulatoryDomain,
           alignRefFloors, alignRefOpacity } = useEditorStore()
   const isSelectMode    = editorMode === EDITOR_MODE.SELECT
@@ -1267,6 +1268,12 @@ function Editor2D() {
                   if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'switch'); return }
                   setSelected(id, 'switch')
                 }}
+                onSwitchDragMove={(id, x, y) => {
+                  useDragOverlayStore.getState().setSwitch({ id, x, y })
+                }}
+                onSwitchDragEnd={() => {
+                  useDragOverlayStore.getState().setSwitch(null)
+                }}
                 onRightMouseDown={handleRightMouseDown}
                 viewportScale={viewport.scale}
                 onDelete={(id) => { removeSwitch(activeFloorId, id); clearSelected() }}
@@ -1309,6 +1316,10 @@ function Editor2D() {
                 setHoverCursor={setHoverCursor}
                 dimmed={isDoorWindowMode}
               />
+            )}
+
+            {activeFloorId && showCables && (
+              <CableLayer floorId={activeFloorId} viewportScale={viewport.scale} />
             )}
 
             {isScaleMode && (

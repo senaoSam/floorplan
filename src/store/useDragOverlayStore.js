@@ -7,19 +7,22 @@ import { create } from 'zustand'
 // Nothing in here is persisted or undoable — it's cleared on dragend.
 //
 // Shape:
-//   ap:    { id, x, y } | null        (canvas-pixel coords)
-//   wall:  { id, dx, dy } | null      (offset from committed endpoints)
-//   scope: { id, dx, dy } | null
-//   hole:  { id, dx, dy } | null
+//   ap:     { id, x, y } | null       (canvas-pixel coords)
+//   sw:     { id, x, y } | null       (canvas-pixel coords)
+//   wall:   { id, dx, dy } | null     (offset from committed endpoints)
+//   scope:  { id, dx, dy } | null
+//   hole:   { id, dx, dy } | null
 export const useDragOverlayStore = create((set) => ({
   ap: null,
+  sw: null,
   wall: null,
   scope: null,
   hole: null,
 
-  setAP:    (v) => set({ ap: v }),
-  setWall:  (v) => set({ wall: v }),
-  setScope: (v) => set({ scope: v }),
-  setHole:  (v) => set({ hole: v }),
-  clear:    () => set({ ap: null, wall: null, scope: null, hole: null }),
+  setAP:     (v) => set({ ap: v }),
+  setSwitch: (v) => set({ sw: v }),
+  setWall:   (v) => set({ wall: v }),
+  setScope:  (v) => set({ scope: v }),
+  setHole:   (v) => set({ hole: v }),
+  clear:     () => set({ ap: null, sw: null, wall: null, scope: null, hole: null }),
 }))

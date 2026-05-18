@@ -1,6 +1,9 @@
-import React, { useCallback } from 'react'
+import React, { useCallback, useMemo } from 'react'
 import { useAPStore } from '@/store/useAPStore'
+import { useCableStore } from '@/store/useCableStore'
+import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { computeRoutes } from '@/features/cable/computeRoutes'
 import { AP_MODEL_LIST, DEFAULT_AP_MODEL_ID, getAPModelById } from '@/constants/apModels'
 import { ANTENNA_PATTERN_LIST, DEFAULT_PATTERN_ID, getPatternById } from '@/constants/antennaPatterns'
 import { channelEntries, isChannelAllowed, allowedChannels } from '@/constants/regulatoryDomains'
@@ -34,10 +37,18 @@ const MOUNT_OPTIONS = [
 
 function APPanel({ floorId, apId }) {
   const ap          = useAPStore((s) => (s.apsByFloor[floorId] ?? []).find((a) => a.id === apId))
+  const aps         = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   const updateAP    = useAPStore((s) => s.updateAP)
   const removeAP    = useAPStore((s) => s.removeAP)
   const clearSelected = useEditorStore((s) => s.clearSelected)
   const domainId    = useEditorStore((s) => s.regulatoryDomain)
+  const switches    = useCableStore((s) => s.switchesByFloor[floorId] ?? [])
+  const floor       = useFloorStore((s) => s.floors.find((f) => f.id === floorId))
+
+  const route = useMemo(() => {
+    const map = computeRoutes({ floor, aps, switches })
+    return map.get(apId)
+  }, [floor, aps, switches, apId])
 
   const model = getAPModelById(ap?.modelId ?? DEFAULT_AP_MODEL_ID)
 
@@ -402,6 +413,39 @@ function APPanel({ floorId, apId }) {
           )
         })()}
       </section>
+
+      {/* 線纜路徑（fallback Manhattan to nearest same-floor switch） */}
+      {route && (
+        <section className="ap-panel__section">
+          <p className="ap-panel__label">線纜</p>
+          {route.routeStatus === 'unroutable' ? (
+            <p className="ap-panel__hint" style={{ color: '#ef4444' }}>
+              ⚠ 同樓層沒有 Switch，AP 無法接線
+            </p>
+          ) : (
+            <>
+              <p className="ap-panel__hint">
+                目標 Switch：
+                {(() => {
+                  const sw = switches.find((s) => s.id === route.switchId)
+                  return sw ? sw.name : '—'
+                })()}
+              </p>
+              <p className="ap-panel__hint">
+                線長：{route.cableM != null ? `${route.cableM.toFixed(2)} m` : '需先校正比例尺'}
+                {route.cableM != null && (
+                  <span className="ap-panel__hint-inline">
+                    （Z drop {route.zDropM.toFixed(2)} m，含 20% slack）
+                  </span>
+                )}
+              </p>
+              <p className="ap-panel__hint">
+                狀態：fallback Manhattan
+              </p>
+            </>
+          )}
+        </section>
+      )}
 
     </div>
   )

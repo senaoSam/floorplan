@@ -46,6 +46,7 @@ export const useEditorStore = create((set, get) => ({
   showAPs: true,
   showAPInfo: true,
   showSwitches: true,
+  showCables: true,
 
   // Align-mode reference overlay. `alignRefFloors` is a Set of floor IDs that
   // should render as semi-transparent reference layers while in ALIGN_FLOOR
