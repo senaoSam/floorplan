@@ -1,0 +1,103 @@
+@use '@/styles/variables' as *
+
+.cable-summary
+  // Sit next to HeatmapControl on the canvas bottom-left strip. Offset is
+  // tuned to clear HeatmapControl's collapsed-header width (~270 px). If
+  // HeatmapControl's panel is expanded the two may visually approach; both
+  // collapse independently so the user can always make room.
+  position: absolute
+  bottom: 12px
+  left: 290px
+  background: rgba(18, 18, 30, 0.92)
+  backdrop-filter: blur(8px)
+  border: 1px solid rgba(255, 255, 255, 0.12)
+  border-radius: 8px
+  min-width: 220px
+  max-width: 320px
+  user-select: none
+  z-index: 50
+  color: $text-primary
+
+  &__header
+    display: flex
+    align-items: center
+    gap: 8px
+    padding: 6px 10px
+    cursor: pointer
+    border-radius: 8px
+    transition: background 0.12s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.06)
+
+  &__icon
+    font-size: 13px
+
+  &__title
+    font-size: 11px
+    font-weight: 600
+    color: $text-secondary
+    text-transform: uppercase
+    letter-spacing: 0.4px
+
+  &__total
+    margin-left: auto
+    font-size: 13px
+    font-weight: 600
+    color: $text-primary
+
+  &__arrow
+    font-size: 10px
+    color: $text-secondary
+    transition: transform 0.2s
+
+    &--collapsed
+      transform: rotate(-90deg)
+
+  &__body
+    padding: 4px 10px 10px
+    display: flex
+    flex-direction: column
+    gap: 8px
+
+  &__section
+    display: flex
+    flex-direction: column
+    gap: 3px
+
+    &:not(:first-child)
+      border-top: 1px dashed rgba(255, 255, 255, 0.08)
+      padding-top: 8px
+
+  &__label
+    font-size: 10px
+    font-weight: 600
+    color: $text-secondary
+    text-transform: uppercase
+    letter-spacing: 0.4px
+    margin-bottom: 3px
+
+    &--warn
+      color: #ef4444
+
+  &__row
+    display: flex
+    align-items: center
+    justify-content: space-between
+    font-size: 12px
+    padding: 2px 4px
+    border-radius: 4px
+
+    &--warn
+      color: #ef4444
+
+    &--clickable
+      cursor: pointer
+
+      &:hover
+        background: rgba(255, 255, 255, 0.06)
+
+  &__sub
+    font-size: 10px
+    color: $text-secondary
+    margin-left: 4px

@@ -4,6 +4,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import Editor2D from '@/features/editor/Editor2D'
 import Viewer3D from '@/features/viewer3d/Viewer3D'
 import HeatmapControl from '@/components/HeatmapControl/HeatmapControl'
+import CableSummaryPanel from '@/components/CableSummaryPanel/CableSummaryPanel'
 import './CanvasArea.sass'
 
 function CanvasArea() {
@@ -29,6 +30,7 @@ function CanvasArea() {
         <Viewer3D />
       </div>
       {hasFloor && <HeatmapControl />}
+      {hasFloor && <CableSummaryPanel />}
     </div>
   )
 }
