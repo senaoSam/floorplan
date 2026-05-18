@@ -65,6 +65,7 @@ function BatchPanel() {
   const updateScopes     = useScopeStore((s) => s.updateScopes)
   const removeFloorHoles = useFloorHoleStore((s) => s.removeFloorHoles)
   const removeSwitches   = useCableStore((s) => s.removeSwitches)
+  const removeTrays      = useCableStore((s) => s.removeTrays)
 
   // [SELECTABLE-TYPE] 新增物件類型 → 在下方 ids 陣列、typesPresent 計數、showXxxFields 都要加
   const wallIds  = selectedItems.filter((it) => it.type === 'wall').map((it) => it.id)
@@ -72,10 +73,11 @@ function BatchPanel() {
   const scopeIds = selectedItems.filter((it) => it.type === 'scope').map((it) => it.id)
   const holeIds  = selectedItems.filter((it) => it.type === 'floor_hole').map((it) => it.id)
   const swIds    = selectedItems.filter((it) => it.type === 'switch').map((it) => it.id)
+  const trayIds  = selectedItems.filter((it) => it.type === 'cable_tray').map((it) => it.id)
 
   // Only expose per-type editing when the selection is homogeneous —
   // mixed selections only keep the summary + delete to avoid accidental cross-type edits.
-  const typesPresent = [wallIds.length > 0, apIds.length > 0, scopeIds.length > 0, holeIds.length > 0, swIds.length > 0].filter(Boolean).length
+  const typesPresent = [wallIds.length > 0, apIds.length > 0, scopeIds.length > 0, holeIds.length > 0, swIds.length > 0, trayIds.length > 0].filter(Boolean).length
   const isHomogeneous = typesPresent === 1
   const showWallFields  = isHomogeneous && wallIds.length > 0
   const showAPFields    = isHomogeneous && apIds.length > 0
@@ -110,8 +112,9 @@ function BatchPanel() {
     if (scopeIds.length) removeScopes(activeFloorId, scopeIds)
     if (holeIds.length)  removeFloorHoles(activeFloorId, holeIds)
     if (swIds.length)    removeSwitches(activeFloorId, swIds)
+    if (trayIds.length)  removeTrays(activeFloorId, trayIds)
     clearSelected()
-  }, [activeFloorId, wallIds, apIds, scopeIds, holeIds, swIds, removeWalls, removeAPs, removeScopes, removeFloorHoles, removeSwitches, clearSelected])
+  }, [activeFloorId, wallIds, apIds, scopeIds, holeIds, swIds, trayIds, removeWalls, removeAPs, removeScopes, removeFloorHoles, removeSwitches, removeTrays, clearSelected])
 
   const handleWallMaterial = useCallback((mat) => {
     updateWalls(activeFloorId, wallIds, { material: mat })
@@ -231,6 +234,7 @@ function BatchPanel() {
           {scopeIds.length > 0 && <span className="batch-panel__chip batch-panel__chip--scope">{scopeIds.length} 範圍</span>}
           {holeIds.length > 0 && <span className="batch-panel__chip batch-panel__chip--hole">{holeIds.length} 中庭</span>}
           {swIds.length > 0 && <span className="batch-panel__chip batch-panel__chip--switch">{swIds.length} Switch</span>}
+          {trayIds.length > 0 && <span className="batch-panel__chip batch-panel__chip--tray">{trayIds.length} 線槽</span>}
         </div>
       </section>
 

@@ -1,7 +1,10 @@
 import React from 'react'
 import { Group, Circle, Line } from 'react-konva'
 
-function DeleteButton({ x, y, scale = 1, onClick, setHoverCursor }) {
+// `leaveCursor` controls what to restore when the pointer leaves the button.
+// Default 'move' matches AP / Wall / Scope (all draggable). Pass 'pointer' for
+// non-draggable objects (e.g. Cable Tray) so the cursor doesn't lie.
+function DeleteButton({ x, y, scale = 1, onClick, setHoverCursor, leaveCursor = 'move' }) {
   const s = scale
   const r = 10 * s
 
@@ -10,7 +13,7 @@ function DeleteButton({ x, y, scale = 1, onClick, setHoverCursor }) {
       x={x}
       y={y}
       onMouseEnter={() => { setHoverCursor?.('pointer') }}
-      onMouseLeave={() => { setHoverCursor?.('move') }}
+      onMouseLeave={() => { setHoverCursor?.(leaveCursor) }}
       onClick={(e) => {
         e.cancelBubble = true
         onClick()

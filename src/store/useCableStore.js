@@ -29,10 +29,18 @@ export function getSwitchKindColor(kind) {
   return SWITCH_KINDS.find((k) => k.value === kind)?.color ?? '#10b981'
 }
 
+// Cable tray defaults
+export const DEFAULT_TRAY_MAGNET_PX = 100
+
 export const useCableStore = create((set, get) => ({
   // { [floorId]: Switch[] }
   switchesByFloor: {},
   globalSwitchCounter: 0,
+
+  // { [floorId]: Tray[] }
+  // Tray shape: { id, points: [{x,y}, ...], magnetDistance }
+  // points are canvas coords (image px); magnetDistance is canvas px.
+  traysByFloor: {},
 
   getSwitches: (floorId) => get().switchesByFloor[floorId] ?? [],
 
@@ -85,9 +93,56 @@ export const useCableStore = create((set, get) => ({
       switchesByFloor: { ...state.switchesByFloor, [floorId]: switches },
     })),
 
+  // ── Tray actions ──────────────────────────────────────────────────────
+
+  getTrays: (floorId) => get().traysByFloor[floorId] ?? [],
+
+  addTray: (floorId, tray) =>
+    set((state) => ({
+      traysByFloor: {
+        ...state.traysByFloor,
+        [floorId]: [...(state.traysByFloor[floorId] ?? []), tray],
+      },
+    })),
+
+  updateTray: (floorId, trayId, patch) =>
+    set((state) => ({
+      traysByFloor: {
+        ...state.traysByFloor,
+        [floorId]: (state.traysByFloor[floorId] ?? []).map((t) =>
+          t.id === trayId ? { ...t, ...patch } : t,
+        ),
+      },
+    })),
+
+  removeTray: (floorId, trayId) =>
+    set((state) => ({
+      traysByFloor: {
+        ...state.traysByFloor,
+        [floorId]: (state.traysByFloor[floorId] ?? []).filter((t) => t.id !== trayId),
+      },
+    })),
+
+  removeTrays: (floorId, trayIds) =>
+    set((state) => {
+      const idSet = new Set(trayIds)
+      return {
+        traysByFloor: {
+          ...state.traysByFloor,
+          [floorId]: (state.traysByFloor[floorId] ?? []).filter((t) => !idSet.has(t.id)),
+        },
+      }
+    }),
+
+  setTrays: (floorId, trays) =>
+    set((state) => ({
+      traysByFloor: { ...state.traysByFloor, [floorId]: trays },
+    })),
+
   clearFloor: (floorId) =>
     set((state) => {
-      const { [floorId]: _, ...rest } = state.switchesByFloor
-      return { switchesByFloor: rest }
+      const { [floorId]: _s, ...restS } = state.switchesByFloor
+      const { [floorId]: _t, ...restT } = state.traysByFloor
+      return { switchesByFloor: restS, traysByFloor: restT }
     }),
 }))

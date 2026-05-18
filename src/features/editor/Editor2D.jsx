@@ -6,7 +6,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
-import { useCableStore, DEFAULT_SWITCH } from '@/store/useCableStore'
+import { useCableStore, DEFAULT_SWITCH, DEFAULT_TRAY_MAGNET_PX } from '@/store/useCableStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { MATERIALS, MATERIAL_LIST, OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
@@ -21,6 +21,7 @@ import WallLayer from './layers/WallLayer'
 import { getFloorColor } from '@/utils/floorColor'
 import APLayer from './layers/APLayer'
 import SwitchLayer from './layers/SwitchLayer'
+import CableTrayLayer from './layers/CableTrayLayer'
 import CableLayer from './layers/CableLayer'
 import ScopeLayer from './layers/ScopeLayer'
 import FloorHoleLayer from './layers/FloorHoleLayer'
@@ -90,6 +91,9 @@ function Editor2D() {
   // ── 裁切繪製狀態 ──────────────────────────────────────
   const [cropStart, setCropStart] = useState(null)   // {x,y}
 
+  // ── Cable Tray 繪製狀態 ───────────────────────────────
+  const [trayDraftPoints, setTrayDraftPoints] = useState([])  // [{x,y}, ...]
+
   // ── 框選狀態 ──────────────────────────────────────────
   // Marquee rect is drawn imperatively onto its own Konva Layer so mousemove
   // doesn't trigger React re-renders of wall / AP / scope layers. On demo
@@ -105,7 +109,7 @@ function Editor2D() {
 
   const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected, togglePanelCollapsed,
           selectedItems, setSelectedItems, toggleSelectedItem,
-          showFloorImage, showScopes, showFloorHoles, showWalls, showAPs, showSwitches, showCables,
+          showFloorImage, showScopes, showFloorHoles, showWalls, showAPs, showSwitches, showCables, showCableTrays,
           autoChannelOnPlace, regulatoryDomain,
           alignRefFloors, alignRefOpacity } = useEditorStore()
   const isSelectMode    = editorMode === EDITOR_MODE.SELECT
@@ -116,6 +120,7 @@ function Editor2D() {
   const isWallMode      = editorMode === EDITOR_MODE.DRAW_WALL
   const isAPMode        = editorMode === EDITOR_MODE.PLACE_AP
   const isSwitchMode    = editorMode === EDITOR_MODE.PLACE_SWITCH
+  const isTrayMode      = editorMode === EDITOR_MODE.DRAW_CABLE_TRAY
   const isScopeMode     = editorMode === EDITOR_MODE.DRAW_SCOPE
   const isFloorHoleMode = editorMode === EDITOR_MODE.DRAW_FLOOR_HOLE
   const isCropMode      = editorMode === EDITOR_MODE.CROP_IMAGE
@@ -154,6 +159,7 @@ function Editor2D() {
 
   const addSwitch     = useCableStore((s) => s.addSwitch)
   const nextSwitchName = useCableStore((s) => s.nextSwitchName)
+  const addTray       = useCableStore((s) => s.addTray)
 
   const addScope = useScopeStore((s) => s.addScope)
 
@@ -295,6 +301,21 @@ function Editor2D() {
   const removeFloorHoles = useFloorHoleStore((s) => s.removeFloorHoles)
   const removeSwitch    = useCableStore((s) => s.removeSwitch)
   const removeSwitches  = useCableStore((s) => s.removeSwitches)
+  const removeTray      = useCableStore((s) => s.removeTray)
+  const removeTrays     = useCableStore((s) => s.removeTrays)
+
+  // Commit current tray draft if it has ≥ 2 vertices, else discard. Defined
+  // here (above the keyboard effect) because the Esc handler references it.
+  const finishTrayDraft = useCallback(() => {
+    if (trayDraftPoints.length >= 2) {
+      addTray(activeFloorId, {
+        id: generateId('tray'),
+        points: trayDraftPoints,
+        magnetDistance: DEFAULT_TRAY_MAGNET_PX,
+      })
+    }
+    setTrayDraftPoints([])
+  }, [trayDraftPoints, activeFloorId, addTray])
 
   // ── 材質快捷鍵 toast 自動消失 ─────────────────────────
   useEffect(() => {
@@ -318,6 +339,7 @@ function Editor2D() {
           case 'scope':      return (useScopeStore.getState().scopesByFloor[fid] ?? []).some((s) => s.id === sid)
           case 'floor_hole': return (useFloorHoleStore.getState().floorHolesByFloor[fid] ?? []).some((h) => h.id === sid)
           case 'switch':     return (useCableStore.getState().switchesByFloor[fid] ?? []).some((sw) => sw.id === sid)
+          case 'cable_tray': return (useCableStore.getState().traysByFloor[fid] ?? []).some((t) => t.id === sid)
           case 'floor_image':return true
           case 'floor_align':return true
           default:           return false
@@ -355,12 +377,19 @@ function Editor2D() {
       }
 
       if (e.key === 'Escape') {
+        // If a tray draft is in progress, commit/discard it instead of just abandoning,
+        // so the user can finish a tray with Esc without right-clicking.
+        if (isTrayMode && trayDraftPoints.length > 0) {
+          finishTrayDraft()
+          return
+        }
         setWallDrawStart(null)
         setScopePoints([])
         setFloorHolePoints([])
         setCropStart(null)
         setDwWallId(null)
         setDwStartFrac(null)
+        setTrayDraftPoints([])
         resetScale()
         return
       }
@@ -377,11 +406,13 @@ function Editor2D() {
           const scopeIds = items.filter((it) => it.type === 'scope').map((it) => it.id)
           const holeIds  = items.filter((it) => it.type === 'floor_hole').map((it) => it.id)
           const swIds    = items.filter((it) => it.type === 'switch').map((it) => it.id)
+          const trayIds  = items.filter((it) => it.type === 'cable_tray').map((it) => it.id)
           if (wallIds.length)  removeWalls(activeFloorId, wallIds)
           if (apIds.length)    removeAPs(activeFloorId, apIds)
           if (scopeIds.length) removeScopes(activeFloorId, scopeIds)
           if (holeIds.length)  removeFloorHoles(activeFloorId, holeIds)
           if (swIds.length)    removeSwitches(activeFloorId, swIds)
+          if (trayIds.length)  removeTrays(activeFloorId, trayIds)
           clearSelected()
           return
         }
@@ -405,6 +436,10 @@ function Editor2D() {
         }
         if (selectedId && selectedType === 'switch') {
           removeSwitch(activeFloorId, selectedId)
+          clearSelected()
+        }
+        if (selectedId && selectedType === 'cable_tray') {
+          removeTray(activeFloorId, selectedId)
           clearSelected()
         }
       }
@@ -444,7 +479,7 @@ function Editor2D() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, selectedType, activeFloorId, isWallMode, isDoorWindowMode, isAlignMode, removeWall, removeWalls, updateWall, removeAP, removeAPs, removeScope, removeScopes, removeFloorHole, removeFloorHoles, removeSwitch, removeSwitches, clearSelected])
+  }, [selectedId, selectedType, activeFloorId, isWallMode, isDoorWindowMode, isAlignMode, isTrayMode, trayDraftPoints, finishTrayDraft, removeWall, removeWalls, updateWall, removeAP, removeAPs, removeScope, removeScopes, removeFloorHole, removeFloorHoles, removeSwitch, removeSwitches, removeTray, removeTrays, clearSelected])
 
   // ── 切換模式時清除繪製狀態 ────────────────────────────
   useEffect(() => {
@@ -454,6 +489,7 @@ function Editor2D() {
     setCropStart(null)
     setDwWallId(null)
     setDwStartFrac(null)
+    setTrayDraftPoints([])
     if (!isScaleMode) resetScale()
   }, [editorMode])
 
@@ -589,8 +625,26 @@ function Editor2D() {
       }
     }
 
+    // Cable trays (any segment crosses rect, or any vertex inside it)
+    if (showCableTrays) {
+      const trays = useCableStore.getState().traysByFloor[activeFloorId] ?? []
+      for (const t of trays) {
+        let hit = false
+        for (let i = 0; i < t.points.length - 1 && !hit; i++) {
+          const a = t.points[i], b = t.points[i + 1]
+          if (segIntersectsRect(a.x, a.y, b.x, b.y)) hit = true
+        }
+        if (!hit) {
+          for (const p of t.points) {
+            if (p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY) { hit = true; break }
+          }
+        }
+        if (hit) hits.push({ id: t.id, type: 'cable_tray' })
+      }
+    }
+
     return hits
-  }, [activeFloorId, showWalls, showAPs, showScopes, showFloorHoles, showSwitches])
+  }, [activeFloorId, showWalls, showAPs, showScopes, showFloorHoles, showSwitches, showCableTrays])
 
   // ── 中鍵：防止預設行為（開新分頁等）/ 左鍵：框選起點 ────
   const handleMouseDown = useCallback((e) => {
@@ -643,6 +697,32 @@ function Editor2D() {
     return pos
   }, [activeFloorId, viewport.scale])
 
+  // Snap to any existing tray vertex (committed trays + current draft) so a
+  // new draft can start/end on an existing endpoint. Wider radius than walls
+  // (24 vs 12 screen-px) since trays sparse → easy hover landing matters more.
+  // We don't merge trays (per cable-spec §10 MVP keeps them as separate
+  // objects), but sharing the exact coordinate lets the future graph builder
+  // dedupe at that node.
+  const snapToTrayVertex = useCallback((pos) => {
+    const snapDist = 24 / viewport.scale
+    const trays = useCableStore.getState().traysByFloor[activeFloorId] ?? []
+    let best = pos, bestD = snapDist
+    for (const t of trays) {
+      for (const v of t.points) {
+        const d = Math.hypot(pos.x - v.x, pos.y - v.y)
+        if (d < bestD) { bestD = d; best = { x: v.x, y: v.y } }
+      }
+    }
+    // Don't snap onto the same vertex we just placed (the last draft point),
+    // otherwise the user can't click again to add a new vertex right next to it.
+    for (let i = 0; i < trayDraftPoints.length - 1; i++) {
+      const v = trayDraftPoints[i]
+      const d = Math.hypot(pos.x - v.x, pos.y - v.y)
+      if (d < bestD) { bestD = d; best = { x: v.x, y: v.y } }
+    }
+    return best
+  }, [activeFloorId, viewport.scale, trayDraftPoints])
+
   // ── 滑鼠移動：右鍵拖曳閾值判斷 / 框選 / 更新 ghost 線 ──
   const handleMouseMove = useCallback(() => {
     const pos = stageRef.current?.getPointerPosition()
@@ -691,9 +771,14 @@ function Editor2D() {
     // Konva layer and starves the main thread (slows Konva hit detection,
     // which is what surfaces as laggy hover highlight + RSSI readout).
     const needsMousePos = isWallMode || isScopeMode || isFloorHoleMode ||
-                          isScaleMode || isCropMode || isDoorWindowMode
+                          isScaleMode || isCropMode || isDoorWindowMode || isTrayMode
     if (needsMousePos) {
-      setMousePos(isWallMode ? snapToWallEndpoint(canvasPos) : canvasPos)
+      const snapped = isWallMode
+        ? snapToWallEndpoint(canvasPos)
+        : isTrayMode
+          ? snapToTrayVertex(canvasPos)
+          : canvasPos
+      setMousePos(snapped)
     } else if (mousePos !== null) {
       setMousePos(null)
     }
@@ -740,7 +825,7 @@ function Editor2D() {
     } else if (useHoverReadoutStore.getState().reading) {
       useHoverReadoutStore.getState().setReading(null)
     }
-  }, [toCanvasPos, isWallMode, isScopeMode, isFloorHoleMode, isScaleMode, isCropMode, isDoorWindowMode, mousePos, snapToWallEndpoint, viewport.scale, activeFloorId])
+  }, [toCanvasPos, isWallMode, isScopeMode, isFloorHoleMode, isScaleMode, isCropMode, isDoorWindowMode, isTrayMode, mousePos, snapToWallEndpoint, snapToTrayVertex, viewport.scale, activeFloorId])
 
   // ── 點擊：分流到各模式 ─────────────────────────────────
   const handleStageClick = useCallback((e) => {
@@ -812,6 +897,15 @@ function Editor2D() {
         name: nextAPName(),
         color: '#4fc3f7',
       })
+      return
+    }
+
+    // Cable Tray polyline drawing — accumulate vertices, finish with right-click / Esc.
+    // Snap to existing tray vertices so users can extend from / connect back to
+    // an endpoint (separate tray objects sharing the exact coordinate).
+    if (isTrayMode) {
+      const snapped = snapToTrayVertex(pos)
+      setTrayDraftPoints((prev) => [...prev, snapped])
       return
     }
 
@@ -941,6 +1035,7 @@ function Editor2D() {
     isWallMode, wallDrawStart, activeFloorId, snapToWallEndpoint,
     isAPMode, nextAPName, autoChannelOnPlace, regulatoryDomain,
     isSwitchMode, addSwitch, nextSwitchName,
+    isTrayMode, snapToTrayVertex,
     isScopeMode, scopePoints, viewport.scale, addScope,
     isFloorHoleMode, floorHolePoints, addFloorHole,
     isCropMode, cropStart, updateFloor, toImagePos, setSelected,
@@ -959,8 +1054,10 @@ function Editor2D() {
     if (isFloorHoleMode && floorHolePoints.length > 0) { setFloorHolePoints([]); return }
     if (isCropMode && cropStart) { setCropStart(null); return }
     if (isDoorWindowMode && dwWallId) { setDwWallId(null); setDwStartFrac(null); return }
+    // Right-click in tray draw mode: commit the polyline if it has ≥ 2 vertices.
+    if (isTrayMode && trayDraftPoints.length > 0) { finishTrayDraft(); return }
     togglePanelCollapsed()
-  }, [isAlignMode, isWallMode, wallDrawStart, isScopeMode, scopePoints, isFloorHoleMode, floorHolePoints, isCropMode, cropStart, isDoorWindowMode, dwWallId, togglePanelCollapsed])
+  }, [isAlignMode, isWallMode, wallDrawStart, isScopeMode, scopePoints, isFloorHoleMode, floorHolePoints, isCropMode, cropStart, isDoorWindowMode, dwWallId, isTrayMode, trayDraftPoints, finishTrayDraft, togglePanelCollapsed])
 
   // ── 比例尺 helpers ─────────────────────────────────────
   const resetScale = () => {
@@ -1031,6 +1128,7 @@ function Editor2D() {
     isWallMode      ? cursorWall  :
     isAPMode        ? cursorAP    :
     isSwitchMode                       ? 'crosshair' :
+    isTrayMode                         ? 'crosshair' :
     isDoorWindowMode                   ? 'crosshair' :
     isMarqueeMode                      ? 'crosshair' :
     isCropMode                         ? 'crosshair' :
@@ -1069,6 +1167,7 @@ function Editor2D() {
     [EDITOR_MODE.DOOR_WINDOW]:     { label: '門窗模式', hint: '點擊牆體兩點設定門/窗位置；D 切換門、W 切換窗；右鍵或 Esc 取消' },
     [EDITOR_MODE.PLACE_AP]:        { label: '放置 AP 模式', hint: '左鍵點擊放置 AP' },
     [EDITOR_MODE.PLACE_SWITCH]:    { label: '放置 Switch 模式', hint: '左鍵點擊放置 Switch / IDF / MDF / Router；右側面板可調類型與規格' },
+    [EDITOR_MODE.DRAW_CABLE_TRAY]: { label: '繪製線槽模式', hint: '左鍵點擊新增頂點；右鍵或 Esc 完成（≥ 2 點才會建立）；磁吸範圍可在右側面板調整' },
     [EDITOR_MODE.DRAW_SCOPE]:      { label: '範圍模式',     hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.DRAW_FLOOR_HOLE]: { label: '中庭模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.CROP_IMAGE]:      { label: '裁切模式', hint: '左鍵點擊兩點定義裁切區域；右鍵或 Esc 取消' },
@@ -1182,7 +1281,7 @@ function Editor2D() {
                   setSelected(id, 'scope')
                 }}
                 isSelectMode={isSelectMode}
-                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode}
+                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode || isTrayMode}
                 onScopeDragMove={(id, dx, dy) => {
                   draggingScopeRef.current = { id, dx, dy }
                   useDragOverlayStore.getState().setScope({ id, dx, dy })
@@ -1212,7 +1311,7 @@ function Editor2D() {
                   setSelected(id, 'floor_hole')
                 }}
                 isSelectMode={isSelectMode}
-                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode}
+                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode || isTrayMode}
                 onRightMouseDown={handleRightMouseDown}
                 onDelete={(id) => { removeFloorHole(activeFloorId, id); clearSelected() }}
                 viewportScale={viewport.scale}
@@ -1241,7 +1340,7 @@ function Editor2D() {
                   useDragOverlayStore.getState().setWall(null)
                 }}
                 isDrawMode={isWallMode}
-                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode}
+                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode || isTrayMode}
                 snapRadius={SNAP_PX / viewport.scale}
                 onRightMouseDown={handleRightMouseDown}
                 onDelete={(id) => { removeWall(activeFloorId, id); clearSelected() }}
@@ -1256,6 +1355,27 @@ function Editor2D() {
                 dwWallId={dwWallId}
                 dwStartFrac={dwStartFrac}
                 dwOpeningType={dwOpeningType}
+              />
+            )}
+
+            {activeFloorId && showCableTrays && (
+              <CableTrayLayer
+                floorId={activeFloorId}
+                selectedTrayId={selectedType === 'cable_tray' ? selectedId : null}
+                selectedItems={selectedItems}
+                onTrayClick={(id, e) => {
+                  if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'cable_tray'); return }
+                  setSelected(id, 'cable_tray')
+                }}
+                onRightMouseDown={handleRightMouseDown}
+                viewportScale={viewport.scale}
+                onDelete={(id) => { removeTray(activeFloorId, id); clearSelected() }}
+                setHoverCursor={setHoverCursor}
+                isDrawingMode={isTrayMode}
+                draftPoints={trayDraftPoints}
+                draftMagnetPx={DEFAULT_TRAY_MAGNET_PX}
+                mousePos={isTrayMode ? mousePos : null}
+                dimmed={isDoorWindowMode}
               />
             )}
 
@@ -1309,7 +1429,7 @@ function Editor2D() {
                   draggingAPRef.current = null
                   useDragOverlayStore.getState().setAP(null)
                 }}
-                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode}
+                isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode || isTrayMode}
                 onRightMouseDown={handleRightMouseDown}
                 viewportScale={viewport.scale}
                 onDelete={(id) => { removeAP(activeFloorId, id); clearSelected() }}

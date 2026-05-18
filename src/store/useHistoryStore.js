@@ -33,6 +33,7 @@ function takeSnapshot(floorId) {
     scopes: structuredClone(useScopeStore.getState().scopesByFloor[floorId] ?? []),
     floorHoles: structuredClone(useFloorHoleStore.getState().floorHolesByFloor[floorId] ?? []),
     switches:   structuredClone(useCableStore.getState().switchesByFloor[floorId] ?? []),
+    trays:      structuredClone(useCableStore.getState().traysByFloor[floorId] ?? []),
     // 未來：cables, cameras, risers ...
   }
 }
@@ -40,7 +41,7 @@ function takeSnapshot(floorId) {
 // 【擴充點 B】新增 store 時，在此加入還原邏輯
 function restoreSnapshot(snapshot) {
   if (!snapshot) return
-  const { floorId, walls, aps, scopes, floorHoles, switches } = snapshot
+  const { floorId, walls, aps, scopes, floorHoles, switches, trays } = snapshot
   _restoring = true
   useWallStore.getState().setWalls(floorId, walls)
   useAPStore.getState().setAPs(floorId, aps)
@@ -51,6 +52,7 @@ function restoreSnapshot(snapshot) {
     floorHolesByFloor: { ...s.floorHolesByFloor, [floorId]: floorHoles },
   }))
   useCableStore.getState().setSwitches(floorId, switches ?? [])
+  useCableStore.getState().setTrays(floorId, trays ?? [])
   // 未來：restoreSnapshot 加入 cables, risers, cameras ...
   _restoring = false
 }
@@ -143,6 +145,7 @@ function commitPending() {
     scopes: structuredClone(raw.scopes),
     floorHoles: structuredClone(raw.floorHoles),
     switches: structuredClone(raw.switches),
+    trays:    structuredClone(raw.trays),
   })
 }
 
@@ -183,6 +186,7 @@ let _prevAPs = useAPStore.getState().apsByFloor
 let _prevScopes = useScopeStore.getState().scopesByFloor
 let _prevHoles = useFloorHoleStore.getState().floorHolesByFloor
 let _prevSwitches = useCableStore.getState().switchesByFloor
+let _prevTrays    = useCableStore.getState().traysByFloor
 
 function onStoreChange(storeName, prevRef, currentRef) {
   if (_restoring) return
@@ -205,6 +209,7 @@ function onStoreChange(storeName, prevRef, currentRef) {
     scopes:     storeName === 'scopes'   ? (prevRef[floorId] ?? []) : (useScopeStore.getState().scopesByFloor[floorId] ?? []),
     floorHoles: storeName === 'holes'    ? (prevRef[floorId] ?? []) : (useFloorHoleStore.getState().floorHolesByFloor[floorId] ?? []),
     switches:   storeName === 'switches' ? (prevRef[floorId] ?? []) : (useCableStore.getState().switchesByFloor[floorId] ?? []),
+    trays:      storeName === 'trays'    ? (prevRef[floorId] ?? []) : (useCableStore.getState().traysByFloor[floorId] ?? []),
   }
 
   schedulePushRaw(raw)
@@ -243,9 +248,14 @@ useFloorHoleStore.subscribe((state) => {
 })
 
 useCableStore.subscribe((state) => {
-  const cur = state.switchesByFloor
-  if (cur !== _prevSwitches) {
-    onStoreChange('switches', _prevSwitches, cur)
-    _prevSwitches = cur
+  const curS = state.switchesByFloor
+  if (curS !== _prevSwitches) {
+    onStoreChange('switches', _prevSwitches, curS)
+    _prevSwitches = curS
+  }
+  const curT = state.traysByFloor
+  if (curT !== _prevTrays) {
+    onStoreChange('trays', _prevTrays, curT)
+    _prevTrays = curT
   }
 })

@@ -39,7 +39,7 @@
 
 | #     | 狀態 | Task                                                                                                              |
 | ----- | ---- | ----------------------------------------------------------------------------------------------------------------- |
-| 12-1  | ⬜   | Cable Tray polyline 繪製 + magnet 半徑視覺化                                                                       |
+| 12-1  | ✅   | Cable Tray polyline 繪製 + magnet 半徑視覺化                                                                       |
 | 12-2a | ⬜   | Graph builder Steps 1-7（endpoint snap 只挑最近 tray + tray intersection + chainage sort）                          |
 | 12-2b | ⬜   | Stage 3 routing（Dijkstra + connected component + same-floor fallback + unroutable 標記）                          |
 | 12-2c | ⬜   | 線長計算（chainage-based）+ CableLayer 渲染（tray / fallback / unroutable 三態）                                    |

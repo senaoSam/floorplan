@@ -87,10 +87,13 @@ src/store/
   useCableStore.js            # 網路基礎設施（Phase 7 / Layer 11+）
                               #   - switchesByFloor {} — Switch / IDF / MDF / Router endpoints
                               #     shape: { id, name, x, y, kind, mountHeight, model, portCount, poeBudget }
-                              #   - SWITCH_KINDS / DEFAULT_SWITCH / getSwitchKindColor()
-                              #   - addSwitch(), updateSwitch(), removeSwitch(), removeSwitches(),
-                              #     setSwitches(), clearFloor(), nextSwitchName(kind)
-                              #   - 未來：traysByFloor, risers, slack 參數（cable-spec §2）
+                              #   - traysByFloor {} — Cable Tray polylines
+                              #     shape: { id, points: [{x,y},...], magnetDistance }
+                              #   - SWITCH_KINDS / DEFAULT_SWITCH / DEFAULT_TRAY_MAGNET_PX / getSwitchKindColor()
+                              #   - Switch: addSwitch / updateSwitch / removeSwitch(es) / setSwitches / nextSwitchName(kind)
+                              #   - Tray:   addTray / updateTray / removeTray(s) / setTrays
+                              #   - clearFloor() 同時清掉本樓層的 switches + trays
+                              #   - 未來：risers（跨樓層）、slack 參數（cable-spec §2）
 
   useHeatmapStore.js          # Heatmap 開關與計算參數
                               #   - enabled, reflections, diffraction, gridStepM, blur, showContours
@@ -188,6 +191,8 @@ src/components/
     WallPanel.jsx             #   牆體屬性：材質、頂/底高度、長度顯示、刪除、門窗管理
     APPanel.jsx               #   AP 屬性：頻段、頻道、天線、功率、高度、刪除
     SwitchPanel.jsx           #   Switch 屬性：kind（switch/idf/mdf/router）、型號、port 數、PoE budget、安裝高度、刪除
+                              #     + Port 用量 / PoE 用量 warning + 已連接 AP 清單（依 computeRoutes 結果）
+    CableTrayPanel.jsx        #   Cable Tray 屬性：節點數、線長（公尺）、magnetDistance、刪除
     ScopePanel.jsx            #   範圍屬性：in/out 切換、頂點、刪除
     FloorHolePanel.jsx        #   中庭屬性：說明、頂點、刪除
     FloorImagePanel.jsx       #   平面圖屬性：旋轉、透明度、裁切
@@ -230,6 +235,10 @@ src/features/
       APLayer.jsx             # AP 圖層：同心圓(頻段色碼 2.4G=橘 / 5G=青 / 6G=紫)、拖曳、標籤
       SwitchLayer.jsx         # Switch/IDF/MDF/Router 圖層：方形 chassis + kind 色碼、拖曳、命名標籤
                               #   依 cable-spec §9 stacking 順序，畫在 APLayer 之下、CableTrayLayer 之上
+      CableTrayLayer.jsx      # Cable Tray polyline + 磁吸範圍視覺化（半透明膠囊狀填色）
+                              #   編輯模式或 hover/select 才顯示 magnet halo
+                              #   含 DraftTray 子元件：繪製中即時 ghost line 與 magnet 預覽
+                              #   stacking：WallLayer 之上、SwitchLayer 之下
       CableLayer.jsx          # Stage 3 路由結果：每個 AP → 最近同樓層 Switch 的 L-shape 線
                               #   virtual layer（每次 store 變動重算 computeRoutes）
                               #   三態：tray 實線 / fallback-manhattan 虛線淡灰 / unroutable 紅色驚嘆號

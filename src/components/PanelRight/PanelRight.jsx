@@ -9,6 +9,7 @@ import FloorImagePanel from './FloorImagePanel'
 import AlignFloorPanel from './AlignFloorPanel'
 import BatchPanel from './BatchPanel'
 import SwitchPanel from './SwitchPanel'
+import CableTrayPanel from './CableTrayPanel'
 import './PanelRight.sass'
 
 function PanelRight() {
@@ -35,6 +36,9 @@ function PanelRight() {
       )}
       {!isBatch && selectedType === 'switch' && activeFloorId && (
         <SwitchPanel floorId={activeFloorId} swId={selectedId} />
+      )}
+      {!isBatch && selectedType === 'cable_tray' && activeFloorId && (
+        <CableTrayPanel floorId={activeFloorId} trayId={selectedId} />
       )}
       {!isBatch && selectedType === 'scope' && activeFloorId && (
         <ScopePanel floorId={activeFloorId} zoneId={selectedId} />
