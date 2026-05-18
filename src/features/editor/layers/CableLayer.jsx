@@ -15,6 +15,7 @@ import { computeRoutes } from '@/features/cable/computeRoutes'
 function CableLayer({ floorId, viewportScale }) {
   const aps        = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   const switches   = useCableStore((s) => s.switchesByFloor[floorId] ?? [])
+  const trays      = useCableStore((s) => s.traysByFloor[floorId] ?? [])
   const floor      = useFloorStore((s) => s.floors.find((f) => f.id === floorId))
   // Live drag overrides — keep cable lines tracking the cursor in real time
   // instead of waiting for the dragend commit into the main stores.
@@ -29,8 +30,8 @@ function CableLayer({ floorId, viewportScale }) {
     const switchesLive = dragSwitch
       ? switches.map((s) => (s.id === dragSwitch.id ? { ...s, x: dragSwitch.x, y: dragSwitch.y } : s))
       : switches
-    return computeRoutes({ floor, aps: apsLive, switches: switchesLive })
-  }, [floor, aps, switches, dragAP, dragSwitch])
+    return computeRoutes({ floor, aps: apsLive, switches: switchesLive, trays })
+  }, [floor, aps, switches, trays, dragAP, dragSwitch])
 
   if (routes.size === 0) return null
 

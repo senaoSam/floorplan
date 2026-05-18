@@ -10,6 +10,7 @@ import './APPanel.sass'
 function SwitchPanel({ floorId, swId }) {
   const sw            = useCableStore((s) => (s.switchesByFloor[floorId] ?? []).find((x) => x.id === swId))
   const switches      = useCableStore((s) => s.switchesByFloor[floorId] ?? [])
+  const trays         = useCableStore((s) => s.traysByFloor[floorId] ?? [])
   const updateSwitch  = useCableStore((s) => s.updateSwitch)
   const removeSwitch  = useCableStore((s) => s.removeSwitch)
   const aps           = useAPStore((s) => s.apsByFloor[floorId] ?? [])
@@ -41,7 +42,7 @@ function SwitchPanel({ floorId, swId }) {
   // routing layer already places APs regardless of capacity (per spec §8).
   const connected = useMemo(() => {
     if (!sw) return { aps: [], totalPoe: 0 }
-    const routes = computeRoutes({ floor, aps, switches })
+    const routes = computeRoutes({ floor, aps, switches, trays })
     const connAps = []
     let totalPoe = 0
     for (const ap of aps) {
@@ -52,7 +53,7 @@ function SwitchPanel({ floorId, swId }) {
       }
     }
     return { aps: connAps, totalPoe }
-  }, [sw, swId, aps, switches, floor])
+  }, [sw, swId, aps, switches, trays, floor])
 
   if (!sw) return null
 

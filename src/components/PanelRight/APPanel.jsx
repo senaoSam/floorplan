@@ -43,12 +43,13 @@ function APPanel({ floorId, apId }) {
   const clearSelected = useEditorStore((s) => s.clearSelected)
   const domainId    = useEditorStore((s) => s.regulatoryDomain)
   const switches    = useCableStore((s) => s.switchesByFloor[floorId] ?? [])
+  const trays       = useCableStore((s) => s.traysByFloor[floorId] ?? [])
   const floor       = useFloorStore((s) => s.floors.find((f) => f.id === floorId))
 
   const route = useMemo(() => {
-    const map = computeRoutes({ floor, aps, switches })
+    const map = computeRoutes({ floor, aps, switches, trays })
     return map.get(apId)
-  }, [floor, aps, switches, apId])
+  }, [floor, aps, switches, trays, apId])
 
   const model = getAPModelById(ap?.modelId ?? DEFAULT_AP_MODEL_ID)
 
@@ -440,7 +441,7 @@ function APPanel({ floorId, apId }) {
                 )}
               </p>
               <p className="ap-panel__hint">
-                狀態：fallback Manhattan
+                狀態：{route.routeStatus === 'tray' ? '沿 Cable Tray' : 'fallback Manhattan'}
               </p>
             </>
           )}

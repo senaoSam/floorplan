@@ -155,17 +155,16 @@ export function buildFloorGraph({ floor, aps, switches, trays }) {
   for (const sw of switches) snapEndpoint({ x: sw.x, y: sw.y }, swEntries.get(sw.id))
 
   // ── Step 7: sort each tray's anchors and add adjacent edges (chainage-based)
+  // Zero-length edges (two anchors at the same chainage — e.g. an endpoint-foot
+  // landing exactly on a tray-vertex) MUST still be added with weight 0,
+  // otherwise the coincident anchors are graph-disconnected and Dijkstra can't
+  // reach the endpoint via the tray.
   for (const meta of trayMeta) {
     meta.anchors.sort((a, b) => a.chain - b.chain)
     for (let i = 0; i < meta.anchors.length - 1; i++) {
       const A = meta.anchors[i]
       const B = meta.anchors[i + 1]
       const chainPx = Math.abs(B.chain - A.chain)
-      // Zero-length tray edges happen when two anchors land at the same chainage
-      // (e.g. a vertex and a cross at the same point). Skip — they'd add a
-      // weight-0 self-loop-ish edge that bloats the graph without changing
-      // shortest paths.
-      if (chainPx < 1e-6) continue
       const weightM = pxPerM && pxPerM > 0
         ? (chainPx / pxPerM) * (1 + SLACK_TRAY)
         : 0
