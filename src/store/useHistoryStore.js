@@ -15,6 +15,7 @@ import { useWallStore } from './useWallStore'
 import { useAPStore } from './useAPStore'
 import { useScopeStore } from './useScopeStore'
 import { useFloorHoleStore } from './useFloorHoleStore'
+import { useCableStore } from './useCableStore'
 
 const MAX_HISTORY = 50
 const DEBOUNCE_MS = 300
@@ -31,14 +32,15 @@ function takeSnapshot(floorId) {
     aps: structuredClone(useAPStore.getState().apsByFloor[floorId] ?? []),
     scopes: structuredClone(useScopeStore.getState().scopesByFloor[floorId] ?? []),
     floorHoles: structuredClone(useFloorHoleStore.getState().floorHolesByFloor[floorId] ?? []),
-    // 未來：switches, cables, cameras ...
+    switches:   structuredClone(useCableStore.getState().switchesByFloor[floorId] ?? []),
+    // 未來：cables, cameras, risers ...
   }
 }
 
 // 【擴充點 B】新增 store 時，在此加入還原邏輯
 function restoreSnapshot(snapshot) {
   if (!snapshot) return
-  const { floorId, walls, aps, scopes, floorHoles } = snapshot
+  const { floorId, walls, aps, scopes, floorHoles, switches } = snapshot
   _restoring = true
   useWallStore.getState().setWalls(floorId, walls)
   useAPStore.getState().setAPs(floorId, aps)
@@ -48,7 +50,8 @@ function restoreSnapshot(snapshot) {
   useFloorHoleStore.setState((s) => ({
     floorHolesByFloor: { ...s.floorHolesByFloor, [floorId]: floorHoles },
   }))
-  // 未來：restoreSnapshot 加入 switches, cables, cameras ...
+  useCableStore.getState().setSwitches(floorId, switches ?? [])
+  // 未來：restoreSnapshot 加入 cables, risers, cameras ...
   _restoring = false
 }
 
@@ -139,6 +142,7 @@ function commitPending() {
     aps: structuredClone(raw.aps),
     scopes: structuredClone(raw.scopes),
     floorHoles: structuredClone(raw.floorHoles),
+    switches: structuredClone(raw.switches),
   })
 }
 
@@ -178,6 +182,7 @@ let _prevWalls = useWallStore.getState().wallsByFloor
 let _prevAPs = useAPStore.getState().apsByFloor
 let _prevScopes = useScopeStore.getState().scopesByFloor
 let _prevHoles = useFloorHoleStore.getState().floorHolesByFloor
+let _prevSwitches = useCableStore.getState().switchesByFloor
 
 function onStoreChange(storeName, prevRef, currentRef) {
   if (_restoring) return
@@ -195,10 +200,11 @@ function onStoreChange(storeName, prevRef, currentRef) {
 
   const raw = {
     floorId,
-    walls:      storeName === 'walls'  ? (prevRef[floorId] ?? []) : (useWallStore.getState().wallsByFloor[floorId] ?? []),
-    aps:        storeName === 'aps'    ? (prevRef[floorId] ?? []) : (useAPStore.getState().apsByFloor[floorId] ?? []),
-    scopes:     storeName === 'scopes' ? (prevRef[floorId] ?? []) : (useScopeStore.getState().scopesByFloor[floorId] ?? []),
-    floorHoles: storeName === 'holes'  ? (prevRef[floorId] ?? []) : (useFloorHoleStore.getState().floorHolesByFloor[floorId] ?? []),
+    walls:      storeName === 'walls'    ? (prevRef[floorId] ?? []) : (useWallStore.getState().wallsByFloor[floorId] ?? []),
+    aps:        storeName === 'aps'      ? (prevRef[floorId] ?? []) : (useAPStore.getState().apsByFloor[floorId] ?? []),
+    scopes:     storeName === 'scopes'   ? (prevRef[floorId] ?? []) : (useScopeStore.getState().scopesByFloor[floorId] ?? []),
+    floorHoles: storeName === 'holes'    ? (prevRef[floorId] ?? []) : (useFloorHoleStore.getState().floorHolesByFloor[floorId] ?? []),
+    switches:   storeName === 'switches' ? (prevRef[floorId] ?? []) : (useCableStore.getState().switchesByFloor[floorId] ?? []),
   }
 
   schedulePushRaw(raw)
@@ -233,5 +239,13 @@ useFloorHoleStore.subscribe((state) => {
   if (cur !== _prevHoles) {
     onStoreChange('holes', _prevHoles, cur)
     _prevHoles = cur
+  }
+})
+
+useCableStore.subscribe((state) => {
+  const cur = state.switchesByFloor
+  if (cur !== _prevSwitches) {
+    onStoreChange('switches', _prevSwitches, cur)
+    _prevSwitches = cur
   }
 })

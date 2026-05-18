@@ -9,6 +9,7 @@ const LAYERS = [
   { key: 'showWalls',      label: '牆體' },
   { key: 'showAPs',        label: 'AP' },
   { key: 'showAPInfo',     label: 'AP 資訊' },
+  { key: 'showSwitches',   label: 'Switch' },
 ]
 
 function LayerToggle() {

@@ -84,6 +84,14 @@ src/store/
                               #   - floorHolesByFloor {}
                               #   - addFloorHole(), updateFloorHole(), removeFloorHole(), removeFloorHoles()
 
+  useCableStore.js            # 網路基礎設施（Phase 7 / Layer 11+）
+                              #   - switchesByFloor {} — Switch / IDF / MDF / Router endpoints
+                              #     shape: { id, name, x, y, kind, mountHeight, model, portCount, poeBudget }
+                              #   - SWITCH_KINDS / DEFAULT_SWITCH / getSwitchKindColor()
+                              #   - addSwitch(), updateSwitch(), removeSwitch(), removeSwitches(),
+                              #     setSwitches(), clearFloor(), nextSwitchName(kind)
+                              #   - 未來：traysByFloor, risers, slack 參數（cable-spec §2）
+
   useHeatmapStore.js          # Heatmap 開關與計算參數
                               #   - enabled, reflections, diffraction, gridStepM, blur, showContours
                               #   - mode (rssi / sinr / snr / cci)
@@ -179,6 +187,7 @@ src/components/
     PanelRight.jsx
     WallPanel.jsx             #   牆體屬性：材質、頂/底高度、長度顯示、刪除、門窗管理
     APPanel.jsx               #   AP 屬性：頻段、頻道、天線、功率、高度、刪除
+    SwitchPanel.jsx           #   Switch 屬性：kind（switch/idf/mdf/router）、型號、port 數、PoE budget、安裝高度、刪除
     ScopePanel.jsx            #   範圍屬性：in/out 切換、頂點、刪除
     FloorHolePanel.jsx        #   中庭屬性：說明、頂點、刪除
     FloorImagePanel.jsx       #   平面圖屬性：旋轉、透明度、裁切
@@ -219,6 +228,8 @@ src/features/
       RefVectorLayer.jsx      # 對齊模式：參考樓層的 AP / Scope / Floor Hole 輪廓
       WallLayer.jsx           # 牆體圖層：線段 + 端點把手 + 材質顏色、拖曳吸附、刪除
       APLayer.jsx             # AP 圖層：同心圓(頻段色碼 2.4G=橘 / 5G=青 / 6G=紫)、拖曳、標籤
+      SwitchLayer.jsx         # Switch/IDF/MDF/Router 圖層：方形 chassis + kind 色碼、拖曳、命名標籤
+                              #   依 cable-spec §9 stacking 順序，畫在 APLayer 之下、CableTrayLayer 之上
       ScopeLayer.jsx          # 範圍圖層：多邊形(in=綠, out=紅)、第一點吸附、刪除
       FloorHoleLayer.jsx      # 中庭圖層：紫色多邊形
       ScaleLayer.jsx          # 比例尺圖層：兩點 + 距離標籤 + ghost 線

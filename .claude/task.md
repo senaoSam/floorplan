@@ -11,7 +11,7 @@
 
 | #    | 狀態 | Task                                                                                       |
 | ---- | ---- | ------------------------------------------------------------------------------------------ |
-| 11-1 | ⬜   | Switch / IDF / MDF 放置與屬性面板（port 數、PoE budget、kind）                              |
+| 11-1 | ✅   | Switch / IDF / MDF 放置與屬性面板（port 數、PoE budget、kind）                              |
 | 11-2 | ⬜   | AP↔Switch 預設 Manhattan 連線（+20% slack + Z_drop，same-floor 限制；無 switch → unroutable）|
 | 11-3 | ⬜   | PoE 預算 + port 容量 over-capacity warning（不進 routing）                                  |
 

@@ -10,6 +10,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
+import { useCableStore } from '@/store/useCableStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorImport } from '@/features/importer/useFloorImport'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
@@ -27,6 +28,7 @@ function SidebarLeft() {
   const clearAPs        = useAPStore((s) => s.clearFloor)
   const clearScopes     = useScopeStore((s) => s.clearFloor)
   const clearHoles      = useFloorHoleStore((s) => s.clearFloor)
+  const clearSwitches   = useCableStore((s) => s.clearFloor)
   const setEditorMode   = useEditorStore((s) => s.setEditorMode)
   const setSelected     = useEditorStore((s) => s.setSelected)
 
@@ -151,6 +153,7 @@ function SidebarLeft() {
     clearAPs(floor.id)
     clearScopes(floor.id)
     clearHoles(floor.id)
+    clearSwitches(floor.id)
     removeFloor(floor.id)
     // Removing the active floor while aligning would leave the panel orphaned;
     // drop back to SELECT so the UI stays consistent.

@@ -8,6 +8,7 @@ import FloorHolePanel from './FloorHolePanel'
 import FloorImagePanel from './FloorImagePanel'
 import AlignFloorPanel from './AlignFloorPanel'
 import BatchPanel from './BatchPanel'
+import SwitchPanel from './SwitchPanel'
 import './PanelRight.sass'
 
 function PanelRight() {
@@ -31,6 +32,9 @@ function PanelRight() {
       )}
       {!isBatch && selectedType === 'ap' && activeFloorId && (
         <APPanel floorId={activeFloorId} apId={selectedId} />
+      )}
+      {!isBatch && selectedType === 'switch' && activeFloorId && (
+        <SwitchPanel floorId={activeFloorId} swId={selectedId} />
       )}
       {!isBatch && selectedType === 'scope' && activeFloorId && (
         <ScopePanel floorId={activeFloorId} zoneId={selectedId} />

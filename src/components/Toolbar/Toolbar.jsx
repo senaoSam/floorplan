@@ -23,6 +23,7 @@ const TOOL_GROUPS = [
   ],
   [
     { mode: EDITOR_MODE.PLACE_AP,       label: 'AP',       icon: '\uD83D\uDCE1' },
+    { mode: EDITOR_MODE.PLACE_SWITCH,   label: 'Switch',   icon: '\uD83D\uDD0C' },
     { mode: EDITOR_MODE.DRAW_SCOPE,     label: '範圍',     icon: '\u2B21' },
   ],
 ]

@@ -212,7 +212,7 @@ const PHASES = [
       {
         layer: 'Layer 11 — Switch & 邏輯連線（base layer）',
         items: [
-          { id: '11-1', done: false, text: 'Switch / IDF / MDF 放置與屬性面板（port 數、PoE budget、kind）' },
+          { id: '11-1', done: true, text: 'Switch / IDF / MDF 放置與屬性面板（port 數、PoE budget、kind）' },
           { id: '11-2', done: false, text: 'AP↔Switch 預設 Manhattan 連線（+20% slack + Z_drop，same floor 限制）' },
           { id: '11-3', done: false, text: 'PoE 預算 + port 容量 over-capacity warning（不進 routing）' },
         ],

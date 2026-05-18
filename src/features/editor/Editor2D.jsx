@@ -6,6 +6,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
+import { useCableStore, DEFAULT_SWITCH } from '@/store/useCableStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { MATERIALS, MATERIAL_LIST, OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
@@ -19,6 +20,7 @@ import RefVectorLayer from './layers/RefVectorLayer'
 import WallLayer from './layers/WallLayer'
 import { getFloorColor } from '@/utils/floorColor'
 import APLayer from './layers/APLayer'
+import SwitchLayer from './layers/SwitchLayer'
 import ScopeLayer from './layers/ScopeLayer'
 import FloorHoleLayer from './layers/FloorHoleLayer'
 import ScaleLayer from './layers/ScaleLayer'
@@ -102,7 +104,7 @@ function Editor2D() {
 
   const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected, togglePanelCollapsed,
           selectedItems, setSelectedItems, toggleSelectedItem,
-          showFloorImage, showScopes, showFloorHoles, showWalls, showAPs,
+          showFloorImage, showScopes, showFloorHoles, showWalls, showAPs, showSwitches,
           autoChannelOnPlace, regulatoryDomain,
           alignRefFloors, alignRefOpacity } = useEditorStore()
   const isSelectMode    = editorMode === EDITOR_MODE.SELECT
@@ -112,6 +114,7 @@ function Editor2D() {
   const isScaleMode     = editorMode === EDITOR_MODE.DRAW_SCALE
   const isWallMode      = editorMode === EDITOR_MODE.DRAW_WALL
   const isAPMode        = editorMode === EDITOR_MODE.PLACE_AP
+  const isSwitchMode    = editorMode === EDITOR_MODE.PLACE_SWITCH
   const isScopeMode     = editorMode === EDITOR_MODE.DRAW_SCOPE
   const isFloorHoleMode = editorMode === EDITOR_MODE.DRAW_FLOOR_HOLE
   const isCropMode      = editorMode === EDITOR_MODE.CROP_IMAGE
@@ -147,6 +150,9 @@ function Editor2D() {
 
   const addAP     = useAPStore((s) => s.addAP)
   const nextAPName = useAPStore((s) => s.nextAPName)
+
+  const addSwitch     = useCableStore((s) => s.addSwitch)
+  const nextSwitchName = useCableStore((s) => s.nextSwitchName)
 
   const addScope = useScopeStore((s) => s.addScope)
 
@@ -286,6 +292,8 @@ function Editor2D() {
   const removeScopes    = useScopeStore((s) => s.removeScopes)
   const removeFloorHole = useFloorHoleStore((s) => s.removeFloorHole)
   const removeFloorHoles = useFloorHoleStore((s) => s.removeFloorHoles)
+  const removeSwitch    = useCableStore((s) => s.removeSwitch)
+  const removeSwitches  = useCableStore((s) => s.removeSwitches)
 
   // ── 材質快捷鍵 toast 自動消失 ─────────────────────────
   useEffect(() => {
@@ -308,6 +316,7 @@ function Editor2D() {
           case 'ap':         return (useAPStore.getState().apsByFloor[fid] ?? []).some((a) => a.id === sid)
           case 'scope':      return (useScopeStore.getState().scopesByFloor[fid] ?? []).some((s) => s.id === sid)
           case 'floor_hole': return (useFloorHoleStore.getState().floorHolesByFloor[fid] ?? []).some((h) => h.id === sid)
+          case 'switch':     return (useCableStore.getState().switchesByFloor[fid] ?? []).some((sw) => sw.id === sid)
           case 'floor_image':return true
           case 'floor_align':return true
           default:           return false
@@ -366,10 +375,12 @@ function Editor2D() {
           const apIds   = items.filter((it) => it.type === 'ap').map((it) => it.id)
           const scopeIds = items.filter((it) => it.type === 'scope').map((it) => it.id)
           const holeIds  = items.filter((it) => it.type === 'floor_hole').map((it) => it.id)
+          const swIds    = items.filter((it) => it.type === 'switch').map((it) => it.id)
           if (wallIds.length)  removeWalls(activeFloorId, wallIds)
           if (apIds.length)    removeAPs(activeFloorId, apIds)
           if (scopeIds.length) removeScopes(activeFloorId, scopeIds)
           if (holeIds.length)  removeFloorHoles(activeFloorId, holeIds)
+          if (swIds.length)    removeSwitches(activeFloorId, swIds)
           clearSelected()
           return
         }
@@ -389,6 +400,10 @@ function Editor2D() {
         }
         if (selectedId && selectedType === 'floor_hole') {
           removeFloorHole(activeFloorId, selectedId)
+          clearSelected()
+        }
+        if (selectedId && selectedType === 'switch') {
+          removeSwitch(activeFloorId, selectedId)
           clearSelected()
         }
       }
@@ -428,7 +443,7 @@ function Editor2D() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, selectedType, activeFloorId, isWallMode, isDoorWindowMode, isAlignMode, removeWall, removeWalls, updateWall, removeAP, removeAPs, removeScope, removeScopes, removeFloorHole, removeFloorHoles, clearSelected])
+  }, [selectedId, selectedType, activeFloorId, isWallMode, isDoorWindowMode, isAlignMode, removeWall, removeWalls, updateWall, removeAP, removeAPs, removeScope, removeScopes, removeFloorHole, removeFloorHoles, removeSwitch, removeSwitches, clearSelected])
 
   // ── 切換模式時清除繪製狀態 ────────────────────────────
   useEffect(() => {
@@ -563,8 +578,18 @@ function Editor2D() {
       }
     }
 
+    // Switches (center point in rect)
+    if (showSwitches) {
+      const switches = useCableStore.getState().switchesByFloor[activeFloorId] ?? []
+      for (const sw of switches) {
+        if (sw.x >= minX && sw.x <= maxX && sw.y >= minY && sw.y <= maxY) {
+          hits.push({ id: sw.id, type: 'switch' })
+        }
+      }
+    }
+
     return hits
-  }, [activeFloorId, showWalls, showAPs, showScopes, showFloorHoles])
+  }, [activeFloorId, showWalls, showAPs, showScopes, showFloorHoles, showSwitches])
 
   // ── 中鍵：防止預設行為（開新分頁等）/ 左鍵：框選起點 ────
   const handleMouseDown = useCallback((e) => {
@@ -789,6 +814,22 @@ function Editor2D() {
       return
     }
 
+    // Switch 放置
+    if (isSwitchMode) {
+      const kind = DEFAULT_SWITCH.kind
+      addSwitch(activeFloorId, {
+        id: generateId('sw'),
+        name: nextSwitchName(kind),
+        x: pos.x, y: pos.y,
+        kind,
+        mountHeight: DEFAULT_SWITCH.mountHeight,
+        model: DEFAULT_SWITCH.model,
+        portCount: DEFAULT_SWITCH.portCount,
+        poeBudget: DEFAULT_SWITCH.poeBudget,
+      })
+      return
+    }
+
     // 範圍區域
     if (isScopeMode) {
       // 吸附第一點：距離 < SNAP_PX / scale → 閉合多邊形
@@ -898,6 +939,7 @@ function Editor2D() {
     isScaleMode, showScaleDialog, scalePt1,
     isWallMode, wallDrawStart, activeFloorId, snapToWallEndpoint,
     isAPMode, nextAPName, autoChannelOnPlace, regulatoryDomain,
+    isSwitchMode, addSwitch, nextSwitchName,
     isScopeMode, scopePoints, viewport.scale, addScope,
     isFloorHoleMode, floorHolePoints, addFloorHole,
     isCropMode, cropStart, updateFloor, toImagePos, setSelected,
@@ -987,6 +1029,7 @@ function Editor2D() {
     isScaleMode     ? cursorScale :
     isWallMode      ? cursorWall  :
     isAPMode        ? cursorAP    :
+    isSwitchMode                       ? 'crosshair' :
     isDoorWindowMode                   ? 'crosshair' :
     isMarqueeMode                      ? 'crosshair' :
     isCropMode                         ? 'crosshair' :
@@ -1024,6 +1067,7 @@ function Editor2D() {
     [EDITOR_MODE.DRAW_WALL]:       { label: '畫牆模式', hint: '左鍵點擊設定端點，右鍵或 Esc 結束｜數字鍵 1~6 切換材質' },
     [EDITOR_MODE.DOOR_WINDOW]:     { label: '門窗模式', hint: '點擊牆體兩點設定門/窗位置；D 切換門、W 切換窗；右鍵或 Esc 取消' },
     [EDITOR_MODE.PLACE_AP]:        { label: '放置 AP 模式', hint: '左鍵點擊放置 AP' },
+    [EDITOR_MODE.PLACE_SWITCH]:    { label: '放置 Switch 模式', hint: '左鍵點擊放置 Switch / IDF / MDF / Router；右側面板可調類型與規格' },
     [EDITOR_MODE.DRAW_SCOPE]:      { label: '範圍模式',     hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.DRAW_FLOOR_HOLE]: { label: '中庭模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.CROP_IMAGE]:      { label: '裁切模式', hint: '左鍵點擊兩點定義裁切區域；右鍵或 Esc 取消' },
@@ -1211,6 +1255,23 @@ function Editor2D() {
                 dwWallId={dwWallId}
                 dwStartFrac={dwStartFrac}
                 dwOpeningType={dwOpeningType}
+              />
+            )}
+
+            {activeFloorId && showSwitches && (
+              <SwitchLayer
+                floorId={activeFloorId}
+                selectedSwitchId={selectedType === 'switch' ? selectedId : null}
+                selectedItems={selectedItems}
+                onSwitchClick={(id, e) => {
+                  if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'switch'); return }
+                  setSelected(id, 'switch')
+                }}
+                onRightMouseDown={handleRightMouseDown}
+                viewportScale={viewport.scale}
+                onDelete={(id) => { removeSwitch(activeFloorId, id); clearSelected() }}
+                setHoverCursor={setHoverCursor}
+                dimmed={isDoorWindowMode}
               />
             )}
 
