@@ -1,6 +1,7 @@
 // AP model database — vendor specs used for default txPower caps, supported bands, antenna gains.
 // maxTxPower 為各頻段可設定上限 (dBm)；antennaGain 為天線增益 (dBi)；
 // streamCount 為 MIMO spatial stream 數（per-band，用於 802.11ax data rate 查表，RX-4）。
+// poeWattage 為典型 PoE 耗電量 (W)，給 switch 的 PoE budget 計算用。
 export const AP_MODELS = {
   GENERIC_WIFI6: {
     id: 'generic-wifi6',
@@ -11,6 +12,7 @@ export const AP_MODELS = {
     maxTxPower: { 2.4: 23, 5: 23 },
     antennaGain: { 2.4: 3, 5: 4 },
     streamCount: { 2.4: 2, 5: 2 },
+    poeWattage: 15,
   },
   CISCO_C9166: {
     id: 'cisco-c9166',
@@ -21,6 +23,7 @@ export const AP_MODELS = {
     maxTxPower: { 2.4: 26, 5: 26, 6: 24 },
     antennaGain: { 2.4: 4, 5: 5, 6: 6 },
     streamCount: { 2.4: 4, 5: 4, 6: 4 },
+    poeWattage: 30,
   },
   ARUBA_AP635: {
     id: 'aruba-ap635',
@@ -31,6 +34,7 @@ export const AP_MODELS = {
     maxTxPower: { 2.4: 24, 5: 24, 6: 24 },
     antennaGain: { 2.4: 3, 5: 5, 6: 6 },
     streamCount: { 2.4: 2, 5: 4, 6: 2 },
+    poeWattage: 25,
   },
   RUCKUS_R770: {
     id: 'ruckus-r770',
@@ -41,6 +45,7 @@ export const AP_MODELS = {
     maxTxPower: { 2.4: 27, 5: 27, 6: 24 },
     antennaGain: { 2.4: 4, 5: 6, 6: 6 },
     streamCount: { 2.4: 4, 5: 4, 6: 4 },
+    poeWattage: 35,
   },
   UBIQUITI_U6_PRO: {
     id: 'ubiquiti-u6-pro',
@@ -51,6 +56,7 @@ export const AP_MODELS = {
     maxTxPower: { 2.4: 22, 5: 23 },
     antennaGain: { 2.4: 4, 5: 5.5 },
     streamCount: { 2.4: 2, 5: 4 },
+    poeWattage: 13,
   },
   UBIQUITI_U6_LITE: {
     id: 'ubiquiti-u6-lite',
@@ -61,6 +67,7 @@ export const AP_MODELS = {
     maxTxPower: { 2.4: 20, 5: 20 },
     antennaGain: { 2.4: 3, 5: 3 },
     streamCount: { 2.4: 2, 5: 2 },
+    poeWattage: 11,
   },
 }
 
@@ -70,3 +77,11 @@ export const DEFAULT_AP_MODEL_ID = AP_MODELS.GENERIC_WIFI6.id
 
 export const getAPModelById = (id) =>
   AP_MODEL_LIST.find((m) => m.id === id) ?? AP_MODELS.GENERIC_WIFI6
+
+// Per-AP PoE consumption. Falls back to a conservative 15 W when the model
+// (or an unknown modelId) has no `poeWattage` field. Used by SwitchPanel to
+// flag PoE-budget over-capacity warnings.
+export const getAPPoeWattage = (ap) => {
+  const m = getAPModelById(ap?.modelId ?? DEFAULT_AP_MODEL_ID)
+  return m.poeWattage ?? 15
+}
