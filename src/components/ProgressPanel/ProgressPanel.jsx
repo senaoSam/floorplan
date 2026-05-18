@@ -145,7 +145,6 @@ const PHASES = [
           { id: 'HM-F2c', done: true, text: '跨樓層射線的牆穿透' },
           { id: 'HM-F2e', done: true, text: '牆 Z 範圍過濾（wall bottom/topHeight）' },
           { id: 'HM-F3b', done: true, text: '樓板材質 UI' },
-          { id: 'HM-F2d', done: false, text: '跨樓層反射/繞射（3D wall 升級後）' },
           { id: 'HM-F8',  done: true,  text: '頻率相依的牆損失（ITU-R P.2040-3 lossB；2.4 GHz anchor）' },
         ],
       },
@@ -169,8 +168,6 @@ const PHASES = [
           { id: 'HM-F5j', done: true, text: 'Per-AP LOS field bake（drag 期間取回完整 refl/diff）' },
           { id: 'HM-F5k', done: true, text: 'AP→corner / AP→wall 鏡像 precompute texture' },
           { id: 'HM-F5l', done: true, text: 'Coarse-fine 擴張到 refl/diff（物理 upper bound mask）' },
-          { id: 'HM-F5m', done: false, text: '⏸️ F5c+ 4-AP batch（實測 readPixels 不是瓶頸，延後）' },
-          { id: 'HM-F5e', done: false, text: '⏸️ 延後（被 HM-drag-lod dominate；增量 texel 上傳僅救拖 AP）' },
           { id: 'HM-F5f', done: true, text: '大場景調優（diff loop cull 重排，dense-aps 1.78×）' },
         ],
       },
@@ -179,7 +176,6 @@ const PHASES = [
         items: [
           { id: 'HM-F4', done: true, text: 'autoPowerPlan 自動功率規劃（greedy + 多起點 ±1 dB；cost v2 = 4 個獨立 loss term L_coverage / L_outlier / L_quality / L_excess 加權）' },
           { id: 'HM-F9', done: true, text: 'autoPowerPlan 進 Web Worker（不卡 main thread + 真實 progress + cancel + 規劃品質分數）' },
-          { id: 'HM-B1', done: false, text: 'Gaussian blur 改善 / 參數微調 / 關閉選項' },
         ],
       },
     ],
@@ -210,102 +206,46 @@ const PHASES = [
     ],
   },
   {
-    phase: 'Phase 7 — 網路基礎設施',
+    // 設計依據：.claude/cable-spec.md
+    phase: 'Phase 7 — 網路基礎設施（Cable）',
     groups: [
       {
-        layer: 'Layer 11 — Switch & PoE',
+        layer: 'Layer 11 — Switch & 邏輯連線（base layer）',
         items: [
-          { id: '11-1', done: false, text: 'Switch 放置與屬性面板' },
-          { id: '11-2', done: false, text: 'AP ↔ Switch 連線' },
-          { id: '11-3', done: false, text: 'PoE 電力預算 + 過載警告' },
-          { id: '11-4', done: false, text: 'MDF / IDF 堆疊設定' },
+          { id: '11-1', done: false, text: 'Switch / IDF / MDF 放置與屬性面板（port 數、PoE budget、kind）' },
+          { id: '11-2', done: false, text: 'AP↔Switch 預設 Manhattan 連線（+20% slack + Z_drop，same floor 限制）' },
+          { id: '11-3', done: false, text: 'PoE 預算 + port 容量 over-capacity warning（不進 routing）' },
         ],
       },
       {
-        layer: 'Layer 12 — 走線管路',
+        layer: 'Layer 12 — Cable Tray / Riser',
         items: [
-          { id: '12-1', done: false, text: 'Cable Tray 路徑繪製' },
-          { id: '12-2', done: false, text: '自動計算線長' },
-          { id: '12-3', done: false, text: 'Cable Riser 垂直升降點' },
-        ],
-      },
-      {
-        layer: 'Layer 13 — 多設備支援',
-        items: [
-          { id: '13-1', done: false, text: 'IPCam 放置與屬性面板' },
-          { id: '13-2', done: false, text: 'Gateway 放置與屬性面板' },
-          { id: '13-3', done: false, text: '通用 IoT 設備放置' },
+          { id: '12-1', done: false, text: 'Cable Tray polyline 繪製 + magnet 半徑視覺化' },
+          { id: '12-2a', done: false, text: 'Graph builder Steps 1-7（endpoint snap 只挑最近 tray + tray intersection + chainage sort）' },
+          { id: '12-2b', done: false, text: 'Stage 3 routing（Dijkstra + connected component + same-floor fallback + unroutable 標記）' },
+          { id: '12-2c', done: false, text: '線長計算（chainage-based）+ CableLayer 渲染（tray / fallback / unroutable 三態）' },
+          { id: '12-3a', done: false, text: 'Cable Riser 點 + magnet（跨樓層共用 xy + floorIds）' },
+          { id: '12-3b', done: false, text: 'Riser graph 整合（Steps 6/9/10：snap 多 tray + 相鄰樓層垂直邊）' },
+          { id: '12-4', done: false, text: '⏸️ 延後：Hybrid routing（走一段 tray 再 Manhattan 收尾）' },
         ],
       },
     ],
   },
   {
-    phase: 'Phase 8 — 容量規劃 & Client 模擬',
-    groups: [
-      {
-        layer: 'Layer 14 — 容量規劃',
-        items: [
-          { id: '14-1', done: false, text: '容量區域繪製 + 子區域' },
-          { id: '14-2', done: false, text: '區域 client 數與頻段分佈設定' },
-          { id: '14-3', done: false, text: 'AP radio 負載視覺化' },
-          { id: '14-4', done: false, text: '6 GHz client 比例調整' },
-        ],
-      },
-      {
-        layer: 'Layer 15 — Client 體驗模擬',
-        items: [
-          { id: '15-1', done: false, text: 'Client 裝置類型設定' },
-          { id: '15-2', done: false, text: 'Client uplink 視角（用 RX-4 MCS 表，client TX 弱 5-10 dB）' },
-          { id: '15-3', done: false, text: 'Client 漫遊路徑視覺化' },
-          { id: '15-4', done: false, text: 'Wi-Fi 6E / 7 模擬（在 RX-4 ax 表上擴 be MCS 12-13、320 MHz）' },
-        ],
-      },
-    ],
-  },
-  {
-    phase: 'Phase 9 — AI 輔助 & 進階視覺化',
+    phase: 'Phase 9 — AI 輔助',
     groups: [
       {
         layer: 'Layer 16 — AI 自動化',
         items: [
-          { id: '16-1', done: false, text: 'AI 自動量測比例尺' },
-          { id: '16-2', done: false, text: 'AI 自動描繪建築範圍' },
           { id: '16-3a', done: true,  text: 'OpenCV.js 整合 + 二值化 pipeline（worker）' },
-          { id: '16-3b', done: false, text: '圖框與外邊界 ROI 偵測（暫緩，見 task.md）' },
           { id: '16-3c', done: true,  text: 'Deskew（Hough 角度直方圖 + warpAffine）' },
-          { id: '16-3d', done: false, text: 'Connected component scoring（文字 vs 牆）' },
           { id: '16-3e', done: true,  text: '分方向 morph long-line mask（保留原始線厚）' },
           { id: '16-3f', done: true,  text: 'HoughLinesP 線段抽取' },
-          { id: '16-3g', done: false, text: '角度 clustering（dominant orientations）' },
           { id: '16-3h', done: true,  text: 'Graph-based collinear merge + endpoint extension' },
           { id: '16-3i', done: true,  text: 'Wall thickness pair detection（牆 vs 家具/尺寸線）' },
-          { id: '16-3j', done: false, text: 'Oriented ROI density scoring' },
-          { id: '16-3k', done: false, text: '實心填色牆分支（contour + skeleton）' },
           { id: '16-3l', done: true,  text: 'Confidence scoring 整合（length+paired+density minimal viable）' },
           { id: '16-3m', done: true,  text: 'Web Worker 化（隨 16-3a 提前完成）' },
-          { id: '16-3n', done: false, text: '半自動 Review UI + 寫入 wallStore' },
           { id: '16-3o', done: true,  text: 'Toolbar「AI 偵測牆壁」入口 + 三桶分寫 + Undo/Redo 整合' },
-          { id: '16-4', done: false, text: 'AI 自動建議 AP 位置' },
-        ],
-      },
-      {
-        layer: 'Layer 17 — 進階顯示',
-        items: [
-          { id: '17-1', done: false, text: '人流熱區顯示' },
-          { id: '17-2', done: false, text: 'WiFi Client 訊號模擬顯示' },
-        ],
-      },
-    ],
-  },
-  {
-    phase: '整合（未來）',
-    groups: [
-      {
-        layer: '系統整合',
-        items: [
-          { id: 'I-1', done: false, text: '串接真實 API（替換 mock data）' },
-          { id: 'I-2', done: false, text: '封裝為可嵌入主產品的元件' },
-          { id: 'I-3', done: false, text: '專案管理（國家頻段 + 環境類型）' },
         ],
       },
     ],
