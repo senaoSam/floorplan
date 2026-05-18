@@ -9,13 +9,16 @@ import './APPanel.sass'
 
 function SwitchPanel({ floorId, swId }) {
   const sw            = useCableStore((s) => (s.switchesByFloor[floorId] ?? []).find((x) => x.id === swId))
-  const switches      = useCableStore((s) => s.switchesByFloor[floorId] ?? [])
-  const trays         = useCableStore((s) => s.traysByFloor[floorId] ?? [])
   const updateSwitch  = useCableStore((s) => s.updateSwitch)
   const removeSwitch  = useCableStore((s) => s.removeSwitch)
-  const aps           = useAPStore((s) => s.apsByFloor[floorId] ?? [])
-  const floor         = useFloorStore((s) => s.floors.find((f) => f.id === floorId))
   const clearSelected = useEditorStore((s) => s.clearSelected)
+  // Building-wide subscriptions: a cross-floor riser route can connect APs
+  // on other floors to this switch, so we need every AP / tray / riser.
+  const floors          = useFloorStore((s) => s.floors)
+  const apsByFloor      = useAPStore((s) => s.apsByFloor)
+  const switchesByFloor = useCableStore((s) => s.switchesByFloor)
+  const traysByFloor    = useCableStore((s) => s.traysByFloor)
+  const risers          = useCableStore((s) => s.risers)
 
   const handleField = useCallback((field, value) => {
     updateSwitch(floorId, swId, { [field]: value })
@@ -36,24 +39,25 @@ function SwitchPanel({ floorId, swId }) {
     clearSelected()
   }
 
-  // Connected APs = APs whose nearest same-floor switch is this one (route
-  // status === 'fallback-manhattan' since no tray graph yet). Drives the
-  // port-count + PoE-budget over-capacity warnings — purely advisory, the
-  // routing layer already places APs regardless of capacity (per spec §8).
+  // Connected APs = APs (any floor) whose chosen switch is this one. Used
+  // for port-count + PoE-budget over-capacity warnings — purely advisory,
+  // routing doesn't gate on capacity (spec §8).
   const connected = useMemo(() => {
     if (!sw) return { aps: [], totalPoe: 0 }
-    const routes = computeRoutes({ floor, aps, switches, trays })
+    const routes = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
     const connAps = []
     let totalPoe = 0
-    for (const ap of aps) {
-      const r = routes.get(ap.id)
-      if (r && r.switchId === swId) {
-        connAps.push(ap)
-        totalPoe += getAPPoeWattage(ap)
+    for (const [fId, list] of Object.entries(apsByFloor)) {
+      for (const ap of list ?? []) {
+        const r = routes.get(ap.id)
+        if (r && r.switchId === swId) {
+          connAps.push({ ...ap, floorId: fId })
+          totalPoe += getAPPoeWattage(ap)
+        }
       }
     }
     return { aps: connAps, totalPoe }
-  }, [sw, swId, aps, switches, trays, floor])
+  }, [sw, swId, floors, apsByFloor, switchesByFloor, traysByFloor, risers])
 
   if (!sw) return null
 
@@ -189,12 +193,23 @@ function SwitchPanel({ floorId, swId }) {
           <p className="ap-panel__hint">尚無 AP 路由到本 Switch</p>
         ) : (
           <ul className="ap-panel__conn-list">
-            {connected.aps.map((ap) => (
-              <li key={ap.id} className="ap-panel__conn-item">
-                <span className="ap-panel__conn-name">{ap.name}</span>
-                <span className="ap-panel__conn-wattage">{getAPPoeWattage(ap)} W</span>
-              </li>
-            ))}
+            {connected.aps.map((ap) => {
+              const isCrossFloor = ap.floorId !== floorId
+              const apFloor = isCrossFloor ? floors.find((f) => f.id === ap.floorId) : null
+              return (
+                <li key={ap.id} className="ap-panel__conn-item">
+                  <span className="ap-panel__conn-name">
+                    {ap.name}
+                    {isCrossFloor && (
+                      <span className="ap-panel__hint-inline">
+                        ({apFloor?.name ?? ap.floorId})
+                      </span>
+                    )}
+                  </span>
+                  <span className="ap-panel__conn-wattage">{getAPPoeWattage(ap)} W</span>
+                </li>
+              )
+            })}
           </ul>
         )}
       </section>

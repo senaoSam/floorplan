@@ -18,8 +18,9 @@
 
 import { cumulativeLengths, closestPointOnPolyline, segmentIntersection } from './geometry'
 
-export const SLACK_TRAY   = 0.10  // along-tray edges
-export const SLACK_DIRECT = 0.20  // endpoint→foot drop, fallback Manhattan (used by 12-2b)
+export const SLACK_TRAY            = 0.10  // along-tray edges
+export const SLACK_DIRECT          = 0.20  // endpoint→foot drop, fallback Manhattan
+export const SLACK_RISER_VERTICAL  = 0.00  // cross-floor riser hops (spec §7: 0–5%)
 
 // Node kinds
 //   'endpoint'      — AP / Switch / IDF / MDF / Router (Step 1)
@@ -34,7 +35,8 @@ function makeIdGen(prefix) {
   return () => `${prefix}-${++n}`
 }
 
-// Builds a graph for ONE floor (no riser nodes / vertical edges yet).
+// Builds a graph for ONE floor. Riser vertical edges live above this layer
+// (see buildBuildingGraph) because Step 10 by definition spans floors.
 // Returns:
 //   {
 //     nodes: Map<id, { id, kind, floorId, xy, ref? }>,
@@ -42,12 +44,17 @@ function makeIdGen(prefix) {
 //     endpointNodeIds: {
 //       aps:      Map<apId, { nodeId, snapInfo|null }>,
 //       switches: Map<swId, { nodeId, snapInfo|null }>,
+//       risers:   Map<riserId, { nodeId, snapInfos }>,
 //     },
 //     warnings: string[],
 //   }
 // snapInfo === null means the endpoint isn't connected to any tray and must
-// rely on fallback Manhattan in Stage 3 (handled later in 12-2b).
-export function buildFloorGraph({ floor, aps, switches, trays }) {
+// rely on fallback Manhattan in Stage 3.
+//
+// `risers` here is the list visible on THIS floor (caller filters by
+// floorIds.includes(floor.id)). Step 10 cross-floor edges are added by the
+// building-level wrapper.
+export function buildFloorGraph({ floor, aps, switches, trays, risers = [] }) {
   const floorId  = floor.id
   const pxPerM   = floor.scale          // null until the scale is calibrated
   const nextNode = makeIdGen(`n${floorId}`)
@@ -130,6 +137,17 @@ export function buildFloorGraph({ floor, aps, switches, trays }) {
     swEntries.set(sw.id, { nodeId, snapInfo: null })
   }
 
+  // ── Step 2: riser@floor nodes for risers visible on this floor ───────────
+  const riserEntries = new Map()
+  for (const r of risers) {
+    const nodeId = addNode({
+      kind: 'riser@floor',
+      xy: { x: r.x, y: r.y },
+      ref: { type: 'riser', id: r.id },
+    })
+    riserEntries.set(r.id, { nodeId, snapInfos: [] })
+  }
+
   // ── Step 5: endpoint snap — only the nearest tray within magnetDistance ──
   const snapEndpoint = (xy, entry) => {
     let best = null
@@ -154,6 +172,33 @@ export function buildFloorGraph({ floor, aps, switches, trays }) {
   for (const ap of aps) snapEndpoint({ x: ap.x, y: ap.y }, apEntries.get(ap.id))
   for (const sw of switches) snapEndpoint({ x: sw.x, y: sw.y }, swEntries.get(sw.id))
 
+  // ── Step 6 + 9: riser snap — attach to ALL trays whose magnet contains
+  // the riser xy (unlike endpoints, risers are hubs). For each match, add a
+  // foot anchor on the tray and a 'riser-drop' edge from riser@floor → foot.
+  for (const r of risers) {
+    const entry = riserEntries.get(r.id)
+    if (!entry) continue
+    const riserMagnet = r.magnetDistance ?? 100
+    for (const meta of trayMeta) {
+      const c = closestPointOnPolyline({ x: r.x, y: r.y }, meta.tray.points, meta.cum)
+      const trayMagnet = meta.tray.magnetDistance ?? 100
+      // Use the smaller of the two magnets so neither side overreaches its
+      // intended pull range. Spec doesn't pin this; smaller side wins keeps
+      // both authors' intent honoured.
+      const magnet = Math.min(riserMagnet, trayMagnet)
+      if (c.d > magnet) continue
+      const footId = addNode({ kind: 'riser-foot', xy: { x: c.foot.x, y: c.foot.y } })
+      meta.anchors.push({ chain: c.chain, nodeId: footId, kind: 'riser-foot' })
+      entry.snapInfos.push({ footNodeId: footId, dropPx: c.d, trayId: meta.tray.id })
+      if (pxPerM && pxPerM > 0) {
+        const weightM = (c.d / pxPerM) * (1 + SLACK_DIRECT)
+        addEdge(entry.nodeId, footId, weightM, 'riser-drop')
+      } else {
+        addEdge(entry.nodeId, footId, 0, 'riser-drop')
+      }
+    }
+  }
+
   // ── Step 7: sort each tray's anchors and add adjacent edges (chainage-based)
   // Zero-length edges (two anchors at the same chainage — e.g. an endpoint-foot
   // landing exactly on a tray-vertex) MUST still be added with weight 0,
@@ -175,7 +220,68 @@ export function buildFloorGraph({ floor, aps, switches, trays }) {
   return {
     nodes,
     adj,
-    endpointNodeIds: { aps: apEntries, switches: swEntries },
+    endpointNodeIds: { aps: apEntries, switches: swEntries, risers: riserEntries },
+    warnings,
+  }
+}
+
+// ── Step 10 wrapper: per-floor graphs stitched by vertical riser edges ───
+// Caller passes building-wide data; we delegate per-floor build to
+// buildFloorGraph and then add cross-floor edges between each riser's
+// adjacent (by elevation) floor nodes. Output shape mirrors the per-floor
+// graph but spans the whole building.
+export function buildBuildingGraph({ floors, apsByFloor = {}, switchesByFloor = {}, traysByFloor = {}, risers = [] }) {
+  const nodes = new Map()
+  const adj   = new Map()
+  const apEndpoints     = new Map()
+  const switchEndpoints = new Map()
+  const warnings = []
+  // riserId → ordered list of { floorId, nodeId, elevation }
+  const riserFloorNodes = new Map()
+
+  for (const floor of floors) {
+    const floorRisers = risers.filter((r) => (r.floorIds ?? []).includes(floor.id))
+    const g = buildFloorGraph({
+      floor,
+      aps:      apsByFloor[floor.id]      ?? [],
+      switches: switchesByFloor[floor.id] ?? [],
+      trays:    traysByFloor[floor.id]    ?? [],
+      risers:   floorRisers,
+    })
+    for (const [id, node] of g.nodes) nodes.set(id, node)
+    for (const [id, edges] of g.adj)   adj.set(id, edges)
+    for (const [apId, info]    of g.endpointNodeIds.aps)      apEndpoints.set(apId, { ...info, floorId: floor.id })
+    for (const [swId, info]    of g.endpointNodeIds.switches) switchEndpoints.set(swId, { ...info, floorId: floor.id })
+    for (const [riserId, info] of g.endpointNodeIds.risers) {
+      if (!riserFloorNodes.has(riserId)) riserFloorNodes.set(riserId, [])
+      riserFloorNodes.get(riserId).push({
+        floorId: floor.id,
+        nodeId: info.nodeId,
+        elevation: floor.elevation ?? 0,
+      })
+    }
+    warnings.push(...g.warnings)
+  }
+
+  // Step 10 — connect each riser's adjacent floors. We sort by elevation so
+  // a 3-floor riser yields edges (F1↔F2) + (F2↔F3) only (not F1↔F3 — that
+  // would bypass the intermediate floor). dz is already meters.
+  for (const entries of riserFloorNodes.values()) {
+    entries.sort((a, b) => a.elevation - b.elevation)
+    for (let i = 0; i < entries.length - 1; i++) {
+      const A = entries[i], B = entries[i + 1]
+      const dz = Math.abs(B.elevation - A.elevation)
+      const weightM = dz * (1 + SLACK_RISER_VERTICAL)
+      adj.get(A.nodeId).push({ to: B.nodeId, weightM, kind: 'riser-vertical' })
+      adj.get(B.nodeId).push({ to: A.nodeId, weightM, kind: 'riser-vertical' })
+    }
+  }
+
+  return {
+    nodes,
+    adj,
+    endpointNodeIds: { aps: apEndpoints, switches: switchEndpoints },
+    riserFloorNodes,
     warnings,
   }
 }

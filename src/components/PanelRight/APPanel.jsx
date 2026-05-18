@@ -37,19 +37,21 @@ const MOUNT_OPTIONS = [
 
 function APPanel({ floorId, apId }) {
   const ap          = useAPStore((s) => (s.apsByFloor[floorId] ?? []).find((a) => a.id === apId))
-  const aps         = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   const updateAP    = useAPStore((s) => s.updateAP)
   const removeAP    = useAPStore((s) => s.removeAP)
   const clearSelected = useEditorStore((s) => s.clearSelected)
   const domainId    = useEditorStore((s) => s.regulatoryDomain)
-  const switches    = useCableStore((s) => s.switchesByFloor[floorId] ?? [])
-  const trays       = useCableStore((s) => s.traysByFloor[floorId] ?? [])
-  const floor       = useFloorStore((s) => s.floors.find((f) => f.id === floorId))
+  // Building-wide subscriptions — needed for cross-floor riser routes.
+  const floors          = useFloorStore((s) => s.floors)
+  const apsByFloor      = useAPStore((s) => s.apsByFloor)
+  const switchesByFloor = useCableStore((s) => s.switchesByFloor)
+  const traysByFloor    = useCableStore((s) => s.traysByFloor)
+  const risers          = useCableStore((s) => s.risers)
 
   const route = useMemo(() => {
-    const map = computeRoutes({ floor, aps, switches, trays })
+    const map = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
     return map.get(apId)
-  }, [floor, aps, switches, trays, apId])
+  }, [floors, apsByFloor, switchesByFloor, traysByFloor, risers, apId])
 
   const model = getAPModelById(ap?.modelId ?? DEFAULT_AP_MODEL_ID)
 
@@ -428,8 +430,12 @@ function APPanel({ floorId, apId }) {
               <p className="ap-panel__hint">
                 目標 Switch：
                 {(() => {
-                  const sw = switches.find((s) => s.id === route.switchId)
-                  return sw ? sw.name : '—'
+                  // Switch may live on a different floor when routed via riser.
+                  for (const list of Object.values(switchesByFloor)) {
+                    const sw = (list ?? []).find((s) => s.id === route.switchId)
+                    if (sw) return sw.name
+                  }
+                  return '—'
                 })()}
               </p>
               <p className="ap-panel__hint">
