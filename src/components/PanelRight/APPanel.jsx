@@ -49,8 +49,8 @@ function APPanel({ floorId, apId }) {
   const risers          = useCableStore((s) => s.risers)
 
   const route = useMemo(() => {
-    const map = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
-    return map.get(apId)
+    const { routes } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
+    return routes.get(apId)
   }, [floors, apsByFloor, switchesByFloor, traysByFloor, risers, apId])
 
   const model = getAPModelById(ap?.modelId ?? DEFAULT_AP_MODEL_ID)

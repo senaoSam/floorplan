@@ -46,7 +46,7 @@ function CableLayer({ floorId, viewportScale }) {
       switchesByFloor: switchesByFloorLive,
       traysByFloor,
       risers,
-    })
+    }).routes
   }, [floors, apsByFloor, switchesByFloor, traysByFloor, risers, dragAP, dragSwitch, floorId])
 
   if (routes.size === 0) return null

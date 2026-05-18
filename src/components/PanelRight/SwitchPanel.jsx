@@ -44,7 +44,7 @@ function SwitchPanel({ floorId, swId }) {
   // routing doesn't gate on capacity (spec §8).
   const connected = useMemo(() => {
     if (!sw) return { aps: [], totalPoe: 0 }
-    const routes = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
+    const { routes } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
     const connAps = []
     let totalPoe = 0
     for (const [fId, list] of Object.entries(apsByFloor)) {

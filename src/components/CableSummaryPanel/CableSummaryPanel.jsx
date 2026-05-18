@@ -22,7 +22,7 @@ function CableSummaryPanel() {
   const [collapsed, setCollapsed] = useState(true)
 
   const stats = useMemo(() => {
-    const routes = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
+    const { routes, warnings } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
     let totalM = 0
     const byStatus = { tray: 0, 'fallback-manhattan': 0, unroutable: 0 }
     const byFloor  = new Map()   // floorId → { totalM, apCount }
@@ -42,7 +42,7 @@ function CableSummaryPanel() {
         unroutable.push({ apId: r.apId, apName: ap?.name ?? r.apId, floorId: fid })
       }
     }
-    return { totalM, byStatus, byFloor, unroutable, totalAP: routes.size }
+    return { totalM, byStatus, byFloor, unroutable, warnings, totalAP: routes.size }
   }, [floors, apsByFloor, switchesByFloor, traysByFloor, risers])
 
   // Hide the panel until the user actually has a cable system to summarise.
@@ -125,6 +125,19 @@ function CableSummaryPanel() {
                   <span className="cable-summary__sub">
                     {floors.find((f) => f.id === u.floorId)?.name ?? u.floorId}
                   </span>
+                </div>
+              ))}
+            </section>
+          )}
+
+          {stats.warnings.length > 0 && (
+            <section className="cable-summary__section">
+              <p className="cable-summary__label cable-summary__label--warn">
+                ⚠ Graph 警告（{stats.warnings.length}）
+              </p>
+              {stats.warnings.map((w, i) => (
+                <div key={i} className="cable-summary__warning" title={w}>
+                  {w}
                 </div>
               ))}
             </section>

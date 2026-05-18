@@ -15,10 +15,12 @@
 import { buildBuildingGraph, SLACK_DIRECT } from './buildGraph'
 import { unionFind, dijkstra, reconstructPath } from './routing'
 
-// Returns Map<apId, route> across ALL floors. Route shape:
-//   { apId, switchId|null, points: [{x,y,kind,floorId},...]|null,
-//     cableM|null, zDropM|null, routeStatus, homeFloorId }
-//   routeStatus ∈ 'tray' | 'fallback-manhattan' | 'unroutable'
+// Returns { routes, warnings }:
+//   routes:   Map<apId, route> across ALL floors. Route shape:
+//     { apId, switchId|null, points: [{x,y,kind,floorId},...]|null,
+//       cableM|null, zDropM|null, routeStatus, homeFloorId }
+//     routeStatus ∈ 'tray' | 'fallback-manhattan' | 'unroutable'
+//   warnings: string[] from buildBuildingGraph (tray-tray touching, etc.)
 //
 // Building-wide because risers let an AP reach a switch on another floor
 // (spec §6 "graph route 含跨樓層 riser"). Callers that only care about a
@@ -26,7 +28,7 @@ import { unionFind, dijkstra, reconstructPath } from './routing'
 // or by point.floorId.
 export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = {}, traysByFloor = {}, risers = [] }) {
   const out = new Map()
-  if (floors.length === 0) return out
+  if (floors.length === 0) return { routes: out, warnings: [] }
 
   const floorById = new Map(floors.map((f) => [f.id, f]))
 
@@ -130,5 +132,5 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
     }
   }
 
-  return out
+  return { routes: out, warnings: g.warnings ?? [] }
 }
