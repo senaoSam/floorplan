@@ -1,6 +1,7 @@
 import React from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
+import { useEditorStore } from '@/store/useEditorStore'
 import { generateId } from '@/utils/id'
 import { DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
 import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
@@ -62,6 +63,7 @@ function StressLoader() {
   const floors        = useFloorStore((s) => s.floors)
   const setAPs        = useAPStore((s) => s.setAPs)
 
+  const sidebarCollapsed = useEditorStore((s) => s.sidebarCollapsed)
   const activeFloor = floors.find((f) => f.id === activeFloorId) ?? null
   const disabled = !activeFloor || !activeFloor.scale
 
@@ -72,7 +74,7 @@ function StressLoader() {
   }
 
   return (
-    <div className="stress-loader">
+    <div className={`stress-loader${sidebarCollapsed ? ' stress-loader--compact' : ''}`}>
       {COUNTS.map((n) => (
         <button
           key={n}
@@ -82,7 +84,7 @@ function StressLoader() {
           disabled={disabled}
           title={disabled ? '需先載入有比例尺的樓層' : `把目前樓層塞滿 ${n} 顆 AP（取代既有 AP）`}
         >
-          {n} AP
+          {sidebarCollapsed ? n : `${n} AP`}
         </button>
       ))}
     </div>

@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useEditorStore } from '@/store/useEditorStore'
 import './ProgressPanel.sass'
 
 const FEATURES = [
@@ -257,6 +258,7 @@ const ALL_ITEMS = PHASES.flatMap((p) => p.groups.flatMap((g) => g.items))
 function ProgressPanel() {
   const [open, setOpen] = useState(false)
   const [tab, setTab]   = useState('features') // 'features' | 'tasks'
+  const sidebarCollapsed = useEditorStore((s) => s.sidebarCollapsed)
 
   const totalDone  = ALL_ITEMS.filter((i) => i.done).length
   const totalCount = ALL_ITEMS.length
@@ -265,12 +267,14 @@ function ProgressPanel() {
     <>
       {/* 觸發按鈕 */}
       <button
-        className="progress-trigger"
+        className={`progress-trigger${sidebarCollapsed ? ' progress-trigger--compact' : ''}`}
         onClick={() => setOpen((v) => !v)}
-        title="查看目前進度"
+        title={sidebarCollapsed ? `進度 ${totalDone}/${totalCount}` : '查看目前進度'}
       >
         <span className="progress-trigger__bar" style={{ width: `${(totalDone / totalCount) * 100}%` }} />
-        <span className="progress-trigger__label">📋 進度 {totalDone}/{totalCount}</span>
+        <span className="progress-trigger__label">
+          {sidebarCollapsed ? '📋' : `📋 進度 ${totalDone}/${totalCount}`}
+        </span>
       </button>
 
       {/* 面板 */}

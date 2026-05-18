@@ -122,16 +122,17 @@ function DemoLoader() {
 
   const busy = loading || warmingUp
   const label = warmingUp ? '初始化熱力圖引擎…' : loading ? '載入中…' : '載入 Demo 平面圖'
+  const sidebarCollapsed = useEditorStore((s) => s.sidebarCollapsed)
 
   return (
     <button
-      className="demo-loader"
+      className={`demo-loader${sidebarCollapsed ? ' demo-loader--compact' : ''}`}
       onClick={handleLoad}
       disabled={busy}
-      title={warmingUp ? '熱力圖引擎初始化中，請稍候' : '再次點擊可新增另一個 Demo 樓層'}
+      title={sidebarCollapsed ? label : (warmingUp ? '熱力圖引擎初始化中，請稍候' : '再次點擊可新增另一個 Demo 樓層')}
     >
       {busy ? <span className="demo-loader__spinner" /> : '🗺'}
-      <span>{label}</span>
+      {!sidebarCollapsed && <span>{label}</span>}
     </button>
   )
 }

@@ -10,6 +10,17 @@
   display: flex
   gap: 6px
 
+  // Compact: stack vertically, narrow buttons that fit beside the collapsed sidebar.
+  &--compact
+    flex-direction: column
+    gap: 4px
+    bottom: 156px
+
+    .stress-loader__btn
+      width: 30px
+      padding: 0
+      font-size: 10px
+
 .stress-loader__btn
   height: 28px
   padding: 0 12px
