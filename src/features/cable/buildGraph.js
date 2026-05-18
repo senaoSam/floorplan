@@ -76,13 +76,24 @@ export function buildFloorGraph({ floor, aps, switches, trays, risers = [] }) {
   // ── Step 3: tray vertices → graph nodes + anchor list ────────────────────
   // Each anchor: { chain, nodeId, kind }. Sorted by chain at Step 7 to lay
   // tray-internal edges. Chainage is the cumulative distance from points[0].
+  //
+  // 12-2d: Reuse the same nodeId when two trays share a vertex at the EXACT
+  // same xy. This handles "user drew separate trays that touch at endpoints"
+  // (the canvas already provides a snap UI that produces exact-equal coords).
+  // We only fold when xy is strictly `===` — spec §10 still rejects "almost
+  // touching" cases to keep topology stable under small position changes.
+  const vertexByXY = new Map()  // key: `${x}|${y}` → nodeId
   const trayMeta = trays.map((t) => {
     const cum = cumulativeLengths(t.points)
-    const anchors = t.points.map((v, i) => ({
-      chain: cum[i],
-      nodeId: addNode({ kind: 'tray-vertex', xy: { x: v.x, y: v.y } }),
-      kind:   'vertex',
-    }))
+    const anchors = t.points.map((v, i) => {
+      const key = `${v.x}|${v.y}`
+      let nodeId = vertexByXY.get(key)
+      if (!nodeId) {
+        nodeId = addNode({ kind: 'tray-vertex', xy: { x: v.x, y: v.y } })
+        vertexByXY.set(key, nodeId)
+      }
+      return { chain: cum[i], nodeId, kind: 'vertex' }
+    })
     return { tray: t, cum, anchors }
   })
 
@@ -155,7 +166,10 @@ export function buildFloorGraph({ floor, aps, switches, trays, risers = [] }) {
       const c = closestPointOnPolyline(xy, meta.tray.points, meta.cum)
       const magnet = meta.tray.magnetDistance ?? 100
       if (c.d > magnet) continue
-      if (!best || c.d < best.d) best = { meta, c }
+      // best is shaped { meta, c }; compare against best.c.d, not best.d
+      // (a long-hidden bug — only surfaced once multi-polyline trays were
+      // common after 12-2d's vertex merge made them practical).
+      if (!best || c.d < best.c.d) best = { meta, c }
     }
     if (!best) return
     const footId = addNode({ kind: 'endpoint-foot', xy: { x: best.c.foot.x, y: best.c.foot.y } })
