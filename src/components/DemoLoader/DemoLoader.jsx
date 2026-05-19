@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
+import { useCableStore } from '@/store/useCableStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useWarmupStore } from '@/store/useWarmupStore'
@@ -36,6 +37,18 @@ const DEMO_AP_POSITIONS_NORM = [
   { x: 615 / 685, y: 400 / 511 }, // master suite
 ]
 
+// Cable seed (13-3): single horizontal tray cutting through the middle of
+// the house, magnet 150 px so all five room-centre APs land inside its
+// capsule. Switch sits on the tray so its snap distance is zero, leaving
+// AP cable lengths the only meaningful variable. xy normalised to
+// example3.png (685x511) and scaled to the actual canvas at load time.
+const DEMO_TRAY_PTS_NORM = [
+  { x:  50 / 685, y: 320 / 511 },
+  { x: 640 / 685, y: 320 / 511 },
+]
+const DEMO_TRAY_MAGNET_PX = 150
+const DEMO_SWITCH_NORM = { x: 300 / 685, y: 320 / 511 }
+
 function buildDemoAPs(canvasWidth, canvasHeight, regulatoryDomain) {
   const aps = DEMO_AP_POSITIONS_NORM.map((p, i) => ({
     id: generateId('ap'),
@@ -68,6 +81,9 @@ function DemoLoader() {
   const importFloorFromUrl = useFloorStore((s) => s.importFloorFromUrl)
   const setWalls           = useWallStore((s) => s.setWalls)
   const setAPs             = useAPStore((s) => s.setAPs)
+  const setSwitches        = useCableStore((s) => s.setSwitches)
+  const setTrays           = useCableStore((s) => s.setTrays)
+  const nextSwitchName     = useCableStore((s) => s.nextSwitchName)
   const setHeatmapEnabled  = useHeatmapStore((s) => s.setEnabled)
   const regulatoryDomain   = useEditorStore((s) => s.regulatoryDomain)
   const warmingUp          = useWarmupStore((s) => s.warmingUp)
@@ -112,6 +128,26 @@ function DemoLoader() {
       const { walls } = floorplanFromLines(lines)
       setWalls(floor.id, walls)
       setAPs(floor.id, buildDemoAPs(img.naturalWidth, img.naturalHeight, regulatoryDomain))
+
+      // Cable seed: one tray + one switch, sized to the actual canvas.
+      const W = img.naturalWidth, H = img.naturalHeight
+      setTrays(floor.id, [{
+        id: generateId('tray'),
+        points: DEMO_TRAY_PTS_NORM.map((p) => ({ x: p.x * W, y: p.y * H })),
+        magnetDistance: DEMO_TRAY_MAGNET_PX,
+      }])
+      setSwitches(floor.id, [{
+        id: generateId('sw'),
+        name: nextSwitchName('switch'),
+        x: DEMO_SWITCH_NORM.x * W,
+        y: DEMO_SWITCH_NORM.y * H,
+        kind: 'switch',
+        mountHeight: 0.5,
+        model: 'POE-24-port',
+        portCount: 24,
+        poeBudget: 370,
+      }])
+
       setHeatmapEnabled(true)
     } catch (e) {
       console.error('[DemoLoader] load failed', e)
