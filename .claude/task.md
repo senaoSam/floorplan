@@ -198,3 +198,30 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 - 視覺：藍色細長方體或 cylinder（半徑 5 cm），對應 2D tray 顏色
 - 掛在 FloorStack 內（per-floor，不跨樓層）
 - Riser 已有 3D 圓柱（12-3a 做了），不重複
+
+---
+
+## Phase 11 — Cable UX Polish
+
+> 跑過幾輪 demo 後發現 tray 單線跟其他線視覺易混淆、selection 沒帶 routing 上下文。
+
+### Layer 17 — Cable 視覺 + 選取上下文
+
+| #     | 狀態 | Task                                                                              |
+| ----- | ---- | --------------------------------------------------------------------------------- |
+| 17-1  | ⬜   | Tray 通道風格視覺（border + 虛線中線 + 半透明 body）                                 |
+| 17-2  | ⬜   | 選取裝置 highlight 連線（點 AP → 該條 cable；點 SW → 所有連接的 cable + S2S）       |
+
+**17-1 細節**
+- 既有：tray 是單一一條粗線（2.4px），跟其他線（cable、wall）視覺易混
+- 新：把 tray 渲染成「通道」的樣子
+  - 兩條 perpendicular-offset 出來的平行 border 線（實線）
+  - 中間虛線中線
+  - 兩 border 之間的封閉區域用半透明 body 色填
+- 寬度視覺上 ~6 px（canvas px 隨 viewport scale 換算）
+
+**17-2 細節**
+- CableLayer 讀 selectedId / selectedType
+- 選 AP：highlight 該 AP 的 route（cable + 目標 switch 的位置）；其他 cable 變淡（opacity 0.2）
+- 選 Switch：highlight 所有 route.switchId === selectedId 的線 + 所有 S2S link 含該 switch 的線；其他線變淡
+- 沒選任何裝置：全部正常 opacity
