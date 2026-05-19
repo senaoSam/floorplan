@@ -10,6 +10,7 @@ import ScopeLayer3D from './ScopeLayer3D'
 import HeatmapPlane3D from './HeatmapPlane3D'
 import FloorHoleVolume3D from './FloorHoleVolume3D'
 import RiserLayer3D from './RiserLayer3D'
+import TrayLayer3D from './TrayLayer3D'
 import { computeFloorElevations } from './floorStacking'
 import './Viewer3D.sass'
 
@@ -82,6 +83,8 @@ function FloorStack({ floor, elevation, isActive }) {
       <ScopeLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
       <WallLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActive} />
       <APLayer3D    floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActive} />
+      {/* 15-1: cable tray rendered as thin boxes pinned to the ceiling. */}
+      <TrayLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} ceilingHeight={floor.floorHeight} />
       {/* 10-5e MVP: heatmap on the active floor only. Mounted inside this
           group so the plane inherits the floor's elevation translate; the
           `elevation` prop is forwarded for future modes that may mount the

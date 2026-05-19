@@ -163,9 +163,9 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 
 | #     | 狀態 | Task                                                                              |
 | ----- | ---- | --------------------------------------------------------------------------------- |
-| 14-1  | ⬜   | Switch uplink 屬性 + UI（指定上層 switch / IDF / MDF target、線材偏好）             |
-| 14-2  | ⬜   | Switch-to-switch routing（用既有 tray/riser graph 算 S2S 線，新 render layer）       |
-| 14-3  | ⬜   | BOM 分類顯示（AP-link vs S2S、copper vs fiber、長度級距 <30/30-90/>90m）            |
+| 14-1  | ✅   | Switch uplink 屬性 + UI（指定上層 switch / IDF / MDF target、線材偏好）             |
+| 14-2  | ✅   | Switch-to-switch routing（用既有 tray/riser graph 算 S2S 線，新 render layer）       |
+| 14-3  | ✅   | BOM 分類顯示（AP-link vs S2S、copper vs fiber、長度級距 <30/30-90/>90m）            |
 
 **14-1 細節**
 - Switch model 增加 `uplinkTo: switchId | null`（null = 頂層，不上連）
@@ -190,7 +190,7 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 
 | #     | 狀態 | Task                                                                              |
 | ----- | ---- | --------------------------------------------------------------------------------- |
-| 15-1  | ⬜   | Tray 3D 渲染（沿 polyline 在天花板高度畫長方體 / cylinder）                          |
+| 15-1  | ✅   | Tray 3D 渲染（沿 polyline 在天花板高度畫長方體 / cylinder）                          |
 | 15-2  | ⏸️   | **延後**：Cable 3D 渲染（路徑線在 3D 顯示）— 視 15-1 + 使用者回饋再排                |
 
 **15-1 細節**
