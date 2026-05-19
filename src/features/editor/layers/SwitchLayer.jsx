@@ -2,6 +2,10 @@ import React, { useState } from 'react'
 import { Group, Rect, Text, Line } from 'react-konva'
 import DeleteButton from './DeleteButton'
 import { useCableStore, getSwitchKindColor } from '@/store/useCableStore'
+import { useFocusedDevices } from '@/features/editor/useFocusedDevices'
+
+// 17-2: indigo halo wrapped around devices related to the current selection.
+const FOCUS_HALO = '#818cf8'
 
 // Switch icon = small rounded chassis with port indicators on the bottom edge.
 // Kind colour drives stroke + label background so switch / IDF / MDF / router
@@ -13,7 +17,7 @@ const KIND_LABEL = {
   router: 'RTR',
 }
 
-function SwitchMarker({ sw, isSelected, isHovered, onHover, isDraggable, onClick, onMoved, onDragMove, onRightMouseDown, inverseScale, onDelete, setHoverCursor }) {
+function SwitchMarker({ sw, isSelected, isHovered, isFocused, onHover, isDraggable, onClick, onMoved, onDragMove, onRightMouseDown, inverseScale, onDelete, setHoverCursor }) {
   const s = inverseScale
   const color = getSwitchKindColor(sw.kind)
   const strokeColor = isSelected ? '#e74c3c' : color
@@ -49,6 +53,20 @@ function SwitchMarker({ sw, isSelected, isHovered, onHover, isDraggable, onClick
         onMoved(sw.id, e.target.x(), e.target.y())
       }}
     >
+      {/* 17-2 focus halo — drawn first so chassis sits on top of it. */}
+      {isFocused && (
+        <Rect
+          x={-w / 2 - 4 * s}
+          y={-h / 2 - 4 * s}
+          width={w + 8 * s}
+          height={h + 8 * s}
+          cornerRadius={5 * s}
+          stroke={FOCUS_HALO}
+          strokeWidth={3 * s}
+          opacity={0.85}
+          listening={false}
+        />
+      )}
       {/* Chassis */}
       <Rect
         x={-w / 2}
@@ -127,6 +145,7 @@ function SwitchLayer({ floorId, selectedSwitchId, selectedItems = [], onSwitchCl
   const inverseScale  = 1 / (viewportScale || 1)
   const [hoveredId, setHoveredId] = useState(null)
   const batchSelectedIds = selectedItems.length > 1 ? new Set(selectedItems.filter((it) => it.type === 'switch').map((it) => it.id)) : null
+  const focused = useFocusedDevices()
 
   const handleMoved = (id, x, y) => {
     updateSwitch(floorId, id, { x, y })
@@ -141,6 +160,7 @@ function SwitchLayer({ floorId, selectedSwitchId, selectedItems = [], onSwitchCl
           sw={sw}
           isSelected={sw.id === selectedSwitchId || (batchSelectedIds?.has(sw.id) ?? false)}
           isHovered={sw.id === hoveredId}
+          isFocused={focused.switches.has(sw.id)}
           onHover={setHoveredId}
           isDraggable
           onClick={onSwitchClick}

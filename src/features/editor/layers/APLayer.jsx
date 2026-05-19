@@ -4,6 +4,10 @@ import DeleteButton from './DeleteButton'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
+import { useFocusedDevices } from '@/features/editor/useFocusedDevices'
+
+// 17-2: indigo halo wrapped around devices related to the current selection.
+const FOCUS_HALO = '#818cf8'
 
 // Normalize azimuth to [0, 360) and beamwidth to [10, 180].
 const wrapAzimuth = (v) => (((v % 360) + 360) % 360)
@@ -37,7 +41,7 @@ const FREQ_LABEL = {
   6:   '6G',
 }
 
-function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, onMoved, onDragMove, isDrawingActive, onRightMouseDown, showAPInfo, inverseScale, onDelete, setHoverCursor }) {
+function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, onClick, onMoved, onDragMove, isDrawingActive, onRightMouseDown, showAPInfo, inverseScale, onDelete, setHoverCursor }) {
   const color = FREQ_COLOR[ap.frequency] ?? '#4fc3f7'
   const ringColor = isSelected ? '#e74c3c' : color
   const s = inverseScale
@@ -86,6 +90,16 @@ function APMarker({ ap, isSelected, isHovered, onHover, isDraggable, onClick, on
     >
       {/* 透明 hit circle — 唯一接收滑鼠事件的子元素，其餘全部 listening={false} */}
       <Circle radius={14 * inverseScale} fill="transparent" />
+      {/* 17-2 focus halo — drawn first so the AP icon sits on top of it. */}
+      {isFocused && (
+        <Circle
+          radius={15 * s}
+          stroke={FOCUS_HALO}
+          strokeWidth={3 * s}
+          opacity={0.85}
+          listening={false}
+        />
+      )}
       {/* 定向覆蓋扇形（僅指示方向與波瓣寬度，不代表真實距離） */}
       {isDirectional && (
         <>
@@ -216,6 +230,7 @@ function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPDra
   const inverseScale = 1 / viewportScale
   const [hoveredId, setHoveredId] = useState(null)
   const batchSelectedIds = selectedItems.length > 1 ? new Set(selectedItems.filter((it) => it.type === 'ap').map((it) => it.id)) : null
+  const focused = useFocusedDevices()
 
   const handleMoved = (id, x, y) => {
     updateAP(floorId, id, { x, y })
@@ -230,6 +245,7 @@ function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPDra
           ap={ap}
           isSelected={ap.id === selectedAPId || (batchSelectedIds?.has(ap.id) ?? false)}
           isHovered={ap.id === hoveredId}
+          isFocused={focused.aps.has(ap.id)}
           onHover={setHoveredId}
           isDraggable
           onClick={onAPClick}

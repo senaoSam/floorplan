@@ -4,7 +4,17 @@ import { useAPStore } from '@/store/useAPStore'
 import { useCableStore } from '@/store/useCableStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
+import { useEditorStore } from '@/store/useEditorStore'
 import { computeRoutes } from '@/features/cable/computeRoutes'
+
+// 17-2: opacity multiplier for cables NOT related to the current selection.
+// Routes that touch the selected AP / Switch keep full opacity; everything
+// else fades so the user sees the connection at a glance.
+const DIM_OPACITY = 0.18
+
+// Indigo highlight band drawn beneath cable lines for the focused route(s).
+// No border — just a translucent body that wraps the polyline.
+const HIGHLIGHT_FILL = 'rgba(129, 140, 248, 0.55)'  // indigo-400 @ 55%
 
 // Render Stage 3 route results on the active floor only. Routes are
 // computed building-wide (cross-floor via risers); we filter segments to
@@ -24,7 +34,28 @@ function CableLayer({ floorId, viewportScale }) {
   // instead of waiting for the dragend commit into the main stores.
   const dragAP     = useDragOverlayStore((s) => s.ap)
   const dragSwitch = useDragOverlayStore((s) => s.sw)
+  // 17-2: selection state drives the dim-the-others highlight pass.
+  const selectedId   = useEditorStore((s) => s.selectedId)
+  const selectedType = useEditorStore((s) => s.selectedType)
   const inverseScale = 1 / (viewportScale || 1)
+
+  // Decide which cable groups stay fully opaque vs fade. No selection (or
+  // a selection that isn't a network device) → everything stays normal.
+  const hasFocus = selectedId && (selectedType === 'ap' || selectedType === 'switch')
+  const isRouteRelevant = (r) => {
+    if (!hasFocus) return true
+    if (selectedType === 'ap')     return r.apId     === selectedId
+    if (selectedType === 'switch') return r.switchId === selectedId
+    return true
+  }
+  const isLinkRelevant = (link) => {
+    if (!hasFocus) return true
+    if (selectedType === 'switch') return link.srcId === selectedId || link.targetId === selectedId
+    return false   // AP selection doesn't relate to S2S trunks
+  }
+  // Highlight = "selected AND this cable is one of the focused ones".
+  const isRouteFocused = (r)    => hasFocus && isRouteRelevant(r)
+  const isLinkFocused  = (link) => hasFocus && isLinkRelevant(link)
 
   const { routes, switchLinks } = useMemo(() => {
     // Apply drag overlays on the active floor only — overlays are per-floor.
@@ -57,6 +88,8 @@ function CableLayer({ floorId, viewportScale }) {
   return (
     <Group listening={false}>
       {Array.from(routes.values()).map((r) => {
+        const groupOpacity = isRouteRelevant(r) ? 1 : DIM_OPACITY
+        const highlight = isRouteFocused(r)
         if (r.routeStatus === 'unroutable') {
           // Only show the unroutable badge on the AP's home floor.
           if (r.homeFloorId !== floorId) return null
@@ -65,14 +98,19 @@ function CableLayer({ floorId, viewportScale }) {
           const apLive = dragAP && dragAP.id === ap.id
             ? { ...ap, x: dragAP.x, y: dragAP.y }
             : ap
-          return <UnroutableBadge key={r.apId} ap={apLive} s={inverseScale} />
+          return (
+            <Group key={r.apId} opacity={groupOpacity}>
+              <UnroutableBadge ap={apLive} s={inverseScale} />
+            </Group>
+          )
         }
         if (r.routeStatus === 'fallback-manhattan') {
           // Fallback is always same-floor by spec; skip if not this floor.
           if (r.homeFloorId !== floorId) return null
           const flat = r.points.flatMap((p) => [p.x, p.y])
           return (
-            <Group key={r.apId}>
+            <Group key={r.apId} opacity={groupOpacity}>
+              {highlight && <HighlightBand points={r.points} floorId={floorId} s={inverseScale} />}
               <Line
                 points={flat}
                 stroke="#9ca3af"
@@ -96,17 +134,28 @@ function CableLayer({ floorId, viewportScale }) {
         }
         // routeStatus === 'tray' — may span multiple floors via riser. Only
         // render the contiguous segments that lie entirely on the active floor.
-        return <TrayRoute key={r.apId} route={r} floorId={floorId} s={inverseScale} />
+        return (
+          <Group key={r.apId} opacity={groupOpacity}>
+            {highlight && <HighlightBand points={r.points} floorId={floorId} s={inverseScale} />}
+            <TrayRoute route={r} floorId={floorId} s={inverseScale} />
+          </Group>
+        )
       })}
 
       {/* 14-2: switch-to-switch uplinks. Same renderer, distinct colour so
           trunk lines don't blend into AP cables. */}
       {Array.from(switchLinks.values()).map((link) => {
+        const groupOpacity = isLinkRelevant(link) ? 1 : DIM_OPACITY
+        const highlight = isLinkFocused(link)
         if (link.routeStatus === 'unroutable') {
           if (link.srcFloorId !== floorId) return null
           const sw = switchesOnFloor.find((s) => s.id === link.srcId)
           if (!sw) return null
-          return <UnroutableBadge key={`sl-${link.srcId}`} ap={sw} s={inverseScale} />
+          return (
+            <Group key={`sl-${link.srcId}`} opacity={groupOpacity}>
+              <UnroutableBadge ap={sw} s={inverseScale} />
+            </Group>
+          )
         }
         if (link.routeStatus === 'fallback-manhattan') {
           if (link.srcFloorId !== floorId) return null
@@ -116,7 +165,8 @@ function CableLayer({ floorId, viewportScale }) {
           const stroke  = isFiber ? '#fb7185' : '#a78bfa'
           const flat = link.points.flatMap((p) => [p.x, p.y])
           return (
-            <Group key={`sl-${link.srcId}`}>
+            <Group key={`sl-${link.srcId}`} opacity={groupOpacity}>
+              {highlight && <HighlightBand points={link.points} floorId={floorId} s={inverseScale} />}
               <Line
                 points={flat}
                 stroke={stroke}
@@ -131,7 +181,12 @@ function CableLayer({ floorId, viewportScale }) {
             </Group>
           )
         }
-        return <SwitchLinkRoute key={`sl-${link.srcId}`} link={link} floorId={floorId} s={inverseScale} />
+        return (
+          <Group key={`sl-${link.srcId}`} opacity={groupOpacity}>
+            {highlight && <HighlightBand points={link.points} floorId={floorId} s={inverseScale} />}
+            <SwitchLinkRoute link={link} floorId={floorId} s={inverseScale} />
+          </Group>
+        )
       })}
     </Group>
   )
@@ -242,6 +297,37 @@ function SwitchLinkRoute({ link, floorId, s }) {
         )
       })}
     </Group>
+  )
+}
+
+// Translucent indigo band drawn UNDER cable lines so the focused route
+// reads as a highlighted "tube". No border — just the body. Each on-floor
+// segment is its own Line so cross-floor riser hops don't smear across
+// the canvas. Strokewidth tuned to wrap cleanly around drop legs + tray
+// runs without obscuring them.
+function HighlightBand({ points, floorId, s }) {
+  if (!points || points.length < 2) return null
+  const segments = []
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i], b = points[i + 1]
+    if (a.floorId === floorId && b.floorId === floorId) {
+      segments.push([a.x, a.y, b.x, b.y])
+    }
+  }
+  return (
+    <>
+      {segments.map((seg, i) => (
+        <Line
+          key={`hb-${i}`}
+          points={seg}
+          stroke={HIGHLIGHT_FILL}
+          strokeWidth={10 * s}
+          lineCap="round"
+          lineJoin="round"
+          listening={false}
+        />
+      ))}
+    </>
   )
 }
 

@@ -209,8 +209,8 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 
 | #     | 狀態 | Task                                                                              |
 | ----- | ---- | --------------------------------------------------------------------------------- |
-| 17-1  | ⬜   | Tray 通道風格視覺（border + 虛線中線 + 半透明 body）                                 |
-| 17-2  | ⬜   | 選取裝置 highlight 連線（點 AP → 該條 cable；點 SW → 所有連接的 cable + S2S）       |
+| 17-1  | ✅   | Tray 通道風格視覺（border + 虛線中線 + 半透明 body）                                 |
+| 17-2  | ✅   | 選取裝置 highlight 連線 + device halo（點 AP → cable + dest switch；點 SW → 所有 cable + AP + S2S peer）|
 
 **17-1 細節**
 - 既有：tray 是單一一條粗線（2.4px），跟其他線（cable、wall）視覺易混

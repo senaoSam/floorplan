@@ -3,11 +3,55 @@ import { Group, Line, Circle } from 'react-konva'
 import DeleteButton from './DeleteButton'
 import { useCableStore } from '@/store/useCableStore'
 
-// Tray colour scheme: muted blue, distinct from cable (grey/cyan) and walls.
-const TRAY_COLOR        = '#60a5fa'
+// Tray colour scheme: indigo (blue-leaning purple), distinct from cable
+// (cyan / violet) and walls.
+const TRAY_COLOR        = '#818cf8'                    // indigo-400 border
 const TRAY_SELECTED     = '#e74c3c'
-const MAGNET_FILL       = 'rgba(96, 165, 250, 0.12)'
-const MAGNET_STROKE     = 'rgba(96, 165, 250, 0.45)'
+const TRAY_BODY_FILL    = 'rgba(99, 102, 241, 0.40)'   // indigo-500 @ 40% — visible body
+const TRAY_SELECTED_FILL = 'rgba(231, 76, 60, 0.32)'
+const MAGNET_FILL       = 'rgba(129, 140, 248, 0.12)'
+const MAGNET_STROKE     = 'rgba(129, 140, 248, 0.45)'
+
+// Visual width (screen px) of the channel — borders sit at ±halfWidth from
+// the centreline. Tuned so the body fill, two borders, and dashed centre
+// are all individually legible at typical zoom levels.
+const TRAY_WIDTH_SCREEN_PX = 8
+
+// Build a parallel offset polyline. Each vertex is shifted perpendicular by
+// `offset` (px in canvas coords); the perpendicular at an interior vertex
+// is the angle bisector of the incoming and outgoing edges, scaled so the
+// edge-to-offset distance stays exactly `offset` on both sides (miter join).
+// Returns a fresh array of points.
+function offsetPolyline(points, offset) {
+  if (points.length < 2) return points.map((p) => ({ ...p }))
+  const perp = (a, b) => {
+    const dx = b.x - a.x, dy = b.y - a.y
+    const len = Math.hypot(dx, dy) || 1
+    return { x: -dy / len, y: dx / len }   // "left" of segment direction
+  }
+  const out = new Array(points.length)
+  for (let i = 0; i < points.length; i++) {
+    const cur = points[i]
+    const prev = i > 0 ? points[i - 1] : null
+    const next = i < points.length - 1 ? points[i + 1] : null
+    let nx, ny
+    if (prev && next) {
+      const p1 = perp(prev, cur)
+      const p2 = perp(cur, next)
+      // Miter math: |p1·p2 + 1| → 0 at a 180° fold; clamp to avoid the
+      // miter shooting off to infinity at near-reversals.
+      const denom = Math.max(1 + p1.x * p2.x + p1.y * p2.y, 0.05)
+      nx = (p1.x + p2.x) / denom
+      ny = (p1.y + p2.y) / denom
+    } else if (next) {
+      const p = perp(cur, next); nx = p.x; ny = p.y
+    } else {
+      const p = perp(prev, cur); nx = p.x; ny = p.y
+    }
+    out[i] = { x: cur.x + nx * offset, y: cur.y + ny * offset }
+  }
+  return out
+}
 
 // Point at 50% of the polyline's total path length.
 function polylineMidpoint(points) {
@@ -99,15 +143,57 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, onHover, onClic
         lineCap="round"
         lineJoin="round"
       />
-      {/* Visible tray polyline */}
-      <Line
-        points={flat}
-        stroke={stroke}
-        strokeWidth={(isSelected ? 3.2 : isHovered ? 2.8 : 2.4) * s}
-        lineCap="round"
-        lineJoin="round"
-        listening={false}
-      />
+      {/* 17-1 channel-style body: closed polygon spanning the two offset
+          polylines, then border lines on the outside, then a dashed centre.
+          Reads as an actual cable tray rather than just a heavy stroke. */}
+      {(() => {
+        const halfW = (TRAY_WIDTH_SCREEN_PX * s) / 2
+        const up   = offsetPolyline(tray.points,  halfW)
+        const down = offsetPolyline(tray.points, -halfW)
+        const bodyFlat = [
+          ...up.flatMap((p) => [p.x, p.y]),
+          ...[...down].reverse().flatMap((p) => [p.x, p.y]),
+        ]
+        const upFlat   = up.flatMap((p) => [p.x, p.y])
+        const downFlat = down.flatMap((p) => [p.x, p.y])
+        const borderW = (isSelected ? 1.6 : isHovered ? 1.3 : 1.1) * s
+        const fillCol = isSelected ? TRAY_SELECTED_FILL : TRAY_BODY_FILL
+        return (
+          <>
+            <Line
+              points={bodyFlat}
+              closed
+              fill={fillCol}
+              listening={false}
+            />
+            <Line
+              points={upFlat}
+              stroke={stroke}
+              strokeWidth={borderW}
+              lineCap="round"
+              lineJoin="round"
+              listening={false}
+            />
+            <Line
+              points={downFlat}
+              stroke={stroke}
+              strokeWidth={borderW}
+              lineCap="round"
+              lineJoin="round"
+              listening={false}
+            />
+            <Line
+              points={flat}
+              stroke={stroke}
+              strokeWidth={0.9 * s}
+              dash={[6 * s, 4 * s]}
+              opacity={0.7}
+              lineCap="round"
+              listening={false}
+            />
+          </>
+        )
+      })()}
       {/* Vertex markers (only when selected) */}
       {isSelected && tray.points.map((p, i) => (
         <Circle

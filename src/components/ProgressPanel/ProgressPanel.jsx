@@ -272,8 +272,8 @@ const PHASES = [
       {
         layer: 'Layer 17 — Cable 視覺 + 選取上下文',
         items: [
-          { id: '17-1', done: false, text: 'Tray 通道風格視覺（border + 虛線中線 + 半透明 body）' },
-          { id: '17-2', done: false, text: '選取裝置 highlight 連線（點 AP/SW 高亮相關 cable + S2S）' },
+          { id: '17-1', done: true, text: 'Tray 通道風格視覺（border + 虛線中線 + 半透明 body）' },
+          { id: '17-2', done: true, text: '選取裝置 highlight 連線 + device halo（cable + AP/SW peer）' },
         ],
       },
     ],
