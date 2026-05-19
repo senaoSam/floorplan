@@ -21,8 +21,11 @@ const TRAY_WIDTH_SCREEN_PX = 8
 // `offset` (px in canvas coords); the perpendicular at an interior vertex
 // is the angle bisector of the incoming and outgoing edges, scaled so the
 // edge-to-offset distance stays exactly `offset` on both sides (miter join).
-// Returns a fresh array of points.
-function offsetPolyline(points, offset) {
+// `extPrev` / `extNext` let the caller supply a fake "previous" / "next"
+// point for the first / last vertex so an endpoint that meets another
+// tray at a shared junction still uses a miter join instead of a
+// perpendicular cap. Returns a fresh array of points.
+function offsetPolyline(points, offset, { extPrev = null, extNext = null } = {}) {
   if (points.length < 2) return points.map((p) => ({ ...p }))
   const perp = (a, b) => {
     const dx = b.x - a.x, dy = b.y - a.y
@@ -32,8 +35,8 @@ function offsetPolyline(points, offset) {
   const out = new Array(points.length)
   for (let i = 0; i < points.length; i++) {
     const cur = points[i]
-    const prev = i > 0 ? points[i - 1] : null
-    const next = i < points.length - 1 ? points[i + 1] : null
+    const prev = i > 0 ? points[i - 1] : extPrev
+    const next = i < points.length - 1 ? points[i + 1] : extNext
     let nx, ny
     if (prev && next) {
       const p1 = perp(prev, cur)
@@ -51,6 +54,107 @@ function offsetPolyline(points, offset) {
     out[i] = { x: cur.x + nx * offset, y: cur.y + ny * offset }
   }
   return out
+}
+
+// Build a closed-polygon outline for a tray channel: top border, end cap
+// (semicircle when the endpoint is open, miter when it meets another
+// tray), bottom border, and start cap. Used as the single Konva Line so
+// the body fill and the surrounding border line are guaranteed to share
+// the exact same outline (no gap between the two).
+function buildChannelPolygon(points, halfW, extPrev, extNext) {
+  if (points.length < 2) return []
+  const up   = offsetPolyline(points,  halfW, { extPrev, extNext })
+  const down = offsetPolyline(points, -halfW, { extPrev, extNext })
+
+  // Sample N interior points along the half-circle from `from` to `to`,
+  // both at distance halfW from `center`, sweeping through the side where
+  // `outward` points. N excludes the two endpoints (caller already has them).
+  const ARC_N = 12
+  const norm = (a) => ((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
+  const arcBetween = (center, from, to, outward) => {
+    const fromA = Math.atan2(from.y - center.y, from.x - center.x)
+    const toA   = Math.atan2(to.y - center.y, to.x - center.x)
+    const outA  = Math.atan2(outward.y, outward.x)
+    const fromN = norm(fromA)
+    let toCCW   = norm(toA);  if (toCCW <= fromN) toCCW += 2 * Math.PI
+    let outCCW  = norm(outA); if (outCCW <= fromN) outCCW += 2 * Math.PI
+    const ccw   = outCCW > fromN && outCCW < toCCW
+    const sweep = ccw ? (toCCW - fromN) : -(2 * Math.PI - (toCCW - fromN))
+    const out = []
+    for (let k = 1; k < ARC_N; k++) {
+      const t = k / ARC_N
+      const a = fromN + sweep * t
+      out.push({ x: center.x + halfW * Math.cos(a), y: center.y + halfW * Math.sin(a) })
+    }
+    return out
+  }
+
+  const unit = (p, q) => {
+    const dx = q.x - p.x, dy = q.y - p.y
+    const len = Math.hypot(dx, dy) || 1
+    return { x: dx / len, y: dy / len }
+  }
+
+  const poly = []
+  // Top border: up[0] → up[last]
+  for (const p of up) poly.push(p)
+  // End cap — semicircle for open ends, straight close for miter junctions
+  if (!extNext) {
+    const end = points[points.length - 1]
+    const fwd = unit(points[points.length - 2], end)   // outward = forward
+    poly.push(...arcBetween(end, up[up.length - 1], down[down.length - 1], fwd))
+  }
+  // Bottom border reversed: down[last] → down[0]
+  for (let i = down.length - 1; i >= 0; i--) poly.push(down[i])
+  // Start cap
+  if (!extPrev) {
+    const start = points[0]
+    const fwd = unit(start, points[1])
+    poly.push(...arcBetween(start, down[0], up[0], { x: -fwd.x, y: -fwd.y }))
+  }
+  return poly.flatMap((p) => [p.x, p.y])
+}
+
+// For each tray, look up other trays that share an EXACT endpoint xy and
+// return a fake "extra" point in the neighbour's direction so offsetPolyline
+// can miter the junction cleanly. Only fires for 2-tray junctions; 3+ way
+// T-junctions fall back to perpendicular caps (the visual seam there is
+// fine — the geometry is already ambiguous).
+function computeTrayNeighborExts(trays) {
+  const junctions = new Map()   // 'x|y' → [{ trayIdx, side, inwardDir }]
+  const unitVec = (from, to) => {
+    const dx = to.x - from.x, dy = to.y - from.y
+    const len = Math.hypot(dx, dy) || 1
+    return { x: dx / len, y: dy / len }
+  }
+  trays.forEach((tray, idx) => {
+    const pts = tray.points
+    if (!pts || pts.length < 2) return
+    const start = pts[0], end = pts[pts.length - 1]
+    const startKey = `${start.x}|${start.y}`
+    const endKey   = `${end.x}|${end.y}`
+    if (!junctions.has(startKey)) junctions.set(startKey, [])
+    if (!junctions.has(endKey))   junctions.set(endKey, [])
+    junctions.get(startKey).push({ trayIdx: idx, side: 'start', inwardDir: unitVec(start, pts[1]) })
+    junctions.get(endKey).push({ trayIdx: idx, side: 'end',   inwardDir: unitVec(end,   pts[pts.length - 2]) })
+  })
+  return trays.map((tray, idx) => {
+    const pts = tray.points
+    if (!pts || pts.length < 2) return { startExt: null, endExt: null }
+    const lookup = (key, vertex) => {
+      const list = junctions.get(key) ?? []
+      if (list.length !== 2) return null    // unambiguous 2-tray junction only
+      const other = list.find((e) => e.trayIdx !== idx)
+      if (!other) return null
+      return { x: vertex.x + other.inwardDir.x, y: vertex.y + other.inwardDir.y }
+    }
+    const startKey = `${pts[0].x}|${pts[0].y}`
+    const endKey   = `${pts[pts.length - 1].x}|${pts[pts.length - 1].y}`
+    return {
+      startExt: lookup(startKey, pts[0]),
+      endExt:   lookup(endKey,   pts[pts.length - 1]),
+    }
+  })
 }
 
 // Point at 50% of the polyline's total path length.
@@ -75,7 +179,7 @@ function polylineMidpoint(points) {
   return points[points.length - 1]
 }
 
-function TrayPolyline({ tray, isSelected, isHovered, showMagnet, onHover, onClick, onRightMouseDown, inverseScale, onDelete, setHoverCursor, isDrawingMode }) {
+function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endExt, onHover, onClick, onRightMouseDown, inverseScale, onDelete, setHoverCursor, isDrawingMode }) {
   const s = inverseScale
   const flat = tray.points.flatMap((p) => [p.x, p.y])
   const stroke = isSelected ? TRAY_SELECTED : TRAY_COLOR
@@ -143,43 +247,25 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, onHover, onClic
         lineCap="round"
         lineJoin="round"
       />
-      {/* 17-1 channel-style body: closed polygon spanning the two offset
-          polylines, then border lines on the outside, then a dashed centre.
-          Reads as an actual cable tray rather than just a heavy stroke. */}
+      {/* 17-1 channel: a single closed polygon carries the body fill AND the
+          full border outline — top + bottom borders, plus a semicircle cap
+          at each open endpoint and a miter at shared junctions. The dashed
+          centreline is a separate line so the dash phase stays straight. */}
       {(() => {
         const halfW = (TRAY_WIDTH_SCREEN_PX * s) / 2
-        const up   = offsetPolyline(tray.points,  halfW)
-        const down = offsetPolyline(tray.points, -halfW)
-        const bodyFlat = [
-          ...up.flatMap((p) => [p.x, p.y]),
-          ...[...down].reverse().flatMap((p) => [p.x, p.y]),
-        ]
-        const upFlat   = up.flatMap((p) => [p.x, p.y])
-        const downFlat = down.flatMap((p) => [p.x, p.y])
-        const borderW = (isSelected ? 1.6 : isHovered ? 1.3 : 1.1) * s
-        const fillCol = isSelected ? TRAY_SELECTED_FILL : TRAY_BODY_FILL
+        const polyFlat = buildChannelPolygon(tray.points, halfW, startExt, endExt)
+        const borderW  = (isSelected ? 1.6 : isHovered ? 1.3 : 1.1) * s
+        const fillCol  = isSelected ? TRAY_SELECTED_FILL : TRAY_BODY_FILL
         return (
           <>
             <Line
-              points={bodyFlat}
+              points={polyFlat}
               closed
               fill={fillCol}
-              listening={false}
-            />
-            <Line
-              points={upFlat}
               stroke={stroke}
               strokeWidth={borderW}
-              lineCap="round"
-              lineJoin="round"
-              listening={false}
-            />
-            <Line
-              points={downFlat}
-              stroke={stroke}
-              strokeWidth={borderW}
-              lineCap="round"
-              lineJoin="round"
+              lineJoin="miter"
+              miterLimit={10}
               listening={false}
             />
             <Line
@@ -234,6 +320,9 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
   const batchSelectedIds = selectedItems.length > 1
     ? new Set(selectedItems.filter((it) => it.type === 'cable_tray').map((it) => it.id))
     : null
+  // 17-1 follow-up: pre-compute per-tray junction info so each tray miters
+  // cleanly into its neighbour where they share an exact endpoint.
+  const neighborExts = React.useMemo(() => computeTrayNeighborExts(trays), [trays])
 
   // Detect if mousePos sits exactly on an existing tray vertex (snap target).
   // Editor2D pre-snaps the mousePos, so an exact-match scan is enough.
@@ -257,7 +346,7 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
 
   return (
     <Group opacity={dimmed ? 0.2 : 1}>
-      {trays.map((tray) => {
+      {trays.map((tray, i) => {
         const isSel = tray.id === selectedTrayId || (batchSelectedIds?.has(tray.id) ?? false)
         const isHov = tray.id === hoveredId
         return (
@@ -268,6 +357,8 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
             isHovered={isHov}
             // Show magnet halo while drawing trays OR when this one is selected/hovered.
             showMagnet={isDrawingMode || isSel || isHov}
+            startExt={neighborExts[i]?.startExt ?? null}
+            endExt={neighborExts[i]?.endExt ?? null}
             onHover={setHoveredId}
             onClick={onTrayClick}
             onRightMouseDown={onRightMouseDown}
