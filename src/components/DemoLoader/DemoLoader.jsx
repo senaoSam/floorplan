@@ -146,6 +146,8 @@ function DemoLoader() {
         model: 'POE-24-port',
         portCount: 24,
         poeBudget: 370,
+        uplinkTo: null,
+        cableType: 'auto',
       }])
 
       setHeatmapEnabled(true)

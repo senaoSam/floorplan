@@ -39,11 +39,11 @@ function SwitchPanel({ floorId, swId }) {
     clearSelected()
   }
 
-  // Connected APs = APs (any floor) whose chosen switch is this one. Used
-  // for port-count + PoE-budget over-capacity warnings — purely advisory,
-  // routing doesn't gate on capacity (spec §8).
+  // Connected = APs routed to this switch + uplink/downlink ports consumed by
+  // S2S links. Used for port-count + PoE warnings — advisory, doesn't gate
+  // routing (spec §8).
   const connected = useMemo(() => {
-    if (!sw) return { aps: [], totalPoe: 0 }
+    if (!sw) return { aps: [], totalPoe: 0, uplinkUsed: 0, downlinkCount: 0 }
     const { routes } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
     const connAps = []
     let totalPoe = 0
@@ -56,7 +56,16 @@ function SwitchPanel({ floorId, swId }) {
         }
       }
     }
-    return { aps: connAps, totalPoe }
+    // S2S ports: 1 uplink port on this switch if it has uplinkTo; +1 port
+    // per other switch whose uplinkTo points at this one (downlinks).
+    const uplinkUsed = sw.uplinkTo ? 1 : 0
+    let downlinkCount = 0
+    for (const list of Object.values(switchesByFloor)) {
+      for (const other of list ?? []) {
+        if (other.id !== swId && other.uplinkTo === swId) downlinkCount++
+      }
+    }
+    return { aps: connAps, totalPoe, uplinkUsed, downlinkCount }
   }, [sw, swId, floors, apsByFloor, switchesByFloor, traysByFloor, risers])
 
   if (!sw) return null
@@ -64,7 +73,8 @@ function SwitchPanel({ floorId, swId }) {
   const color      = getSwitchKindColor(sw.kind)
   const portCount  = sw.portCount ?? 24
   const poeBudget  = sw.poeBudget ?? 0
-  const portOver   = connected.aps.length > portCount
+  const portsUsed  = connected.aps.length + connected.uplinkUsed + connected.downlinkCount
+  const portOver   = portsUsed > portCount
   const poeOver    = poeBudget > 0 && connected.totalPoe > poeBudget
 
   return (
@@ -123,8 +133,13 @@ function SwitchPanel({ floorId, swId }) {
         <p className="ap-panel__label">
           Port 數
           <span className={`ap-panel__hint-inline${portOver ? ' ap-panel__hint-inline--warn' : ''}`}>
-            （已用 {connected.aps.length} / {portCount}）
+            （已用 {portsUsed} / {portCount}）
           </span>
+        </p>
+        <p className="ap-panel__hint">
+          AP {connected.aps.length}
+          {connected.uplinkUsed ? ` + Uplink ${connected.uplinkUsed}` : ''}
+          {connected.downlinkCount ? ` + Downlink ${connected.downlinkCount}` : ''}
         </p>
         <div className="ap-panel__number-row">
           <input
@@ -139,7 +154,7 @@ function SwitchPanel({ floorId, swId }) {
         </div>
         {portOver && (
           <p className="ap-panel__hint ap-panel__hint--warn">
-            ⚠ Port 不足：已連 {connected.aps.length}，超過 {portCount}
+            ⚠ Port 不足：已用 {portsUsed}，超過 {portCount}
           </p>
         )}
       </section>
@@ -184,6 +199,55 @@ function SwitchPanel({ floorId, swId }) {
           />
           <span className="ap-panel__unit">m</span>
         </div>
+      </section>
+
+      {/* Uplink target — 14-1: which higher-level switch this one connects to.
+          Listing every other switch keeps the model expressive (any topology),
+          while the kind-based default in 14-2 will suggest the obvious pick. */}
+      <section className="ap-panel__section">
+        <p className="ap-panel__label">上連 Uplink</p>
+        <select
+          className="ap-panel__input ap-panel__select"
+          value={sw.uplinkTo ?? ''}
+          onChange={(e) => handleField('uplinkTo', e.target.value || null)}
+        >
+          <option value="">— 頂層（無 uplink）</option>
+          {Object.entries(switchesByFloor).flatMap(([fId, list]) =>
+            (list ?? []).filter((s) => s.id !== swId).map((s) => {
+              const f = floors.find((fl) => fl.id === fId)
+              return (
+                <option key={s.id} value={s.id}>
+                  {s.name}（{s.kind?.toUpperCase()}{f ? ` @ ${f.name}` : ''}）
+                </option>
+              )
+            })
+          )}
+        </select>
+        <p className="ap-panel__hint">指定本 switch 的 uplink target（14-2 計算 S2S 線時用）</p>
+      </section>
+
+      {/* Cable type preference */}
+      <section className="ap-panel__section">
+        <p className="ap-panel__label">線材偏好</p>
+        <div className="ap-panel__btn-group">
+          {[
+            { value: 'auto',   label: 'Auto' },
+            { value: 'copper', label: 'Copper' },
+            { value: 'fiber',  label: 'Fiber' },
+          ].map((opt) => {
+            const active = (sw.cableType ?? 'auto') === opt.value
+            return (
+              <button
+                key={opt.value}
+                className={`ap-panel__btn${active ? ' ap-panel__btn--active' : ''}`}
+                onClick={() => handleField('cableType', opt.value)}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
+        <p className="ap-panel__hint">Auto：&lt; 90 m copper、&ge; 90 m fiber（Cat 6 規範上限）</p>
       </section>
 
       {/* 已連接 AP 清單 */}

@@ -15,12 +15,25 @@
 import { buildBuildingGraph, SLACK_DIRECT } from './buildGraph'
 import { unionFind, dijkstra, reconstructPath } from './routing'
 
-// Returns { routes, warnings }:
-//   routes:   Map<apId, route> across ALL floors. Route shape:
-//     { apId, switchId|null, points: [{x,y,kind,floorId},...]|null,
-//       cableM|null, zDropM|null, routeStatus, homeFloorId }
-//     routeStatus ∈ 'tray' | 'fallback-manhattan' | 'unroutable'
+// 14-3: Cat 6 spec — beyond ~90 m copper is impractical and the run jumps
+// to fiber. Duplicated from useCableStore.COPPER_MAX_LENGTH_M to keep this
+// module store-free for ease of testing.
+const COPPER_MAX_LENGTH_M = 90
+
+// Returns { routes, switchLinks, warnings }:
+//   routes:   Map<apId, route> across ALL floors (see route shape below).
+//   switchLinks: Map<srcSwId, link> for switch→switch uplinks (14-2).
 //   warnings: string[] from buildBuildingGraph (tray-tray touching, etc.)
+//
+// AP route shape:
+//   { apId, switchId|null, points: [{x,y,kind,floorId},...]|null,
+//     cableM|null, zDropM|null, routeStatus, homeFloorId }
+//   routeStatus ∈ 'tray' | 'fallback-manhattan' | 'unroutable'
+//
+// Switch link shape:
+//   { srcId, targetId, points, cableM, routeStatus, cableType,
+//     srcFloorId, targetFloorId }
+//   cableType ∈ 'copper' | 'fiber' — auto-resolved from sw.cableType + length
 //
 // Building-wide because risers let an AP reach a switch on another floor
 // (spec §6 "graph route 含跨樓層 riser"). Callers that only care about a
@@ -28,7 +41,8 @@ import { unionFind, dijkstra, reconstructPath } from './routing'
 // or by point.floorId.
 export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = {}, traysByFloor = {}, risers = [] }) {
   const out = new Map()
-  if (floors.length === 0) return { routes: out, warnings: [] }
+  const switchLinks = new Map()
+  if (floors.length === 0) return { routes: out, switchLinks, warnings: [] }
 
   const floorById = new Map(floors.map((f) => [f.id, f]))
 
@@ -132,5 +146,84 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
     }
   }
 
-  return { routes: out, warnings: g.warnings ?? [] }
+  // ── Switch-to-switch links (14-2) ──────────────────────────────────────
+  // Same graph + Dijkstra recipe as AP→switch; only the source/target node
+  // pair changes. No Z drop (both endpoints already at mount height).
+  const swByFloor = new Map()  // swId → floorId
+  for (const [floorId, list] of Object.entries(switchesByFloor)) {
+    for (const sw of list ?? []) swByFloor.set(sw.id, floorId)
+  }
+  const swById = new Map()
+  for (const list of Object.values(switchesByFloor)) {
+    for (const sw of list ?? []) swById.set(sw.id, sw)
+  }
+
+  for (const [srcId, sw] of swById) {
+    const targetId = sw.uplinkTo
+    if (!targetId) continue
+    const target = swById.get(targetId)
+    if (!target) continue                  // dangling reference
+
+    const srcFloorId    = swByFloor.get(srcId)
+    const targetFloorId = swByFloor.get(targetId)
+    const srcNodeId     = g.endpointNodeIds.switches.get(srcId)?.nodeId
+    const tgtNodeId     = g.endpointNodeIds.switches.get(targetId)?.nodeId
+
+    let link = null
+    if (srcNodeId && tgtNodeId && uf.find(srcNodeId) === uf.find(tgtNodeId)) {
+      const { dist, prev } = dijkstra(g.adj, srcNodeId)
+      const d = dist.get(tgtNodeId)
+      if (d !== undefined && d !== Infinity) {
+        const nodePath = reconstructPath(prev, srcNodeId, tgtNodeId) ?? [srcNodeId, tgtNodeId]
+        const points = nodePath.map((id) => {
+          const n = g.nodes.get(id)
+          return { x: n.xy.x, y: n.xy.y, kind: n.kind, floorId: n.floorId }
+        })
+        link = {
+          srcId, targetId, points,
+          cableM: d, routeStatus: 'tray',
+          srcFloorId, targetFloorId,
+        }
+      }
+    }
+
+    // Fallback Manhattan — same floor only (spec §6 applies to S2S too).
+    if (!link && srcFloorId === targetFloorId) {
+      const floor = floorById.get(srcFloorId)
+      const pxPerM = floor?.scale
+      const dPx = Math.abs(sw.x - target.x) + Math.abs(sw.y - target.y)
+      const cableM = pxPerM && pxPerM > 0
+        ? (dPx / pxPerM) * (1 + SLACK_DIRECT)
+        : null
+      link = {
+        srcId, targetId,
+        points: [
+          { x: sw.x,     y: sw.y,     kind: 'endpoint', floorId: srcFloorId },
+          { x: target.x, y: sw.y,     kind: 'corner',   floorId: srcFloorId },
+          { x: target.x, y: target.y, kind: 'endpoint', floorId: srcFloorId },
+        ],
+        cableM, routeStatus: 'fallback-manhattan',
+        srcFloorId, targetFloorId,
+      }
+    }
+
+    if (!link) {
+      link = {
+        srcId, targetId, points: null, cableM: null,
+        routeStatus: 'unroutable',
+        srcFloorId, targetFloorId,
+      }
+    }
+
+    // Resolve copper/fiber per spec — auto picks copper unless length pushes
+    // beyond Cat 6's 90 m limit. User override always wins.
+    const pref = sw.cableType ?? 'auto'
+    link.cableType = pref === 'auto'
+      ? (link.cableM != null && link.cableM >= COPPER_MAX_LENGTH_M ? 'fiber' : 'copper')
+      : pref
+
+    switchLinks.set(srcId, link)
+  }
+
+  return { routes: out, switchLinks, warnings: g.warnings ?? [] }
 }

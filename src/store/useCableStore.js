@@ -23,7 +23,14 @@ export const DEFAULT_SWITCH = {
   model: 'POE-24-port',
   portCount: 24,
   poeBudget: 370,
+  // 14-1: switch→switch uplink. null = top of the hierarchy (typically the
+  // MDF/Router). 'auto' picks copper for <90 m, fiber for ≥90 m.
+  uplinkTo: null,
+  cableType: 'auto',
 }
+
+// Cat 6 spec limit; beyond this, fiber is the practical choice.
+export const COPPER_MAX_LENGTH_M = 90
 
 export function getSwitchKindColor(kind) {
   return SWITCH_KINDS.find((k) => k.value === kind)?.color ?? '#10b981'

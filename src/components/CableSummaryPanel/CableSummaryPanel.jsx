@@ -22,11 +22,22 @@ function CableSummaryPanel() {
   const [collapsed, setCollapsed] = useState(true)
 
   const stats = useMemo(() => {
-    const { routes, warnings } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
-    let totalM = 0
+    const { routes, switchLinks, warnings } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
+    let totalApM = 0
+    let totalS2sM = 0
     const byStatus = { tray: 0, 'fallback-manhattan': 0, unroutable: 0 }
     const byFloor  = new Map()   // floorId → { totalM, apCount }
     const unroutable = []
+    // 14-3 BOM buckets: cableType (copper vs fiber) and length brackets
+    // <30 / 30-89 / 90+ m. AP cables default to copper (drops are short).
+    const bom = {
+      apToSwitch: 0,
+      s2s:        { copper: 0, fiber: 0 },
+      byLength:   { short: 0, mid: 0, long: 0 },        // total metres
+      counts:     { short: 0, mid: 0, long: 0 },        // number of cables
+    }
+    const bucketLen = (m) => m < 30 ? 'short' : m < 90 ? 'mid' : 'long'
+
     for (const r of routes.values()) {
       byStatus[r.routeStatus] = (byStatus[r.routeStatus] ?? 0) + 1
       const fid = r.homeFloorId
@@ -35,14 +46,35 @@ function CableSummaryPanel() {
       f.apCount++
       if (r.cableM != null) {
         f.totalM += r.cableM
-        totalM   += r.cableM
+        totalApM += r.cableM
+        bom.apToSwitch += r.cableM
+        const b = bucketLen(r.cableM)
+        bom.byLength[b] += r.cableM
+        bom.counts[b]   += 1
       }
       if (r.routeStatus === 'unroutable') {
         const ap = (apsByFloor[fid] ?? []).find((a) => a.id === r.apId)
         unroutable.push({ apId: r.apId, apName: ap?.name ?? r.apId, floorId: fid })
       }
     }
-    return { totalM, byStatus, byFloor, unroutable, warnings, totalAP: routes.size }
+
+    // S2S links — separate from AP cables, tracked per cableType.
+    for (const link of switchLinks.values()) {
+      if (link.cableM == null) continue
+      totalS2sM += link.cableM
+      bom.s2s[link.cableType] = (bom.s2s[link.cableType] ?? 0) + link.cableM
+      const b = bucketLen(link.cableM)
+      bom.byLength[b] += link.cableM
+      bom.counts[b]   += 1
+    }
+
+    return {
+      totalM: totalApM + totalS2sM,
+      totalApM, totalS2sM,
+      byStatus, byFloor, unroutable, warnings,
+      totalAP: routes.size, totalS2s: switchLinks.size,
+      bom,
+    }
   }, [floors, apsByFloor, switchesByFloor, traysByFloor, risers])
 
   // Hide the panel until the user actually has a cable system to summarise.
@@ -127,6 +159,53 @@ function CableSummaryPanel() {
                   </span>
                 </div>
               ))}
+            </section>
+          )}
+
+          {/* 14-3 BOM breakdown — only show when there's something to summarise. */}
+          {(stats.totalApM > 0 || stats.totalS2sM > 0) && (
+            <section className="cable-summary__section">
+              <p className="cable-summary__label">BOM 分類</p>
+              <div className="cable-summary__row">
+                <span>AP → Switch</span>
+                <span>{stats.totalApM.toFixed(1)} m<span className="cable-summary__sub">（{stats.totalAP}）</span></span>
+              </div>
+              {stats.totalS2s > 0 && (
+                <>
+                  <div className="cable-summary__row">
+                    <span>Switch → Switch</span>
+                    <span>{stats.totalS2sM.toFixed(1)} m<span className="cable-summary__sub">（{stats.totalS2s}）</span></span>
+                  </div>
+                  {stats.bom.s2s.copper > 0 && (
+                    <div className="cable-summary__row cable-summary__row--sub">
+                      <span>　Copper</span><span>{stats.bom.s2s.copper.toFixed(1)} m</span>
+                    </div>
+                  )}
+                  {stats.bom.s2s.fiber > 0 && (
+                    <div className="cable-summary__row cable-summary__row--sub">
+                      <span>　Fiber</span><span>{stats.bom.s2s.fiber.toFixed(1)} m</span>
+                    </div>
+                  )}
+                </>
+              )}
+            </section>
+          )}
+
+          {(stats.bom.counts.short + stats.bom.counts.mid + stats.bom.counts.long) > 0 && (
+            <section className="cable-summary__section">
+              <p className="cable-summary__label">長度級距</p>
+              <div className="cable-summary__row">
+                <span>&lt; 30 m</span>
+                <span>{stats.bom.byLength.short.toFixed(1)} m<span className="cable-summary__sub">（{stats.bom.counts.short}）</span></span>
+              </div>
+              <div className="cable-summary__row">
+                <span>30 – 89 m</span>
+                <span>{stats.bom.byLength.mid.toFixed(1)} m<span className="cable-summary__sub">（{stats.bom.counts.mid}）</span></span>
+              </div>
+              <div className="cable-summary__row">
+                <span>&ge; 90 m<span className="cable-summary__sub">（需 fiber）</span></span>
+                <span>{stats.bom.byLength.long.toFixed(1)} m<span className="cable-summary__sub">（{stats.bom.counts.long}）</span></span>
+              </div>
             </section>
           )}
 

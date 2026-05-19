@@ -945,6 +945,8 @@ function Editor2D() {
         model: DEFAULT_SWITCH.model,
         portCount: DEFAULT_SWITCH.portCount,
         poeBudget: DEFAULT_SWITCH.poeBudget,
+        uplinkTo: DEFAULT_SWITCH.uplinkTo,
+        cableType: DEFAULT_SWITCH.cableType,
       })
       return
     }

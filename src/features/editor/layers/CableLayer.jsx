@@ -26,7 +26,7 @@ function CableLayer({ floorId, viewportScale }) {
   const dragSwitch = useDragOverlayStore((s) => s.sw)
   const inverseScale = 1 / (viewportScale || 1)
 
-  const routes = useMemo(() => {
+  const { routes, switchLinks } = useMemo(() => {
     // Apply drag overlays on the active floor only — overlays are per-floor.
     const apsByFloorLive = dragAP
       ? {
@@ -46,12 +46,13 @@ function CableLayer({ floorId, viewportScale }) {
       switchesByFloor: switchesByFloorLive,
       traysByFloor,
       risers,
-    }).routes
+    })
   }, [floors, apsByFloor, switchesByFloor, traysByFloor, risers, dragAP, dragSwitch, floorId])
 
-  if (routes.size === 0) return null
+  if (routes.size === 0 && switchLinks.size === 0) return null
 
-  const apsOnFloor = apsByFloor[floorId] ?? []
+  const apsOnFloor      = apsByFloor[floorId] ?? []
+  const switchesOnFloor = switchesByFloor[floorId] ?? []
 
   return (
     <Group listening={false}>
@@ -96,6 +97,41 @@ function CableLayer({ floorId, viewportScale }) {
         // routeStatus === 'tray' — may span multiple floors via riser. Only
         // render the contiguous segments that lie entirely on the active floor.
         return <TrayRoute key={r.apId} route={r} floorId={floorId} s={inverseScale} />
+      })}
+
+      {/* 14-2: switch-to-switch uplinks. Same renderer, distinct colour so
+          trunk lines don't blend into AP cables. */}
+      {Array.from(switchLinks.values()).map((link) => {
+        if (link.routeStatus === 'unroutable') {
+          if (link.srcFloorId !== floorId) return null
+          const sw = switchesOnFloor.find((s) => s.id === link.srcId)
+          if (!sw) return null
+          return <UnroutableBadge key={`sl-${link.srcId}`} ap={sw} s={inverseScale} />
+        }
+        if (link.routeStatus === 'fallback-manhattan') {
+          if (link.srcFloorId !== floorId) return null
+          // Match cableType colour scheme — same palette as SwitchLinkRoute
+          // so toggling Copper/Fiber on a Manhattan fallback stays legible.
+          const isFiber = link.cableType === 'fiber'
+          const stroke  = isFiber ? '#fb7185' : '#a78bfa'
+          const flat = link.points.flatMap((p) => [p.x, p.y])
+          return (
+            <Group key={`sl-${link.srcId}`}>
+              <Line
+                points={flat}
+                stroke={stroke}
+                strokeWidth={1.6 * inverseScale}
+                dash={isFiber
+                  ? [18 * inverseScale, 8 * inverseScale]   // longer dash for fiber
+                  : [14 * inverseScale, 10 * inverseScale]}
+                opacity={0.8}
+                lineCap="round"
+                lineJoin="round"
+              />
+            </Group>
+          )
+        }
+        return <SwitchLinkRoute key={`sl-${link.srcId}`} link={link} floorId={floorId} s={inverseScale} />
       })}
     </Group>
   )
@@ -147,6 +183,59 @@ function TrayRoute({ route, floorId, s }) {
             radius={radius * s}
             fill={trayColor}
             stroke={isFoot || isRiserFoot || isRiserHub ? '#0e7490' : null}
+            strokeWidth={isFoot || isRiserFoot || isRiserHub ? 0.6 * s : 0}
+            opacity={0.9}
+          />
+        )
+      })}
+    </Group>
+  )
+}
+
+// Trunk variant of TrayRoute — same per-segment rendering but with a
+// distinct colour so switch-to-switch uplinks visually separate from
+// AP-to-switch drops. Fiber-class links use a longer dash to hint at the
+// material change.
+function SwitchLinkRoute({ link, floorId, s }) {
+  const pts = link.points
+  if (!pts || pts.length < 2) return null
+  const isFiber  = link.cableType === 'fiber'
+  const trunk    = isFiber ? '#fb7185' : '#a78bfa'  // rose-400 / violet-400
+  const stroke2  = isFiber ? '#9f1239' : '#6d28d9'
+  return (
+    <Group>
+      {pts.slice(0, -1).map((p, i) => {
+        const q = pts[i + 1]
+        if (p.floorId !== floorId || q.floorId !== floorId) return null
+        const isDrop = p.kind === 'endpoint' || q.kind === 'endpoint'
+        return (
+          <Line
+            key={i}
+            points={[p.x, p.y, q.x, q.y]}
+            stroke={trunk}
+            strokeWidth={(isDrop ? 1.5 : 1.9) * s}
+            dash={isDrop ? [6 * s, 4 * s] : (isFiber ? [12 * s, 6 * s] : null)}
+            opacity={isDrop ? 0.85 : 0.95}
+            lineCap="round"
+            lineJoin="round"
+          />
+        )
+      })}
+      {pts.map((p, i) => {
+        if (p.floorId !== floorId) return null
+        if (p.kind === 'endpoint') return null
+        const isFoot     = p.kind === 'endpoint-foot'
+        const isRiserFoot = p.kind === 'riser-foot'
+        const isRiserHub = p.kind === 'riser@floor'
+        const radius = (isFoot || isRiserFoot) ? 2.6 : isRiserHub ? 3.1 : 2.2
+        return (
+          <Circle
+            key={`d${i}`}
+            x={p.x}
+            y={p.y}
+            radius={radius * s}
+            fill={trunk}
+            stroke={isFoot || isRiserFoot || isRiserHub ? stroke2 : null}
             strokeWidth={isFoot || isRiserFoot || isRiserHub ? 0.6 * s : 0}
             opacity={0.9}
           />
