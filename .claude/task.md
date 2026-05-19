@@ -151,3 +151,50 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 - 既有 DemoLoader 只放 5 個 AP + 牆面 + 平面圖
 - 加上：1–2 個 switch、1–2 條 tray（範例形狀）、可選 riser（若新增第二樓層 demo）
 - 讓使用者一鍵看到完整 cable 系統運作，不用自己手動放
+
+---
+
+## Phase 10 — Cable 進階：S2S / BOM 分類 / 3D
+
+> 把 cable 從「能算 AP→switch 線長」推進到「能算整棟網路 + 拿來訂料 + 3D 視覺化」。
+> 對應 cable-spec.md §10「延後項目」。
+
+### Layer 14 — Switch-to-switch + BOM 分類
+
+| #     | 狀態 | Task                                                                              |
+| ----- | ---- | --------------------------------------------------------------------------------- |
+| 14-1  | ⬜   | Switch uplink 屬性 + UI（指定上層 switch / IDF / MDF target、線材偏好）             |
+| 14-2  | ⬜   | Switch-to-switch routing（用既有 tray/riser graph 算 S2S 線，新 render layer）       |
+| 14-3  | ⬜   | BOM 分類顯示（AP-link vs S2S、copper vs fiber、長度級距 <30/30-90/>90m）            |
+
+**14-1 細節**
+- Switch model 增加 `uplinkTo: switchId | null`（null = 頂層，不上連）
+- Switch model 增加 `cableType: 'auto' | 'copper' | 'fiber'`（auto = 依距離自動決定）
+- SwitchPanel UI：下拉選擇 uplink target（列出建築裡所有其他 switch）+ cable type 選擇
+- 預設規則：'switch' → 找最近的 'idf'，'idf' → 找最近的 'mdf'，'mdf' → null（頂層）
+
+**14-2 細節**
+- 對每個有 `uplinkTo` 的 switch，用 `buildBuildingGraph` 跑 Dijkstra（source = 該 switch 的 endpoint node、target = uplinkTo 的 endpoint node）
+- 找不到路 → fallback Manhattan（限同樓層）；同樓層不在也 → unroutable
+- 新增 SwitchLinkLayer（或合併進 CableLayer）渲染 S2S 線
+- 視覺：實線、不同顏色（例如紫或深青）區分 AP-link 線
+
+**14-3 細節**
+- CableSummaryPanel 加 BOM 分類 section：
+  - AP-to-Switch 總長 / Switch-to-Switch 總長
+  - Copper 總長 / Fiber 總長（>90m 自動 fiber，可被 cableType 覆寫）
+  - 長度級距：<30m / 30-90m / >90m 各幾條
+- per-IDF 用量列表（可選）
+
+### Layer 15 — 3D Cable 視覺化
+
+| #     | 狀態 | Task                                                                              |
+| ----- | ---- | --------------------------------------------------------------------------------- |
+| 15-1  | ⬜   | Tray 3D 渲染（沿 polyline 在天花板高度畫長方體 / cylinder）                          |
+| 15-2  | ⏸️   | **延後**：Cable 3D 渲染（路徑線在 3D 顯示）— 視 15-1 + 使用者回饋再排                |
+
+**15-1 細節**
+- 每條 tray 的 polyline 沿 ceiling height (`floor.elevation + floor.floorHeight - 0.1`) 渲染
+- 視覺：藍色細長方體或 cylinder（半徑 5 cm），對應 2D tray 顏色
+- 掛在 FloorStack 內（per-floor，不跨樓層）
+- Riser 已有 3D 圓柱（12-3a 做了），不重複

@@ -247,6 +247,26 @@ const PHASES = [
     ],
   },
   {
+    phase: 'Phase 10 — Cable 進階：S2S / BOM 分類 / 3D',
+    groups: [
+      {
+        layer: 'Layer 14 — Switch-to-switch + BOM 分類',
+        items: [
+          { id: '14-1', done: false, text: 'Switch uplink 屬性 + UI（target switch + 線材偏好）' },
+          { id: '14-2', done: false, text: 'Switch-to-switch routing（用既有 graph 算 S2S 線）' },
+          { id: '14-3', done: false, text: 'BOM 分類顯示（AP-link vs S2S、copper/fiber、長度級距）' },
+        ],
+      },
+      {
+        layer: 'Layer 15 — 3D Cable 視覺化',
+        items: [
+          { id: '15-1', done: false, text: 'Tray 3D 渲染（沿 polyline 在天花板高度）' },
+          { id: '15-2', done: false, text: '⏸️ 延後：Cable 3D 渲染（路徑線在 3D 顯示）' },
+        ],
+      },
+    ],
+  },
+  {
     phase: 'Phase 9 — AI 輔助',
     groups: [
       {
