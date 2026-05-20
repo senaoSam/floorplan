@@ -42,13 +42,27 @@ function CableTrayPanel({ floorId, trayId }) {
   const magnet = tray.magnetDistance ?? DEFAULT_TRAY_MAGNET_PX
   const magnetM = floor?.scale ? magnet / floor.scale : null
 
+  const displayName = tray.name ?? tray.id
+
   return (
     <div className="ap-panel">
       <div className="ap-panel__header">
-        <span className="ap-panel__title">Cable Tray 屬性</span>
+        <span className="ap-panel__title">{displayName}</span>
         <span className="ap-panel__dot" style={{ background: '#60a5fa' }} />
         <button className="panel-delete-btn" onClick={handleDelete}>刪除</button>
       </div>
+
+      <section className="ap-panel__section">
+        <p className="ap-panel__label">名稱</p>
+        <input
+          className="ap-panel__input"
+          type="text"
+          value={tray.name ?? ''}
+          placeholder={tray.id}
+          onChange={(e) => updateTray(floorId, trayId, { name: e.target.value })}
+        />
+        <p className="ap-panel__hint">自動命名 TRAY-{`{序號}`}；可手動覆寫</p>
+      </section>
 
       <section className="ap-panel__section">
         <p className="ap-panel__label">節點數</p>

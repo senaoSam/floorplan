@@ -461,6 +461,7 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
   const trays         = useCableStore((s) => s.traysByFloor[floorId] ?? [])
   const updateTray    = useCableStore((s) => s.updateTray)
   const addTray       = useCableStore((s) => s.addTray)
+  const nextTrayName  = useCableStore((s) => s.nextTrayName)
   const removeTrayFn  = useCableStore((s) => s.removeTray)
   const inverseScale  = 1 / (viewportScale || 1)
   const [hoveredId, setHoveredId] = useState(null)
@@ -554,8 +555,12 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
               const ptsA = tray.points.slice(0, idx + 1)
               const ptsB = tray.points.slice(idx)
               removeTrayFn(floorId, tray.id)
-              addTray(floorId, { ...tray, id: generateId('tray'), points: ptsA })
-              addTray(floorId, { ...tray, id: generateId('tray'), points: ptsB })
+              // Fresh names — split children are independent objects.
+              // nextTrayName() reads + increments the global counter each call.
+              const nameA = nextTrayName()
+              addTray(floorId, { ...tray, id: generateId('tray'), name: nameA, points: ptsA })
+              const nameB = nextTrayName()
+              addTray(floorId, { ...tray, id: generateId('tray'), name: nameB, points: ptsB })
             }}
             onInsertVertex={(segIdx, e) => {
               if (!toCanvasPos) return
@@ -598,8 +603,10 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
               const ptsA = [...tray.points.slice(0, segIdx + 1), foot]
               const ptsB = [foot, ...tray.points.slice(segIdx + 1)]
               removeTrayFn(floorId, tray.id)
-              addTray(floorId, { ...tray, id: generateId('tray'), points: ptsA })
-              addTray(floorId, { ...tray, id: generateId('tray'), points: ptsB })
+              const nameA = nextTrayName()
+              addTray(floorId, { ...tray, id: generateId('tray'), name: nameA, points: ptsA })
+              const nameB = nextTrayName()
+              addTray(floorId, { ...tray, id: generateId('tray'), name: nameB, points: ptsB })
             }}
           />
         )

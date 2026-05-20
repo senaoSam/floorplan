@@ -50,9 +50,12 @@ export const useCableStore = create((set, get) => ({
   globalSwitchCounter: 0,
 
   // { [floorId]: Tray[] }
-  // Tray shape: { id, points: [{x,y}, ...], magnetDistance }
+  // Tray shape: { id, name, points: [{x,y}, ...], magnetDistance }
   // points are canvas coords (image px); magnetDistance is canvas px.
+  // `name` is user-facing (e.g. "TRAY-03"); falls back to `id` for legacy
+  // trays loaded without one.
   traysByFloor: {},
+  globalTrayCounter: 0,
 
   // Global risers — one entry per physical riser, regardless of how many
   // floors it spans. cable-spec §2: { id, name, x, y, floorIds, magnetDistance }
@@ -114,8 +117,15 @@ export const useCableStore = create((set, get) => ({
 
   getTrays: (floorId) => get().traysByFloor[floorId] ?? [],
 
+  // Auto-name format: TRAY-{seq}. Floor / system suffixes (per task 18-4
+  // wording) are deferred until 19-3 introduces the `system` field —
+  // until then a flat global sequence is the least surprising and matches
+  // the SW-XX / IDF-XX convention used for switches.
+  nextTrayName: () => `TRAY-${String(get().globalTrayCounter + 1).padStart(2, '0')}`,
+
   addTray: (floorId, tray) =>
     set((state) => ({
+      globalTrayCounter: state.globalTrayCounter + 1,
       traysByFloor: {
         ...state.traysByFloor,
         [floorId]: [...(state.traysByFloor[floorId] ?? []), tray],

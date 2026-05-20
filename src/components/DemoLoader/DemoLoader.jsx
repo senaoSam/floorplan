@@ -82,8 +82,9 @@ function DemoLoader() {
   const setWalls           = useWallStore((s) => s.setWalls)
   const setAPs             = useAPStore((s) => s.setAPs)
   const setSwitches        = useCableStore((s) => s.setSwitches)
-  const setTrays           = useCableStore((s) => s.setTrays)
+  const addTray            = useCableStore((s) => s.addTray)
   const nextSwitchName     = useCableStore((s) => s.nextSwitchName)
+  const nextTrayName       = useCableStore((s) => s.nextTrayName)
   const setHeatmapEnabled  = useHeatmapStore((s) => s.setEnabled)
   const regulatoryDomain   = useEditorStore((s) => s.regulatoryDomain)
   const warmingUp          = useWarmupStore((s) => s.warmingUp)
@@ -131,11 +132,14 @@ function DemoLoader() {
 
       // Cable seed: one tray + one switch, sized to the actual canvas.
       const W = img.naturalWidth, H = img.naturalHeight
-      setTrays(floor.id, [{
+      // addTray (not setTrays) so the global tray counter auto-bumps —
+      // user-drawn trays after Demo then continue from TRAY-02 onwards.
+      addTray(floor.id, {
         id: generateId('tray'),
+        name: nextTrayName(),
         points: DEMO_TRAY_PTS_NORM.map((p) => ({ x: p.x * W, y: p.y * H })),
         magnetDistance: DEMO_TRAY_MAGNET_PX,
-      }])
+      })
       setSwitches(floor.id, [{
         id: generateId('sw'),
         name: nextSwitchName('switch'),

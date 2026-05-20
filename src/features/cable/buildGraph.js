@@ -113,7 +113,7 @@ export function buildFloorGraph({ floor, aps, switches, trays, risers = [] }) {
           if (!hit) continue
           if (hit.touching) {
             warnings.push(
-              `Trays ${A.tray.id} and ${B.tray.id} touch at endpoint near (${hit.x.toFixed(1)}, ${hit.y.toFixed(1)}); not auto-merged.`,
+              `Trays ${A.tray.name ?? A.tray.id} and ${B.tray.name ?? B.tray.id} touch at endpoint near (${hit.x.toFixed(1)}, ${hit.y.toFixed(1)}); not auto-merged.`,
             )
             continue
           }

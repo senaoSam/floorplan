@@ -166,6 +166,7 @@ function Editor2D() {
   const addSwitch     = useCableStore((s) => s.addSwitch)
   const nextSwitchName = useCableStore((s) => s.nextSwitchName)
   const addTray       = useCableStore((s) => s.addTray)
+  const nextTrayName  = useCableStore((s) => s.nextTrayName)
   const addRiser      = useCableStore((s) => s.addRiser)
   const nextRiserName = useCableStore((s) => s.nextRiserName)
 
@@ -320,12 +321,13 @@ function Editor2D() {
     if (trayDraftPoints.length >= 2) {
       addTray(activeFloorId, {
         id: generateId('tray'),
+        name: nextTrayName(),
         points: trayDraftPoints,
         magnetDistance: DEFAULT_TRAY_MAGNET_PX,
       })
     }
     setTrayDraftPoints([])
-  }, [trayDraftPoints, activeFloorId, addTray])
+  }, [trayDraftPoints, activeFloorId, addTray, nextTrayName])
 
   // ── 材質快捷鍵 toast 自動消失 ─────────────────────────
   useEffect(() => {

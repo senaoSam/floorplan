@@ -263,7 +263,7 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | 18-1  | ✅   | Vertex edit — 選中 tray 顯示 handles，可拖曳 / 插入 / 刪除 / 從端點延伸 / split segment |
 | 18-2  | ✅   | 整條 tray drag 搬位置（保留 vertex 結構、更新 magnet / graph / cable route）           |
 | 18-3  | ✅   | Drawing UX — Backspace / Cmd+Z undo last vertex；Shift 鎖 0/45/90°；Enter 完成        |
-| 18-4  | ⬜   | Tray naming — auto `TRAY-{floor}-{system}-{seq}`、可手動覆寫；warning 顯示用 name 取代 id |
+| 18-4  | ✅   | Tray naming — auto `TRAY-{floor}-{system}-{seq}`、可手動覆寫；warning 顯示用 name 取代 id |
 | 18-5  | ⬜   | Selected 顯示 vertex handles + segment + 可 snap 的 endpoint                          |
 
 ---
