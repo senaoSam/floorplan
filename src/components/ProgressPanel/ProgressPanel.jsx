@@ -261,7 +261,8 @@ const PHASES = [
         layer: 'Layer 15 — 3D Cable 視覺化',
         items: [
           { id: '15-1', done: true, text: 'Tray 3D 渲染（沿 polyline 在天花板高度）' },
-          { id: '15-2', done: false, text: '⏸️ 延後：Cable 3D 渲染（路徑線在 3D 顯示）' },
+          { id: '15-2', done: true, text: 'Cable 3D 渲染（路徑線在 3D 顯示，對齊 2D 虛實線樣式）' },
+          { id: '15-3', done: true, text: 'Switch / IDF / MDF / Router 3D chassis（深灰本體 + 前面板 LED 條）' },
         ],
       },
     ],

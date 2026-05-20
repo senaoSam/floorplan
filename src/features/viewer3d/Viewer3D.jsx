@@ -11,6 +11,8 @@ import HeatmapPlane3D from './HeatmapPlane3D'
 import FloorHoleVolume3D from './FloorHoleVolume3D'
 import RiserLayer3D from './RiserLayer3D'
 import TrayLayer3D from './TrayLayer3D'
+import SwitchLayer3D from './SwitchLayer3D'
+import CableLayer3D from './CableLayer3D'
 import { computeFloorElevations } from './floorStacking'
 import './Viewer3D.sass'
 
@@ -87,6 +89,11 @@ function FloorStack({ floor, elevation, isActive }) {
           per-tray mountHeight (TrayLayer3D reads the floor from the store
           so the ceiling preset can resolve against floor.floorHeight). */}
       <TrayLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
+      {/* Switch / IDF / MDF / Router chassis at their mountHeight. */}
+      <SwitchLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
+      {/* Cable routes (AP↔switch + S2S) lifted to 3D so the user sees the
+          full plenum-routed path, not just the tray geometry. */}
+      <CableLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
       {/* 10-5e MVP: heatmap on the active floor only. Mounted inside this
           group so the plane inherits the floor's elevation translate; the
           `elevation` prop is forwarded for future modes that may mount the

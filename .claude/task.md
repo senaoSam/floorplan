@@ -191,7 +191,8 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | #     | 狀態 | Task                                                                              |
 | ----- | ---- | --------------------------------------------------------------------------------- |
 | 15-1  | ✅   | Tray 3D 渲染（沿 polyline 在天花板高度畫長方體 / cylinder）                          |
-| 15-2  | ⏸️   | **延後**：Cable 3D 渲染（路徑線在 3D 顯示）— 視 15-1 + 使用者回饋再排                |
+| 15-2  | ✅   | Cable 3D 渲染（AP↔SW / S2S 路徑在 3D；對齊 2D 的虛線/實線/dash 樣式）                |
+| 15-3  | ✅   | Switch / IDF / MDF / Router 3D chassis（深灰本體 + 前面板 kind 色 LED 條）            |
 
 **15-1 細節**
 - 每條 tray 的 polyline 沿 ceiling height (`floor.elevation + floor.floorHeight - 0.1`) 渲染
@@ -325,5 +326,5 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | ID | 狀態 | 原因 |
 |---|---|---|
 | 12-4 Hybrid routing | ⏸️ | 17-3 switch hub 落地後痛點變少，繼續延後 |
-| 15-2 Cable 3D polylines | ⏸️ | **純視覺化（read-only）**，符合「3D = read-only」原則，有空再做 |
+| 15-2 Cable 3D polylines | ✅ | 19-2 把 tray 高度做成 per-tray 後順手補完；對齊 2D 樣式（虛實線）+ 新加 15-3 SwitchLayer3D |
 | 17-4 Snap 視覺提示 | ⏸️ | 17-3 hub 化後此情境罕見，待實際痛點出現再評估 |
