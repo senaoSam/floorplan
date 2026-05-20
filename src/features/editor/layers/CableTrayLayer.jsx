@@ -248,7 +248,7 @@ function VertexHandle({
   )
 }
 
-function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endExt, onHover, onClick, onRightMouseDown, inverseScale, onDelete, setHoverCursor, isDrawingMode, onVertexDragMove, onVertexDragEnd, onDeleteVertex, onSplitVertex, onInsertVertex }) {
+function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endExt, onHover, onClick, onRightMouseDown, inverseScale, onDelete, setHoverCursor, isDrawingMode, dimmed, onVertexDragMove, onVertexDragEnd, onDeleteVertex, onSplitVertex, onInsertVertex, onSplitSegment, onTranslate }) {
   const s = inverseScale
   const flat = tray.points.flatMap((p) => [p.x, p.y])
   const stroke = isSelected ? TRAY_SELECTED : TRAY_COLOR
@@ -256,7 +256,15 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endEx
 
   return (
     <Group
-      onMouseEnter={() => { setHoverCursor?.(isDrawingMode ? 'crosshair' : 'pointer'); onHover(tray.id) }}
+      draggable={!isDrawingMode && !dimmed}
+      onMouseEnter={() => {
+        // Cursor cue: 'pointer' if a click would select; 'move' once the tray
+        // is already selected (so a drag now translates it). Drawing mode
+        // overrides with 'crosshair' to signal "click to add a vertex".
+        const cur = isDrawingMode ? 'crosshair' : isSelected ? 'move' : 'pointer'
+        setHoverCursor?.(cur)
+        onHover(tray.id)
+      }}
       onMouseLeave={() => { setHoverCursor?.(null); onHover(null) }}
       onClick={(e) => {
         // In tray drawing mode: don't consume the click — let it bubble to
@@ -279,6 +287,18 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endEx
           e.cancelBubble = true
           onRightMouseDown?.(e.currentTarget)
         }
+      }}
+      onDragStart={(e) => {
+        e.cancelBubble = true
+        // Auto-select before moving so the panel/handles show the right tray.
+        if (!isSelected) onClick?.(tray.id, e)
+      }}
+      onDragEnd={(e) => {
+        e.cancelBubble = true
+        const dx = e.target.x()
+        const dy = e.target.y()
+        e.target.position({ x: 0, y: 0 })
+        if (dx !== 0 || dy !== 0) onTranslate?.(dx, dy)
       }}
     >
       {/* Magnet halo — drawn first so the tray sits on top of it.
@@ -321,10 +341,12 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endEx
           lineJoin="round"
         />
       )}
-      {/* Per-segment hit-test lines — only when selected. Clicking inserts a
-          new vertex at the perpendicular foot of the click point. The hit
-          width is intentionally narrower (8*s vs 14*s) so the vertex/×
-          handles drawn on top stay easy to grab. */}
+      {/* Per-segment hit-test lines — only when selected. Plain click inserts
+          a new vertex at the perpendicular foot of the click point.
+          Shift+click splits the tray at that point (two new trays meeting at
+          the click foot — both share the exact xy so the graph merges them).
+          Hit width is intentionally narrower (8*s vs 14*s) than the body so
+          vertex/× handles drawn on top stay easy to grab. */}
       {isSelected && !isDrawingMode && tray.points.slice(0, -1).map((a, i) => {
         const b = tray.points[i + 1]
         return (
@@ -338,7 +360,11 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endEx
             onMouseLeave={() => { setHoverCursor?.(null) }}
             onClick={(e) => {
               e.cancelBubble = true
-              onInsertVertex?.(i, e)
+              if (e.evt?.shiftKey) {
+                onSplitSegment?.(i, e)
+              } else {
+                onInsertVertex?.(i, e)
+              }
             }}
           />
         )
@@ -504,6 +530,11 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
             onDelete={onDelete}
             setHoverCursor={setHoverCursor}
             isDrawingMode={isDrawingMode}
+            dimmed={dimmed}
+            onTranslate={(dx, dy) => {
+              const newPoints = tray.points.map((p) => ({ x: p.x + dx, y: p.y + dy }))
+              updateTray(floorId, tray.id, { points: newPoints })
+            }}
             onVertexDragMove={(idx, raw) => {
               const snapped = snapVertexDrag(tray.id, idx, raw)
               const newPoints = tray.points.map((pt, j) => (j === idx ? snapped : pt))
@@ -547,6 +578,28 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
                 ...tray.points.slice(segIdx + 1),
               ]
               updateTray(floorId, tray.id, { points: newPoints })
+            }}
+            onSplitSegment={(segIdx, e) => {
+              if (!toCanvasPos) return
+              const stage = e?.target?.getStage?.()
+              const screenPos = stage?.getPointerPosition?.()
+              if (!screenPos) return
+              const canvasPos = toCanvasPos(screenPos)
+              const a = tray.points[segIdx], b = tray.points[segIdx + 1]
+              const dx = b.x - a.x, dy = b.y - a.y
+              const lenSq = dx * dx + dy * dy
+              if (lenSq < 1e-6) return
+              const t = ((canvasPos.x - a.x) * dx + (canvasPos.y - a.y) * dy) / lenSq
+              const tc = Math.max(0, Math.min(1, t))
+              const foot = { x: a.x + tc * dx, y: a.y + tc * dy }
+              // Two new trays, both containing the foot vertex so they share
+              // the exact xy at the split point (12-2d coincidence-merge keeps
+              // them graph-connected).
+              const ptsA = [...tray.points.slice(0, segIdx + 1), foot]
+              const ptsB = [foot, ...tray.points.slice(segIdx + 1)]
+              removeTrayFn(floorId, tray.id)
+              addTray(floorId, { ...tray, id: generateId('tray'), points: ptsA })
+              addTray(floorId, { ...tray, id: generateId('tray'), points: ptsB })
             }}
           />
         )
