@@ -286,7 +286,7 @@ const PHASES = [
       {
         layer: 'Layer 18 — Tray Edit',
         items: [
-          { id: '18-1', done: false, text: 'Vertex edit — drag / insert / delete / extend from endpoint / split segment' },
+          { id: '18-1', done: true, text: 'Vertex edit — drag / insert / delete / extend from endpoint / split segment' },
           { id: '18-2', done: false, text: '整條 tray drag 搬位置（保留 vertex 結構、更新 magnet / graph / cable route）' },
           { id: '18-3', done: false, text: 'Drawing UX — Backspace undo vertex；Shift 鎖 0/45/90°；Enter 完成' },
           { id: '18-4', done: false, text: 'Tray naming — auto TRAY-{floor}-{system}-{seq}、可手動覆寫' },

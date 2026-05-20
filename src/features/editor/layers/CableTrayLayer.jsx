@@ -2,6 +2,11 @@ import React, { useState } from 'react'
 import { Group, Line, Circle } from 'react-konva'
 import DeleteButton from './DeleteButton'
 import { useCableStore } from '@/store/useCableStore'
+import { generateId } from '@/utils/id'
+
+// Snap radius (screen px) when dragging an existing vertex onto another
+// tray's vertex. Same value as the draft-mode snap so the UX feels uniform.
+const VERTEX_SNAP_SCREEN_PX = 24
 
 // Tray colour scheme: indigo (blue-leaning purple), distinct from cable
 // (cyan / violet) and walls.
@@ -179,7 +184,71 @@ function polylineMidpoint(points) {
   return points[points.length - 1]
 }
 
-function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endExt, onHover, onClick, onRightMouseDown, inverseScale, onDelete, setHoverCursor, isDrawingMode }) {
+// Interactive vertex handle (only visible when the tray is selected).
+// Draggable for moving, with a small × badge for deletion. Shift+click
+// (on a non-endpoint vertex) splits the tray into two trays sharing the
+// vertex's exact xy — the graph builder treats coincident xy as the same
+// node so the network stays connected.
+function VertexHandle({
+  x, y, index, isEndpoint, canDelete, color, inverseScale,
+  onDragMove, onDragEnd, onDelete, onSplit, onClickVertex, setHoverCursor,
+}) {
+  const s = inverseScale
+  const [hovered, setHovered] = useState(false)
+  // Show the delete badge whenever the vertex is hovered AND deletion is
+  // allowed (tray would still have ≥ 2 points after removal). Putting it on
+  // hover keeps the canvas calm when nothing is being edited; the badge
+  // sits offset to the upper-right of the vertex.
+  const badgeOffset = 11 * s
+
+  return (
+    <Group>
+      <Circle
+        x={x}
+        y={y}
+        radius={(hovered ? 8 : 6) * s}
+        fill="#fff"
+        stroke={color}
+        strokeWidth={(hovered ? 2.4 : 2) * s}
+        draggable
+        onMouseEnter={() => { setHovered(true); setHoverCursor?.('move') }}
+        onMouseLeave={() => { setHovered(false); setHoverCursor?.(null) }}
+        onClick={(e) => {
+          e.cancelBubble = true
+          if (e.evt.shiftKey && !isEndpoint) {
+            onSplit?.(index)
+            return
+          }
+          onClickVertex?.(index)
+        }}
+        onDragStart={(e) => { e.cancelBubble = true }}
+        onDragMove={(e) => {
+          e.cancelBubble = true
+          const raw = { x: e.target.x(), y: e.target.y() }
+          const snapped = onDragMove?.(index, raw) ?? raw
+          e.target.position(snapped)
+        }}
+        onDragEnd={(e) => { e.cancelBubble = true; onDragEnd?.(index) }}
+      />
+      {hovered && canDelete && (
+        <Group
+          x={x + badgeOffset}
+          y={y - badgeOffset}
+          onMouseEnter={() => { setHoverCursor?.('pointer') }}
+          onMouseLeave={() => { setHoverCursor?.(null) }}
+          onClick={(e) => { e.cancelBubble = true; onDelete?.(index) }}
+        >
+          <Circle radius={7 * s} fill="#000" opacity={0.35} listening={false} />
+          <Circle radius={6 * s} fill="#e74c3c" stroke="#fff" strokeWidth={1.2 * s} />
+          <Line points={[-3 * s, -3 * s, 3 * s, 3 * s]} stroke="#fff" strokeWidth={1.5 * s} lineCap="round" listening={false} />
+          <Line points={[3 * s, -3 * s, -3 * s, 3 * s]} stroke="#fff" strokeWidth={1.5 * s} lineCap="round" listening={false} />
+        </Group>
+      )}
+    </Group>
+  )
+}
+
+function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endExt, onHover, onClick, onRightMouseDown, inverseScale, onDelete, setHoverCursor, isDrawingMode, onVertexDragMove, onVertexDragEnd, onDeleteVertex, onSplitVertex, onInsertVertex }) {
   const s = inverseScale
   const flat = tray.points.flatMap((p) => [p.x, p.y])
   const stroke = isSelected ? TRAY_SELECTED : TRAY_COLOR
@@ -239,14 +308,41 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endEx
         />
       )}
       {/* Hit-test polyline (transparent thick line) so click works anywhere
-          near the tray, even outside the visible stroke width. */}
-      <Line
-        points={flat}
-        stroke="transparent"
-        strokeWidth={Math.max(14 * s, 14)}
-        lineCap="round"
-        lineJoin="round"
-      />
+          near the tray, even outside the visible stroke width.
+          When the tray is selected we replace this single fat hit-line with
+          per-segment hit-test lines (below) so a click on a segment can
+          insert a vertex at the click point instead of just re-selecting. */}
+      {!isSelected && (
+        <Line
+          points={flat}
+          stroke="transparent"
+          strokeWidth={Math.max(14 * s, 14)}
+          lineCap="round"
+          lineJoin="round"
+        />
+      )}
+      {/* Per-segment hit-test lines — only when selected. Clicking inserts a
+          new vertex at the perpendicular foot of the click point. The hit
+          width is intentionally narrower (8*s vs 14*s) so the vertex/×
+          handles drawn on top stay easy to grab. */}
+      {isSelected && !isDrawingMode && tray.points.slice(0, -1).map((a, i) => {
+        const b = tray.points[i + 1]
+        return (
+          <Line
+            key={`seg-hit-${i}`}
+            points={[a.x, a.y, b.x, b.y]}
+            stroke="transparent"
+            strokeWidth={Math.max(8 * s, 8)}
+            lineCap="butt"
+            onMouseEnter={() => { setHoverCursor?.('copy') }}
+            onMouseLeave={() => { setHoverCursor?.(null) }}
+            onClick={(e) => {
+              e.cancelBubble = true
+              onInsertVertex?.(i, e)
+            }}
+          />
+        )
+      })}
       {/* 17-1 channel: a single closed polygon carries the body fill AND the
           full border outline — top + bottom borders, plus a semicircle cap
           at each open endpoint and a miter at shared junctions. The dashed
@@ -280,19 +376,41 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endEx
           </>
         )
       })()}
-      {/* Vertex markers (only when selected) */}
-      {isSelected && tray.points.map((p, i) => (
-        <Circle
-          key={i}
-          x={p.x}
-          y={p.y}
-          radius={4 * s}
-          fill="#fff"
-          stroke={stroke}
-          strokeWidth={1.5 * s}
-          listening={false}
-        />
-      ))}
+      {/* Vertex handles — interactive when selected, decorative when not.
+          The selected variant is draggable + has a × delete badge; shift+click
+          on an interior vertex splits the tray. */}
+      {isSelected && !isDrawingMode ? (
+        tray.points.map((p, i) => (
+          <VertexHandle
+            key={`v-${i}`}
+            x={p.x}
+            y={p.y}
+            index={i}
+            isEndpoint={i === 0 || i === tray.points.length - 1}
+            canDelete={tray.points.length > 2}
+            color={stroke}
+            inverseScale={s}
+            onDragMove={onVertexDragMove}
+            onDragEnd={onVertexDragEnd}
+            onDelete={onDeleteVertex}
+            onSplit={onSplitVertex}
+            setHoverCursor={setHoverCursor}
+          />
+        ))
+      ) : (
+        isSelected && tray.points.map((p, i) => (
+          <Circle
+            key={`v-${i}`}
+            x={p.x}
+            y={p.y}
+            radius={4 * s}
+            fill="#fff"
+            stroke={stroke}
+            strokeWidth={1.5 * s}
+            listening={false}
+          />
+        ))
+      )}
       {/* Quick delete button at polyline midpoint so it's easy to spot and
           its hit area overlaps the line — moving mouse onto the X stays inside
           the group's combined hit area, so onMouseLeave doesn't drop it. */}
@@ -313,8 +431,11 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endEx
   )
 }
 
-function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayClick, onRightMouseDown, viewportScale, onDelete, setHoverCursor, isDrawingMode, draftPoints, draftMagnetPx, mousePos, dimmed }) {
+function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayClick, onRightMouseDown, viewportScale, onDelete, setHoverCursor, isDrawingMode, draftPoints, draftMagnetPx, mousePos, dimmed, toCanvasPos }) {
   const trays         = useCableStore((s) => s.traysByFloor[floorId] ?? [])
+  const updateTray    = useCableStore((s) => s.updateTray)
+  const addTray       = useCableStore((s) => s.addTray)
+  const removeTrayFn  = useCableStore((s) => s.removeTray)
   const inverseScale  = 1 / (viewportScale || 1)
   const [hoveredId, setHoveredId] = useState(null)
   const batchSelectedIds = selectedItems.length > 1
@@ -323,6 +444,23 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
   // 17-1 follow-up: pre-compute per-tray junction info so each tray miters
   // cleanly into its neighbour where they share an exact endpoint.
   const neighborExts = React.useMemo(() => computeTrayNeighborExts(trays), [trays])
+
+  // Snap a vertex being dragged onto another tray's vertex (or another
+  // vertex of the same tray) within VERTEX_SNAP_SCREEN_PX. Excludes the
+  // dragged vertex itself so it doesn't snap to its own old position.
+  const snapVertexDrag = React.useCallback((trayId, vertexIdx, pos) => {
+    const snapDist = VERTEX_SNAP_SCREEN_PX * inverseScale
+    let best = pos, bestD = snapDist
+    for (const t of trays) {
+      for (let i = 0; i < t.points.length; i++) {
+        if (t.id === trayId && i === vertexIdx) continue
+        const v = t.points[i]
+        const d = Math.hypot(pos.x - v.x, pos.y - v.y)
+        if (d < bestD) { bestD = d; best = { x: v.x, y: v.y } }
+      }
+    }
+    return best
+  }, [trays, inverseScale])
 
   // Detect if mousePos sits exactly on an existing tray vertex (snap target).
   // Editor2D pre-snaps the mousePos, so an exact-match scan is enough.
@@ -366,6 +504,50 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
             onDelete={onDelete}
             setHoverCursor={setHoverCursor}
             isDrawingMode={isDrawingMode}
+            onVertexDragMove={(idx, raw) => {
+              const snapped = snapVertexDrag(tray.id, idx, raw)
+              const newPoints = tray.points.map((pt, j) => (j === idx ? snapped : pt))
+              updateTray(floorId, tray.id, { points: newPoints })
+              return snapped
+            }}
+            onVertexDragEnd={() => { /* store already up to date via drag-move */ }}
+            onDeleteVertex={(idx) => {
+              if (tray.points.length <= 2) return
+              const newPoints = tray.points.filter((_, j) => j !== idx)
+              updateTray(floorId, tray.id, { points: newPoints })
+            }}
+            onSplitVertex={(idx) => {
+              if (idx <= 0 || idx >= tray.points.length - 1) return
+              // Two new trays share the exact vertex at idx → graph builder
+              // (cable-spec §10 / 12-2d) treats coincident xy as one node.
+              const ptsA = tray.points.slice(0, idx + 1)
+              const ptsB = tray.points.slice(idx)
+              removeTrayFn(floorId, tray.id)
+              addTray(floorId, { ...tray, id: generateId('tray'), points: ptsA })
+              addTray(floorId, { ...tray, id: generateId('tray'), points: ptsB })
+            }}
+            onInsertVertex={(segIdx, e) => {
+              if (!toCanvasPos) return
+              const stage = e?.target?.getStage?.()
+              const screenPos = stage?.getPointerPosition?.()
+              if (!screenPos) return
+              const canvasPos = toCanvasPos(screenPos)
+              // Project onto the segment so the inserted vertex sits exactly
+              // on the existing tray line, then user can drag it elsewhere.
+              const a = tray.points[segIdx], b = tray.points[segIdx + 1]
+              const dx = b.x - a.x, dy = b.y - a.y
+              const lenSq = dx * dx + dy * dy
+              if (lenSq < 1e-6) return
+              const t = ((canvasPos.x - a.x) * dx + (canvasPos.y - a.y) * dy) / lenSq
+              const tc = Math.max(0, Math.min(1, t))
+              const foot = { x: a.x + tc * dx, y: a.y + tc * dy }
+              const newPoints = [
+                ...tray.points.slice(0, segIdx + 1),
+                foot,
+                ...tray.points.slice(segIdx + 1),
+              ]
+              updateTray(floorId, tray.id, { points: newPoints })
+            }}
           />
         )
       })}

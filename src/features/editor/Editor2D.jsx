@@ -1421,6 +1421,7 @@ function Editor2D() {
                 draftMagnetPx={DEFAULT_TRAY_MAGNET_PX}
                 mousePos={isTrayMode ? mousePos : null}
                 dimmed={isDoorWindowMode}
+                toCanvasPos={toCanvasPos}
               />
             )}
 
