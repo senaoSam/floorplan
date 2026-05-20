@@ -281,6 +281,77 @@ const PHASES = [
     ],
   },
   {
+    phase: 'Phase 12 — Tray 編輯能力（P0）',
+    groups: [
+      {
+        layer: 'Layer 18 — Tray Edit',
+        items: [
+          { id: '18-1', done: false, text: 'Vertex edit — drag / insert / delete / extend from endpoint / split segment' },
+          { id: '18-2', done: false, text: '整條 tray drag 搬位置（保留 vertex 結構、更新 magnet / graph / cable route）' },
+          { id: '18-3', done: false, text: 'Drawing UX — Backspace undo vertex；Shift 鎖 0/45/90°；Enter 完成' },
+          { id: '18-4', done: false, text: 'Tray naming — auto TRAY-{floor}-{system}-{seq}、可手動覆寫' },
+          { id: '18-5', done: false, text: 'Selected 顯示 vertex handles + segment + 可 snap 的 endpoint' },
+        ],
+      },
+    ],
+  },
+  {
+    phase: 'Phase 13 — Tray 工程屬性與診斷',
+    groups: [
+      {
+        layer: 'Layer 19 — Tray Engineering',
+        items: [
+          { id: '19-1', done: false, text: 'Tray kind（ladder / wire basket / solid / conduit / PVC）+ width × depth + material' },
+          { id: '19-2', done: false, text: 'mountHeight per-tray（2D 編輯，3D 視覺跟著）' },
+          { id: '19-3', done: false, text: 'System 屬性（Data / Power / Fire / Backbone / Mixed）+ owner color legend' },
+          { id: '19-4', done: false, text: 'capacityProfile + per-tray fill ratio + 三段 warning（不寫死 40%）' },
+          { id: '19-5', done: false, text: 'CableTrayPanel 升級為 health panel（Identity / Load / Path / Issues）' },
+        ],
+      },
+    ],
+  },
+  {
+    phase: 'Phase 14 — Planning BOM + 施工前檢查',
+    groups: [
+      {
+        layer: 'Layer 20 — Planning BOM',
+        items: [
+          { id: '20-1', done: false, text: 'Tray Planning BOM — 總長 / 彎頭 / T 接 / 跨接 / 餘料係數' },
+          { id: '20-2', done: false, text: 'Per-tray AP/cable 列表 + 容量瓶頸列表' },
+          { id: '20-3', done: false, text: 'Drawing snap 增強 — snap to wall / parallel / angle lock' },
+          { id: '20-4', done: false, text: 'Right-click context menu — rename / split / extend / merge / convert / delete' },
+        ],
+      },
+    ],
+  },
+  {
+    phase: 'Phase 15 — 進階拓撲',
+    groups: [
+      {
+        layer: 'Layer 21 — Advanced Topology',
+        items: [
+          { id: '21-1', done: false, text: 'Vertical tray / conduit（獨立物件，不是 Riser）' },
+          { id: '21-2', done: false, text: 'Zone box / consolidation point — trunk → zone → short drop' },
+          { id: '21-3', done: false, text: 'Routing 支援 zone box（home-run vs via zone box 路徑）' },
+        ],
+      },
+    ],
+  },
+  {
+    phase: 'Phase 16 — CAD Handoff',
+    groups: [
+      {
+        layer: 'Layer 22 — Export',
+        items: [
+          { id: '22-1', done: false, text: 'CSV Planning BOM export' },
+          { id: '22-2', done: false, text: 'PDF report（平面圖 + 統計 + warnings）' },
+          { id: '22-3', done: false, text: 'SVG / PNG plan view export' },
+          { id: '22-4', done: false, text: 'DXF export（DWG 之後再評估）' },
+        ],
+      },
+    ],
+  },
+  {
     phase: 'Phase 9 — AI 輔助',
     groups: [
       {

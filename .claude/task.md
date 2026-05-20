@@ -235,3 +235,95 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
   - 兩條平行 tray 中間放一個 SW 可以同時做 hub 連通兩條
   - AP 在 magnet 內仍然只接最近一條（AP 概念上是單一終端）
   - 同步更新 cable-spec.md §4 反映新規則
+
+---
+
+## Design Principles（2026-05-20 review 後修正，後續 phase 都遵守）
+
+| 主題 | 原則 |
+|---|---|
+| **3D = read-only** | Z 軸屬性（mountHeight、kind…）一律在 **2D panel 編輯**；3D 只負責高度視覺化，不開放 3D 拖曳/畫線 |
+| **Capacity rule** | tray fill 用 `capacityProfile`（25% planning / 40% warning / custom），**不**寫死「NEC 40%」 |
+| **Color legend** | tray 顏色用 **owner / company / discipline standard**，不綁地區法規 |
+| **Riser ≠ vertical tray** | Riser = 跨樓層 backbone 拓撲概念；vertical tray / conduit = 物理 pathway。兩者各自獨立物件 |
+| **BOM = Planning BOM** | 我們算的是 planning estimate（tray 長、彎頭、AP cable），**不是施工 final BOM**（缺廠牌、吊桿、餘料、現場裁切） |
+| **Warning ≠ Code violation** | 容量提示寫「exceeds selected fill rule」，不寫「code violation」，除非未來真的整合 Article 392 / TIA-569 / local code profile |
+
+---
+
+## Phase 12 — Tray 編輯能力（P0）
+
+> 目標：tray 不用刪掉重畫，可以反覆 iterate
+> Reviewer feedback：「不做這層，系統會從『設計工具』退化成『示意圖工具』」
+
+### Layer 18 — Tray Edit
+
+| #     | 狀態 | Task                                                                              |
+| ----- | ---- | --------------------------------------------------------------------------------- |
+| 18-1  | ⬜   | Vertex edit — 選中 tray 顯示 handles，可拖曳 / 插入 / 刪除 / 從端點延伸 / split segment |
+| 18-2  | ⬜   | 整條 tray drag 搬位置（保留 vertex 結構、更新 magnet / graph / cable route）           |
+| 18-3  | ⬜   | Drawing UX — Backspace / Cmd+Z undo last vertex；Shift 鎖 0/45/90°；Enter 完成        |
+| 18-4  | ⬜   | Tray naming — auto `TRAY-{floor}-{system}-{seq}`、可手動覆寫；warning 顯示用 name 取代 id |
+| 18-5  | ⬜   | Selected 顯示 vertex handles + segment + 可 snap 的 endpoint                          |
+
+---
+
+## Phase 13 — Tray 工程屬性與診斷
+
+### Layer 19 — Tray Engineering
+
+| #     | 狀態 | Task                                                                              |
+| ----- | ---- | --------------------------------------------------------------------------------- |
+| 19-1  | ⬜   | Tray kind（ladder / wire basket / solid / conduit / PVC）+ width × depth + material   |
+| 19-2  | ⬜   | mountHeight per-tray（2D 編輯，3D 視覺跟著；presets: ceiling / wall / under raised floor / custom）|
+| 19-3  | ⬜   | System 屬性（Data / Power / Fire / Backbone / Mixed）+ owner color legend            |
+| 19-4  | ⬜   | capacityProfile + per-tray fill ratio 計算 + 三段 warning（OK / 注意 / 滿載 / 超出）   |
+| 19-5  | ⬜   | CableTrayPanel 升級為 health panel（Identity / Load / Path / Issues 四段）             |
+
+---
+
+## Phase 14 — Planning BOM + 施工前檢查
+
+### Layer 20 — Planning BOM
+
+| #     | 狀態 | Task                                                                              |
+| ----- | ---- | --------------------------------------------------------------------------------- |
+| 20-1  | ⬜   | Tray Planning BOM — 總長、彎頭/T 接數、跨接位置、餘料係數（明確標 Planning，非 final BOM） |
+| 20-2  | ⬜   | Per-tray AP/cable 列表 + 容量瓶頸列表                                                 |
+| 20-3  | ⬜   | Drawing snap 增強 — snap to wall / parallel wall / angle lock                       |
+| 20-4  | ⬜   | Right-click context menu — rename / duplicate / split / extend / merge / convert / delete |
+
+---
+
+## Phase 15 — 進階拓撲
+
+### Layer 21 — Advanced Topology
+
+| #     | 狀態 | Task                                                                              |
+| ----- | ---- | --------------------------------------------------------------------------------- |
+| 21-1  | ⬜   | Vertical tray / conduit（**獨立物件**，不是 Riser）— 同樓層內垂直或沿牆爬升           |
+| 21-2  | ⬜   | Zone box / consolidation point — trunk → zone → short drop 拓撲                      |
+| 21-3  | ⬜   | Routing 支援 zone box（home-run vs via zone box 兩種路徑可選） + capacity warning   |
+
+---
+
+## Phase 16 — CAD Handoff
+
+### Layer 22 — Export
+
+| #     | 狀態 | Task                                                                              |
+| ----- | ---- | --------------------------------------------------------------------------------- |
+| 22-1  | ⬜   | CSV Planning BOM export（per-AP cable / tray length / fill ratio）                  |
+| 22-2  | ⬜   | PDF report（平面圖 + 統計表 + warnings）                                              |
+| 22-3  | ⬜   | SVG / PNG plan view export                                                          |
+| 22-4  | ⬜   | DXF export（DWG 視需求再評估）                                                       |
+
+---
+
+## 既有延後項目歸位
+
+| ID | 狀態 | 原因 |
+|---|---|---|
+| 12-4 Hybrid routing | ⏸️ | 17-3 switch hub 落地後痛點變少，繼續延後 |
+| 15-2 Cable 3D polylines | ⏸️ | **純視覺化（read-only）**，符合「3D = read-only」原則，有空再做 |
+| 17-4 Snap 視覺提示 | ⏸️ | 17-3 hub 化後此情境罕見，待實際痛點出現再評估 |
