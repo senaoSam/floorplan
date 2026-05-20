@@ -94,6 +94,10 @@ function Editor2D() {
 
   // ── Cable Tray 繪製狀態 ───────────────────────────────
   const [trayDraftPoints, setTrayDraftPoints] = useState([])  // [{x,y}, ...]
+  // Shift held during draft → ghost segment locks to 0/45/90° from last vertex.
+  // Tracked via ref so handleMouseMove / handleStageClick can read it without
+  // re-creating the callbacks on every Shift up/down.
+  const shiftHeldRef = useRef(false)
 
   // ── 框選狀態 ──────────────────────────────────────────
   // Marquee rect is drawn imperatively onto its own Konva Layer so mousemove
@@ -356,6 +360,26 @@ function Editor2D() {
     }
 
     const onKey = (e) => {
+      // ── Tray draft 鍵盤：在繪製途中 Backspace / Ctrl+Z 退一步，Enter 完成 ──
+      // 必須擺在 Ctrl+Z 全域 undo 與 Delete/Backspace 刪除分支「之前」，
+      // 才能在繪製途中攔截掉那些原本會誤觸的行為。
+      if (isTrayMode && trayDraftPoints.length > 0) {
+        const isUndo = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z')
+        if (e.key === 'Backspace' || isUndo) {
+          const tag = e.target.tagName
+          if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+            e.preventDefault()
+            setTrayDraftPoints((prev) => prev.slice(0, -1))
+            return
+          }
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          finishTrayDraft()
+          return
+        }
+      }
+
       // ── Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y：Undo / Redo ──
       if ((e.ctrlKey || e.metaKey) && !e.altKey) {
         if (e.key === 'z' || e.key === 'Z') {
@@ -721,6 +745,39 @@ function Editor2D() {
     return pos
   }, [activeFloorId, viewport.scale])
 
+  // Track Shift key state for tray-draft angle-lock. Cheap to install once
+  // at mount; the existing onKey handler can't drive this because it needs
+  // both keydown and keyup edges.
+  useEffect(() => {
+    const onDown = (e) => { if (e.key === 'Shift') shiftHeldRef.current = true }
+    const onUp   = (e) => { if (e.key === 'Shift') shiftHeldRef.current = false }
+    const onBlur = ()  => { shiftHeldRef.current = false }
+    window.addEventListener('keydown', onDown)
+    window.addEventListener('keyup', onUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onDown)
+      window.removeEventListener('keyup', onUp)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
+
+  // Snap the cursor position to a 0/45/90° direction from `anchor`. Length
+  // is preserved along the snapped angle (so the ghost line "rotates" as
+  // the user moves while Shift is held).
+  const angleLockToAnchor = useCallback((pos, anchor) => {
+    const dx = pos.x - anchor.x
+    const dy = pos.y - anchor.y
+    const len = Math.hypot(dx, dy)
+    if (len < 1e-6) return pos
+    const step = Math.PI / 4
+    const snappedAngle = Math.round(Math.atan2(dy, dx) / step) * step
+    return {
+      x: anchor.x + Math.cos(snappedAngle) * len,
+      y: anchor.y + Math.sin(snappedAngle) * len,
+    }
+  }, [])
+
   // Snap to any existing tray vertex (committed trays + current draft) so a
   // new draft can start/end on an existing endpoint. Wider radius than walls
   // (24 vs 12 screen-px) since trays sparse → easy hover landing matters more.
@@ -800,7 +857,9 @@ function Editor2D() {
       const snapped = isWallMode
         ? snapToWallEndpoint(canvasPos)
         : isTrayMode
-          ? snapToTrayVertex(canvasPos)
+          ? (shiftHeldRef.current && trayDraftPoints.length > 0
+              ? angleLockToAnchor(canvasPos, trayDraftPoints[trayDraftPoints.length - 1])
+              : snapToTrayVertex(canvasPos))
           : canvasPos
       setMousePos(snapped)
     } else if (mousePos !== null) {
@@ -849,7 +908,7 @@ function Editor2D() {
     } else if (useHoverReadoutStore.getState().reading) {
       useHoverReadoutStore.getState().setReading(null)
     }
-  }, [toCanvasPos, isWallMode, isScopeMode, isFloorHoleMode, isScaleMode, isCropMode, isDoorWindowMode, isTrayMode, mousePos, snapToWallEndpoint, snapToTrayVertex, viewport.scale, activeFloorId])
+  }, [toCanvasPos, isWallMode, isScopeMode, isFloorHoleMode, isScaleMode, isCropMode, isDoorWindowMode, isTrayMode, mousePos, snapToWallEndpoint, snapToTrayVertex, angleLockToAnchor, trayDraftPoints, viewport.scale, activeFloorId])
 
   // ── 點擊：分流到各模式 ─────────────────────────────────
   const handleStageClick = useCallback((e) => {
@@ -927,8 +986,12 @@ function Editor2D() {
     // Cable Tray polyline drawing — accumulate vertices, finish with right-click / Esc.
     // Snap to existing tray vertices so users can extend from / connect back to
     // an endpoint (separate tray objects sharing the exact coordinate).
+    // Shift held + an existing draft anchor → angle-lock instead of snap, so
+    // the committed vertex matches the locked ghost preview.
     if (isTrayMode) {
-      const snapped = snapToTrayVertex(pos)
+      const snapped = (shiftHeldRef.current && trayDraftPoints.length > 0)
+        ? angleLockToAnchor(pos, trayDraftPoints[trayDraftPoints.length - 1])
+        : snapToTrayVertex(pos)
       setTrayDraftPoints((prev) => [...prev, snapped])
       return
     }
@@ -1078,7 +1141,7 @@ function Editor2D() {
     isAPMode, nextAPName, autoChannelOnPlace, regulatoryDomain,
     isSwitchMode, addSwitch, nextSwitchName,
     isRiserMode, addRiser, nextRiserName,
-    isTrayMode, snapToTrayVertex,
+    isTrayMode, snapToTrayVertex, angleLockToAnchor, trayDraftPoints,
     isScopeMode, scopePoints, viewport.scale, addScope,
     isFloorHoleMode, floorHolePoints, addFloorHole,
     isCropMode, cropStart, updateFloor, toImagePos, setSelected,
@@ -1211,7 +1274,7 @@ function Editor2D() {
     [EDITOR_MODE.DOOR_WINDOW]:     { label: '門窗模式', hint: '點擊牆體兩點設定門/窗位置；D 切換門、W 切換窗；右鍵或 Esc 取消' },
     [EDITOR_MODE.PLACE_AP]:        { label: '放置 AP 模式', hint: '左鍵點擊放置 AP' },
     [EDITOR_MODE.PLACE_SWITCH]:    { label: '放置 Switch 模式', hint: '左鍵點擊放置 Switch / IDF / MDF / Router；右側面板可調類型與規格' },
-    [EDITOR_MODE.DRAW_CABLE_TRAY]: { label: '繪製線槽模式', hint: '左鍵點擊新增頂點；右鍵或 Esc 完成（≥ 2 點才會建立）；磁吸範圍可在右側面板調整' },
+    [EDITOR_MODE.DRAW_CABLE_TRAY]: { label: '繪製線槽模式', hint: '左鍵新增頂點；Shift 鎖 0/45/90°；Backspace / Ctrl+Z 退一步；Enter / 右鍵 / Esc 完成（≥ 2 點才會建立）' },
     [EDITOR_MODE.PLACE_RISER]:    { label: '放置 Riser 模式', hint: '左鍵點擊放置 Riser；放完用右側面板加入跨樓層' },
     [EDITOR_MODE.DRAW_SCOPE]:      { label: '範圍模式',     hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.DRAW_FLOOR_HOLE]: { label: '中庭模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
