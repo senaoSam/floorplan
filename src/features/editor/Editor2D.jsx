@@ -1487,6 +1487,12 @@ function Editor2D() {
                 mousePos={isTrayMode ? mousePos : null}
                 dimmed={isDoorWindowMode}
                 toCanvasPos={toCanvasPos}
+                // When a tray is selected, its handles + segment hit-tests
+                // are rendered in the overlay (after APLayer, below). The
+                // BODY stays here so the body's drag handler isn't re-parented
+                // mid-drag — that re-parenting is what caused the "tray jumps
+                // on first body drag" bug.
+                renderMode={selectedType === 'cable_tray' ? 'base' : 'all'}
               />
             )}
 
@@ -1571,6 +1577,30 @@ function Editor2D() {
 
             {activeFloorId && showCables && (
               <CableLayer floorId={activeFloorId} viewportScale={viewport.scale} />
+            )}
+
+            {/* Selected-tray overlay — renders the selected tray (body +
+                interactive handles + segment hit-tests) ON TOP of every
+                other vector element so clicks on its vertices aren't
+                intercepted by overlapping APs / switches / walls. */}
+            {activeFloorId && showCableTrays && selectedType === 'cable_tray' && (
+              <CableTrayLayer
+                floorId={activeFloorId}
+                selectedTrayId={selectedId}
+                selectedItems={selectedItems}
+                onTrayClick={(id, e) => {
+                  if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'cable_tray'); return }
+                  setSelected(id, 'cable_tray')
+                }}
+                onRightMouseDown={handleRightMouseDown}
+                viewportScale={viewport.scale}
+                onDelete={(id) => { removeTray(activeFloorId, id); clearSelected() }}
+                setHoverCursor={setHoverCursor}
+                isDrawingMode={false}
+                dimmed={isDoorWindowMode}
+                toCanvasPos={toCanvasPos}
+                renderMode="overlay"
+              />
             )}
 
             {isScaleMode && (

@@ -248,14 +248,47 @@ function VertexHandle({
   )
 }
 
-function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endExt, onHover, onClick, onRightMouseDown, inverseScale, onDelete, setHoverCursor, isDrawingMode, dimmed, onVertexDragMove, onVertexDragEnd, onDeleteVertex, onSplitVertex, onInsertVertex, onSplitSegment, onTranslate }) {
+// `mode`:
+//   'full'            — body + magnet + handles + segments (used when the
+//                       overlay split isn't active, i.e. nothing selected).
+//   'bodyOnly'        — body + magnet + body-drag, but skip interactive
+//                       handles / per-segment hit-tests. Used in the BASE
+//                       layer for the currently-selected tray so its body
+//                       (and drag handler) stay rooted in the base — the
+//                       overlay only adds the handles on top. This is what
+//                       prevents the mid-drag "jump" where moving the tray
+//                       between Konva parents would tear the drag apart.
+//   'interactiveOnly' — handles + per-segment hit-tests + snap halos, no
+//                       body / magnet / body-drag. Used by the overlay so
+//                       handles + segments float above APs / switches.
+function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, startExt, endExt, onHover, onClick, onRightMouseDown, inverseScale, onDelete, setHoverCursor, isDrawingMode, dimmed, onVertexDragMove, onVertexDragEnd, onDeleteVertex, onSplitVertex, onInsertVertex, onSplitSegment, onTranslate }) {
   const s = inverseScale
   const flat = tray.points.flatMap((p) => [p.x, p.y])
   const stroke = isSelected ? TRAY_SELECTED : TRAY_COLOR
   const magnetPx = tray.magnetDistance ?? 100
+  const showBody = mode !== 'interactiveOnly'
+  const showInteractive = mode !== 'bodyOnly'
+  // Body drag: track the cursor between dragmove ticks so we can hand the
+  // store an incremental (dx, dy) each frame, AND remember the Group's
+  // absolute position at dragstart so dragBoundFunc can pin it there for
+  // the whole drag. The visual moves entirely from store re-renders.
+  // dragBoundFunc receives ABSOLUTE coords (Stage has a viewport transform
+  // that puts local-(0,0) somewhere other than screen-(0,0)), so simply
+  // returning {x:0,y:0} would warp the Group to the screen origin — the
+  // exact "body offset" the user saw.
+  const bodyDragLastRef    = React.useRef(null)
+  const bodyDragOrigAbsRef = React.useRef(null)
 
   return (
     <Group
+      // Both the base body Group AND the overlay interactive Group are
+      // draggable. The overlay's segment hit-tests sit on top of the body
+      // in z-order; if the overlay wasn't draggable, a click on the body
+      // (which lands on overlay's segments) couldn't initiate body-drag.
+      // Both Groups share the same onTranslate path, so dragging either one
+      // updates the same store points — body and handles stay in sync.
+      // (Plain clicks on a segment without movement still fire onClick on
+      // the segment line itself, which cancels bubble and inserts a vertex.)
       draggable={!isDrawingMode && !dimmed}
       onMouseEnter={() => {
         // Cursor cue: 'pointer' if a click would select; 'move' once the tray
@@ -288,22 +321,43 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endEx
           onRightMouseDown?.(e.currentTarget)
         }
       }}
+      dragBoundFunc={() => bodyDragOrigAbsRef.current ?? { x: 0, y: 0 }}
       onDragStart={(e) => {
         e.cancelBubble = true
         // Auto-select before moving so the panel/handles show the right tray.
         if (!isSelected) onClick?.(tray.id, e)
+        const p = e.target.getStage()?.getPointerPosition()
+        bodyDragLastRef.current = p ? { x: p.x, y: p.y } : null
+        // Snapshot absolute position so dragBoundFunc can keep the Group
+        // anchored exactly where it was when the drag started.
+        bodyDragOrigAbsRef.current = e.target.getAbsolutePosition()
+      }}
+      onDragMove={(e) => {
+        e.cancelBubble = true
+        const p = e.target.getStage()?.getPointerPosition()
+        const last = bodyDragLastRef.current
+        if (!p || !last) return
+        // getPointerPosition() returns stage-container CSS pixels (verified
+        // empirically — when pointer is dispatched at canvas-local (500, 300)
+        // the function returns (500, 300), not the scaled-down canvas coord).
+        // So we multiply the screen-px delta by inverseScale to land in
+        // canvas-px before handing it to the store.
+        const incDx = (p.x - last.x) * s
+        const incDy = (p.y - last.y) * s
+        bodyDragLastRef.current = { x: p.x, y: p.y }
+        if (incDx !== 0 || incDy !== 0) onTranslate?.(incDx, incDy)
       }}
       onDragEnd={(e) => {
         e.cancelBubble = true
-        const dx = e.target.x()
-        const dy = e.target.y()
-        e.target.position({ x: 0, y: 0 })
-        if (dx !== 0 || dy !== 0) onTranslate?.(dx, dy)
+        bodyDragLastRef.current = null
+        bodyDragOrigAbsRef.current = null
+        // Group was pinned at its original absolute position throughout the
+        // drag — nothing to reset.
       }}
     >
       {/* Magnet halo — drawn first so the tray sits on top of it.
           Capsule shape via thick line + round caps; radius == magnetDistance. */}
-      {showMagnet && (
+      {showBody && showMagnet && (
         <Line
           points={flat}
           stroke={MAGNET_FILL}
@@ -313,7 +367,7 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endEx
           listening={false}
         />
       )}
-      {showMagnet && (
+      {showBody && showMagnet && (
         <Line
           points={flat}
           stroke={MAGNET_STROKE}
@@ -328,11 +382,13 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endEx
         />
       )}
       {/* Hit-test polyline (transparent thick line) so click works anywhere
-          near the tray, even outside the visible stroke width.
-          When the tray is selected we replace this single fat hit-line with
-          per-segment hit-test lines (below) so a click on a segment can
-          insert a vertex at the click point instead of just re-selecting. */}
-      {!isSelected && (
+          near the tray, even outside the visible stroke width. Always render
+          it when the body is shown — including for the selected tray's
+          bodyOnly base, so the Group still owns a clickable surface to start
+          body-drag on. (Segment hit-tests are in the overlay; they are on
+          TOP in z-order so they win for narrow segment-line clicks, and this
+          wide line catches the rest so body-drag remains possible.) */}
+      {showBody && (
         <Line
           points={flat}
           stroke="transparent"
@@ -347,7 +403,7 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endEx
           the click foot — both share the exact xy so the graph merges them).
           Hit width is intentionally narrower (8*s vs 14*s) than the body so
           vertex/× handles drawn on top stay easy to grab. */}
-      {isSelected && !isDrawingMode && tray.points.slice(0, -1).map((a, i) => {
+      {showInteractive && isSelected && !isDrawingMode && tray.points.slice(0, -1).map((a, i) => {
         const b = tray.points[i + 1]
         return (
           <Line
@@ -373,7 +429,7 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endEx
           full border outline — top + bottom borders, plus a semicircle cap
           at each open endpoint and a miter at shared junctions. The dashed
           centreline is a separate line so the dash phase stays straight. */}
-      {(() => {
+      {showBody && (() => {
         const halfW = (TRAY_WIDTH_SCREEN_PX * s) / 2
         const polyFlat = buildChannelPolygon(tray.points, halfW, startExt, endExt)
         const borderW  = (isSelected ? 1.6 : isHovered ? 1.3 : 1.1) * s
@@ -404,8 +460,9 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endEx
       })()}
       {/* Vertex handles — interactive when selected, decorative when not.
           The selected variant is draggable + has a × delete badge; shift+click
-          on an interior vertex splits the tray. */}
-      {isSelected && !isDrawingMode ? (
+          on an interior vertex splits the tray. Skipped in bodyOnly mode
+          (the overlay carries the handles in that case). */}
+      {showInteractive && isSelected && !isDrawingMode && (
         tray.points.map((p, i) => (
           <VertexHandle
             key={`v-${i}`}
@@ -423,24 +480,12 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endEx
             setHoverCursor={setHoverCursor}
           />
         ))
-      ) : (
-        isSelected && tray.points.map((p, i) => (
-          <Circle
-            key={`v-${i}`}
-            x={p.x}
-            y={p.y}
-            radius={4 * s}
-            fill="#fff"
-            stroke={stroke}
-            strokeWidth={1.5 * s}
-            listening={false}
-          />
-        ))
       )}
       {/* Quick delete button at polyline midpoint so it's easy to spot and
           its hit area overlaps the line — moving mouse onto the X stays inside
-          the group's combined hit area, so onMouseLeave doesn't drop it. */}
-      {isHovered && onDelete && tray.points.length >= 2 && (() => {
+          the group's combined hit area, so onMouseLeave doesn't drop it.
+          Anchored to the body, so only render when body is shown. */}
+      {showBody && isHovered && onDelete && tray.points.length >= 2 && (() => {
         const mid = polylineMidpoint(tray.points)
         return (
           <DeleteButton
@@ -457,8 +502,26 @@ function TrayPolyline({ tray, isSelected, isHovered, showMagnet, startExt, endEx
   )
 }
 
-function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayClick, onRightMouseDown, viewportScale, onDelete, setHoverCursor, isDrawingMode, draftPoints, draftMagnetPx, mousePos, dimmed, toCanvasPos }) {
-  const trays         = useCableStore((s) => s.traysByFloor[floorId] ?? [])
+// `renderMode`:
+//   'all'      — render every tray with mode='full' (default; used when
+//                nothing is selected so no overlay is mounted).
+//   'base'     — render every tray. Unselected → mode='full'; selected →
+//                mode='bodyOnly' (body stays anchored in the base layer so
+//                its drag handler doesn't get re-parented mid-drag). Used
+//                in the base when something is selected.
+//   'overlay'  — render ONLY the selected tray with mode='interactiveOnly'
+//                (handles + segments + snap halos). Mounted AFTER APLayer
+//                in Editor2D so the handles float above other layers.
+function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayClick, onRightMouseDown, viewportScale, onDelete, setHoverCursor, isDrawingMode, draftPoints, draftMagnetPx, mousePos, dimmed, toCanvasPos, renderMode = 'all' }) {
+  const allTrays      = useCableStore((s) => s.traysByFloor[floorId] ?? [])
+  const trays = renderMode === 'overlay'
+    ? allTrays.filter((t) => t.id === selectedTrayId)
+    : allTrays
+  const polylineModeFor = (trayId) => {
+    if (renderMode === 'overlay') return 'interactiveOnly'
+    if (renderMode === 'base' && trayId === selectedTrayId) return 'bodyOnly'
+    return 'full'
+  }
   const updateTray    = useCableStore((s) => s.updateTray)
   const addTray       = useCableStore((s) => s.addTray)
   const nextTrayName  = useCableStore((s) => s.nextTrayName)
@@ -477,10 +540,12 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
   // dragged vertex itself so it doesn't snap to its own old position.
   // Returns { pos, target } — `target` is the snapped-to vertex when a snap
   // actually fired, else null. Caller uses `target` to drive the snap halo.
+  // Always iterates `allTrays` (not the render-filtered `trays`) so the
+  // overlay instance can still snap onto vertices on the base-rendered trays.
   const snapVertexDrag = React.useCallback((trayId, vertexIdx, pos) => {
     const snapDist = VERTEX_SNAP_SCREEN_PX * inverseScale
     let best = pos, bestD = snapDist, target = null
-    for (const t of trays) {
+    for (const t of allTrays) {
       for (let i = 0; i < t.points.length; i++) {
         if (t.id === trayId && i === vertexIdx) continue
         const v = t.points[i]
@@ -489,7 +554,7 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
       }
     }
     return { pos: best, target }
-  }, [trays, inverseScale])
+  }, [allTrays, inverseScale])
 
   // Snap-target for the currently dragging vertex — drives the green halo
   // shown at the other tray's endpoint. Null when no drag or no snap.
@@ -497,9 +562,11 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
 
   // Detect if mousePos sits exactly on an existing tray vertex (snap target).
   // Editor2D pre-snaps the mousePos, so an exact-match scan is enough.
+  // Uses allTrays so the indicator also fires for trays hidden in the base
+  // due to `hideSelected` mode.
   const snapHit = (isDrawingMode && mousePos)
     ? (() => {
-        for (const t of trays) {
+        for (const t of allTrays) {
           for (const v of t.points) {
             if (v.x === mousePos.x && v.y === mousePos.y) return v
           }
@@ -524,6 +591,7 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
           <TrayPolyline
             key={tray.id}
             tray={tray}
+            mode={polylineModeFor(tray.id)}
             isSelected={isSel}
             isHovered={isHov}
             // Show magnet halo while drawing trays OR when this one is selected/hovered.
@@ -539,7 +607,14 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
             isDrawingMode={isDrawingMode}
             dimmed={dimmed}
             onTranslate={(dx, dy) => {
-              const newPoints = tray.points.map((p) => ({ x: p.x + dx, y: p.y + dy }))
+              // Read fresh store state each tick — Konva fires dragmove faster
+              // than React re-renders, so the `tray.points` closure here can be
+              // stale across consecutive ticks. Without fresh-read the second
+              // tick re-applies its delta to the same pre-drag points as the
+              // first, producing the visible "jump back" the user saw.
+              const cur = useCableStore.getState().traysByFloor[floorId]?.find((t) => t.id === tray.id)
+              if (!cur) return
+              const newPoints = cur.points.map((p) => ({ x: p.x + dx, y: p.y + dy }))
               updateTray(floorId, tray.id, { points: newPoints })
             }}
             onVertexDragMove={(idx, raw) => {
@@ -619,8 +694,10 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
         )
       })}
 
-      {/* Draft polyline being drawn (DRAW_CABLE_TRAY mode) */}
-      {isDrawingMode && draftPoints && draftPoints.length > 0 && (
+      {/* Draft + draw-mode snap indicator only render in the base instance
+          (the overlay instance is for the selected tray and should stay
+          lean — drawing implies nothing is selected anyway). */}
+      {renderMode !== 'overlay' && isDrawingMode && draftPoints && draftPoints.length > 0 && (
         <DraftTray
           points={draftPoints}
           magnetPx={draftMagnetPx ?? 100}
@@ -631,7 +708,7 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
 
       {/* Snap indicator: green halo when the cursor has snapped onto an
           existing tray vertex (works even before the first click of a draft). */}
-      {snapHit && (
+      {renderMode !== 'overlay' && snapHit && (
         <Group x={snapHit.x} y={snapHit.y} listening={false}>
           <Circle radius={10 * inverseScale} stroke="#22c55e" strokeWidth={2 * inverseScale} />
           <Circle radius={4  * inverseScale} fill="#22c55e" />
