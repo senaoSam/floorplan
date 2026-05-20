@@ -1,18 +1,15 @@
 import React, { useMemo } from 'react'
-import * as THREE from 'three'
-import { useCableStore } from '@/store/useCableStore'
+import { useCableStore, resolveTrayMountHeight } from '@/store/useCableStore'
+import { useFloorStore } from '@/store/useFloorStore'
 
 // 3D cable tray rendering — each tray polyline becomes a chain of thin
-// blue boxes pinned just below the ceiling. We sit slightly below ceiling
-// (0.05 m) so heatmap planes or other ceiling-mounted geometry on the
-// active floor don't z-fight with the tray surface.
+// blue boxes pinned at the tray's per-tray mountHeight (19-2). Trays grouped
+// by mountHeight so each elevation is one positioned <group>.
 const TRAY_COLOR = '#60a5fa'   // matches 2D CableTrayLayer
-const STROKE     = '#1d4ed8'
 const TRAY_WIDTH = 0.06         // 6 cm cross-section — visible but not bulky
 const TRAY_HEIGHT = 0.04
-const CEILING_INSET = 0.05      // metres below ceiling
 
-// One thin oriented box between two polyline vertices in ceiling-plane.
+// One thin oriented box between two polyline vertices.
 // Positions assume the parent group is already at the correct elevation.
 function TraySegment({ a, b, dimOpacity, pxToM }) {
   const ax = a.x * pxToM
@@ -42,30 +39,40 @@ function TraySegment({ a, b, dimOpacity, pxToM }) {
 }
 
 // Renders all trays for one floor. Lives inside the floor's FloorStack
-// group so floor-elevation/dim treatment applies automatically — caller
-// supplies pxToM and the ceiling height for this floor.
-export default function TrayLayer3D({ floorId, pxToM, ceilingHeight, dimOpacity = 1 }) {
+// group so floor-elevation/dim treatment applies automatically. Caller
+// supplies pxToM; we read the floor from the store ourselves so the
+// `ceiling` preset can resolve against floor.floorHeight dynamically.
+export default function TrayLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
   const trays = useCableStore((s) => s.traysByFloor[floorId] ?? [])
+  const floor = useFloorStore((s) => s.floors.find((f) => f.id === floorId))
 
-  const segments = useMemo(() => {
-    const out = []
+  // Bucket trays by their resolved mountHeight so each Y plane gets one
+  // positioned group. Most builds have all trays on the same height; this
+  // keeps it cheap when they do, and still correct when they don't.
+  const buckets = useMemo(() => {
+    const map = new Map()  // y → [{ trayId, segIdx, a, b }]
     for (const tray of trays) {
+      const y = resolveTrayMountHeight(tray, floor)
       const pts = tray.points ?? []
       for (let i = 0; i < pts.length - 1; i++) {
-        out.push({ key: `${tray.id}-${i}`, a: pts[i], b: pts[i + 1] })
+        if (!map.has(y)) map.set(y, [])
+        map.get(y).push({ key: `${tray.id}-${i}`, a: pts[i], b: pts[i + 1] })
       }
     }
-    return out
-  }, [trays])
+    return [...map.entries()]
+  }, [trays, floor])
 
-  if (segments.length === 0) return null
-  const ceilingY = (ceilingHeight ?? 3) - CEILING_INSET
+  if (buckets.length === 0) return null
 
   return (
-    <group position={[0, ceilingY, 0]}>
-      {segments.map((s) => (
-        <TraySegment key={s.key} a={s.a} b={s.b} dimOpacity={dimOpacity} pxToM={pxToM} />
+    <>
+      {buckets.map(([y, segs]) => (
+        <group key={y} position={[0, y, 0]}>
+          {segs.map((s) => (
+            <TraySegment key={s.key} a={s.a} b={s.b} dimOpacity={dimOpacity} pxToM={pxToM} />
+          ))}
+        </group>
       ))}
-    </group>
+    </>
   )
 }

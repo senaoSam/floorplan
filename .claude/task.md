@@ -275,7 +275,7 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | #     | 狀態 | Task                                                                              |
 | ----- | ---- | --------------------------------------------------------------------------------- |
 | 19-1  | ✅   | Tray kind（ladder / wire basket / solid / conduit / PVC）+ width × depth + material   |
-| 19-2  | ⬜   | mountHeight per-tray（2D 編輯，3D 視覺跟著；presets: ceiling / wall / under raised floor / custom）|
+| 19-2  | ✅   | mountHeight per-tray（2D 編輯，3D 視覺跟著；presets: ceiling / wall / under raised floor / custom）|
 | 19-3  | ⬜   | System 屬性（Data / Power / Fire / Backbone / Mixed）+ owner color legend            |
 | 19-4  | ⬜   | capacityProfile + per-tray fill ratio 計算 + 三段 warning（OK / 注意 / 滿載 / 超出）   |
 | 19-5  | ⬜   | CableTrayPanel 升級為 health panel（Identity / Load / Path / Issues 四段）             |

@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo } from 'react'
-import { useCableStore, DEFAULT_TRAY, DEFAULT_TRAY_MAGNET_PX, TRAY_KINDS, TRAY_MATERIALS } from '@/store/useCableStore'
+import { useCableStore, DEFAULT_TRAY, DEFAULT_TRAY_MAGNET_PX, TRAY_KINDS, TRAY_MATERIALS, TRAY_MOUNT_PRESETS, resolveTrayMountHeight } from '@/store/useCableStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import './APPanel.sass'
@@ -114,6 +114,35 @@ function CableTrayPanel({ floorId, trayId }) {
           />
           <span className="ap-panel__unit">mm</span>
         </div>
+      </section>
+
+      <section className="ap-panel__section">
+        <p className="ap-panel__label">安裝高度</p>
+        <select
+          className="ap-panel__input ap-panel__select"
+          value={tray.mountPreset ?? DEFAULT_TRAY.mountPreset}
+          onChange={(e) => updateTray(floorId, trayId, { mountPreset: e.target.value })}
+        >
+          {TRAY_MOUNT_PRESETS.map((p) => (
+            <option key={p.value} value={p.value}>{p.label}</option>
+          ))}
+        </select>
+        {(tray.mountPreset ?? DEFAULT_TRAY.mountPreset) === 'custom' && (
+          <div className="ap-panel__number-row" style={{ marginTop: 6 }}>
+            <input
+              className="ap-panel__input ap-panel__input--number"
+              type="number"
+              min="0"
+              step="0.1"
+              value={tray.mountHeight ?? DEFAULT_TRAY.mountHeight}
+              onChange={(e) => handleNumber('mountHeight', e.target.value, { min: 0 })}
+            />
+            <span className="ap-panel__unit">m</span>
+          </div>
+        )}
+        <p className="ap-panel__hint">
+          3D 視覺位於 {resolveTrayMountHeight(tray, floor).toFixed(2)} m
+        </p>
       </section>
 
       <section className="ap-panel__section">

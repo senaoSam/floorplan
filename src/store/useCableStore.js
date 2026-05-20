@@ -59,11 +59,30 @@ export const TRAY_MATERIALS = [
   { value: 'pvc',              label: 'PVC' },
 ]
 
+// 19-2 mount-height presets. `ceiling` resolves dynamically against the
+// floor's ceiling height (so changing the floor height re-anchors all
+// ceiling-mounted trays). `wall` / `under_raised_floor` are absolute
+// conventions. `custom` uses the user-entered mountHeight directly.
+export const TRAY_MOUNT_PRESETS = [
+  { value: 'ceiling',            label: '天花 (ceiling)',         resolve: (floor) => Math.max(0, (floor?.floorHeight ?? 3) - 0.05) },
+  { value: 'wall',               label: '牆面 2.4 m',             resolve: () => 2.4 },
+  { value: 'under_raised_floor', label: '架高地板下 0.1 m',       resolve: () => 0.1 },
+  { value: 'custom',             label: '自訂',                   resolve: (_floor, tray) => tray?.mountHeight ?? 2.5 },
+]
+
+export function resolveTrayMountHeight(tray, floor) {
+  const presetVal = tray?.mountPreset ?? 'ceiling'
+  const preset = TRAY_MOUNT_PRESETS.find((p) => p.value === presetVal) ?? TRAY_MOUNT_PRESETS[0]
+  return preset.resolve(floor, tray)
+}
+
 export const DEFAULT_TRAY = {
   kind: 'wire_basket',
   widthMm: 200,
   depthMm: 100,
   materialId: 'galvanized_steel',
+  mountPreset: 'ceiling',
+  mountHeight: 2.5,   // only consulted when mountPreset === 'custom'
 }
 
 // Riser defaults — riser is a GLOBAL object (cable-spec §2):
