@@ -475,19 +475,25 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
   // Snap a vertex being dragged onto another tray's vertex (or another
   // vertex of the same tray) within VERTEX_SNAP_SCREEN_PX. Excludes the
   // dragged vertex itself so it doesn't snap to its own old position.
+  // Returns { pos, target } — `target` is the snapped-to vertex when a snap
+  // actually fired, else null. Caller uses `target` to drive the snap halo.
   const snapVertexDrag = React.useCallback((trayId, vertexIdx, pos) => {
     const snapDist = VERTEX_SNAP_SCREEN_PX * inverseScale
-    let best = pos, bestD = snapDist
+    let best = pos, bestD = snapDist, target = null
     for (const t of trays) {
       for (let i = 0; i < t.points.length; i++) {
         if (t.id === trayId && i === vertexIdx) continue
         const v = t.points[i]
         const d = Math.hypot(pos.x - v.x, pos.y - v.y)
-        if (d < bestD) { bestD = d; best = { x: v.x, y: v.y } }
+        if (d < bestD) { bestD = d; best = { x: v.x, y: v.y }; target = best }
       }
     }
-    return best
+    return { pos: best, target }
   }, [trays, inverseScale])
+
+  // Snap-target for the currently dragging vertex — drives the green halo
+  // shown at the other tray's endpoint. Null when no drag or no snap.
+  const [dragSnapTarget, setDragSnapTarget] = useState(null)
 
   // Detect if mousePos sits exactly on an existing tray vertex (snap target).
   // Editor2D pre-snaps the mousePos, so an exact-match scan is enough.
@@ -537,12 +543,13 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
               updateTray(floorId, tray.id, { points: newPoints })
             }}
             onVertexDragMove={(idx, raw) => {
-              const snapped = snapVertexDrag(tray.id, idx, raw)
-              const newPoints = tray.points.map((pt, j) => (j === idx ? snapped : pt))
+              const { pos, target } = snapVertexDrag(tray.id, idx, raw)
+              setDragSnapTarget(target)
+              const newPoints = tray.points.map((pt, j) => (j === idx ? pos : pt))
               updateTray(floorId, tray.id, { points: newPoints })
-              return snapped
+              return pos
             }}
-            onVertexDragEnd={() => { /* store already up to date via drag-move */ }}
+            onVertexDragEnd={() => { setDragSnapTarget(null) }}
             onDeleteVertex={(idx) => {
               if (tray.points.length <= 2) return
               const newPoints = tray.points.filter((_, j) => j !== idx)
@@ -626,6 +633,16 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
           existing tray vertex (works even before the first click of a draft). */}
       {snapHit && (
         <Group x={snapHit.x} y={snapHit.y} listening={false}>
+          <Circle radius={10 * inverseScale} stroke="#22c55e" strokeWidth={2 * inverseScale} />
+          <Circle radius={4  * inverseScale} fill="#22c55e" />
+        </Group>
+      )}
+
+      {/* 18-5: same green halo while a vertex of a selected tray is being
+          dragged onto another tray's vertex. Makes the snap target visible
+          before release so the user knows the two will become coincident. */}
+      {dragSnapTarget && (
+        <Group x={dragSnapTarget.x} y={dragSnapTarget.y} listening={false}>
           <Circle radius={10 * inverseScale} stroke="#22c55e" strokeWidth={2 * inverseScale} />
           <Circle radius={4  * inverseScale} fill="#22c55e" />
         </Group>

@@ -290,7 +290,7 @@ const PHASES = [
           { id: '18-2', done: true, text: '整條 tray drag 搬位置（保留 vertex 結構、更新 magnet / graph / cable route）' },
           { id: '18-3', done: true, text: 'Drawing UX — Backspace undo vertex；Shift 鎖 0/45/90°；Enter 完成' },
           { id: '18-4', done: true, text: 'Tray naming — auto TRAY-{floor}-{system}-{seq}、可手動覆寫' },
-          { id: '18-5', done: false, text: 'Selected 顯示 vertex handles + segment + 可 snap 的 endpoint' },
+          { id: '18-5', done: true, text: 'Selected 顯示 vertex handles + segment + 可 snap 的 endpoint' },
         ],
       },
     ],
