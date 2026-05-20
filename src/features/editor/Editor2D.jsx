@@ -6,7 +6,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
-import { useCableStore, DEFAULT_SWITCH, DEFAULT_TRAY_MAGNET_PX, DEFAULT_RISER_MAGNET_PX } from '@/store/useCableStore'
+import { useCableStore, DEFAULT_SWITCH, DEFAULT_TRAY, DEFAULT_TRAY_MAGNET_PX, DEFAULT_RISER_MAGNET_PX } from '@/store/useCableStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { MATERIALS, MATERIAL_LIST, OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
@@ -324,6 +324,7 @@ function Editor2D() {
         name: nextTrayName(),
         points: trayDraftPoints,
         magnetDistance: DEFAULT_TRAY_MAGNET_PX,
+        ...DEFAULT_TRAY,
       })
     }
     setTrayDraftPoints([])

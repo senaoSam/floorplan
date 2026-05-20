@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
-import { useCableStore } from '@/store/useCableStore'
+import { useCableStore, DEFAULT_TRAY } from '@/store/useCableStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useWarmupStore } from '@/store/useWarmupStore'
@@ -139,6 +139,7 @@ function DemoLoader() {
         name: nextTrayName(),
         points: DEMO_TRAY_PTS_NORM.map((p) => ({ x: p.x * W, y: p.y * H })),
         magnetDistance: DEMO_TRAY_MAGNET_PX,
+        ...DEFAULT_TRAY,
       })
       setSwitches(floor.id, [{
         id: generateId('sw'),

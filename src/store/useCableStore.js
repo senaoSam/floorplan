@@ -39,6 +39,33 @@ export function getSwitchKindColor(kind) {
 // Cable tray defaults
 export const DEFAULT_TRAY_MAGNET_PX = 100
 
+// 19-1 engineering attributes — kind drives fill-ratio rules later (19-4);
+// width × depth give the cross-section used for Planning BOM (20-1) and
+// (eventually) capacity calculations. Material is a free-form tag that
+// affects pricing/weight in BOM and color coding by site convention.
+export const TRAY_KINDS = [
+  { value: 'wire_basket', label: '網架式 (wire basket)' },
+  { value: 'ladder',      label: '梯式 (ladder)' },
+  { value: 'solid',       label: '槽式 (solid bottom)' },
+  { value: 'conduit',     label: '導管 (conduit)' },
+  { value: 'pvc',         label: 'PVC' },
+]
+
+export const TRAY_MATERIALS = [
+  { value: 'galvanized_steel', label: '鍍鋅鋼' },
+  { value: 'stainless_steel',  label: '不鏽鋼' },
+  { value: 'aluminum',         label: '鋁' },
+  { value: 'fiberglass',       label: '玻璃纖維' },
+  { value: 'pvc',              label: 'PVC' },
+]
+
+export const DEFAULT_TRAY = {
+  kind: 'wire_basket',
+  widthMm: 200,
+  depthMm: 100,
+  materialId: 'galvanized_steel',
+}
+
 // Riser defaults — riser is a GLOBAL object (cable-spec §2):
 // shape: { id, name, x, y, floorIds: [floorId,...], magnetDistance }
 // xy is shared across every floor the riser passes through.

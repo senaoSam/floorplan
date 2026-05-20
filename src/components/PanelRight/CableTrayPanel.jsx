@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo } from 'react'
-import { useCableStore, DEFAULT_TRAY_MAGNET_PX } from '@/store/useCableStore'
+import { useCableStore, DEFAULT_TRAY, DEFAULT_TRAY_MAGNET_PX, TRAY_KINDS, TRAY_MATERIALS } from '@/store/useCableStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import './APPanel.sass'
@@ -67,6 +67,69 @@ function CableTrayPanel({ floorId, trayId }) {
       <section className="ap-panel__section">
         <p className="ap-panel__label">節點數</p>
         <p className="ap-panel__hint">{tray.points.length} 個頂點</p>
+      </section>
+
+      <section className="ap-panel__section">
+        <p className="ap-panel__label">
+          類型
+          <span className="ap-panel__coming-soon">待 19-4 啟用</span>
+        </p>
+        <select
+          className="ap-panel__input ap-panel__select"
+          value={tray.kind ?? DEFAULT_TRAY.kind}
+          onChange={(e) => updateTray(floorId, trayId, { kind: e.target.value })}
+        >
+          {TRAY_KINDS.map((k) => (
+            <option key={k.value} value={k.value}>{k.label}</option>
+          ))}
+        </select>
+      </section>
+
+      <section className="ap-panel__section">
+        <p className="ap-panel__label">
+          斷面尺寸
+          <span className="ap-panel__coming-soon">待 19-4 / 20-1 啟用</span>
+        </p>
+        <div className="ap-panel__number-row">
+          <span className="ap-panel__unit" style={{ minWidth: 28 }}>寬</span>
+          <input
+            className="ap-panel__input ap-panel__input--number"
+            type="number"
+            min="1"
+            step="10"
+            value={tray.widthMm ?? DEFAULT_TRAY.widthMm}
+            onChange={(e) => handleNumber('widthMm', e.target.value, { min: 1 })}
+          />
+          <span className="ap-panel__unit">mm</span>
+        </div>
+        <div className="ap-panel__number-row" style={{ marginTop: 6 }}>
+          <span className="ap-panel__unit" style={{ minWidth: 28 }}>深</span>
+          <input
+            className="ap-panel__input ap-panel__input--number"
+            type="number"
+            min="1"
+            step="10"
+            value={tray.depthMm ?? DEFAULT_TRAY.depthMm}
+            onChange={(e) => handleNumber('depthMm', e.target.value, { min: 1 })}
+          />
+          <span className="ap-panel__unit">mm</span>
+        </div>
+      </section>
+
+      <section className="ap-panel__section">
+        <p className="ap-panel__label">
+          材質
+          <span className="ap-panel__coming-soon">待 20-1 啟用</span>
+        </p>
+        <select
+          className="ap-panel__input ap-panel__select"
+          value={tray.materialId ?? DEFAULT_TRAY.materialId}
+          onChange={(e) => updateTray(floorId, trayId, { materialId: e.target.value })}
+        >
+          {TRAY_MATERIALS.map((m) => (
+            <option key={m.value} value={m.value}>{m.label}</option>
+          ))}
+        </select>
       </section>
 
       <section className="ap-panel__section">
