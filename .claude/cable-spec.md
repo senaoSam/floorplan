@@ -104,9 +104,12 @@ Cable Tray 不是「另一種 AP→Switch 連線方式」，而是**讓已存在
 
 | 物件類型 | magnet 範圍內有多條 tray 時 | 為什麼 |
 |---|---|---|
-| **endpoint (AP/Switch/Camera...)** | **只接最近一條** | 否則 endpoint 變隱形 junction，把不該連的 tray 接起來 |
+| **AP / Camera / 單 port 終端** | **只接最近一條** | 否則 endpoint 變隱形 junction，把不該連的 tray 接起來 |
+| **Switch / IDF / MDF / Router**（17-3 修正）| **接所有 magnet 內 tray** | switch 物理上就是多 port hub；同 riser 邏輯 |
 | **Riser** | **接所有 magnet 內 tray segment** | 它本來就是 hub，多接是正確行為 |
 | **Tray-tray** | **只在「幾何相交」時共用 nodeId** | 不能因為座標巧合 dedupe；共線重疊不自動合併（MVP 出 warning） |
+
+> 17-3 修正記錄：原 MVP spec 把 switch 跟 AP 同等對待（「endpoint 只接最近」）。實際使用發現這對 switch 反直覺 — switch 物理上就是多 port hub，跨多條 tray 接線是它的正常工作模式。改成跟 riser 一樣 hub-style snap。
 
 `closest_point_on_polyline(P, T)`：對 T 的每個 segment 算 perpendicular foot，foot 超出 segment 端點時 clamp，回傳全 polyline 最近的 foot + chainage。
 

@@ -211,6 +211,8 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | ----- | ---- | --------------------------------------------------------------------------------- |
 | 17-1  | ✅   | Tray 通道風格視覺（border + 虛線中線 + 半透明 body）                                 |
 | 17-2  | ✅   | 選取裝置 highlight 連線 + device halo（點 AP → cable + dest switch；點 SW → 所有 cable + AP + S2S peer）|
+| 17-3  | ✅   | Switch 視為 hub（spec §4 例外）：snap 到 magnet 內所有 tray，不再只挑最近               |
+| 17-4  | ⏸️   | 「snap 了但不通」視覺提示（待 17-3 之後評估是否還需要）                                |
 
 **17-1 細節**
 - 既有：tray 是單一一條粗線（2.4px），跟其他線（cable、wall）視覺易混
@@ -225,3 +227,11 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 - 選 AP：highlight 該 AP 的 route（cable + 目標 switch 的位置）；其他 cable 變淡（opacity 0.2）
 - 選 Switch：highlight 所有 route.switchId === selectedId 的線 + 所有 S2S link 含該 switch 的線；其他線變淡
 - 沒選任何裝置：全部正常 opacity
+
+**17-3 細節**
+- 原 spec §4「endpoint 只接最近一條」對 switch 來說反直觀 — switch 物理上本來就是多 port hub
+- 改 buildGraph Step 5：switch 跟 riser 一樣，snap 到 magnet 內**所有** tray
+- 影響：
+  - 兩條平行 tray 中間放一個 SW 可以同時做 hub 連通兩條
+  - AP 在 magnet 內仍然只接最近一條（AP 概念上是單一終端）
+  - 同步更新 cable-spec.md §4 反映新規則

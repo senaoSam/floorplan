@@ -274,6 +274,8 @@ const PHASES = [
         items: [
           { id: '17-1', done: true, text: 'Tray 通道風格視覺（border + 虛線中線 + 半透明 body）' },
           { id: '17-2', done: true, text: '選取裝置 highlight 連線 + device halo（cable + AP/SW peer）' },
+          { id: '17-3', done: true, text: 'Switch 視為 hub（spec §4 例外）：snap 到 magnet 內所有 tray' },
+          { id: '17-4', done: false, text: '⏸️ 待評估：「snap 了但不通」視覺提示' },
         ],
       },
     ],

@@ -159,8 +159,38 @@ export function buildFloorGraph({ floor, aps, switches, trays, risers = [] }) {
     riserEntries.set(r.id, { nodeId, snapInfos: [] })
   }
 
-  // ── Step 5: endpoint snap — only the nearest tray within magnetDistance ──
-  const snapEndpoint = (xy, entry) => {
+  // ── Step 5: endpoint snap ──
+  //   AP / single-port endpoints  → snap to NEAREST tray within magnet only
+  //   Switch / IDF / MDF / Router → snap to ALL trays within magnet (hub-style,
+  //     17-3 spec §4 exception): a switch is physically a multi-port device,
+  //     forcing it to a single tray makes adjacent trays graph-isolated even
+  //     when the switch could naturally bridge them.
+  // `hub === true` opts into the riser-style multi-snap behaviour.
+  const snapEndpoint = (xy, entry, { hub = false } = {}) => {
+    if (hub) {
+      // Hub mode: attach to every tray whose magnet contains this endpoint.
+      // Same mechanic as Step 6 riser snap below.
+      for (const meta of trayMeta) {
+        const c = closestPointOnPolyline(xy, meta.tray.points, meta.cum)
+        const magnet = meta.tray.magnetDistance ?? 100
+        if (c.d > magnet) continue
+        const footId = addNode({ kind: 'endpoint-foot', xy: { x: c.foot.x, y: c.foot.y } })
+        meta.anchors.push({ chain: c.chain, nodeId: footId, kind: 'endpoint-foot' })
+        // Track all snap feet on the entry — keeps shape consistent with the
+        // single-snap case by always populating snapInfo with the first one.
+        if (!entry.snapInfos) entry.snapInfos = []
+        const info = { footNodeId: footId, dropPx: c.d, trayId: meta.tray.id }
+        entry.snapInfos.push(info)
+        if (!entry.snapInfo) entry.snapInfo = info
+        if (pxPerM && pxPerM > 0) {
+          addEdge(entry.nodeId, footId, (c.d / pxPerM) * (1 + SLACK_DIRECT), 'drop')
+        } else {
+          addEdge(entry.nodeId, footId, 0, 'drop')
+        }
+      }
+      return
+    }
+    // Single-snap mode: pick the nearest tray within magnet.
     let best = null
     for (const meta of trayMeta) {
       const c = closestPointOnPolyline(xy, meta.tray.points, meta.cum)
@@ -175,16 +205,14 @@ export function buildFloorGraph({ floor, aps, switches, trays, risers = [] }) {
     const footId = addNode({ kind: 'endpoint-foot', xy: { x: best.c.foot.x, y: best.c.foot.y } })
     best.meta.anchors.push({ chain: best.c.chain, nodeId: footId, kind: 'endpoint-foot' })
     entry.snapInfo = { footNodeId: footId, dropPx: best.d ?? best.c.d, trayId: best.meta.tray.id }
-    // Drop edge (endpoint → foot): straight perpendicular drop, slackDirect.
     if (pxPerM && pxPerM > 0) {
-      const weightM = (best.c.d / pxPerM) * (1 + SLACK_DIRECT)
-      addEdge(entry.nodeId, footId, weightM, 'drop')
+      addEdge(entry.nodeId, footId, (best.c.d / pxPerM) * (1 + SLACK_DIRECT), 'drop')
     } else {
-      addEdge(entry.nodeId, footId, 0, 'drop')  // unscaled — caller must check
+      addEdge(entry.nodeId, footId, 0, 'drop')
     }
   }
   for (const ap of aps) snapEndpoint({ x: ap.x, y: ap.y }, apEntries.get(ap.id))
-  for (const sw of switches) snapEndpoint({ x: sw.x, y: sw.y }, swEntries.get(sw.id))
+  for (const sw of switches) snapEndpoint({ x: sw.x, y: sw.y }, swEntries.get(sw.id), { hub: true })
 
   // ── Step 6 + 9: riser snap — attach to ALL trays whose magnet contains
   // the riser xy (unlike endpoints, risers are hubs). For each match, add a
