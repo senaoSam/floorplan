@@ -4,6 +4,7 @@ import { useAPStore } from '@/store/useAPStore'
 import { useCableStore, CAPACITY_PROFILES } from '@/store/useCableStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { computeRoutes } from '@/features/cable/computeRoutes'
+import { computeTrayBOM } from '@/features/cable/computeTrayBOM'
 import './CableSummaryPanel.sass'
 
 // Building-wide cable BOM + per-route-status counts + unroutable list.
@@ -22,6 +23,15 @@ function CableSummaryPanel() {
   const customCapacity     = useCableStore((s) => s.customCapacity)
   const setCapacityProfile = useCableStore((s) => s.setCapacityProfile)
   const setCustomCapacity  = useCableStore((s) => s.setCustomCapacity)
+  const wasteFactor        = useCableStore((s) => s.wasteFactor)
+  const setWasteFactor     = useCableStore((s) => s.setWasteFactor)
+
+  // 20-1 Tray Planning BOM — fittings & length estimate. Re-computes when
+  // tray points / waste factor change.
+  const trayBOM = useMemo(
+    () => computeTrayBOM({ floors, traysByFloor, wasteFactor }),
+    [floors, traysByFloor, wasteFactor],
+  )
 
   const [collapsed, setCollapsed] = useState(true)
 
@@ -210,6 +220,69 @@ function CableSummaryPanel() {
                 <span>&ge; 90 m<span className="cable-summary__sub">（需 fiber）</span></span>
                 <span>{stats.bom.byLength.long.toFixed(1)} m<span className="cable-summary__sub">（{stats.bom.counts.long}）</span></span>
               </div>
+            </section>
+          )}
+
+          {/* 20-1 Tray Planning BOM — physical tray order estimate (length
+              + fittings count). Explicitly framed as planning, not final BOM. */}
+          {trayBOM.totalLengthM > 0 && (
+            <section className="cable-summary__section">
+              <p className="cable-summary__label">Tray Planning BOM</p>
+              <div className="cable-summary__row">
+                <span>總長</span>
+                <span>{trayBOM.totalLengthM.toFixed(1)} m</span>
+              </div>
+              <div className="cable-summary__row">
+                <span>＋餘料係數</span>
+                <span>{trayBOM.totalLengthWithWasteM.toFixed(1)} m</span>
+              </div>
+              <div className="cable-summary__row cable-summary__row--inline">
+                <span>餘料係數</span>
+                <input
+                  type="number"
+                  min="1.00"
+                  max="2.00"
+                  step="0.01"
+                  className="cable-summary__num"
+                  value={wasteFactor}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    if (!isNaN(v) && v >= 1.0 && v <= 2.0) setWasteFactor(v)
+                  }}
+                />
+                <span>×</span>
+              </div>
+              <div className="cable-summary__row">
+                <span>L 接</span>
+                <span>{trayBOM.lfits}</span>
+              </div>
+              <div className="cable-summary__row">
+                <span>T 接</span>
+                <span>{trayBOM.tjoints}</span>
+              </div>
+              <div className="cable-summary__row">
+                <span>跨接</span>
+                <span>{trayBOM.crosses}</span>
+              </div>
+              {trayBOM.perFloor.length > 1 && (
+                <details className="cable-summary__details">
+                  <summary>每樓層細項</summary>
+                  {trayBOM.perFloor.map((pf) => (
+                    <div key={pf.floorId} className="cable-summary__row cable-summary__row--sub">
+                      <span>{pf.name}</span>
+                      <span>
+                        {pf.lengthM.toFixed(1)} m
+                        <span className="cable-summary__sub">
+                          （{pf.lfits}L / {pf.tjoints}T / {pf.crosses}×）
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+                </details>
+              )}
+              <p className="cable-summary__hint">
+                Planning estimate — 不含吊桿、餘料裁切細節，僅供下單參考
+              </p>
             </section>
           )}
 

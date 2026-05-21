@@ -334,6 +334,11 @@ src/features/
                               #   weight 一律 meters，沿 tray 用 chainage 差（非 euclidean）
                               #   SLACK_TRAY = 0.10, SLACK_DIRECT = 0.20
                               #   Step 2/6/10（riser）尚未做（12-3 系列）
+    computeTrayBOM.js         # 20-1 Tray Planning BOM
+                              #   - computeTrayBOM({floors, traysByFloor, wasteFactor})
+                              #   - 總長 (+wasteFactor)、彎頭 (90° / 45° / other)、T 接、跨接 計數
+                              #   - perFloor 細項：每樓層長度 + bend / tjoint / cross
+                              #   - 明確標 Planning BOM，非施工 final BOM
     computeTrayFill.js        # 19-4 Per-tray cable fill ratio + capacity warning
                               #   - computeTrayCableLoads({routes, switchLinks, traysByFloor})
                               #     → Map<`${floorId}|${trayId}`, {count, copperCount, fiberCount}>

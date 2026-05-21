@@ -202,6 +202,12 @@ export const useCableStore = create((set, get) => ({
       customCapacity: { ...state.customCapacity, ...patch },
     })),
 
+  // 20-1 waste factor — multiplier applied to the Planning BOM total length
+  // (e.g. 1.10 = 10% extra for cuts / overlap / fittings allowance). This is
+  // a planning estimate, not施工 final BOM — site team adjusts during install.
+  wasteFactor: 1.10,
+  setWasteFactor: (value) => set({ wasteFactor: value }),
+
   getSwitches: (floorId) => get().switchesByFloor[floorId] ?? [],
 
   nextSwitchName: (kind = 'switch') => {
