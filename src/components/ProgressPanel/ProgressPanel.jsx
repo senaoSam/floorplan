@@ -306,7 +306,7 @@ const PHASES = [
           { id: '19-2', done: true, text: 'mountHeight per-tray（2D 編輯，3D 視覺跟著）' },
           { id: '19-3', done: true, text: 'System 屬性（Data / Power / Fire / Backbone / Mixed）+ owner color legend' },
           { id: '19-4', done: true, text: 'capacityProfile + per-tray fill ratio + 三段 warning（不寫死 40%）' },
-          { id: '19-5', done: false, text: 'CableTrayPanel 升級為 health panel（Identity / Load / Path / Issues）' },
+          { id: '19-5', done: true, text: 'CableTrayPanel 升級為 health panel（Identity / Load / Path / Issues）' },
         ],
       },
     ],
