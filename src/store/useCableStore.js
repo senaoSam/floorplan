@@ -112,6 +112,60 @@ export const DEFAULT_TRAY = {
   system: 'data',     // 19-3 discipline — drives color + naming
 }
 
+// 19-4 cable cross-section assumptions (Planning BOM estimate). Cat 6 ≈ 6.5 mm
+// OD; multimode fiber jacket ≈ 3 mm OD. Real cables vary — these are the
+// owner-default planning numbers; bumping them is the right knob if the site
+// uses thicker copper (Cat 6A/7) or armoured fiber.
+export const CABLE_AREAS_MM2 = {
+  copper: 33.2,   // π × (6.5 / 2)²
+  fiber:  7.1,    // π × (3.0 / 2)²
+}
+
+// 19-4 capacity profiles. Two presets + `custom`. Per the project's design
+// principles, we never call these "code violations" — they are owner-chosen
+// planning thresholds, not NEC / TIA-569 enforcement. Sites that follow a
+// specific standard (e.g. NEC Article 392 40% rule) pick the matching preset
+// or define their own custom thresholds.
+//
+// status mapping (used by classifyFillRatio):
+//   ratio < warnRatio  → 'ok'      (OK)
+//   ratio < fullRatio  → 'warn'    (注意)
+//   ratio ≤ 1.0        → 'full'    (滿載)
+//   ratio > 1.0        → 'exceed'  (超出)
+export const CAPACITY_PROFILES = [
+  { value: 'planning', label: 'Planning（25% / 40%）', warnRatio: 0.25, fullRatio: 0.40 },
+  { value: 'standard', label: 'Standard（40% / 60%）', warnRatio: 0.40, fullRatio: 0.60 },
+  { value: 'custom',   label: '自訂',                  warnRatio: null, fullRatio: null },
+]
+
+export const DEFAULT_CAPACITY_PROFILE = 'planning'
+
+export function getCapacityProfile(value, customCapacity) {
+  const preset = CAPACITY_PROFILES.find((p) => p.value === value) ?? CAPACITY_PROFILES[0]
+  if (preset.value !== 'custom') return preset
+  return {
+    value: 'custom',
+    label: preset.label,
+    warnRatio: customCapacity?.warnRatio ?? 0.25,
+    fullRatio: customCapacity?.fullRatio ?? 0.40,
+  }
+}
+
+export const CAPACITY_STATUS = {
+  ok:     { label: 'OK',     color: '#10b981' },
+  warn:   { label: '注意',   color: '#f59e0b' },
+  full:   { label: '滿載',   color: '#f97316' },
+  exceed: { label: '超出',   color: '#ef4444' },
+}
+
+export function classifyFillRatio(ratio, profile) {
+  if (!Number.isFinite(ratio)) return 'ok'
+  if (ratio > 1.0) return 'exceed'
+  if (ratio >= profile.fullRatio) return 'full'
+  if (ratio >= profile.warnRatio) return 'warn'
+  return 'ok'
+}
+
 // Riser defaults — riser is a GLOBAL object (cable-spec §2):
 // shape: { id, name, x, y, floorIds: [floorId,...], magnetDistance }
 // xy is shared across every floor the riser passes through.
@@ -134,6 +188,19 @@ export const useCableStore = create((set, get) => ({
   // floors it spans. cable-spec §2: { id, name, x, y, floorIds, magnetDistance }
   risers: [],
   globalRiserCounter: 0,
+
+  // 19-4 capacity rule (global). User picks a preset or 'custom'; custom
+  // thresholds live in customCapacity. Never hard-coded as a code rule —
+  // each owner picks the right numbers for their fill convention.
+  capacityProfile: DEFAULT_CAPACITY_PROFILE,
+  customCapacity: { warnRatio: 0.25, fullRatio: 0.40 },
+
+  setCapacityProfile: (value) => set({ capacityProfile: value }),
+
+  setCustomCapacity: (patch) =>
+    set((state) => ({
+      customCapacity: { ...state.customCapacity, ...patch },
+    })),
 
   getSwitches: (floorId) => get().switchesByFloor[floorId] ?? [],
 

@@ -1,7 +1,10 @@
 import React, { useCallback, useMemo } from 'react'
-import { useCableStore, DEFAULT_TRAY, DEFAULT_TRAY_MAGNET_PX, TRAY_KINDS, TRAY_MATERIALS, TRAY_MOUNT_PRESETS, TRAY_SYSTEMS, resolveTrayMountHeight, getTraySystem } from '@/store/useCableStore'
+import { useCableStore, DEFAULT_TRAY, DEFAULT_TRAY_MAGNET_PX, TRAY_KINDS, TRAY_MATERIALS, TRAY_MOUNT_PRESETS, TRAY_SYSTEMS, resolveTrayMountHeight, getTraySystem, getCapacityProfile } from '@/store/useCableStore'
 import { useFloorStore } from '@/store/useFloorStore'
+import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { computeRoutes } from '@/features/cable/computeRoutes'
+import { computeTrayCableLoads, computeTrayFill } from '@/features/cable/computeTrayFill'
 import './APPanel.sass'
 
 // Polyline length in canvas px → meters via floor scale.
@@ -19,6 +22,13 @@ function CableTrayPanel({ floorId, trayId }) {
   const updateTray    = useCableStore((s) => s.updateTray)
   const removeTray    = useCableStore((s) => s.removeTray)
   const floor         = useFloorStore((s) => s.floors.find((f) => f.id === floorId))
+  const floors          = useFloorStore((s) => s.floors)
+  const apsByFloor      = useAPStore((s) => s.apsByFloor)
+  const switchesByFloor = useCableStore((s) => s.switchesByFloor)
+  const traysByFloor    = useCableStore((s) => s.traysByFloor)
+  const risers          = useCableStore((s) => s.risers)
+  const capacityProfile = useCableStore((s) => s.capacityProfile)
+  const customCapacity  = useCableStore((s) => s.customCapacity)
   const clearSelected = useEditorStore((s) => s.clearSelected)
 
   const handleNumber = useCallback((field, raw, { min = 0 } = {}) => {
@@ -36,6 +46,17 @@ function CableTrayPanel({ floorId, trayId }) {
     if (!tray || !floor?.scale) return null
     return polylineLengthPx(tray.points) / floor.scale
   }, [tray, floor])
+
+  // 19-4 — per-tray cable fill ratio + status. Routing is computed once at
+  // the building level and the result for THIS tray is picked out by key.
+  const fill = useMemo(() => {
+    if (!tray) return null
+    const { routes, switchLinks } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
+    const loads = computeTrayCableLoads({ routes, switchLinks, traysByFloor })
+    const load  = loads.get(`${floorId}|${trayId}`) ?? { count: 0, copperCount: 0, fiberCount: 0 }
+    const profile = getCapacityProfile(capacityProfile, customCapacity)
+    return { ...computeTrayFill({ tray, load, profile }), profile }
+  }, [tray, floors, apsByFloor, switchesByFloor, traysByFloor, risers, floorId, trayId, capacityProfile, customCapacity])
 
   if (!tray) return null
 
@@ -96,10 +117,7 @@ function CableTrayPanel({ floorId, trayId }) {
       </section>
 
       <section className="ap-panel__section">
-        <p className="ap-panel__label">
-          類型
-          <span className="ap-panel__coming-soon">待 19-4 啟用</span>
-        </p>
+        <p className="ap-panel__label">類型</p>
         <select
           className="ap-panel__input ap-panel__select"
           value={tray.kind ?? DEFAULT_TRAY.kind}
@@ -114,7 +132,7 @@ function CableTrayPanel({ floorId, trayId }) {
       <section className="ap-panel__section">
         <p className="ap-panel__label">
           斷面尺寸
-          <span className="ap-panel__coming-soon">待 19-4 / 20-1 啟用</span>
+          <span className="ap-panel__coming-soon">用於 19-4 fill ratio</span>
         </p>
         <div className="ap-panel__number-row">
           <span className="ap-panel__unit" style={{ minWidth: 28 }}>寬</span>
@@ -193,6 +211,44 @@ function CableTrayPanel({ floorId, trayId }) {
           {lengthM != null ? `${lengthM.toFixed(2)} m` : '需先校正比例尺'}
         </p>
       </section>
+
+      {fill && (
+        <section className="ap-panel__section">
+          <p className="ap-panel__label">
+            容量
+            <span
+              className="tray-fill-badge"
+              style={{ background: fill.statusColor }}
+            >
+              {fill.statusLabel}
+            </span>
+          </p>
+          <div className="ap-panel__number-row tray-fill-row">
+            <span className="ap-panel__unit" style={{ minWidth: 56 }}>填充率</span>
+            <span style={{ color: fill.statusColor, fontWeight: 600 }}>
+              {(fill.fillRatio * 100).toFixed(1)}%
+            </span>
+            <span className="ap-panel__unit">
+              （{fill.cableAreaMm2.toFixed(0)} / {fill.trayAreaMm2.toFixed(0)} mm²）
+            </span>
+          </div>
+          <div className="ap-panel__number-row tray-fill-row">
+            <span className="ap-panel__unit" style={{ minWidth: 56 }}>纜線數</span>
+            <span style={{ color: '#e5e7eb' }}>{fill.count} 條</span>
+            {fill.copperCount > 0 && (
+              <span className="ap-panel__unit">　copper {fill.copperCount}</span>
+            )}
+            {fill.fiberCount > 0 && (
+              <span className="ap-panel__unit">　fiber {fill.fiberCount}</span>
+            )}
+          </div>
+          <p className="ap-panel__hint">
+            設定值：注意 ≥ {(fill.profile.warnRatio * 100).toFixed(0)}%、
+            滿載 ≥ {(fill.profile.fullRatio * 100).toFixed(0)}%、超出 &gt; 100%
+            （依公司 capacity profile）
+          </p>
+        </section>
+      )}
 
       <section className="ap-panel__section">
         <p className="ap-panel__label">

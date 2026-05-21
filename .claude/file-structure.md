@@ -330,6 +330,14 @@ src/features/
                               #   weight 一律 meters，沿 tray 用 chainage 差（非 euclidean）
                               #   SLACK_TRAY = 0.10, SLACK_DIRECT = 0.20
                               #   Step 2/6/10（riser）尚未做（12-3 系列）
+    computeTrayFill.js        # 19-4 Per-tray cable fill ratio + capacity warning
+                              #   - computeTrayCableLoads({routes, switchLinks, traysByFloor})
+                              #     → Map<`${floorId}|${trayId}`, {count, copperCount, fiberCount}>
+                              #     walks each route's `points`，連續兩點都落在 tray polyline 上才算
+                              #     佔用該 tray（foot drop 因只有一端在線上，自動排除）
+                              #   - computeTrayFill({tray, load, profile})
+                              #     → {fillRatio, status, statusLabel, statusColor, ...}
+                              #     status ∈ ok / warn / full / exceed
 
   channel/                    # （頻道規劃相關 helper，視需要看內檔）
   floor/                      # （樓層管理相關 helper）

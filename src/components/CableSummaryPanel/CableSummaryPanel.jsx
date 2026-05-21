@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
-import { useCableStore } from '@/store/useCableStore'
+import { useCableStore, CAPACITY_PROFILES } from '@/store/useCableStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { computeRoutes } from '@/features/cable/computeRoutes'
 import './CableSummaryPanel.sass'
@@ -18,6 +18,10 @@ function CableSummaryPanel() {
   const traysByFloor    = useCableStore((s) => s.traysByFloor)
   const risers          = useCableStore((s) => s.risers)
   const setSelected     = useEditorStore((s) => s.setSelected)
+  const capacityProfile    = useCableStore((s) => s.capacityProfile)
+  const customCapacity     = useCableStore((s) => s.customCapacity)
+  const setCapacityProfile = useCableStore((s) => s.setCapacityProfile)
+  const setCustomCapacity  = useCableStore((s) => s.setCustomCapacity)
 
   const [collapsed, setCollapsed] = useState(true)
 
@@ -208,6 +212,59 @@ function CableSummaryPanel() {
               </div>
             </section>
           )}
+
+          {/* 19-4 capacity profile picker — drives per-tray fill ratio warnings. */}
+          <section className="cable-summary__section">
+            <p className="cable-summary__label">容量規則 (Capacity profile)</p>
+            <select
+              className="cable-summary__select"
+              value={capacityProfile}
+              onChange={(e) => setCapacityProfile(e.target.value)}
+            >
+              {CAPACITY_PROFILES.map((p) => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </select>
+            {capacityProfile === 'custom' && (
+              <div className="cable-summary__custom-rows">
+                <div className="cable-summary__row">
+                  <span>注意 ≥</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    className="cable-summary__num"
+                    value={Math.round((customCapacity.warnRatio ?? 0.25) * 100)}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value)
+                      if (!isNaN(v)) setCustomCapacity({ warnRatio: v / 100 })
+                    }}
+                  />
+                  <span>%</span>
+                </div>
+                <div className="cable-summary__row">
+                  <span>滿載 ≥</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    className="cable-summary__num"
+                    value={Math.round((customCapacity.fullRatio ?? 0.40) * 100)}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value)
+                      if (!isNaN(v)) setCustomCapacity({ fullRatio: v / 100 })
+                    }}
+                  />
+                  <span>%</span>
+                </div>
+              </div>
+            )}
+            <p className="cable-summary__hint">
+              不是工程法規檢查 — 由設計方依公司 / 業主慣例選用
+            </p>
+          </section>
 
           {stats.warnings.length > 0 && (
             <section className="cable-summary__section">
