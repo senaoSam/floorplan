@@ -1,22 +1,19 @@
 import React, { useMemo, useRef, useEffect } from 'react'
 import * as THREE from 'three'
-import { useCableStore, resolveTrayMountHeight } from '@/store/useCableStore'
+import { useCableStore, resolveTrayMountHeight, getTraySystem } from '@/store/useCableStore'
 import { useFloorStore } from '@/store/useFloorStore'
 
-// 3D cable tray rendering — each tray segment is a translucent indigo
-// "channel" box matching the 2D channel visual: body fill + visible border
-// edges + a dashed centerline along the top. Colors mirror the 2D
-// CableTrayLayer (TRAY_BODY_FILL / TRAY_COLOR) so the 2D and 3D views
-// match at a glance.
-const TRAY_BORDER     = '#818cf8'    // indigo-400 — same as 2D border stroke
-const TRAY_BODY_FILL  = '#6366f1'    // indigo-500 — body diffuse (alpha below)
+// 3D cable tray rendering — each tray segment is a translucent "channel"
+// box matching the 2D channel visual: body fill + visible border edges + a
+// dashed centerline along the top. Colors come from the tray's system
+// (19-3 TRAY_SYSTEMS legend) so 2D and 3D views match at a glance.
 const TRAY_BODY_ALPHA = 0.4
 const TRAY_WIDTH      = 0.10          // 10 cm cross-section, slightly wider
 const TRAY_HEIGHT     = 0.05          // so the channel reads volumetrically
 
 // One channel segment between two polyline vertices.
 // Positions assume the parent group is already at the correct elevation.
-function TraySegment({ a, b, dimOpacity, pxToM }) {
+function TraySegment({ a, b, dimOpacity, pxToM, color }) {
   const ax = a.x * pxToM
   const az = a.y * pxToM        // canvas y → world z (per FloorPlane convention)
   const bx = b.x * pxToM
@@ -58,7 +55,7 @@ function TraySegment({ a, b, dimOpacity, pxToM }) {
       <mesh>
         <primitive object={bodyGeom} attach="geometry" />
         <meshStandardMaterial
-          color={TRAY_BODY_FILL}
+          color={color}
           transparent
           opacity={TRAY_BODY_ALPHA * dimOpacity}
           depthWrite={false}
@@ -69,7 +66,7 @@ function TraySegment({ a, b, dimOpacity, pxToM }) {
       <lineSegments>
         <primitive object={edgesGeom} attach="geometry" />
         <lineBasicMaterial
-          color={TRAY_BORDER}
+          color={color}
           transparent={dimOpacity < 1}
           opacity={dimOpacity}
         />
@@ -78,7 +75,7 @@ function TraySegment({ a, b, dimOpacity, pxToM }) {
       <line ref={centerLineRef}>
         <primitive object={centerLineGeom} attach="geometry" />
         <lineDashedMaterial
-          color={TRAY_BORDER}
+          color={color}
           transparent={dimOpacity < 1}
           opacity={0.85 * dimOpacity}
           dashSize={0.12}
@@ -101,13 +98,14 @@ export default function TrayLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
   // positioned group. Most builds have all trays on the same height; this
   // keeps it cheap when they do, and still correct when they don't.
   const buckets = useMemo(() => {
-    const map = new Map()  // y → [{ trayId, segIdx, a, b }]
+    const map = new Map()  // y → [{ trayId, segIdx, a, b, color }]
     for (const tray of trays) {
       const y = resolveTrayMountHeight(tray, floor)
+      const color = getTraySystem(tray.system).color
       const pts = tray.points ?? []
       for (let i = 0; i < pts.length - 1; i++) {
         if (!map.has(y)) map.set(y, [])
-        map.get(y).push({ key: `${tray.id}-${i}`, a: pts[i], b: pts[i + 1] })
+        map.get(y).push({ key: `${tray.id}-${i}`, a: pts[i], b: pts[i + 1], color })
       }
     }
     return [...map.entries()]
@@ -120,7 +118,7 @@ export default function TrayLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
       {buckets.map(([y, segs]) => (
         <group key={y} position={[0, y, 0]}>
           {segs.map((s) => (
-            <TraySegment key={s.key} a={s.a} b={s.b} dimOpacity={dimOpacity} pxToM={pxToM} />
+            <TraySegment key={s.key} a={s.a} b={s.b} color={s.color} dimOpacity={dimOpacity} pxToM={pxToM} />
           ))}
         </group>
       ))}

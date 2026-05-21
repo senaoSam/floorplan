@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo } from 'react'
-import { useCableStore, DEFAULT_TRAY, DEFAULT_TRAY_MAGNET_PX, TRAY_KINDS, TRAY_MATERIALS, TRAY_MOUNT_PRESETS, resolveTrayMountHeight } from '@/store/useCableStore'
+import { useCableStore, DEFAULT_TRAY, DEFAULT_TRAY_MAGNET_PX, TRAY_KINDS, TRAY_MATERIALS, TRAY_MOUNT_PRESETS, TRAY_SYSTEMS, resolveTrayMountHeight, getTraySystem } from '@/store/useCableStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import './APPanel.sass'
@@ -43,12 +43,13 @@ function CableTrayPanel({ floorId, trayId }) {
   const magnetM = floor?.scale ? magnet / floor.scale : null
 
   const displayName = tray.name ?? tray.id
+  const sys = getTraySystem(tray.system)
 
   return (
     <div className="ap-panel">
       <div className="ap-panel__header">
         <span className="ap-panel__title">{displayName}</span>
-        <span className="ap-panel__dot" style={{ background: '#60a5fa' }} />
+        <span className="ap-panel__dot" style={{ background: sys.color }} />
         <button className="panel-delete-btn" onClick={handleDelete}>刪除</button>
       </div>
 
@@ -61,12 +62,37 @@ function CableTrayPanel({ floorId, trayId }) {
           placeholder={tray.id}
           onChange={(e) => updateTray(floorId, trayId, { name: e.target.value })}
         />
-        <p className="ap-panel__hint">自動命名 TRAY-{`{序號}`}；可手動覆寫</p>
+        <p className="ap-panel__hint">自動命名 TRAY-{`{樓層}`}-{`{系統}`}-{`{序號}`}；可手動覆寫</p>
       </section>
 
       <section className="ap-panel__section">
         <p className="ap-panel__label">節點數</p>
         <p className="ap-panel__hint">{tray.points.length} 個頂點</p>
+      </section>
+
+      <section className="ap-panel__section">
+        <p className="ap-panel__label">系統 / 用途</p>
+        <select
+          className="ap-panel__input ap-panel__select"
+          value={tray.system ?? DEFAULT_TRAY.system}
+          onChange={(e) => updateTray(floorId, trayId, { system: e.target.value })}
+        >
+          {TRAY_SYSTEMS.map((s) => (
+            <option key={s.value} value={s.value}>{s.label}</option>
+          ))}
+        </select>
+        <div className="tray-system-legend">
+          {TRAY_SYSTEMS.map((s) => (
+            <span key={s.value} className="tray-system-legend__item">
+              <span
+                className="tray-system-legend__swatch"
+                style={{ background: s.color }}
+              />
+              {s.label}
+            </span>
+          ))}
+        </div>
+        <p className="ap-panel__hint">配色依擁有者 / 公司慣例，可在程式碼中覆寫</p>
       </section>
 
       <section className="ap-panel__section">

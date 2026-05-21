@@ -1,21 +1,24 @@
 import React, { useState } from 'react'
 import { Group, Line, Circle } from 'react-konva'
 import DeleteButton from './DeleteButton'
-import { useCableStore } from '@/store/useCableStore'
+import { useCableStore, getTraySystem, DEFAULT_TRAY } from '@/store/useCableStore'
+import { useFloorStore } from '@/store/useFloorStore'
 import { generateId } from '@/utils/id'
 
 // Snap radius (screen px) when dragging an existing vertex onto another
 // tray's vertex. Same value as the draft-mode snap so the UX feels uniform.
 const VERTEX_SNAP_SCREEN_PX = 24
 
-// Tray colour scheme: indigo (blue-leaning purple), distinct from cable
-// (cyan / violet) and walls.
-const TRAY_COLOR        = '#818cf8'                    // indigo-400 border
-const TRAY_SELECTED     = '#e74c3c'
-const TRAY_BODY_FILL    = 'rgba(99, 102, 241, 0.40)'   // indigo-500 @ 40% — visible body
-const TRAY_SELECTED_FILL = 'rgba(231, 76, 60, 0.32)'
-const MAGNET_FILL       = 'rgba(129, 140, 248, 0.12)'
-const MAGNET_STROKE     = 'rgba(129, 140, 248, 0.45)'
+// Tray colour scheme defaults — overridden per tray by its `system` field
+// (19-3). Defaults match the 'data' system entry so legacy trays without a
+// system render identically to before.
+// Selection cue: border switches to white so the system identity (body fill
+// + dashed centreline both keep the system color). Red was previously used
+// but clashed with the Power system; white is unambiguous and doesn't
+// collide with any system color or cable color in the palette.
+const TRAY_SELECTED_BORDER = '#ffffff'
+const MAGNET_FILL          = 'rgba(129, 140, 248, 0.12)'
+const MAGNET_STROKE        = 'rgba(129, 140, 248, 0.45)'
 
 // Visual width (screen px) of the channel — borders sit at ±halfWidth from
 // the centreline. Tuned so the body fill, two borders, and dashed centre
@@ -264,7 +267,15 @@ function VertexHandle({
 function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, startExt, endExt, onHover, onClick, onRightMouseDown, inverseScale, onDelete, setHoverCursor, isDrawingMode, dimmed, onVertexDragMove, onVertexDragEnd, onDeleteVertex, onSplitVertex, onInsertVertex, onSplitSegment, onTranslate }) {
   const s = inverseScale
   const flat = tray.points.flatMap((p) => [p.x, p.y])
-  const stroke = isSelected ? TRAY_SELECTED : TRAY_COLOR
+  const sys = getTraySystem(tray.system)
+  // Border switches to the selection color on select; body fill + centreline
+  // stay at the system color so the user can still tell the discipline apart
+  // while editing. `stroke` is reused by VertexHandle so its ring matches the
+  // current selection cue.
+  const borderColor = isSelected ? TRAY_SELECTED_BORDER : sys.color
+  const stroke = borderColor
+  const bodyFillCol = sys.fill
+  const centerLineColor = sys.color
   const magnetPx = tray.magnetDistance ?? 100
   const showBody = mode !== 'interactiveOnly'
   const showInteractive = mode !== 'bodyOnly'
@@ -432,15 +443,17 @@ function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, 
       {showBody && (() => {
         const halfW = (TRAY_WIDTH_SCREEN_PX * s) / 2
         const polyFlat = buildChannelPolygon(tray.points, halfW, startExt, endExt)
-        const borderW  = (isSelected ? 1.6 : isHovered ? 1.3 : 1.1) * s
-        const fillCol  = isSelected ? TRAY_SELECTED_FILL : TRAY_BODY_FILL
+        // Selected border is drawn thicker so the white still reads through
+        // any contrast against the system-coloured body underneath.
+        const borderW  = (isSelected ? 2.2 : isHovered ? 1.3 : 1.1) * s
+        const fillCol  = bodyFillCol
         return (
           <>
             <Line
               points={polyFlat}
               closed
               fill={fillCol}
-              stroke={stroke}
+              stroke={borderColor}
               strokeWidth={borderW}
               lineJoin="miter"
               miterLimit={10}
@@ -448,7 +461,7 @@ function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, 
             />
             <Line
               points={flat}
-              stroke={stroke}
+              stroke={centerLineColor}
               strokeWidth={0.9 * s}
               dash={[6 * s, 4 * s]}
               opacity={0.7}
@@ -526,6 +539,7 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
   const addTray       = useCableStore((s) => s.addTray)
   const nextTrayName  = useCableStore((s) => s.nextTrayName)
   const removeTrayFn  = useCableStore((s) => s.removeTray)
+  const floor         = useFloorStore((s) => s.floors.find((f) => f.id === floorId))
   const inverseScale  = 1 / (viewportScale || 1)
   const [hoveredId, setHoveredId] = useState(null)
   const batchSelectedIds = selectedItems.length > 1
@@ -639,9 +653,10 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
               removeTrayFn(floorId, tray.id)
               // Fresh names — split children are independent objects.
               // nextTrayName() reads + increments the global counter each call.
-              const nameA = nextTrayName()
+              const nameOpts = { floor, system: tray.system }
+              const nameA = nextTrayName(nameOpts)
               addTray(floorId, { ...tray, id: generateId('tray'), name: nameA, points: ptsA })
-              const nameB = nextTrayName()
+              const nameB = nextTrayName(nameOpts)
               addTray(floorId, { ...tray, id: generateId('tray'), name: nameB, points: ptsB })
             }}
             onInsertVertex={(segIdx, e) => {
@@ -685,9 +700,10 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
               const ptsA = [...tray.points.slice(0, segIdx + 1), foot]
               const ptsB = [foot, ...tray.points.slice(segIdx + 1)]
               removeTrayFn(floorId, tray.id)
-              const nameA = nextTrayName()
+              const nameOpts = { floor, system: tray.system }
+              const nameA = nextTrayName(nameOpts)
               addTray(floorId, { ...tray, id: generateId('tray'), name: nameA, points: ptsA })
-              const nameB = nextTrayName()
+              const nameB = nextTrayName(nameOpts)
               addTray(floorId, { ...tray, id: generateId('tray'), name: nameB, points: ptsB })
             }}
           />
@@ -731,6 +747,8 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
 function DraftTray({ points, magnetPx, mousePos, inverseScale }) {
   const s = inverseScale
   const flatCommitted = points.flatMap((p) => [p.x, p.y])
+  // Draft uses the default-system stroke (no tray exists yet to read from).
+  const draftStroke = getTraySystem(DEFAULT_TRAY.system).color
   const ghostFlat = mousePos
     ? [...flatCommitted, mousePos.x, mousePos.y]
     : flatCommitted
@@ -762,7 +780,7 @@ function DraftTray({ points, magnetPx, mousePos, inverseScale }) {
       {points.length >= 2 && (
         <Line
           points={flatCommitted}
-          stroke={TRAY_COLOR}
+          stroke={draftStroke}
           strokeWidth={2.4 * s}
           lineCap="round"
           lineJoin="round"
@@ -772,7 +790,7 @@ function DraftTray({ points, magnetPx, mousePos, inverseScale }) {
       {mousePos && points.length >= 1 && (
         <Line
           points={[points[points.length - 1].x, points[points.length - 1].y, mousePos.x, mousePos.y]}
-          stroke={TRAY_COLOR}
+          stroke={draftStroke}
           strokeWidth={2 * s}
           dash={[10 * s, 6 * s]}
           opacity={0.65}
@@ -787,7 +805,7 @@ function DraftTray({ points, magnetPx, mousePos, inverseScale }) {
           y={p.y}
           radius={4 * s}
           fill="#fff"
-          stroke={TRAY_COLOR}
+          stroke={draftStroke}
           strokeWidth={1.5 * s}
         />
       ))}

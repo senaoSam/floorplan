@@ -199,3 +199,23 @@
     input[type="checkbox"]
       margin: 0
       cursor: pointer
+
+// 19-3 tray system color legend (shown in CableTrayPanel under the system selector).
+.tray-system-legend
+  display: flex
+  flex-wrap: wrap
+  gap: 6px 10px
+  margin-top: 8px
+
+  &__item
+    display: inline-flex
+    align-items: center
+    gap: 4px
+    font-size: 11px
+    color: $text-secondary
+
+  &__swatch
+    width: 10px
+    height: 10px
+    border-radius: 2px
+    flex-shrink: 0

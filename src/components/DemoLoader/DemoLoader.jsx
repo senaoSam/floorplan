@@ -136,7 +136,7 @@ function DemoLoader() {
       // user-drawn trays after Demo then continue from TRAY-02 onwards.
       addTray(floor.id, {
         id: generateId('tray'),
-        name: nextTrayName(),
+        name: nextTrayName({ floor, system: DEFAULT_TRAY.system }),
         points: DEMO_TRAY_PTS_NORM.map((p) => ({ x: p.x * W, y: p.y * H })),
         magnetDistance: DEMO_TRAY_MAGNET_PX,
         ...DEFAULT_TRAY,

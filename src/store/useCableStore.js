@@ -59,6 +59,32 @@ export const TRAY_MATERIALS = [
   { value: 'pvc',              label: 'PVC' },
 ]
 
+// 19-3 tray discipline / system. Color palette is an "owner default" — sites
+// override by editing entries here to match the project's signage convention.
+// (Design principle: color legend follows owner/company/discipline standard,
+//  not regional code.) `fill` is the translucent body color used by the 2D
+// channel polygon; `color` is the border / stroke / 3D edge color.
+// `code` is the short tag used in auto-generated names (TRAY-{floor}-{code}-{seq}).
+export const TRAY_SYSTEMS = [
+  { value: 'data',     label: 'Data',     code: 'D', color: '#818cf8', fill: 'rgba(99, 102, 241, 0.40)' },
+  { value: 'power',    label: 'Power',    code: 'P', color: '#ef4444', fill: 'rgba(239, 68, 68, 0.32)'  },
+  { value: 'fire',     label: 'Fire',     code: 'F', color: '#f97316', fill: 'rgba(249, 115, 22, 0.32)' },
+  { value: 'backbone', label: 'Backbone', code: 'B', color: '#a855f7', fill: 'rgba(168, 85, 247, 0.32)' },
+  { value: 'mixed',    label: 'Mixed',    code: 'M', color: '#6b7280', fill: 'rgba(107, 114, 128, 0.32)' },
+]
+
+export function getTraySystem(system) {
+  return TRAY_SYSTEMS.find((s) => s.value === system) ?? TRAY_SYSTEMS[0]
+}
+
+export function getTraySystemColor(system) {
+  return getTraySystem(system).color
+}
+
+export function getTraySystemFill(system) {
+  return getTraySystem(system).fill
+}
+
 // 19-2 mount-height presets. `ceiling` resolves dynamically against the
 // floor's ceiling height (so changing the floor height re-anchors all
 // ceiling-mounted trays). `wall` / `under_raised_floor` are absolute
@@ -83,6 +109,7 @@ export const DEFAULT_TRAY = {
   materialId: 'galvanized_steel',
   mountPreset: 'ceiling',
   mountHeight: 2.5,   // only consulted when mountPreset === 'custom'
+  system: 'data',     // 19-3 discipline — drives color + naming
 }
 
 // Riser defaults — riser is a GLOBAL object (cable-spec §2):
@@ -163,11 +190,19 @@ export const useCableStore = create((set, get) => ({
 
   getTrays: (floorId) => get().traysByFloor[floorId] ?? [],
 
-  // Auto-name format: TRAY-{seq}. Floor / system suffixes (per task 18-4
-  // wording) are deferred until 19-3 introduces the `system` field —
-  // until then a flat global sequence is the least surprising and matches
-  // the SW-XX / IDF-XX convention used for switches.
-  nextTrayName: () => `TRAY-${String(get().globalTrayCounter + 1).padStart(2, '0')}`,
+  // Auto-name format (18-4 + 19-3): TRAY-{floorTag}-{sysCode}-{seq}.
+  // - floorTag uses floor.name with whitespace stripped (e.g. "1F" → "1F"),
+  //   omitted entirely when no floor is supplied (legacy callers).
+  // - sysCode is the TRAY_SYSTEMS code letter (D / P / F / B / M).
+  // - seq is the zero-padded global counter.
+  nextTrayName: ({ floor = null, system = 'data' } = {}) => {
+    const seq = String(get().globalTrayCounter + 1).padStart(2, '0')
+    const sysCode = getTraySystem(system).code
+    const floorTag = floor?.name ? String(floor.name).replace(/\s+/g, '') : null
+    return floorTag
+      ? `TRAY-${floorTag}-${sysCode}-${seq}`
+      : `TRAY-${sysCode}-${seq}`
+  },
 
   addTray: (floorId, tray) =>
     set((state) => ({

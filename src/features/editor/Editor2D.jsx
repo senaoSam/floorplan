@@ -321,14 +321,14 @@ function Editor2D() {
     if (trayDraftPoints.length >= 2) {
       addTray(activeFloorId, {
         id: generateId('tray'),
-        name: nextTrayName(),
+        name: nextTrayName({ floor: activeFloor, system: DEFAULT_TRAY.system }),
         points: trayDraftPoints,
         magnetDistance: DEFAULT_TRAY_MAGNET_PX,
         ...DEFAULT_TRAY,
       })
     }
     setTrayDraftPoints([])
-  }, [trayDraftPoints, activeFloorId, addTray, nextTrayName])
+  }, [trayDraftPoints, activeFloorId, activeFloor, addTray, nextTrayName])
 
   // ── 材質快捷鍵 toast 自動消失 ─────────────────────────
   useEffect(() => {
