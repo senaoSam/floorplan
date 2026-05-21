@@ -135,21 +135,18 @@ function CableTrayPanel({ floorId, trayId }) {
           <span className="ap-panel__coming-soon">用於 19-4 fill ratio</span>
         </p>
         <div className="ap-panel__number-row">
-          <span className="ap-panel__unit" style={{ minWidth: 28 }}>寬</span>
+          <span className="ap-panel__unit">寬</span>
           <input
-            className="ap-panel__input ap-panel__input--number"
+            className="ap-panel__input ap-panel__input--number tray-dim-input"
             type="number"
             min="1"
             step="10"
             value={tray.widthMm ?? DEFAULT_TRAY.widthMm}
             onChange={(e) => handleNumber('widthMm', e.target.value, { min: 1 })}
           />
-          <span className="ap-panel__unit">mm</span>
-        </div>
-        <div className="ap-panel__number-row" style={{ marginTop: 6 }}>
-          <span className="ap-panel__unit" style={{ minWidth: 28 }}>深</span>
+          <span className="ap-panel__unit">深</span>
           <input
-            className="ap-panel__input ap-panel__input--number"
+            className="ap-panel__input ap-panel__input--number tray-dim-input"
             type="number"
             min="1"
             step="10"
