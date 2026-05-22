@@ -41,7 +41,7 @@ const FREQ_LABEL = {
   6:   '6G',
 }
 
-function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, onClick, onMoved, onDragMove, isDrawingActive, onRightMouseDown, showAPInfo, inverseScale, onDelete, setHoverCursor }) {
+function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, onClick, onMoved, onDragMove, isDrawingActive, showAPInfo, inverseScale, onDelete, setHoverCursor }) {
   const color = FREQ_COLOR[ap.frequency] ?? '#4fc3f7'
   const ringColor = isSelected ? '#e74c3c' : color
   const s = inverseScale
@@ -66,18 +66,7 @@ function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, 
       draggable={isDraggable}
       onMouseEnter={() => { setHoverCursor?.('grab'); onHover(ap.id) }}
       onMouseLeave={() => { setHoverCursor?.(null); onHover(null) }}
-      onClick={(e) => { e.cancelBubble = true; onClick(ap.id, e) }}
-      onContextMenu={(e) => {
-        e.evt.preventDefault()
-        e.cancelBubble = true
-        onClick(ap.id, e)
-      }}
-      onMouseDown={(e) => {
-        if (e.evt.button === 2) {
-          e.cancelBubble = true
-          onRightMouseDown?.(e.currentTarget)
-        }
-      }}
+      onClick={(e) => { if (e.evt.button !== 0) return; e.cancelBubble = true; onClick(ap.id, e) }}
       onDragStart={(e) => { e.cancelBubble = true; onClick(ap.id, e) }}
       onDragMove={(e) => {
         e.cancelBubble = true
@@ -223,7 +212,7 @@ function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, 
   )
 }
 
-function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPDragMove, onAPDragEnd, isDrawingActive, onRightMouseDown, viewportScale, onDelete, setHoverCursor, dimmed }) {
+function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPDragMove, onAPDragEnd, isDrawingActive, viewportScale, onDelete, setHoverCursor, dimmed }) {
   const aps        = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   const updateAP   = useAPStore((s) => s.updateAP)
   const showAPInfo = useEditorStore((s) => s.showAPInfo)
@@ -252,7 +241,6 @@ function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPDra
           onMoved={handleMoved}
           onDragMove={onAPDragMove}
           isDrawingActive={isDrawingActive}
-          onRightMouseDown={onRightMouseDown}
           showAPInfo={showAPInfo}
           inverseScale={inverseScale}
           onDelete={onDelete}

@@ -111,7 +111,6 @@ function FloorHoleLayer({
   dimmed,
   isSelectMode,
   isDrawingActive,
-  onRightMouseDown,
   onDelete,
   viewportScale,
   setHoverCursor,
@@ -133,12 +132,6 @@ function FloorHoleLayer({
             draggable
             onMouseEnter={() => { setHoverCursor?.('move'); setHoveredId(hole.id) }}
             onMouseLeave={() => { setHoverCursor?.(null); setHoveredId(null) }}
-            onMouseDown={(e) => {
-              if (e.evt.button === 2) {
-                e.cancelBubble = true
-                onRightMouseDown?.(e.currentTarget)
-              }
-            }}
             onDragStart={(e) => {
               e.cancelBubble = true
               onHoleClick?.(hole.id, e)
@@ -167,11 +160,7 @@ function FloorHoleLayer({
               shadowOffset={{ x: 0, y: 0 }}
               hitStrokeWidth={10}
               onClick={(e) => {
-                e.cancelBubble = true
-                onHoleClick?.(hole.id, e)
-              }}
-              onContextMenu={(e) => {
-                e.evt.preventDefault()
+                if (e.evt.button !== 0) return
                 e.cancelBubble = true
                 onHoleClick?.(hole.id, e)
               }}

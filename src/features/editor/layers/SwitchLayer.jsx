@@ -31,7 +31,7 @@ const KIND_LABEL = {
   router: 'RTR',
 }
 
-function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover, isDraggable, onClick, onMoved, onDragMove, onRightMouseDown, inverseScale, onDelete, setHoverCursor }) {
+function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover, isDraggable, onClick, onMoved, onDragMove, inverseScale, onDelete, setHoverCursor }) {
   const s = inverseScale
   const color = getSwitchKindColor(sw.kind)
   const strokeColor = isSelected ? '#e74c3c' : color
@@ -49,18 +49,7 @@ function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover
       draggable={isDraggable}
       onMouseEnter={() => { setHoverCursor?.('grab'); onHover(sw.id) }}
       onMouseLeave={() => { setHoverCursor?.(null); onHover(null) }}
-      onClick={(e) => { e.cancelBubble = true; onClick(sw.id, e) }}
-      onContextMenu={(e) => {
-        e.evt.preventDefault()
-        e.cancelBubble = true
-        onClick(sw.id, e)
-      }}
-      onMouseDown={(e) => {
-        if (e.evt.button === 2) {
-          e.cancelBubble = true
-          onRightMouseDown?.(e.currentTarget)
-        }
-      }}
+      onClick={(e) => { if (e.evt.button !== 0) return; e.cancelBubble = true; onClick(sw.id, e) }}
       onDragStart={(e) => { e.cancelBubble = true; onClick(sw.id, e) }}
       onDragMove={(e) => {
         e.cancelBubble = true
@@ -201,7 +190,7 @@ function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover
   )
 }
 
-function SwitchLayer({ floorId, selectedSwitchId, selectedItems = [], onSwitchClick, onSwitchDragMove, onSwitchDragEnd, onRightMouseDown, viewportScale, onDelete, setHoverCursor, dimmed }) {
+function SwitchLayer({ floorId, selectedSwitchId, selectedItems = [], onSwitchClick, onSwitchDragMove, onSwitchDragEnd, viewportScale, onDelete, setHoverCursor, dimmed }) {
   const switches      = useCableStore((s) => s.switchesByFloor[floorId] ?? [])
   const trays         = useCableStore((s) => s.traysByFloor[floorId] ?? [])
   const updateSwitch  = useCableStore((s) => s.updateSwitch)
@@ -239,7 +228,6 @@ function SwitchLayer({ floorId, selectedSwitchId, selectedItems = [], onSwitchCl
           onClick={onSwitchClick}
           onMoved={handleMoved}
           onDragMove={onSwitchDragMove}
-          onRightMouseDown={onRightMouseDown}
           inverseScale={inverseScale}
           onDelete={onDelete}
           setHoverCursor={setHoverCursor}

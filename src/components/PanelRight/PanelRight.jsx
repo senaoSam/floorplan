@@ -14,16 +14,19 @@ import RiserPanel from './RiserPanel'
 import './PanelRight.sass'
 
 function PanelRight() {
-  const selectedId     = useEditorStore((s) => s.selectedId)
-  const selectedType   = useEditorStore((s) => s.selectedType)
-  const selectedItems  = useEditorStore((s) => s.selectedItems)
-  const panelCollapsed = useEditorStore((s) => s.panelCollapsed)
-  const activeFloorId  = useFloorStore((s) => s.activeFloorId)
+  const selectedId            = useEditorStore((s) => s.selectedId)
+  const selectedType          = useEditorStore((s) => s.selectedType)
+  const selectedItems         = useEditorStore((s) => s.selectedItems)
+  const panelCollapsed        = useEditorStore((s) => s.panelCollapsed)
+  const togglePanelCollapsed  = useEditorStore((s) => s.togglePanelCollapsed)
+  const activeFloorId         = useFloorStore((s) => s.activeFloorId)
 
-  const isBatch = selectedItems.length > 1
-  const isOpen  = (!!selectedId || isBatch) && !panelCollapsed
+  const isBatch       = selectedItems.length > 1
+  const hasSelection  = !!selectedId || isBatch
+  const isOpen        = hasSelection && !panelCollapsed
 
   return (
+    <>
     <aside className={`panel-right${isOpen ? ' panel-right--open' : ''}`}>
       {isBatch && activeFloorId && (
         <BatchPanel />
@@ -57,6 +60,18 @@ function PanelRight() {
         <AlignFloorPanel floorId={activeFloorId} />
       )}
     </aside>
+    {hasSelection && (
+      <button
+        type="button"
+        className={`panel-right__toggle${panelCollapsed ? ' panel-right__toggle--collapsed' : ''}`}
+        onClick={togglePanelCollapsed}
+        title={panelCollapsed ? '展開面板' : '收合面板'}
+        aria-label={panelCollapsed ? '展開面板' : '收合面板'}
+      >
+        {panelCollapsed ? '‹' : '›'}
+      </button>
+    )}
+    </>
   )
 }
 

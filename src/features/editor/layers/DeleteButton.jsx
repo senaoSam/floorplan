@@ -15,6 +15,7 @@ function DeleteButton({ x, y, scale = 1, onClick, setHoverCursor, leaveCursor = 
       onMouseEnter={() => { setHoverCursor?.('pointer') }}
       onMouseLeave={() => { setHoverCursor?.(leaveCursor) }}
       onClick={(e) => {
+        if (e.evt.button !== 0) return
         e.cancelBubble = true
         onClick()
       }}

@@ -11,7 +11,7 @@ const RISER_SELECTED = '#e74c3c'
 const MAGNET_FILL    = 'rgba(167, 139, 250, 0.14)'
 const MAGNET_STROKE  = 'rgba(167, 139, 250, 0.5)'
 
-function RiserMarker({ riser, isSelected, isHovered, onHover, isDraggable, onClick, onMoved, onDragMove, onRightMouseDown, inverseScale, onDelete, setHoverCursor, showMagnet, floorCount }) {
+function RiserMarker({ riser, isSelected, isHovered, onHover, isDraggable, onClick, onMoved, onDragMove, inverseScale, onDelete, setHoverCursor, showMagnet, floorCount }) {
   const s = inverseScale
   const strokeColor = isSelected ? RISER_SELECTED : RISER_COLOR
   const size = 18 * s
@@ -24,18 +24,7 @@ function RiserMarker({ riser, isSelected, isHovered, onHover, isDraggable, onCli
       draggable={isDraggable}
       onMouseEnter={() => { setHoverCursor?.('grab'); onHover(riser.id) }}
       onMouseLeave={() => { setHoverCursor?.(null); onHover(null) }}
-      onClick={(e) => { e.cancelBubble = true; onClick(riser.id, e) }}
-      onContextMenu={(e) => {
-        e.evt.preventDefault()
-        e.cancelBubble = true
-        onClick(riser.id, e)
-      }}
-      onMouseDown={(e) => {
-        if (e.evt.button === 2) {
-          e.cancelBubble = true
-          onRightMouseDown?.(e.currentTarget)
-        }
-      }}
+      onClick={(e) => { if (e.evt.button !== 0) return; e.cancelBubble = true; onClick(riser.id, e) }}
       onDragStart={(e) => { e.cancelBubble = true; onClick(riser.id, e) }}
       onDragMove={(e) => {
         e.cancelBubble = true
@@ -131,7 +120,7 @@ function RiserMarker({ riser, isSelected, isHovered, onHover, isDraggable, onCli
 // Renders every riser whose floorIds contains `floorId`. Risers are global
 // (shared xy across floors) so this layer only displays the subset visible
 // on the active floor.
-function RiserLayer({ floorId, selectedRiserId, selectedItems = [], onRiserClick, onRiserDragMove, onRiserDragEnd, onRightMouseDown, viewportScale, onDelete, setHoverCursor, dimmed, isPlacingMode }) {
+function RiserLayer({ floorId, selectedRiserId, selectedItems = [], onRiserClick, onRiserDragMove, onRiserDragEnd, viewportScale, onDelete, setHoverCursor, dimmed, isPlacingMode }) {
   const risers       = useCableStore((s) => s.risers)
   const updateRiser  = useCableStore((s) => s.updateRiser)
   const inverseScale = 1 / (viewportScale || 1)
@@ -163,7 +152,6 @@ function RiserLayer({ floorId, selectedRiserId, selectedItems = [], onRiserClick
             onClick={onRiserClick}
             onMoved={handleMoved}
             onDragMove={onRiserDragMove}
-            onRightMouseDown={onRightMouseDown}
             inverseScale={inverseScale}
             onDelete={onDelete}
             setHoverCursor={setHoverCursor}

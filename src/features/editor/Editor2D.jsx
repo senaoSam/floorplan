@@ -63,8 +63,6 @@ function Editor2D() {
   const hoverProbeRafRef       = useRef(0)
   const draggingWallRef        = useRef(null)   // { id, dx, dy } 牆體拖移中暫存偏移
   const draggingScopeRef       = useRef(null)   // { id, dx, dy } Scope 拖移中暫存偏移
-  const rightDragPendingRef    = useRef(null)   // { node, startX, startY } 右鍵等待拖曳
-  const suppressContextMenuRef = useRef(false)  // 右鍵拖曳發生後略過下一次 contextMenu
   const marqueeRef             = useRef(null)   // { startX, startY } canvas coords — 框選起點
   const [size, setSize]         = useState({ width: 0, height: 0 })
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 })
@@ -112,7 +110,7 @@ function Editor2D() {
   const [wallMaterial, setWallMaterial] = useState(MATERIALS.CONCRETE)
   const [materialToast, setMaterialToast] = useState(null) // { label, color, key }
 
-  const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected, togglePanelCollapsed,
+  const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected,
           selectedItems, setSelectedItems, toggleSelectedItem,
           showFloorImage, showScopes, showFloorHoles, showWalls, showAPs, showSwitches, showCables, showCableTrays, showRisers,
           autoChannelOnPlace, regulatoryDomain,
@@ -708,8 +706,6 @@ function Editor2D() {
   }, [isMarqueeMode, toCanvasPos])
 
   const handleMouseUp = useCallback((e) => {
-    if (e.evt.button === 2) rightDragPendingRef.current = null
-
     // 框選結束
     if (e.evt.button === 0 && marqueeRef.current) {
       const rect = marqueeRectRef.current
@@ -730,11 +726,6 @@ function Editor2D() {
       }
     }
   }, [collectMarqueeHits, setSelectedItems, clearSelected])
-
-  const handleRightMouseDown = useCallback((node) => {
-    const pos = stageRef.current?.getPointerPosition()
-    if (pos) rightDragPendingRef.current = { node, startX: pos.x, startY: pos.y }
-  }, [])
 
   // ── 牆體端點吸附 ──────────────────────────────────────
   const snapToWallEndpoint = useCallback((pos) => {
@@ -935,21 +926,10 @@ function Editor2D() {
   const [traySnapHint, setTraySnapHint] = useState(null)   // { kind, pos, ref?, lockedAngle? }
   useEffect(() => { if (!isTrayMode) setTraySnapHint(null) }, [isTrayMode])
 
-  // ── 滑鼠移動：右鍵拖曳閾值判斷 / 框選 / 更新 ghost 線 ──
+  // ── 滑鼠移動：框選 / 更新 ghost 線 ──
   const handleMouseMove = useCallback(() => {
     const pos = stageRef.current?.getPointerPosition()
     if (!pos) return
-
-    // 右鍵按住：超過 5px 才啟動拖曳
-    if (rightDragPendingRef.current) {
-      const { node, startX, startY } = rightDragPendingRef.current
-      if (Math.hypot(pos.x - startX, pos.y - startY) > 5) {
-        suppressContextMenuRef.current = true
-        rightDragPendingRef.current = null
-        node.startDrag()
-      }
-      return
-    }
 
     // 框選拖曳 — 用 ref + 命令式 Konva 更新，避免每個 mousemove 都重渲染整個 Editor2D
     if (marqueeRef.current) {
@@ -1291,11 +1271,9 @@ function Editor2D() {
     findNearestWall, projectToWall, dwWallId, dwStartFrac, dwOpeningType,
   ])
 
-  // ── 右鍵：有繪製進行中 → 停止繪製；否則 → 切換 Panel 收合 ──
+  // ── 右鍵：有繪製進行中 → 停止繪製；否則 → 不做事（保留給未來右鍵 menu） ──
   const handleContextMenu = useCallback((e) => {
     e.evt.preventDefault()
-    if (suppressContextMenuRef.current) { suppressContextMenuRef.current = false; return }
-    // In align mode, don't let right-click collapse the panel.
     if (isAlignMode) return
     if (isWallMode && wallDrawStart)           { setWallDrawStart(null); return }
     if (isScopeMode && scopePoints.length > 0) { setScopePoints([]);     return }
@@ -1304,8 +1282,7 @@ function Editor2D() {
     if (isDoorWindowMode && dwWallId) { setDwWallId(null); setDwStartFrac(null); return }
     // Right-click in tray draw mode: commit the polyline if it has ≥ 2 vertices.
     if (isTrayMode && trayDraftPoints.length > 0) { finishTrayDraft(); return }
-    togglePanelCollapsed()
-  }, [isAlignMode, isWallMode, wallDrawStart, isScopeMode, scopePoints, isFloorHoleMode, floorHolePoints, isCropMode, cropStart, isDoorWindowMode, dwWallId, isTrayMode, trayDraftPoints, finishTrayDraft, togglePanelCollapsed])
+  }, [isAlignMode, isWallMode, wallDrawStart, isScopeMode, scopePoints, isFloorHoleMode, floorHolePoints, isCropMode, cropStart, isDoorWindowMode, dwWallId, isTrayMode, trayDraftPoints, finishTrayDraft])
 
   // ── 比例尺 helpers ─────────────────────────────────────
   const resetScale = () => {
@@ -1557,7 +1534,6 @@ function Editor2D() {
                   draggingScopeRef.current = null
                   useDragOverlayStore.getState().setScope(null)
                 }}
-                onRightMouseDown={handleRightMouseDown}
                 onDelete={(id) => { removeScope(activeFloorId, id); clearSelected() }}
                 viewportScale={viewport.scale}
                 setHoverCursor={setHoverCursor}
@@ -1579,7 +1555,6 @@ function Editor2D() {
                 }}
                 isSelectMode={isSelectMode}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode || isTrayMode}
-                onRightMouseDown={handleRightMouseDown}
                 onDelete={(id) => { removeFloorHole(activeFloorId, id); clearSelected() }}
                 viewportScale={viewport.scale}
                 setHoverCursor={setHoverCursor}
@@ -1609,7 +1584,6 @@ function Editor2D() {
                 isDrawMode={isWallMode}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode || isTrayMode}
                 snapRadius={SNAP_PX / viewport.scale}
-                onRightMouseDown={handleRightMouseDown}
                 onDelete={(id) => { removeWall(activeFloorId, id); clearSelected() }}
                 viewportScale={viewport.scale}
                 setHoverCursor={setHoverCursor}
@@ -1635,7 +1609,6 @@ function Editor2D() {
                   if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'cable_tray'); return }
                   setSelected(id, 'cable_tray')
                 }}
-                onRightMouseDown={handleRightMouseDown}
                 viewportScale={viewport.scale}
                 onDelete={(id) => { removeTray(activeFloorId, id); clearSelected() }}
                 setHoverCursor={setHoverCursor}
@@ -1671,7 +1644,6 @@ function Editor2D() {
                 onSwitchDragEnd={() => {
                   useDragOverlayStore.getState().setSwitch(null)
                 }}
-                onRightMouseDown={handleRightMouseDown}
                 viewportScale={viewport.scale}
                 onDelete={(id) => { removeSwitch(activeFloorId, id); clearSelected() }}
                 setHoverCursor={setHoverCursor}
@@ -1690,7 +1662,6 @@ function Editor2D() {
                 }}
                 onRiserDragMove={() => { /* riser xy is global — defer overlay until 12-3b graph */ }}
                 onRiserDragEnd={() => {}}
-                onRightMouseDown={handleRightMouseDown}
                 viewportScale={viewport.scale}
                 onDelete={(id) => { removeRiser(id); clearSelected() }}
                 setHoverCursor={setHoverCursor}
@@ -1727,7 +1698,6 @@ function Editor2D() {
                   useDragOverlayStore.getState().setAP(null)
                 }}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode || isTrayMode}
-                onRightMouseDown={handleRightMouseDown}
                 viewportScale={viewport.scale}
                 onDelete={(id) => { removeAP(activeFloorId, id); clearSelected() }}
                 setHoverCursor={setHoverCursor}
@@ -1752,7 +1722,6 @@ function Editor2D() {
                   if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'cable_tray'); return }
                   setSelected(id, 'cable_tray')
                 }}
-                onRightMouseDown={handleRightMouseDown}
                 viewportScale={viewport.scale}
                 onDelete={(id) => { removeTray(activeFloorId, id); clearSelected() }}
                 setHoverCursor={setHoverCursor}

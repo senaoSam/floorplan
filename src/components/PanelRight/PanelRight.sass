@@ -17,6 +17,35 @@
   &--open
     transform: translateX(0)
 
+  &__toggle
+    position: absolute
+    top: 50%
+    right: $panel-width
+    transform: translateY(-50%)
+    width: 18px
+    height: 56px
+    padding: 0
+    border: 1px solid $border-color
+    border-right: none
+    border-radius: 4px 0 0 4px
+    background: $bg-secondary
+    color: rgba(255, 255, 255, 0.7)
+    font-size: 16px
+    line-height: 1
+    cursor: pointer
+    z-index: 100
+    display: flex
+    align-items: center
+    justify-content: center
+    transition: right 0.2s ease, background 0.15s, color 0.15s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.08)
+      color: #fff
+
+    &--collapsed
+      right: 0
+
 // 各面板 header 共用的刪除按鈕樣式
 .panel-delete-btn
   margin-left: auto

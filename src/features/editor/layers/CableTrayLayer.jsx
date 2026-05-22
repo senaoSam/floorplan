@@ -217,6 +217,7 @@ function VertexHandle({
         onMouseEnter={() => { setHovered(true); setHoverCursor?.('move') }}
         onMouseLeave={() => { setHovered(false); setHoverCursor?.(null) }}
         onClick={(e) => {
+          if (e.evt.button !== 0) return
           e.cancelBubble = true
           if (e.evt.shiftKey && !isEndpoint) {
             onSplit?.(index)
@@ -239,7 +240,7 @@ function VertexHandle({
           y={y - badgeOffset}
           onMouseEnter={() => { setHoverCursor?.('pointer') }}
           onMouseLeave={() => { setHoverCursor?.(null) }}
-          onClick={(e) => { e.cancelBubble = true; onDelete?.(index) }}
+          onClick={(e) => { if (e.evt.button !== 0) return; e.cancelBubble = true; onDelete?.(index) }}
         >
           <Circle radius={7 * s} fill="#000" opacity={0.35} listening={false} />
           <Circle radius={6 * s} fill="#e74c3c" stroke="#fff" strokeWidth={1.2 * s} />
@@ -264,7 +265,7 @@ function VertexHandle({
 //   'interactiveOnly' — handles + per-segment hit-tests + snap halos, no
 //                       body / magnet / body-drag. Used by the overlay so
 //                       handles + segments float above APs / switches.
-function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, startExt, endExt, onHover, onClick, onRightMouseDown, inverseScale, onDelete, setHoverCursor, isDrawingMode, dimmed, onVertexDragMove, onVertexDragEnd, onDeleteVertex, onSplitVertex, onInsertVertex, onSplitSegment, onTranslate }) {
+function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, startExt, endExt, onHover, onClick, inverseScale, onDelete, setHoverCursor, isDrawingMode, dimmed, onVertexDragMove, onVertexDragEnd, onDeleteVertex, onSplitVertex, onInsertVertex, onSplitSegment, onTranslate }) {
   const s = inverseScale
   const flat = tray.points.flatMap((p) => [p.x, p.y])
   const sys = getTraySystem(tray.system)
@@ -311,6 +312,7 @@ function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, 
       }}
       onMouseLeave={() => { setHoverCursor?.(null); onHover(null) }}
       onClick={(e) => {
+        if (e.evt.button !== 0) return
         // In tray drawing mode: don't consume the click — let it bubble to
         // the Stage handler, which will add a new draft vertex (already
         // snapped to this tray's endpoint when in snap range). Hover and
@@ -318,19 +320,6 @@ function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, 
         if (isDrawingMode) return
         e.cancelBubble = true
         onClick(tray.id, e)
-      }}
-      onContextMenu={(e) => {
-        if (isDrawingMode) return  // let Stage finish the draft instead
-        e.evt.preventDefault()
-        e.cancelBubble = true
-        onClick(tray.id, e)
-      }}
-      onMouseDown={(e) => {
-        if (isDrawingMode) return  // no right-drag of existing trays while drawing
-        if (e.evt.button === 2) {
-          e.cancelBubble = true
-          onRightMouseDown?.(e.currentTarget)
-        }
       }}
       dragBoundFunc={() => bodyDragOrigAbsRef.current ?? { x: 0, y: 0 }}
       onDragStart={(e) => {
@@ -426,6 +415,7 @@ function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, 
             onMouseEnter={() => { setHoverCursor?.('copy') }}
             onMouseLeave={() => { setHoverCursor?.(null) }}
             onClick={(e) => {
+              if (e.evt.button !== 0) return
               e.cancelBubble = true
               if (e.evt?.shiftKey) {
                 onSplitSegment?.(i, e)
@@ -525,7 +515,7 @@ function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, 
 //   'overlay'  — render ONLY the selected tray with mode='interactiveOnly'
 //                (handles + segments + snap halos). Mounted AFTER APLayer
 //                in Editor2D so the handles float above other layers.
-function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayClick, onRightMouseDown, viewportScale, onDelete, setHoverCursor, isDrawingMode, draftPoints, draftMagnetPx, mousePos, snapHint, draftAnchor, dimmed, toCanvasPos, renderMode = 'all' }) {
+function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayClick, viewportScale, onDelete, setHoverCursor, isDrawingMode, draftPoints, draftMagnetPx, mousePos, snapHint, draftAnchor, dimmed, toCanvasPos, renderMode = 'all' }) {
   const allTrays      = useCableStore((s) => s.traysByFloor[floorId] ?? [])
   const trays = renderMode === 'overlay'
     ? allTrays.filter((t) => t.id === selectedTrayId)
@@ -614,7 +604,6 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
             endExt={neighborExts[i]?.endExt ?? null}
             onHover={setHoveredId}
             onClick={onTrayClick}
-            onRightMouseDown={onRightMouseDown}
             inverseScale={inverseScale}
             onDelete={onDelete}
             setHoverCursor={setHoverCursor}
