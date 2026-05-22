@@ -653,10 +653,9 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
               removeTrayFn(floorId, tray.id)
               // Fresh names — split children are independent objects.
               // nextTrayName() reads + increments the global counter each call.
-              const nameOpts = { floor, system: tray.system }
-              const nameA = nextTrayName(nameOpts)
+              const nameA = nextTrayName({ floor })
               addTray(floorId, { ...tray, id: generateId('tray'), name: nameA, points: ptsA })
-              const nameB = nextTrayName(nameOpts)
+              const nameB = nextTrayName({ floor })
               addTray(floorId, { ...tray, id: generateId('tray'), name: nameB, points: ptsB })
             }}
             onInsertVertex={(segIdx, e) => {
@@ -700,10 +699,9 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
               const ptsA = [...tray.points.slice(0, segIdx + 1), foot]
               const ptsB = [foot, ...tray.points.slice(segIdx + 1)]
               removeTrayFn(floorId, tray.id)
-              const nameOpts = { floor, system: tray.system }
-              const nameA = nextTrayName(nameOpts)
+              const nameA = nextTrayName({ floor })
               addTray(floorId, { ...tray, id: generateId('tray'), name: nameA, points: ptsA })
-              const nameB = nextTrayName(nameOpts)
+              const nameB = nextTrayName({ floor })
               addTray(floorId, { ...tray, id: generateId('tray'), name: nameB, points: ptsB })
             }}
           />

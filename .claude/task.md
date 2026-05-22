@@ -290,7 +290,7 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | #     | 狀態 | Task                                                                              |
 | ----- | ---- | --------------------------------------------------------------------------------- |
 | 20-1  | ✅   | Tray Planning BOM — 總長、彎頭/T 接數、跨接位置、餘料係數（明確標 Planning，非 final BOM） |
-| 20-2  | ⬜   | Per-tray AP/cable 列表 + 容量瓶頸列表                                                 |
+| 20-2  | ✅   | Per-tray AP/cable 列表 + 容量瓶頸列表                                                 |
 | 20-3  | ⬜   | Drawing snap 增強 — snap to wall / parallel wall / angle lock                       |
 | 20-4  | ⬜   | Right-click context menu — rename / duplicate / split / extend / merge / convert / delete |
 

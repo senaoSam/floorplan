@@ -195,10 +195,11 @@ src/components/
     APPanel.jsx               #   AP 屬性：頻段、頻道、天線、功率、高度、刪除
     SwitchPanel.jsx           #   Switch 屬性：kind（switch/idf/mdf/router）、型號、port 數、PoE budget、安裝高度、刪除
                               #     + Port 用量 / PoE 用量 warning + 已連接 AP 清單（依 computeRoutes 結果）
-    CableTrayPanel.jsx        #   Cable Tray health panel — Identity / Path / Load / Issues 四段
-                              #     Identity: 名稱、系統/用途、類型、材質
+    CableTrayPanel.jsx        #   Cable Tray health panel — Identity / Path / Load / 占用 cable / Issues
+                              #     Identity: 名稱、系統/用途
                               #     Path: 幾何（頂點數 + 長度）、斷面尺寸、安裝高度、磁吸範圍
                               #     Load: 容量 badge + fill ratio + cable count（19-4 計算）
+                              #     占用 cable: 20-2 — 列出每條 AP drop / S2S link、cable type、長度
                               #     Issues: 容量警告 + graph 警告（只在有問題時才顯示）
     RiserPanel.jsx            #   Cable Riser 屬性：跨樓層 checkbox（依 elevation 排序）、magnetDistance、xy 顯示、刪除
     ScopePanel.jsx            #   範圍屬性：in/out 切換、頂點、刪除
@@ -341,9 +342,12 @@ src/features/
                               #   - 明確標 Planning BOM，非施工 final BOM
     computeTrayFill.js        # 19-4 Per-tray cable fill ratio + capacity warning
                               #   - computeTrayCableLoads({routes, switchLinks, traysByFloor})
-                              #     → Map<`${floorId}|${trayId}`, {count, copperCount, fiberCount}>
+                              #     → Map<`${floorId}|${trayId}`, {count, copperCount, fiberCount, occupants}>
                               #     walks each route's `points`，連續兩點都落在 tray polyline 上才算
                               #     佔用該 tray（foot drop 因只有一端在線上，自動排除）
+                              #     20-2: occupants[] 列出傳遞 cable 的 AP / S2S link
+                              #     {kind:'ap', apId, switchId, cableType, cableM} |
+                              #     {kind:'s2s', srcId, targetId, cableType, cableM}
                               #   - computeTrayFill({tray, load, profile})
                               #     → {fillRatio, status, statusLabel, statusColor, ...}
                               #     status ∈ ok / warn / full / exceed

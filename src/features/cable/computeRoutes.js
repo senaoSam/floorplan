@@ -20,6 +20,18 @@ import { unionFind, dijkstra, reconstructPath } from './routing'
 // module store-free for ease of testing.
 const COPPER_MAX_LENGTH_M = 90
 
+// Resolve a cable run's media (copper/fiber) from the *destination* switch's
+// cableType preference. Switch acts as the authoritative source for "what
+// terminates here": setting it to fiber makes both its S2S uplinks AND the
+// AP drops landing on it fiber. 'auto' applies the Cat 6 90 m rule.
+function resolveCableType(sw, cableM) {
+  const pref = sw?.cableType ?? 'auto'
+  if (pref === 'auto') {
+    return (cableM != null && cableM >= COPPER_MAX_LENGTH_M) ? 'fiber' : 'copper'
+  }
+  return pref
+}
+
 // Returns { routes, switchLinks, warnings }:
 //   routes:   Map<apId, route> across ALL floors (see route shape below).
 //   switchLinks: Map<srcSwId, link> for switch→switch uplinks (14-2).
@@ -52,8 +64,12 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
   // Flatten all switches into one list with floor reference for fallback +
   // unroutable checks below.
   const allSwitches = []
+  const swById = new Map()
   for (const [floorId, list] of Object.entries(switchesByFloor)) {
-    for (const sw of list ?? []) allSwitches.push({ sw, floorId })
+    for (const sw of list ?? []) {
+      allSwitches.push({ sw, floorId })
+      swById.set(sw.id, sw)
+    }
   }
 
   // Component map — lets us skip Dijkstra when AP and switches share no
@@ -93,14 +109,16 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
               const n = g.nodes.get(id)
               return { x: n.xy.x, y: n.xy.y, kind: n.kind, floorId: n.floorId }
             })
+            const cableM = bestDist + zDropM
             out.set(ap.id, {
               apId: ap.id,
               switchId: bestSw.id,
               points,
-              cableM: bestDist + zDropM,
+              cableM,
               zDropM,
               routeStatus: 'tray',
               homeFloorId: floorId,
+              cableType: resolveCableType(bestSw, cableM),
             })
             continue
           }
@@ -142,6 +160,7 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
         zDropM,
         routeStatus: 'fallback-manhattan',
         homeFloorId: floorId,
+        cableType: resolveCableType(best, cableM),
       })
     }
   }
@@ -152,10 +171,6 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
   const swByFloor = new Map()  // swId → floorId
   for (const [floorId, list] of Object.entries(switchesByFloor)) {
     for (const sw of list ?? []) swByFloor.set(sw.id, floorId)
-  }
-  const swById = new Map()
-  for (const list of Object.values(switchesByFloor)) {
-    for (const sw of list ?? []) swById.set(sw.id, sw)
   }
 
   for (const [srcId, sw] of swById) {
@@ -215,12 +230,7 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
       }
     }
 
-    // Resolve copper/fiber per spec — auto picks copper unless length pushes
-    // beyond Cat 6's 90 m limit. User override always wins.
-    const pref = sw.cableType ?? 'auto'
-    link.cableType = pref === 'auto'
-      ? (link.cableM != null && link.cableM >= COPPER_MAX_LENGTH_M ? 'fiber' : 'copper')
-      : pref
+    link.cableType = resolveCableType(sw, link.cableM)
 
     switchLinks.set(srcId, link)
   }

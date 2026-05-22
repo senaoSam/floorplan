@@ -321,7 +321,7 @@ function Editor2D() {
     if (trayDraftPoints.length >= 2) {
       addTray(activeFloorId, {
         id: generateId('tray'),
-        name: nextTrayName({ floor: activeFloor, system: DEFAULT_TRAY.system }),
+        name: nextTrayName({ floor: activeFloor }),
         points: trayDraftPoints,
         magnetDistance: DEFAULT_TRAY_MAGNET_PX,
         ...DEFAULT_TRAY,

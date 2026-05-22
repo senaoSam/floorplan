@@ -30,23 +30,31 @@ function pointOnPolyline(p, points) {
   return false
 }
 
-// → Map<`${floorId}|${trayId}`, { count, copperCount, fiberCount }>
+// → Map<`${floorId}|${trayId}`, { count, copperCount, fiberCount, occupants }>
 //
-// Each route / S2S link contributes +1 to every tray it traverses. AP cables
-// are copper by default (drops are short); S2S links use link.cableType.
+// Each route / S2S link contributes +1 to every tray it traverses. Both
+// AP→Switch drops and S2S links carry their own `cableType` resolved by
+// computeRoutes from the terminating switch's cableType preference (copper /
+// fiber / auto-by-length).
+//
+// 20-2: `occupants` lists which cables actually traverse the tray, so the
+// CableTrayPanel can show "this tray carries AP-03's drop and the SW1↔SW2
+// uplink" instead of just a count. Each occupant: { kind, cableType, cableM,
+// apId?, switchId?, srcId?, targetId? }.
 export function computeTrayCableLoads({ routes, switchLinks, traysByFloor }) {
   const out = new Map()
   const keyOf = (floorId, trayId) => `${floorId}|${trayId}`
-  const bump = (floorId, trayId, cableType) => {
+  const bump = (floorId, trayId, cableType, occupant) => {
     const k = keyOf(floorId, trayId)
-    const e = out.get(k) ?? { count: 0, copperCount: 0, fiberCount: 0 }
+    const e = out.get(k) ?? { count: 0, copperCount: 0, fiberCount: 0, occupants: [] }
     e.count += 1
     if (cableType === 'fiber') e.fiberCount += 1
     else                       e.copperCount += 1
+    if (occupant) e.occupants.push(occupant)
     out.set(k, e)
   }
 
-  const tallyPath = (points, cableType) => {
+  const tallyPath = (points, cableType, occupant) => {
     if (!points || points.length < 2) return
     // Bucket points by floor so we only check trays on the relevant floor.
     const floorIds = new Set(points.map((p) => p.floorId))
@@ -71,18 +79,32 @@ export function computeTrayCableLoads({ routes, switchLinks, traysByFloor }) {
             break
           }
         }
-        if (occupied) bump(fid, tray.id, cableType)
+        if (occupied) bump(fid, tray.id, cableType, occupant)
       }
     }
   }
 
   for (const r of routes.values()) {
     if (!r.points || r.routeStatus !== 'tray') continue
-    tallyPath(r.points, 'copper')   // AP→Switch drops default to copper
+    const cableType = r.cableType ?? 'copper'
+    tallyPath(r.points, cableType, {
+      kind:      'ap',
+      apId:      r.apId,
+      switchId:  r.switchId,
+      cableType,
+      cableM:    r.cableM,
+    })
   }
   for (const link of switchLinks.values()) {
     if (!link.points || link.routeStatus !== 'tray') continue
-    tallyPath(link.points, link.cableType ?? 'copper')
+    const cableType = link.cableType ?? 'copper'
+    tallyPath(link.points, cableType, {
+      kind:      's2s',
+      srcId:     link.srcId,
+      targetId:  link.targetId,
+      cableType,
+      cableM:    link.cableM,
+    })
   }
 
   return out

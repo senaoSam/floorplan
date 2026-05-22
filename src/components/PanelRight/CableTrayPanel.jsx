@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo } from 'react'
-import { useCableStore, DEFAULT_TRAY, DEFAULT_TRAY_MAGNET_PX, TRAY_KINDS, TRAY_MATERIALS, TRAY_MOUNT_PRESETS, TRAY_SYSTEMS, resolveTrayMountHeight, getTraySystem, getCapacityProfile } from '@/store/useCableStore'
+import { useCableStore, DEFAULT_TRAY, DEFAULT_TRAY_MAGNET_PX, TRAY_MOUNT_PRESETS, TRAY_SYSTEMS, resolveTrayMountHeight, getTraySystem, getCapacityProfile } from '@/store/useCableStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
@@ -60,7 +60,7 @@ function CableTrayPanel({ floorId, trayId }) {
     if (!tray) return null
     const { routes, switchLinks, warnings } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
     const loads = computeTrayCableLoads({ routes, switchLinks, traysByFloor })
-    const load  = loads.get(`${floorId}|${trayId}`) ?? { count: 0, copperCount: 0, fiberCount: 0 }
+    const load  = loads.get(`${floorId}|${trayId}`) ?? { count: 0, copperCount: 0, fiberCount: 0, occupants: [] }
     const profile = getCapacityProfile(capacityProfile, customCapacity)
     const fill = { ...computeTrayFill({ tray, load, profile }), profile }
     // Filter graph warnings to those that reference THIS tray (by name or
@@ -69,8 +69,23 @@ function CableTrayPanel({ floorId, trayId }) {
     // doesn't drag in other trays' problems.
     const trayNeedle = tray.name ?? tray.id
     const trayWarnings = (warnings ?? []).filter((w) => w.includes(trayNeedle))
-    return { fill, trayWarnings }
+    return { fill, trayWarnings, occupants: load.occupants ?? [] }
   }, [tray, floors, apsByFloor, switchesByFloor, traysByFloor, risers, floorId, trayId, capacityProfile, customCapacity])
+
+  // Flat AP / switch lookup tables, so we can resolve occupant names without
+  // re-scanning every floor inside the render loop. Routes can span floors
+  // via risers — an AP/switch on this tray's path might live elsewhere.
+  const nodeLookup = useMemo(() => {
+    const apById = new Map()
+    const swById = new Map()
+    for (const [, list] of Object.entries(apsByFloor)) {
+      for (const a of list ?? []) apById.set(a.id, a)
+    }
+    for (const [, list] of Object.entries(switchesByFloor)) {
+      for (const sw of list ?? []) swById.set(sw.id, sw)
+    }
+    return { apById, swById }
+  }, [apsByFloor, switchesByFloor])
 
   if (!tray) return null
 
@@ -81,6 +96,8 @@ function CableTrayPanel({ floorId, trayId }) {
   const sys = getTraySystem(tray.system)
   const fill = diagnostics?.fill ?? null
   const trayWarnings = diagnostics?.trayWarnings ?? []
+  const occupants = diagnostics?.occupants ?? []
+  const { apById, swById } = nodeLookup
 
   // Issues = anything the user might want to act on. Capacity warn / full /
   // exceed each get an entry; graph warnings get one entry each. Empty
@@ -119,7 +136,7 @@ function CableTrayPanel({ floorId, trayId }) {
           placeholder={tray.id}
           onChange={(e) => updateTray(floorId, trayId, { name: e.target.value })}
         />
-        <p className="ap-panel__hint">自動命名 TRAY-{`{樓層}`}-{`{系統}`}-{`{序號}`}；可手動覆寫</p>
+        <p className="ap-panel__hint">自動命名 TRAY-{`{樓層}`}-{`{序號}`}；可手動覆寫</p>
       </section>
 
       <section className="ap-panel__section">
@@ -141,35 +158,6 @@ function CableTrayPanel({ floorId, trayId }) {
             </span>
           ))}
         </div>
-      </section>
-
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">類型</p>
-        <select
-          className="ap-panel__input ap-panel__select"
-          value={tray.kind ?? DEFAULT_TRAY.kind}
-          onChange={(e) => updateTray(floorId, trayId, { kind: e.target.value })}
-        >
-          {TRAY_KINDS.map((k) => (
-            <option key={k.value} value={k.value}>{k.label}</option>
-          ))}
-        </select>
-      </section>
-
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">
-          材質
-          <span className="ap-panel__coming-soon">待 20-1 啟用</span>
-        </p>
-        <select
-          className="ap-panel__input ap-panel__select"
-          value={tray.materialId ?? DEFAULT_TRAY.materialId}
-          onChange={(e) => updateTray(floorId, trayId, { materialId: e.target.value })}
-        >
-          {TRAY_MATERIALS.map((m) => (
-            <option key={m.value} value={m.value}>{m.label}</option>
-          ))}
-        </select>
       </section>
 
       {/* ── Path ──────────────────────────────────────────────────── */}
@@ -286,6 +274,63 @@ function CableTrayPanel({ floorId, trayId }) {
             </p>
           </section>
         </>
+      )}
+
+      {/* ── 20-2 占用 cable 列表 ───────────────────────────────────
+          Lists each AP drop / S2S link that traverses this tray, so users
+          can answer "if I remove this tray, which cables break?". Hidden
+          when the tray carries nothing (e.g. tray drawn but no AP/switch
+          attached yet). */}
+      {occupants.length > 0 && (
+        <section className="ap-panel__section">
+          <p className="ap-panel__label">
+            占用 cable
+            <span className="ap-panel__hint-inline">（{occupants.length} 條）</span>
+          </p>
+          <ul className="tray-occupant-list">
+            {occupants.map((o, i) => {
+              if (o.kind === 'ap') {
+                const ap = apById.get(o.apId)
+                const sw = o.switchId ? swById.get(o.switchId) : null
+                const name = ap?.name ?? o.apId
+                const target = sw?.name ?? (o.switchId ?? '—')
+                return (
+                  <li key={`ap-${o.apId}-${i}`} className="tray-occupant">
+                    <span className="tray-occupant__name">{name}</span>
+                    <span className="tray-occupant__arrow">→</span>
+                    <span className="tray-occupant__name tray-occupant__name--sw">{target}</span>
+                    <span className={`tray-occupant__type tray-occupant__type--${o.cableType}`}>
+                      {o.cableType}
+                    </span>
+                    <span className="tray-occupant__len">
+                      {o.cableM != null ? `${o.cableM.toFixed(1)} m` : '—'}
+                    </span>
+                  </li>
+                )
+              }
+              // s2s
+              const src = swById.get(o.srcId)
+              const tgt = swById.get(o.targetId)
+              return (
+                <li key={`s2s-${o.srcId}-${o.targetId}-${i}`} className="tray-occupant">
+                  <span className="tray-occupant__name tray-occupant__name--sw">
+                    {src?.name ?? o.srcId}
+                  </span>
+                  <span className="tray-occupant__arrow">⇄</span>
+                  <span className="tray-occupant__name tray-occupant__name--sw">
+                    {tgt?.name ?? o.targetId}
+                  </span>
+                  <span className={`tray-occupant__type tray-occupant__type--${o.cableType}`}>
+                    {o.cableType}
+                  </span>
+                  <span className="tray-occupant__len">
+                    {o.cableM != null ? `${o.cableM.toFixed(1)} m` : '—'}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
       )}
 
       {/* ── Issues ─────────────────────────────────────────────────

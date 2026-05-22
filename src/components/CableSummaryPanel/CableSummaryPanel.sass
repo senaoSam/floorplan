@@ -107,6 +107,18 @@
     color: $text-secondary
     margin-left: 4px
 
+  // 20-2 capacity status badge in bottleneck row
+  &__badge
+    display: inline-block
+    padding: 1px 6px
+    border-radius: 999px
+    font-size: 9px
+    font-weight: 600
+    color: #fff
+    margin-right: 6px
+    letter-spacing: 0.3px
+    vertical-align: middle
+
   &__warning
     font-size: 11px
     color: #fbbf24
@@ -153,9 +165,11 @@
     font-size: 10px
     color: $text-secondary
 
-  // 20-1 inline row (waste factor input)
-  &__row--inline
-    display: flex
+  // 20-1 waste-factor row — label + inline input + × all on the left half
+  // of a normal row, so the resulting "with waste" length stays on the right
+  // (space-between layout from &__row).
+  &__waste-edit
+    display: inline-flex
     align-items: center
     gap: 6px
 

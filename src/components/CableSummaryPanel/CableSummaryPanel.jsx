@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
-import { useCableStore, CAPACITY_PROFILES } from '@/store/useCableStore'
+import { useCableStore, CAPACITY_PROFILES, getCapacityProfile } from '@/store/useCableStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { computeRoutes } from '@/features/cable/computeRoutes'
 import { computeTrayBOM } from '@/features/cable/computeTrayBOM'
+import { computeTrayCableLoads, computeTrayFill } from '@/features/cable/computeTrayFill'
 import './CableSummaryPanel.sass'
 
 // Building-wide cable BOM + per-route-status counts + unroutable list.
@@ -82,14 +83,42 @@ function CableSummaryPanel() {
       bom.counts[b]   += 1
     }
 
+    // 20-2 容量瓶頸 — score every tray by fill ratio, surface the non-OK
+    // ones so the user can spot bottlenecks without clicking through each
+    // tray. Sorted descending so the worst offender is first.
+    const trayLoads = computeTrayCableLoads({ routes, switchLinks, traysByFloor })
+    const profile = getCapacityProfile(capacityProfile, customCapacity)
+    const bottlenecks = []
+    for (const f of floors) {
+      const trays = traysByFloor[f.id] ?? []
+      for (const tray of trays) {
+        const load = trayLoads.get(`${f.id}|${tray.id}`) ?? { count: 0, copperCount: 0, fiberCount: 0 }
+        const fill = computeTrayFill({ tray, load, profile })
+        if (fill.status === 'ok') continue
+        bottlenecks.push({
+          floorId:    f.id,
+          floorName:  f.name ?? f.id,
+          trayId:     tray.id,
+          trayName:   tray.name ?? tray.id,
+          fillRatio:  fill.fillRatio,
+          status:     fill.status,
+          statusLabel: fill.statusLabel,
+          statusColor: fill.statusColor,
+          count:      fill.count,
+        })
+      }
+    }
+    bottlenecks.sort((a, b) => b.fillRatio - a.fillRatio)
+
     return {
       totalM: totalApM + totalS2sM,
       totalApM, totalS2sM,
       byStatus, byFloor, unroutable, warnings,
       totalAP: routes.size, totalS2s: switchLinks.size,
       bom,
+      bottlenecks,
     }
-  }, [floors, apsByFloor, switchesByFloor, traysByFloor, risers])
+  }, [floors, apsByFloor, switchesByFloor, traysByFloor, risers, capacityProfile, customCapacity])
 
   // Hide the panel until the user actually has a cable system to summarise.
   const hasCableSystem =
@@ -101,6 +130,11 @@ function CableSummaryPanel() {
   const handleNavigateAP = (apId, floorId) => {
     setActiveFloor(floorId)
     setSelected(apId, 'ap')
+  }
+
+  const handleNavigateTray = (trayId, floorId) => {
+    setActiveFloor(floorId)
+    setSelected(trayId, 'cable_tray')
   }
 
   const sortedFloorEntries = [...stats.byFloor.entries()].sort((a, b) => {
@@ -233,36 +267,27 @@ function CableSummaryPanel() {
                 <span>{trayBOM.totalLengthM.toFixed(1)} m</span>
               </div>
               <div className="cable-summary__row">
-                <span>＋餘料係數</span>
+                <span className="cable-summary__waste-edit">
+                  ＋餘料係數
+                  <input
+                    type="number"
+                    min="1.00"
+                    max="2.00"
+                    step="0.01"
+                    className="cable-summary__num"
+                    value={wasteFactor}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value)
+                      if (!isNaN(v) && v >= 1.0 && v <= 2.0) setWasteFactor(v)
+                    }}
+                  />
+                  ×
+                </span>
                 <span>{trayBOM.totalLengthWithWasteM.toFixed(1)} m</span>
               </div>
-              <div className="cable-summary__row cable-summary__row--inline">
-                <span>餘料係數</span>
-                <input
-                  type="number"
-                  min="1.00"
-                  max="2.00"
-                  step="0.01"
-                  className="cable-summary__num"
-                  value={wasteFactor}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value)
-                    if (!isNaN(v) && v >= 1.0 && v <= 2.0) setWasteFactor(v)
-                  }}
-                />
-                <span>×</span>
-              </div>
               <div className="cable-summary__row">
-                <span>L 接</span>
-                <span>{trayBOM.lfits}</span>
-              </div>
-              <div className="cable-summary__row">
-                <span>T 接</span>
-                <span>{trayBOM.tjoints}</span>
-              </div>
-              <div className="cable-summary__row">
-                <span>跨接</span>
-                <span>{trayBOM.crosses}</span>
+                <span>接頭 (L / T / 跨)</span>
+                <span>{trayBOM.lfits} / {trayBOM.tjoints} / {trayBOM.crosses}</span>
               </div>
               {trayBOM.perFloor.length > 1 && (
                 <details className="cable-summary__details">
@@ -283,6 +308,41 @@ function CableSummaryPanel() {
               <p className="cable-summary__hint">
                 Planning estimate — 不含吊桿、餘料裁切細節，僅供下單參考
               </p>
+            </section>
+          )}
+
+          {/* 20-2 容量瓶頸 — building-wide ranked list of trays in warn / full /
+              exceed state. Click a row to jump to that tray. Hidden when no
+              tray exceeds the OK threshold (most projects start clean). */}
+          {stats.bottlenecks.length > 0 && (
+            <section className="cable-summary__section">
+              <p className="cable-summary__label cable-summary__label--warn">
+                容量瓶頸（{stats.bottlenecks.length}）
+              </p>
+              {stats.bottlenecks.map((b) => (
+                <div
+                  key={`${b.floorId}|${b.trayId}`}
+                  className="cable-summary__row cable-summary__row--clickable"
+                  onClick={() => handleNavigateTray(b.trayId, b.floorId)}
+                  title="點擊跳到該 Tray"
+                >
+                  <span>
+                    <span
+                      className="cable-summary__badge"
+                      style={{ background: b.statusColor }}
+                    >
+                      {b.statusLabel}
+                    </span>
+                    {b.trayName}
+                  </span>
+                  <span>
+                    {(b.fillRatio * 100).toFixed(0)}%
+                    <span className="cable-summary__sub">
+                      {b.floorName}　{b.count} 條
+                    </span>
+                  </span>
+                </div>
+              ))}
             </section>
           )}
 
