@@ -331,7 +331,6 @@ const PHASES = [
       {
         layer: 'Layer 21 — Advanced Topology',
         items: [
-          { id: '21-1', done: false, text: 'Vertical tray / conduit（獨立物件，不是 Riser）' },
           { id: '21-2', done: false, text: 'Zone box / consolidation point — trunk → zone → short drop' },
           { id: '21-3', done: false, text: 'Routing 支援 zone box（home-run vs via zone box 路徑）' },
         ],

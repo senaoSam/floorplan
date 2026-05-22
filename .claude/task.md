@@ -246,7 +246,7 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | **3D = read-only** | Z 軸屬性（mountHeight、kind…）一律在 **2D panel 編輯**；3D 只負責高度視覺化，不開放 3D 拖曳/畫線 |
 | **Capacity rule** | tray fill 用 `capacityProfile`（25% planning / 40% warning / custom），**不**寫死「NEC 40%」 |
 | **Color legend** | tray 顏色用 **owner / company / discipline standard**，不綁地區法規 |
-| **Riser ≠ vertical tray** | Riser = 跨樓層 backbone 拓撲概念；vertical tray / conduit = 物理 pathway。兩者各自獨立物件 |
+| **垂直走線只用 Riser** | 跨樓層 / 同樓層垂直需求都靠 Riser 涵蓋；不另外做 vertical tray / conduit 物件（評估後撤回 21-1，理由：Hamina 沒有此物件、實作後 AP/SW 不 snap、dz 不進 BOM，無實際 routing 價值）|
 | **BOM = Planning BOM** | 我們算的是 planning estimate（tray 長、彎頭、AP cable），**不是施工 final BOM**（缺廠牌、吊桿、餘料、現場裁切） |
 | **Warning ≠ Code violation** | 容量提示寫「exceeds selected fill rule」，不寫「code violation」，除非未來真的整合 Article 392 / TIA-569 / local code profile |
 
@@ -302,9 +302,10 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 
 | #     | 狀態 | Task                                                                              |
 | ----- | ---- | --------------------------------------------------------------------------------- |
-| 21-1  | ⬜   | Vertical tray / conduit（**獨立物件**，不是 Riser）— 同樓層內垂直或沿牆爬升           |
 | 21-2  | ⬜   | Zone box / consolidation point — trunk → zone → short drop 拓撲                      |
 | 21-3  | ⬜   | Routing 支援 zone box（home-run vs via zone box 兩種路徑可選） + capacity warning   |
+
+> 21-1 Vertical tray / conduit 已撤回 — Hamina 並無此物件、Riser 已涵蓋跨樓層垂直走線需求；conduit 純當「同樓層垂直 pathway」實作後沒有實際 routing 價值（AP/SW 不 snap、dz 不進 BOM），決定不做。
 
 ---
 
