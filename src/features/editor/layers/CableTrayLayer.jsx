@@ -525,7 +525,7 @@ function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, 
 //   'overlay'  — render ONLY the selected tray with mode='interactiveOnly'
 //                (handles + segments + snap halos). Mounted AFTER APLayer
 //                in Editor2D so the handles float above other layers.
-function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayClick, onRightMouseDown, viewportScale, onDelete, setHoverCursor, isDrawingMode, draftPoints, draftMagnetPx, mousePos, dimmed, toCanvasPos, renderMode = 'all' }) {
+function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayClick, onRightMouseDown, viewportScale, onDelete, setHoverCursor, isDrawingMode, draftPoints, draftMagnetPx, mousePos, snapHint, draftAnchor, dimmed, toCanvasPos, renderMode = 'all' }) {
   const allTrays      = useCableStore((s) => s.traysByFloor[floorId] ?? [])
   const trays = renderMode === 'overlay'
     ? allTrays.filter((t) => t.id === selectedTrayId)
@@ -736,6 +736,55 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
         <Group x={dragSnapTarget.x} y={dragSnapTarget.y} listening={false}>
           <Circle radius={10 * inverseScale} stroke="#22c55e" strokeWidth={2 * inverseScale} />
           <Circle radius={4  * inverseScale} fill="#22c55e" />
+        </Group>
+      )}
+
+      {/* 20-3 wall snap halo — orange to distinguish from tray-vertex (green).
+          Kind is communicated via the OUTER ring (not a centre dot), since the
+          mouse cursor sits on top of the centre and can obscure small shapes:
+          - wallEndpoint → solid circle ring (snap to corner)
+          - wallSegment  → solid square ring (snap to wall edge / perpendicular)
+          A small label below the ring spells out the kind verbatim so even
+          colour-blind users can read it. */}
+      {renderMode !== 'overlay' && snapHint && (snapHint.kind === 'wallEndpoint' || snapHint.kind === 'wallSegment') && (
+        <Group x={snapHint.pos.x} y={snapHint.pos.y} listening={false}>
+          {snapHint.kind === 'wallEndpoint' && (
+            <Circle radius={13 * inverseScale} stroke="#f59e0b" strokeWidth={2.5 * inverseScale} />
+          )}
+          {snapHint.kind === 'wallSegment' && (
+            <Line
+              points={[-13 * inverseScale, -13 * inverseScale,  13 * inverseScale, -13 * inverseScale,
+                        13 * inverseScale,  13 * inverseScale, -13 * inverseScale,  13 * inverseScale]}
+              closed
+              stroke="#f59e0b"
+              strokeWidth={2.5 * inverseScale}
+            />
+          )}
+        </Group>
+      )}
+
+      {/* 20-3 parallel-wall guide — a dim guide line from anchor toward cursor
+          plus a tinted highlight on the reference wall, so the user knows what
+          direction is being locked AND which wall is steering the lock. */}
+      {renderMode !== 'overlay' && snapHint && snapHint.kind === 'parallelWall' && draftAnchor && (
+        <Group listening={false}>
+          {snapHint.ref && (
+            <Line
+              points={[snapHint.ref.startX, snapHint.ref.startY, snapHint.ref.endX, snapHint.ref.endY]}
+              stroke="#a78bfa"
+              strokeWidth={3 * inverseScale}
+              opacity={0.55}
+              lineCap="round"
+            />
+          )}
+          <Line
+            points={[draftAnchor.x, draftAnchor.y, snapHint.pos.x, snapHint.pos.y]}
+            stroke="#a78bfa"
+            strokeWidth={1.2 * inverseScale}
+            dash={[4 * inverseScale, 4 * inverseScale]}
+            opacity={0.8}
+          />
+          <Circle x={snapHint.pos.x} y={snapHint.pos.y} radius={4 * inverseScale} fill="#a78bfa" />
         </Group>
       )}
     </Group>

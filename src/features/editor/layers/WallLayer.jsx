@@ -59,7 +59,7 @@ function EndpointHandle({ x, y, which, wallId, walls, floorId, snapRadius, inver
   )
 }
 
-function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems = [], onWallClick, onWallDragMove, onWallDragEnd, isDrawMode, isDrawingActive, snapRadius, onRightMouseDown, onDelete, viewportScale, setHoverCursor, onExtendFromEndpoint, isDoorWindowMode, dwWallId, dwStartFrac, dwOpeningType }) {
+function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems = [], onWallClick, onWallDragMove, onWallDragEnd, isDrawMode, isDrawingActive, isTrayMode, snapRadius, onRightMouseDown, onDelete, viewportScale, setHoverCursor, onExtendFromEndpoint, isDoorWindowMode, dwWallId, dwStartFrac, dwOpeningType }) {
   const walls      = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
   const updateWall = useWallStore((s) => s.updateWall)
   const [hoveredId, setHoveredId] = useState(null)
@@ -89,8 +89,8 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems
         return (
           <Group
             key={wall.id}
-            draggable={!isDoorWindowMode}
-            onMouseEnter={() => { setHoverCursor?.(isDoorWindowMode ? 'crosshair' : 'move'); setHoveredId(wall.id) }}
+            draggable={!isDoorWindowMode && !isTrayMode}
+            onMouseEnter={() => { setHoverCursor?.(isDoorWindowMode || isTrayMode ? null : 'move'); setHoveredId(wall.id) }}
             onMouseLeave={() => { setHoverCursor?.(null); setHoveredId(null) }}
             onMouseDown={(e) => {
               if (e.evt.button === 2) {
@@ -157,12 +157,16 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems
               lineCap="round"
               hitStrokeWidth={14}
               onClick={(e) => {
-                if (isDoorWindowMode) return // 讓事件冒泡到 Stage 處理門窗邏輯
+                // Let click bubble to Stage for door/window mode (existing) and
+                // for tray drawing mode (20-3) so a click on a wall — even when
+                // snap-to-wall is firing — actually commits the snapped tray
+                // vertex instead of selecting the wall.
+                if (isDoorWindowMode || isTrayMode) return
                 e.cancelBubble = true
                 onWallClick?.(wall.id, e)
               }}
               onContextMenu={(e) => {
-                if (isDoorWindowMode) return
+                if (isDoorWindowMode || isTrayMode) return
                 e.evt.preventDefault()
                 e.cancelBubble = true
                 onWallClick?.(wall.id, e)

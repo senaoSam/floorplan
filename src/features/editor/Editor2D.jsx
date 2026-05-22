@@ -807,6 +807,134 @@ function Editor2D() {
     return best
   }, [activeFloorId, viewport.scale, trayDraftPoints])
 
+  // 20-3 snap-to-wall: find nearest wall endpoint OR perpendicular foot on a
+  // wall segment within snap radius. Endpoint wins over segment foot since
+  // it's a stricter target. Returns `null` when nothing within range so the
+  // caller can fall back to other snaps; returns `{ pos, kind, wall }` on
+  // a hit so the layer can draw a distinct halo from tray-vertex snap.
+  // `kind` ∈ 'wallEndpoint' | 'wallSegment'.
+  const snapToWallForTray = useCallback((pos) => {
+    const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
+    if (!walls.length) return null
+    const epDist  = 14 / viewport.scale   // a touch more forgiving than wall mode's 12
+    const segDist = 10 / viewport.scale   // tighter — foot match has wider lateral reach
+    let best = null
+    let bestD = Infinity
+    for (const w of walls) {
+      const eps = [{ x: w.startX, y: w.startY }, { x: w.endX, y: w.endY }]
+      for (const ep of eps) {
+        const d = Math.hypot(pos.x - ep.x, pos.y - ep.y)
+        if (d < epDist && d < bestD) {
+          bestD = d
+          best = { pos: { x: ep.x, y: ep.y }, kind: 'wallEndpoint', wall: w }
+        }
+      }
+    }
+    if (best) return best   // endpoint match wins over any foot
+    for (const w of walls) {
+      const ax = w.startX, ay = w.startY
+      const bx = w.endX,   by = w.endY
+      const dx = bx - ax,  dy = by - ay
+      const lenSq = dx * dx + dy * dy
+      if (lenSq < 1e-6) continue
+      const t = ((pos.x - ax) * dx + (pos.y - ay) * dy) / lenSq
+      if (t < 0 || t > 1) continue          // foot must lie ON the segment
+      const fx = ax + t * dx, fy = ay + t * dy
+      const d  = Math.hypot(pos.x - fx, pos.y - fy)
+      if (d < segDist && d < bestD) {
+        bestD = d
+        best = { pos: { x: fx, y: fy }, kind: 'wallSegment', wall: w }
+      }
+    }
+    return best
+  }, [activeFloorId, viewport.scale])
+
+  // 20-3 parallel-wall direction lock: if the draft has an anchor and the
+  // cursor's vector from the anchor is close to parallel or perpendicular to
+  // a nearby wall, snap the cursor onto that exact ray (length preserved).
+  // Returns `null` when no nearby wall or no near-parallel direction; returns
+  // `{ pos, lockedAngle, refWall }` on a hit. Skipped when Shift is held —
+  // angle lock to 0/45/90° takes priority in that case.
+  const parallelWallLock = useCallback((cursor, anchor) => {
+    const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
+    if (!walls.length) return null
+    const dx0 = cursor.x - anchor.x
+    const dy0 = cursor.y - anchor.y
+    const len = Math.hypot(dx0, dy0)
+    if (len < 4 / viewport.scale) return null    // no direction info yet
+    const cursorAngle = Math.atan2(dy0, dx0)
+    // Pick the wall closest to the cursor — that's the one the user is
+    // visually steering against. Range gate avoids "snapping to whatever wall
+    // is in the building" when the cursor is nowhere near any wall.
+    const proximityPx = 180 / viewport.scale
+    let ref = null
+    let refD = proximityPx
+    for (const w of walls) {
+      const ax = w.startX, ay = w.startY
+      const bx = w.endX,   by = w.endY
+      const sx = bx - ax, sy = by - ay
+      const lenSq = sx * sx + sy * sy
+      if (lenSq < 1e-6) continue
+      const t = ((cursor.x - ax) * sx + (cursor.y - ay) * sy) / lenSq
+      const tc = Math.max(0, Math.min(1, t))
+      const fx = ax + tc * sx, fy = ay + tc * sy
+      const d  = Math.hypot(cursor.x - fx, cursor.y - fy)
+      if (d < refD) { refD = d; ref = w }
+    }
+    if (!ref) return null
+    const wallAngle = Math.atan2(ref.endY - ref.startY, ref.endX - ref.startX)
+    // Test all four 90°-rotations against the cursor direction; pick the one
+    // with the smallest angular delta. Threshold 6° — tight enough that the
+    // user has to be actively steering parallel to fire it.
+    const candidates = [wallAngle, wallAngle + Math.PI / 2, wallAngle + Math.PI, wallAngle + 3 * Math.PI / 2]
+    const normAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a))
+    let bestAngle = null, bestDelta = (6 * Math.PI) / 180
+    for (const a of candidates) {
+      const delta = Math.abs(normAngle(a - cursorAngle))
+      if (delta < bestDelta) { bestDelta = delta; bestAngle = normAngle(a) }
+    }
+    if (bestAngle === null) return null
+    return {
+      pos: { x: anchor.x + Math.cos(bestAngle) * len, y: anchor.y + Math.sin(bestAngle) * len },
+      lockedAngle: bestAngle,
+      refWall: ref,
+    }
+  }, [activeFloorId, viewport.scale])
+
+  // Combined snap pipeline for a tray draft point. Priority chain:
+  //   shift+anchor      → 0/45/90° angle lock (existing)
+  //   else tray vertex  → exact-merge to existing vertex (existing)
+  //   else wall point   → endpoint OR perpendicular foot on wall
+  //   else parallel     → direction lock to nearby wall (anchor required)
+  // The kind tag lets visuals branch (green halo / orange halo / parallel guide).
+  // Returns { pos, kind: 'angleLock' | 'trayVertex' | 'wallEndpoint' | 'wallSegment' | 'parallelWall' | null, ref? }.
+  const snapTrayPoint = useCallback((rawPos) => {
+    const anchor = trayDraftPoints.length > 0 ? trayDraftPoints[trayDraftPoints.length - 1] : null
+    if (shiftHeldRef.current && anchor) {
+      return { pos: angleLockToAnchor(rawPos, anchor), kind: 'angleLock' }
+    }
+    // Tray vertex snap — exact match against committed trays + draft body.
+    // Re-uses existing helper which returns rawPos unchanged on miss; a new
+    // object identity signals a hit (it builds a fresh {x,y} per match).
+    const tray = snapToTrayVertex(rawPos)
+    if (tray !== rawPos) {
+      return { pos: tray, kind: 'trayVertex' }
+    }
+    const wall = snapToWallForTray(rawPos)
+    if (wall) return { pos: wall.pos, kind: wall.kind, ref: wall.wall }
+    if (anchor) {
+      const par = parallelWallLock(rawPos, anchor)
+      if (par) return { pos: par.pos, kind: 'parallelWall', ref: par.refWall, lockedAngle: par.lockedAngle }
+    }
+    return { pos: rawPos, kind: null }
+  }, [trayDraftPoints, angleLockToAnchor, snapToTrayVertex, snapToWallForTray, parallelWallLock])
+
+  // Visual indicators for tray-mode snaps. Updated in mouseMove, consumed by
+  // CableTrayLayer to draw the wall-snap halo / parallel-wall guide. Cleared
+  // when leaving tray mode or when no snap fires.
+  const [traySnapHint, setTraySnapHint] = useState(null)   // { kind, pos, ref?, lockedAngle? }
+  useEffect(() => { if (!isTrayMode) setTraySnapHint(null) }, [isTrayMode])
+
   // ── 滑鼠移動：右鍵拖曳閾值判斷 / 框選 / 更新 ghost 線 ──
   const handleMouseMove = useCallback(() => {
     const pos = stageRef.current?.getPointerPosition()
@@ -857,13 +985,23 @@ function Editor2D() {
     const needsMousePos = isWallMode || isScopeMode || isFloorHoleMode ||
                           isScaleMode || isCropMode || isDoorWindowMode || isTrayMode
     if (needsMousePos) {
-      const snapped = isWallMode
-        ? snapToWallEndpoint(canvasPos)
-        : isTrayMode
-          ? (shiftHeldRef.current && trayDraftPoints.length > 0
-              ? angleLockToAnchor(canvasPos, trayDraftPoints[trayDraftPoints.length - 1])
-              : snapToTrayVertex(canvasPos))
-          : canvasPos
+      let snapped
+      if (isWallMode) {
+        snapped = snapToWallEndpoint(canvasPos)
+      } else if (isTrayMode) {
+        const r = snapTrayPoint(canvasPos)
+        snapped = r.pos
+        // Wall snaps + parallel lock need visuals; the existing exact-match
+        // tray-vertex green halo in CableTrayLayer handles its own kind, so
+        // we only hand it the wall/parallel kinds.
+        setTraySnapHint(
+          r.kind === 'wallEndpoint' || r.kind === 'wallSegment' || r.kind === 'parallelWall'
+            ? r
+            : null
+        )
+      } else {
+        snapped = canvasPos
+      }
       setMousePos(snapped)
     } else if (mousePos !== null) {
       setMousePos(null)
@@ -911,7 +1049,7 @@ function Editor2D() {
     } else if (useHoverReadoutStore.getState().reading) {
       useHoverReadoutStore.getState().setReading(null)
     }
-  }, [toCanvasPos, isWallMode, isScopeMode, isFloorHoleMode, isScaleMode, isCropMode, isDoorWindowMode, isTrayMode, mousePos, snapToWallEndpoint, snapToTrayVertex, angleLockToAnchor, trayDraftPoints, viewport.scale, activeFloorId])
+  }, [toCanvasPos, isWallMode, isScopeMode, isFloorHoleMode, isScaleMode, isCropMode, isDoorWindowMode, isTrayMode, mousePos, snapToWallEndpoint, snapTrayPoint, viewport.scale, activeFloorId])
 
   // ── 點擊：分流到各模式 ─────────────────────────────────
   const handleStageClick = useCallback((e) => {
@@ -987,15 +1125,16 @@ function Editor2D() {
     }
 
     // Cable Tray polyline drawing — accumulate vertices, finish with right-click / Esc.
-    // Snap to existing tray vertices so users can extend from / connect back to
-    // an endpoint (separate tray objects sharing the exact coordinate).
-    // Shift held + an existing draft anchor → angle-lock instead of snap, so
-    // the committed vertex matches the locked ghost preview.
+    // Snap priority (see snapTrayPoint): angle lock > tray vertex > wall endpoint
+    // > wall segment foot > parallel-wall direction lock. Committed vertex must
+    // match the visible ghost preview, so we re-run the same pipeline here
+    // instead of trusting mousePos (which only updates on mousemove; a click
+    // without a prior move would otherwise commit an un-snapped point).
     if (isTrayMode) {
-      const snapped = (shiftHeldRef.current && trayDraftPoints.length > 0)
-        ? angleLockToAnchor(pos, trayDraftPoints[trayDraftPoints.length - 1])
-        : snapToTrayVertex(pos)
+      const { pos: snapped } = snapTrayPoint(pos)
       setTrayDraftPoints((prev) => [...prev, snapped])
+      // Clear visual hint at commit — the user already acted on the snap.
+      setTraySnapHint(null)
       return
     }
 
@@ -1144,7 +1283,7 @@ function Editor2D() {
     isAPMode, nextAPName, autoChannelOnPlace, regulatoryDomain,
     isSwitchMode, addSwitch, nextSwitchName,
     isRiserMode, addRiser, nextRiserName,
-    isTrayMode, snapToTrayVertex, angleLockToAnchor, trayDraftPoints,
+    isTrayMode, snapTrayPoint,
     isScopeMode, scopePoints, viewport.scale, addScope,
     isFloorHoleMode, floorHolePoints, addFloorHole,
     isCropMode, cropStart, updateFloor, toImagePos, setSelected,
@@ -1215,6 +1354,23 @@ function Editor2D() {
     32, 16, 16,
   )
 
+  // Tray cursor — hotspot is a tiny 4-px crosshair so the snap halos (orange
+  // wall-endpoint dot, orange wall-segment square, purple parallel-wall dot)
+  // remain visible at the cursor's actual landing point. The tray-channel
+  // icon sits up-and-to-the-right of the hotspot, well outside any snap halo.
+  const cursorTray = svgCursor(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">` +
+    // Tiny 2-px crosshair — small enough that the orange snap rings around
+    // it (13-px radius in canvas coords) are never obscured.
+    `<line x1="10" y1="12" x2="14" y2="12" stroke="white" stroke-width="1" opacity="0.7"/>` +
+    `<line x1="12" y1="10" x2="12" y2="14" stroke="white" stroke-width="1" opacity="0.7"/>` +
+    // Tray-channel icon offset far from the hotspot so it never covers halos.
+    `<rect x="20" y="6"  width="10" height="3" rx="0.6" fill="none" stroke="#818cf8" stroke-width="1.2"/>` +
+    `<line x1="21" y1="7.5" x2="29" y2="7.5" stroke="#818cf8" stroke-width="0.8" stroke-dasharray="1.5 1.5" opacity="0.9"/>` +
+    `</svg>`,
+    32, 12, 12,
+  )
+
   const cursorScale = svgCursor(
     `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">` +
     `<line x1="16" y1="2" x2="16" y2="30" stroke="white" stroke-width="1" opacity="0.3"/>` +
@@ -1237,7 +1393,7 @@ function Editor2D() {
     isWallMode      ? cursorWall  :
     isAPMode        ? cursorAP    :
     isSwitchMode                       ? 'crosshair' :
-    isTrayMode                         ? 'crosshair' :
+    isTrayMode                         ? cursorTray  :
     isRiserMode                        ? 'crosshair' :
     isDoorWindowMode                   ? 'crosshair' :
     isMarqueeMode                      ? 'crosshair' :
@@ -1277,7 +1433,7 @@ function Editor2D() {
     [EDITOR_MODE.DOOR_WINDOW]:     { label: '門窗模式', hint: '點擊牆體兩點設定門/窗位置；D 切換門、W 切換窗；右鍵或 Esc 取消' },
     [EDITOR_MODE.PLACE_AP]:        { label: '放置 AP 模式', hint: '左鍵點擊放置 AP' },
     [EDITOR_MODE.PLACE_SWITCH]:    { label: '放置 Switch 模式', hint: '左鍵點擊放置 Switch / IDF / MDF / Router；右側面板可調類型與規格' },
-    [EDITOR_MODE.DRAW_CABLE_TRAY]: { label: '繪製線槽模式', hint: '左鍵新增頂點；Shift 鎖 0/45/90°；Backspace / Ctrl+Z 退一步；Enter / 右鍵 / Esc 完成（≥ 2 點才會建立）' },
+    [EDITOR_MODE.DRAW_CABLE_TRAY]: { label: '繪製線槽模式', hint: '左鍵新增頂點；Shift 鎖 0/45/90°；自動 snap 到 tray / 牆角 / 牆邊；近牆方向自動平行；Backspace / Ctrl+Z 退一步；Enter / 右鍵 / Esc 完成（≥ 2 點才會建立）' },
     [EDITOR_MODE.PLACE_RISER]:    { label: '放置 Riser 模式', hint: '左鍵點擊放置 Riser；放完用右側面板加入跨樓層' },
     [EDITOR_MODE.DRAW_SCOPE]:      { label: '範圍模式',     hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
     [EDITOR_MODE.DRAW_FLOOR_HOLE]: { label: '中庭模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
@@ -1463,6 +1619,7 @@ function Editor2D() {
                   setWallDrawStart(pt)
                 }}
                 isDoorWindowMode={isDoorWindowMode}
+                isTrayMode={isTrayMode}
                 dwWallId={dwWallId}
                 dwStartFrac={dwStartFrac}
                 dwOpeningType={dwOpeningType}
@@ -1486,6 +1643,8 @@ function Editor2D() {
                 draftPoints={trayDraftPoints}
                 draftMagnetPx={DEFAULT_TRAY_MAGNET_PX}
                 mousePos={isTrayMode ? mousePos : null}
+                snapHint={isTrayMode ? traySnapHint : null}
+                draftAnchor={isTrayMode && trayDraftPoints.length > 0 ? trayDraftPoints[trayDraftPoints.length - 1] : null}
                 dimmed={isDoorWindowMode}
                 toCanvasPos={toCanvasPos}
                 // When a tray is selected, its handles + segment hit-tests
