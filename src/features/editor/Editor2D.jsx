@@ -1439,19 +1439,25 @@ function Editor2D() {
     32, 16, 16,
   )
 
-  // Tray cursor — hotspot is a tiny 4-px crosshair so the snap halos (orange
-  // wall-endpoint dot, orange wall-segment square, purple parallel-wall dot)
-  // remain visible at the cursor's actual landing point. The tray-channel
-  // icon sits up-and-to-the-right of the hotspot, well outside any snap halo.
+  // Tray cursor — hotspot is a small crosshair at (12,12) so the snap halos
+  // (orange wall-endpoint dot, orange wall-segment square, purple parallel-
+  // wall dot) remain visible at the cursor's actual landing point. The tray-
+  // channel icon sits offset to the lower-right of the hotspot, sized to
+  // match cursorAP / cursorScale visual density.
   const cursorTray = svgCursor(
     `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">` +
-    // Tiny 2-px crosshair — small enough that the orange snap rings around
-    // it (13-px radius in canvas coords) are never obscured.
-    `<line x1="10" y1="12" x2="14" y2="12" stroke="white" stroke-width="1" opacity="0.7"/>` +
-    `<line x1="12" y1="10" x2="12" y2="14" stroke="white" stroke-width="1" opacity="0.7"/>` +
-    // Tray-channel icon offset far from the hotspot so it never covers halos.
-    `<rect x="20" y="6"  width="10" height="3" rx="0.6" fill="none" stroke="#818cf8" stroke-width="1.2"/>` +
-    `<line x1="21" y1="7.5" x2="29" y2="7.5" stroke="#818cf8" stroke-width="0.8" stroke-dasharray="1.5 1.5" opacity="0.9"/>` +
+    // Crosshair at hotspot — white over dark outline so it reads on any
+    // background (matches cursorAP / cursorScale).
+    `<line x1="8"  y1="12" x2="16" y2="12" stroke="black" stroke-width="3" opacity="0.5"/>` +
+    `<line x1="12" y1="8"  x2="12" y2="16" stroke="black" stroke-width="3" opacity="0.5"/>` +
+    `<line x1="8"  y1="12" x2="16" y2="12" stroke="white" stroke-width="1.4"/>` +
+    `<line x1="12" y1="8"  x2="12" y2="16" stroke="white" stroke-width="1.4"/>` +
+    // Tray-channel icon: two parallel rails + dashed centreline + white
+    // outline halo so the indigo body stays legible on light/dark plans.
+    `<rect x="18.5" y="18.5" width="13" height="7" rx="1" fill="rgba(0,0,0,0.55)" stroke="white" stroke-width="0.8"/>` +
+    `<line x1="20" y1="20" x2="30" y2="20" stroke="#a5b4fc" stroke-width="1.6" stroke-linecap="round"/>` +
+    `<line x1="20" y1="24" x2="30" y2="24" stroke="#a5b4fc" stroke-width="1.6" stroke-linecap="round"/>` +
+    `<line x1="20" y1="22" x2="30" y2="22" stroke="#818cf8" stroke-width="0.9" stroke-dasharray="1.6 1.4"/>` +
     `</svg>`,
     32, 12, 12,
   )
