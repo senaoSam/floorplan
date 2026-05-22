@@ -321,6 +321,80 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 
 ---
 
+## Phase 17 — Mode Interaction Cleanup（UX 紀律）
+
+> Reviewer pain：「不同 mode 卻有多種可操作混合，大鍋炒」
+> 例：tray mode 下 hover 牆還是會跑出端點 handle + X delete badge，因為 WallLayer 只擋 `isDoorWindowMode`，其他 N 個繪製模式各自漏掉。
+> 每個 Layer 用一堆 ad-hoc `if (isXMode)` 各自決定 hover / drag / handle / X / cursor，沒有單一真實來源。
+> 目標：把「每個 mode 允許什麼互動」變成 spec 級的規範，再讓 Layer 從同一來源讀。
+
+### Layer 23 — Mode capability matrix
+
+| #    | 狀態 | Task                                                                                       |
+| ---- | ---- | ------------------------------------------------------------------------------------------ |
+| 23-1 | ⬜   | Audit + 文件化（`.claude/mode-matrix.md`）：列出每個 mode × 每種互動表面（hover handle / drag / X badge / cursor / click target / select-on-click / context menu）的期望行為 |
+| 23-2 | ⬜   | 引入 `modeCapabilities.js`：`getModeCapability(mode)` 回傳 `{ allowSelectHover, allowDragExisting, showQuickDelete, showHandles, cursor, ... }`，作為 Layer 唯一查詢源 |
+| 23-3 | ⬜   | Refactor 所有 Layer 改為 consult capability：WallLayer / APLayer / SwitchLayer / ScopeLayer / FloorHoleLayer / RiserLayer / CableTrayLayer / FloorImageLayer 全部拔掉散落的 `isXMode` 守門 |
+
+**為什麼分三步而不是直接動手**
+- 23-1 先 audit 才知道有多少漏網之魚（避免邊改邊發現新例外）
+- 23-2 是抽象層，要先確定欄位再實作
+- 23-3 才動 Layer code，且因為有共同來源，後續再加新 mode 不會再重蹈覆轍
+
+---
+
+## Phase 18 — UI/UX 釐清與分群
+
+> Reviewer pain：「功能版面偏陽春，沒有 domain 分群」
+> 例：Switch / Cable Tray / Riser 概念上同一個 group（網路布線），但 toolbar 並排在牆/AP 之間；牆 / 門窗 / 中庭也是結構類，分散擺。
+> Right panel 每個 type 自己長一套，feature 漂移嚴重（同樣是「健康狀態」section，CableTrayPanel vs SwitchPanel 表現不一致）。
+> 目標：把功能依 domain 分群，視覺層級先講清楚，再把 panel 框架共用化。
+
+### Layer 24 — Function grouping & panel scaffold
+
+| #    | 狀態 | Task                                                                                       |
+| ---- | ---- | ------------------------------------------------------------------------------------------ |
+| 24-1 | ⬜   | Group 分類定案（10 群：4 物件群 + 6 功能群），決定每群代表色 / 圖示 / 擺放區域 — 詳見下表 |
+| 24-2 | ⬜   | Toolbar 重新佈局：物件群連續排、群之間 separator + 群名 label                                  |
+| 24-3 | ⬜   | Right panel 框架共用化：同 group 共用容器 + 標準 section 骨架（Identity / Geometry / Properties / Health / Issues） |
+| 24-4 | ⬜   | Active mode 視覺指示：canvas 頂部 mode badge（例 "🔌 網路布線 / 線槽繪製"），減少使用者迷失       |
+| 24-5 | ⬜   | Color / icon legend 一張表整理（每 group 主色 + sub-type 變化），確保 toolbar / panel / canvas 三處用色一致 |
+
+**24-1 Group 對照表**
+
+物件群（畫布上有實體 → 跟著 right panel）
+
+| Group | 成員 | 備註 |
+|---|---|---|
+| **結構** | Wall / Door+Window / FloorHole / FloorImage | 建物本體 |
+| **無線規劃** | AP / Scope | Scope 是 RF heatmap 評估區，跟 AP 一起 |
+| **網路布線** | Switch / Cable Tray / Riser / *(未來: Cable Path edit)* | 有線基礎建設 |
+| **標註與測量** | Scale / *(未來: Dimension / Note / Text)* | 目前單薄但會擴 |
+
+功能群（操作 / 顯示 / 分析 → toolbar / sidebar / overlay）
+
+| Group | 成員 | 擺放建議 |
+|---|---|---|
+| **操作工具** | Select / Marquee / Pan | Toolbar 最左（mode-agnostic） |
+| **編輯動作** | Undo / Redo / Batch delete | Toolbar 右側或 floating |
+| **檢視** | 2D/3D switch / LayerToggle / 全樓層 toggle | Toolbar 右 + 浮動 panel |
+| **分析輸出** | HeatmapControl / CableSummary / DevicePlanning（auto 頻道/功率）/ *(未來: CSV/PDF/DXF export)* | Canvas 浮動 panel（左下/右下） |
+| **樓層管理** | SidebarLeft floor list / 新增樓層 / Crop / AlignFloor | Sidebar 左 |
+| **輔助/Dev** | AI 牆 / DemoLoader / StressLoader / RegulatorySelector | Toolbar 末端 + canvas 角落 |
+
+**邊界判定**
+- Crop → 樓層管理（對象是 floor，不是物件）
+- AlignFloor → 樓層管理（floor-level meta）
+- Scope → 無線規劃（驅動 RF 計算，不是純標註）
+- AI 牆 → 輔助/Dev（行為是匯入/自動辨識，不直接放在「結構」群）
+
+**先後**
+- 24-1 是設計決策（要先跟使用者敲定分群），其他步驟才動 code
+- 24-2 / 24-3 可平行
+- 24-4 / 24-5 是 polish，最後做
+
+---
+
 ## 既有延後項目歸位
 
 | ID | 狀態 | 原因 |
