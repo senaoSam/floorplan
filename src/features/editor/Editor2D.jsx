@@ -30,6 +30,8 @@ import ScaleLayer from './layers/ScaleLayer'
 import CropLayer from './layers/CropLayer'
 import ScaleDialog from './ScaleDialog'
 import TrayContextMenu from '@/components/ContextMenu/TrayContextMenu'
+import ObjectContextMenu from '@/components/ContextMenu/ObjectContextMenu'
+import { getModeCapability } from './modeCapabilities'
 import LayerToggle from '@/components/LayerToggle/LayerToggle'
 import DevicePlanningPanel from '@/components/DevicePlanningPanel/DevicePlanningPanel'
 import RegulatorySelector from '@/components/RegulatorySelector/RegulatorySelector'
@@ -138,6 +140,16 @@ function Editor2D() {
   const isCropMode      = editorMode === EDITOR_MODE.CROP_IMAGE
   const isAlignMode     = editorMode === EDITOR_MODE.ALIGN_FLOOR
 
+  // 23-2b Single source of truth for Layer interaction policy under the
+  // active mode. Replaces the scattered `isXMode` checks the layers used to
+  // each maintain on their own.
+  const capability = React.useMemo(() => getModeCapability(editorMode), [editorMode])
+
+  // 23-2c Right-click object context menu — shared slice in editor store.
+  const contextMenu      = useEditorStore((s) => s.contextMenu)
+  const openContextMenu  = useEditorStore((s) => s.openContextMenu)
+  const closeContextMenu = useEditorStore((s) => s.closeContextMenu)
+
   const floors         = useFloorStore((s) => s.floors)
   const activeFloorId  = useFloorStore((s) => s.activeFloorId)
   const getActiveFloor = useFloorStore((s) => s.getActiveFloor)
@@ -164,6 +176,7 @@ function Editor2D() {
   }, [])
 
   const addWall    = useWallStore((s) => s.addWall)
+  const nextWallName = useWallStore((s) => s.nextWallName)
   const addOpening = useWallStore((s) => s.addOpening)
 
   const addAP     = useAPStore((s) => s.addAP)
@@ -178,8 +191,10 @@ function Editor2D() {
   const nextRiserName = useCableStore((s) => s.nextRiserName)
 
   const addScope = useScopeStore((s) => s.addScope)
+  const nextScopeName = useScopeStore((s) => s.nextScopeName)
 
   const addFloorHole = useFloorHoleStore((s) => s.addFloorHole)
+  const nextFloorHoleName = useFloorHoleStore((s) => s.nextFloorHoleName)
 
   // ── 座標轉換 ───────────────────────────────────────────
   const toCanvasPos = useCallback((screenPos) => ({
@@ -542,6 +557,8 @@ function Editor2D() {
 
   // ── 20-4 切換樓層 / 模式時關掉 tray context menu ──────
   useEffect(() => { setTrayCtxMenu(null) }, [editorMode, activeFloorId])
+  // 23-3b Generic object menu uses the same auto-close rules as Tray's menu.
+  useEffect(() => { closeContextMenu() }, [editorMode, activeFloorId, closeContextMenu])
 
   // ── 滾輪縮放 ───────────────────────────────────────────
   const handleWheel = useCallback((e) => {
@@ -1070,6 +1087,7 @@ function Editor2D() {
       } else {
         addWall(activeFloorId, {
           id: generateId('wall'),
+          name: nextWallName({ floor: activeFloor }),
           startX: wallDrawStart.x, startY: wallDrawStart.y,
           endX: pos.x,             endY: pos.y,
           material: wallMaterial,
@@ -1174,6 +1192,7 @@ function Editor2D() {
         if (Math.hypot(dx, dy) < snapDist) {
           addScope(activeFloorId, {
             id: generateId('scope'),
+            name: nextScopeName({ floor: activeFloor }),
             points: scopePoints.flatMap((p) => [p.x, p.y]),
             type: 'in',
           })
@@ -1194,6 +1213,7 @@ function Editor2D() {
         if (Math.hypot(dx, dy) < snapDist) {
           addFloorHole(activeFloorId, {
             id: generateId('hole'),
+            name: nextFloorHoleName({ floor: activeFloor }),
             points: floorHolePoints.flatMap((p) => [p.x, p.y]),
           })
           setFloorHolePoints([])
@@ -1453,6 +1473,24 @@ function Editor2D() {
   // ── 游標管理 ───────────────────────────────────────────
   const [hoverCursor, setHoverCursor] = useState(null) // 'move' | 'grab' | 'crosshair' | 'pointer' | null
 
+  // 23-3b Object right-click dispatcher. Layers call this with the hit object's
+  // type + id; we resolve the screen-space xy from Konva's pointer state and
+  // ask the shared store to open the menu. The menu component itself reads
+  // store state and renders the overlay near the bottom of this file.
+  //
+  // ⚠ Does NOT change selection. Right-click is a command channel; left-click
+  // is the selection channel. Keeping them disjoint is the whole point of the
+  // mode-matrix refactor — right-clicking AP-02 must not change which object
+  // the right panel is showing.
+  const handleObjectContextMenu = useCallback((type, id, e) => {
+    const stage = e?.target?.getStage?.()
+    const ptr = stage?.getPointerPosition?.()
+    const rect = stage?.content?.getBoundingClientRect?.()
+    const screenX = (rect?.left ?? 0) + (ptr?.x ?? 0)
+    const screenY = (rect?.top  ?? 0) + (ptr?.y ?? 0)
+    openContextMenu({ targetType: type, targetId: id, screenX, screenY })
+  }, [openContextMenu])
+
   const toolCursor =
     isScaleMode     ? cursorScale :
     isWallMode      ? cursorWall  :
@@ -1574,7 +1612,7 @@ function Editor2D() {
                 <React.Fragment key={`ref-${f.id}`}>
                   <FloorImageLayer
                     floor={{ ...f, opacity: alignRefOpacity }}
-                    isSelectMode={false}
+                    capability={getModeCapability(EDITOR_MODE.PAN)}
                     layerProps={{ ...alignLayerProps(f), listening: false }}
                   />
                   <Layer {...alignLayerProps(f)} listening={false}>
@@ -1588,8 +1626,9 @@ function Editor2D() {
           {activeFloor && showFloorImage && (
             <FloorImageLayer
               floor={activeFloor}
-              isSelectMode={isSelectMode}
+              capability={capability}
               onFloorImageClick={() => setSelected(activeFloorId, 'floor_image')}
+              onFloorImageContextMenu={(e) => handleObjectContextMenu('floor_image', activeFloorId, e)}
               layerProps={isAlignMode ? alignLayerProps(activeFloor) : undefined}
             />
           )}
@@ -1612,6 +1651,7 @@ function Editor2D() {
                   if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'scope'); return }
                   setSelected(id, 'scope')
                 }}
+                onScopeContextMenu={(id, e) => handleObjectContextMenu('scope', id, e)}
                 isSelectMode={isSelectMode}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode || isTrayMode}
                 onScopeDragMove={(id, dx, dy) => {
@@ -1622,10 +1662,10 @@ function Editor2D() {
                   draggingScopeRef.current = null
                   useDragOverlayStore.getState().setScope(null)
                 }}
-                onDelete={(id) => { removeScope(activeFloorId, id); clearSelected() }}
                 viewportScale={viewport.scale}
                 setHoverCursor={setHoverCursor}
                 dimmed={isDoorWindowMode}
+                capability={capability}
               />
             )}
 
@@ -1641,12 +1681,13 @@ function Editor2D() {
                   if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'floor_hole'); return }
                   setSelected(id, 'floor_hole')
                 }}
+                onHoleContextMenu={(id, e) => handleObjectContextMenu('floor_hole', id, e)}
                 isSelectMode={isSelectMode}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode || isTrayMode}
-                onDelete={(id) => { removeFloorHole(activeFloorId, id); clearSelected() }}
                 viewportScale={viewport.scale}
                 setHoverCursor={setHoverCursor}
                 dimmed={isDoorWindowMode}
+                capability={capability}
               />
             )}
 
@@ -1661,6 +1702,7 @@ function Editor2D() {
                   if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'wall'); return }
                   setSelected(id, 'wall')
                 }}
+                onWallContextMenu={(id, e) => handleObjectContextMenu('wall', id, e)}
                 onWallDragMove={(id, dx, dy) => {
                   draggingWallRef.current = { id, dx, dy }
                   useDragOverlayStore.getState().setWall({ id, dx, dy })
@@ -1672,7 +1714,6 @@ function Editor2D() {
                 isDrawMode={isWallMode}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode || isTrayMode}
                 snapRadius={SNAP_PX / viewport.scale}
-                onDelete={(id) => { removeWall(activeFloorId, id); clearSelected() }}
                 viewportScale={viewport.scale}
                 setHoverCursor={setHoverCursor}
                 onExtendFromEndpoint={(pt) => {
@@ -1685,6 +1726,7 @@ function Editor2D() {
                 dwWallId={dwWallId}
                 dwStartFrac={dwStartFrac}
                 dwOpeningType={dwOpeningType}
+                capability={capability}
               />
             )}
 
@@ -1698,7 +1740,6 @@ function Editor2D() {
                   setSelected(id, 'cable_tray')
                 }}
                 viewportScale={viewport.scale}
-                onDelete={(id) => { removeTray(activeFloorId, id); clearSelected() }}
                 setHoverCursor={setHoverCursor}
                 isDrawingMode={isTrayMode}
                 draftPoints={trayDraftPoints}
@@ -1708,12 +1749,8 @@ function Editor2D() {
                 draftAnchor={isTrayMode && trayDraftPoints.length > 0 ? trayDraftPoints[trayDraftPoints.length - 1] : null}
                 dimmed={isDoorWindowMode}
                 toCanvasPos={toCanvasPos}
-                // When a tray is selected, its handles + segment hit-tests
-                // are rendered in the overlay (after APLayer, below). The
-                // BODY stays here so the body's drag handler isn't re-parented
-                // mid-drag — that re-parenting is what caused the "tray jumps
-                // on first body drag" bug.
                 renderMode={selectedType === 'cable_tray' ? 'base' : 'all'}
+                capability={capability}
               />
             )}
 
@@ -1726,6 +1763,7 @@ function Editor2D() {
                   if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'switch'); return }
                   setSelected(id, 'switch')
                 }}
+                onSwitchContextMenu={(id, e) => handleObjectContextMenu('switch', id, e)}
                 onSwitchDragMove={(id, x, y) => {
                   useDragOverlayStore.getState().setSwitch({ id, x, y })
                 }}
@@ -1733,9 +1771,9 @@ function Editor2D() {
                   useDragOverlayStore.getState().setSwitch(null)
                 }}
                 viewportScale={viewport.scale}
-                onDelete={(id) => { removeSwitch(activeFloorId, id); clearSelected() }}
                 setHoverCursor={setHoverCursor}
                 dimmed={isDoorWindowMode}
+                capability={capability}
               />
             )}
 
@@ -1748,13 +1786,13 @@ function Editor2D() {
                   if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'cable_riser'); return }
                   setSelected(id, 'cable_riser')
                 }}
+                onRiserContextMenu={(id, e) => handleObjectContextMenu('cable_riser', id, e)}
                 onRiserDragMove={() => { /* riser xy is global — defer overlay until 12-3b graph */ }}
                 onRiserDragEnd={() => {}}
                 viewportScale={viewport.scale}
-                onDelete={(id) => { removeRiser(id); clearSelected() }}
                 setHoverCursor={setHoverCursor}
                 dimmed={isDoorWindowMode}
-                isPlacingMode={isRiserMode}
+                capability={capability}
               />
             )}
 
@@ -1767,6 +1805,7 @@ function Editor2D() {
                   if (e?.evt?.ctrlKey || e?.evt?.metaKey) { toggleSelectedItem(id, 'ap'); return }
                   setSelected(id, 'ap')
                 }}
+                onAPContextMenu={(id, e) => handleObjectContextMenu('ap', id, e)}
                 onAPDragMove={(id, x, y) => {
                   apDragPendingRef.current = { id, x, y }
                   if (apDragRafRef.current === 0) {
@@ -1787,9 +1826,9 @@ function Editor2D() {
                 }}
                 isDrawingActive={isWallMode || isScopeMode || isFloorHoleMode || isScaleMode || isCropMode || isTrayMode}
                 viewportScale={viewport.scale}
-                onDelete={(id) => { removeAP(activeFloorId, id); clearSelected() }}
                 setHoverCursor={setHoverCursor}
                 dimmed={isDoorWindowMode}
+                capability={capability}
               />
             )}
 
@@ -1811,12 +1850,12 @@ function Editor2D() {
                   setSelected(id, 'cable_tray')
                 }}
                 viewportScale={viewport.scale}
-                onDelete={(id) => { removeTray(activeFloorId, id); clearSelected() }}
                 setHoverCursor={setHoverCursor}
                 isDrawingMode={false}
                 dimmed={isDoorWindowMode}
                 toCanvasPos={toCanvasPos}
                 renderMode="overlay"
+                capability={capability}
               />
             )}
 
@@ -1900,6 +1939,13 @@ function Editor2D() {
         const close = () => setTrayCtxMenu(null)
         const { hitContext, mergeCandidate } = trayCtxMenu
 
+        // Right-click on tray-X should not affect the currently-selected
+        // object (could be a different tray, an AP, etc.). Only clear when
+        // an action actually consumes the target tray itself.
+        const clearIfTargetSelected = () => {
+          if (selectedId === tray.id && selectedType === 'cable_tray') clearSelected()
+        }
+
         // Menu owns the rename input/validation; we just persist the value.
         const onRename = (newName) => {
           updateTray(activeFloorId, tray.id, { name: newName })
@@ -1917,7 +1963,7 @@ function Editor2D() {
           addTray(activeFloorId, { ...tray, id: generateId('tray'), name: nameA, points: ptsA })
           const nameB = nextTrayName({ floor: activeFloor })
           addTray(activeFloorId, { ...tray, id: generateId('tray'), name: nameB, points: ptsB })
-          clearSelected()
+          clearIfTargetSelected()
         }
 
         const onExtend = () => {
@@ -1965,7 +2011,7 @@ function Editor2D() {
 
         const onDelete = () => {
           removeTray(activeFloorId, tray.id)
-          clearSelected()
+          clearIfTargetSelected()
         }
 
         return (
@@ -1981,6 +2027,119 @@ function Editor2D() {
             onMerge={onMerge}
             onConvert={onConvert}
             onDelete={onDelete}
+            onClose={close}
+          />
+        )
+      })()}
+
+      {/* 23-3b Generic object context menu — drives Wall / AP / Switch /
+          Riser / Scope / FloorHole / FloorImage. Tray uses its own
+          TrayContextMenu above because it has the rich 20-4 actions
+          (split / extend / merge / convert). Both are mutually exclusive:
+          Tray opens trayCtxMenu, others open contextMenu. */}
+      {contextMenu && contextMenu.targetType !== 'cable_tray' && (() => {
+        const { targetType, targetId, screenX, screenY } = contextMenu
+        const close = () => closeContextMenu()
+
+        // Only clear selection if the deleted object IS the currently-selected
+        // one. Right-click is a command channel disjoint from selection — a
+        // user can have AP-A selected, right-click + delete AP-B, and AP-A
+        // should still be selected in the right panel afterwards.
+        const clearIfTargetSelected = () => {
+          if (selectedId === targetId && selectedType === targetType) clearSelected()
+        }
+
+        // Lookup the live object + name for the header.
+        let title = targetId
+        let currentName = ''
+        let onRename = null
+        let onDelete = () => {}
+
+        if (targetType === 'wall') {
+          const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
+          const w = walls.find((x) => x.id === targetId)
+          title = w?.name ?? w?.id ?? targetId
+          currentName = w?.name ?? ''
+          onRename = (newName) => useWallStore.getState().updateWall(activeFloorId, targetId, { name: newName })
+          onDelete = () => { useWallStore.getState().removeWall(activeFloorId, targetId); clearIfTargetSelected() }
+        } else if (targetType === 'ap') {
+          const aps = useAPStore.getState().apsByFloor[activeFloorId] ?? []
+          const ap = aps.find((x) => x.id === targetId)
+          title = ap?.name ?? ap?.id ?? targetId
+          currentName = ap?.name ?? ''
+          onRename = (newName) => useAPStore.getState().updateAP(activeFloorId, targetId, { name: newName })
+          onDelete = () => { useAPStore.getState().removeAP(activeFloorId, targetId); clearIfTargetSelected() }
+        } else if (targetType === 'switch') {
+          const sws = useCableStore.getState().switchesByFloor[activeFloorId] ?? []
+          const sw = sws.find((x) => x.id === targetId)
+          title = sw?.name ?? sw?.id ?? targetId
+          currentName = sw?.name ?? ''
+          onRename = (newName) => useCableStore.getState().updateSwitch(activeFloorId, targetId, { name: newName })
+          onDelete = () => { useCableStore.getState().removeSwitch(activeFloorId, targetId); clearIfTargetSelected() }
+        } else if (targetType === 'cable_riser') {
+          const risers = useCableStore.getState().risers
+          const r = risers.find((x) => x.id === targetId)
+          title = r?.name ?? r?.id ?? targetId
+          currentName = r?.name ?? ''
+          onRename = (newName) => useCableStore.getState().updateRiser(targetId, { name: newName })
+          onDelete = () => { useCableStore.getState().removeRiser(targetId); clearIfTargetSelected() }
+        } else if (targetType === 'scope') {
+          const zones = useScopeStore.getState().scopesByFloor[activeFloorId] ?? []
+          const z = zones.find((x) => x.id === targetId)
+          title = z?.name ?? z?.id ?? targetId
+          currentName = z?.name ?? ''
+          onRename = (newName) => useScopeStore.getState().updateScope(activeFloorId, targetId, { name: newName })
+          onDelete = () => { useScopeStore.getState().removeScope(activeFloorId, targetId); clearIfTargetSelected() }
+        } else if (targetType === 'floor_hole') {
+          const holes = useFloorHoleStore.getState().floorHolesByFloor[activeFloorId] ?? []
+          const h = holes.find((x) => x.id === targetId)
+          title = h?.name ?? h?.id ?? targetId
+          currentName = h?.name ?? ''
+          onRename = (newName) => useFloorHoleStore.getState().updateFloorHole(activeFloorId, targetId, { name: newName })
+          onDelete = () => { useFloorHoleStore.getState().removeFloorHole(activeFloorId, targetId); clearIfTargetSelected() }
+        } else if (targetType === 'floor_image') {
+          // Floor image has no name and no native "delete" — `刪除` here means
+          // detach the image from the floor record so the canvas reverts to
+          // the empty plan.
+          const f = useFloorStore.getState().floors.find((x) => x.id === targetId)
+          title = `${f?.name ?? targetId} 底圖`
+          // Skip rename for floor image (no name field).
+          onRename = null
+          onDelete = () => {
+            useFloorStore.getState().updateFloor(targetId, {
+              imageUrl: null,
+              imageWidth: undefined,
+              imageHeight: undefined,
+              cropX: null,
+              cropY: null,
+              cropWidth: null,
+              cropHeight: null,
+            })
+            clearIfTargetSelected()
+          }
+        } else {
+          // Unknown type — close menu defensively.
+          return null
+        }
+
+        const items = [
+          {
+            id: 'delete',
+            label: '刪除',
+            danger: true,
+            shortcut: 'Del',
+            onClick: onDelete,
+          },
+        ]
+
+        return (
+          <ObjectContextMenu
+            x={screenX}
+            y={screenY}
+            title={title}
+            currentName={currentName}
+            onRename={onRename}
+            items={items}
             onClose={close}
           />
         )

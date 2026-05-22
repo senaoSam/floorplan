@@ -2,7 +2,6 @@ import React, { useState } from 'react'
 import { Group, Line, Circle, Rect } from 'react-konva'
 import { useWallStore } from '@/store/useWallStore'
 import { OPENING_TYPES } from '@/constants/materials'
-import DeleteButton from './DeleteButton'
 
 // 端點吸附（排除自身牆體）
 function snapToEndpoint(pos, walls, snapDist, excludeWallId) {
@@ -59,7 +58,16 @@ function EndpointHandle({ x, y, which, wallId, walls, floorId, snapRadius, inver
   )
 }
 
-function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems = [], onWallClick, onWallDragMove, onWallDragEnd, isDrawMode, isDrawingActive, isTrayMode, snapRadius, onDelete, viewportScale, setHoverCursor, onExtendFromEndpoint, isDoorWindowMode, dwWallId, dwStartFrac, dwOpeningType }) {
+function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems = [], onWallClick, onWallContextMenu, onWallDragMove, onWallDragEnd, isDrawMode, isDrawingActive, isTrayMode, snapRadius, viewportScale, setHoverCursor, onExtendFromEndpoint, isDoorWindowMode, dwWallId, dwStartFrac, dwOpeningType, capability }) {
+  // Capability flags (23-2b). Layer never reads `editorMode` directly.
+  const allowDrag   = !!capability?.allowDragExisting?.struct
+  const allowHover  = !!capability?.allowSelectHover?.struct
+  const allowClick  = !!capability?.allowSelectClick?.struct
+  const showHandles = !!capability?.showHandles?.struct
+  // DOOR_WINDOW is a special read-only-hover case: hover/click are on for wall
+  // (to pick host), but drag must stay off — capability flags already encode
+  // that (allowDragExisting.struct === false in DOOR_WINDOW), so allowDrag is
+  // correctly false there.
   const walls      = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
   const updateWall = useWallStore((s) => s.updateWall)
   const [hoveredId, setHoveredId] = useState(null)
@@ -89,8 +97,11 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems
         return (
           <Group
             key={wall.id}
-            draggable={!isDoorWindowMode && !isTrayMode}
-            onMouseEnter={() => { setHoverCursor?.(isDoorWindowMode || isTrayMode ? null : 'move'); setHoveredId(wall.id) }}
+            draggable={allowDrag}
+            onMouseEnter={() => {
+              if (allowDrag) setHoverCursor?.('move')
+              if (allowHover) setHoveredId(wall.id)
+            }}
             onMouseLeave={() => { setHoverCursor?.(null); setHoveredId(null) }}
             onDragStart={(e) => {
               e.cancelBubble = true
@@ -152,13 +163,19 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems
               hitStrokeWidth={14}
               onClick={(e) => {
                 if (e.evt.button !== 0) return
-                // Let click bubble to Stage for door/window mode (existing) and
-                // for tray drawing mode (20-3) so a click on a wall — even when
-                // snap-to-wall is firing — actually commits the snapped tray
-                // vertex instead of selecting the wall.
+                // DOOR_WINDOW + tray drawing mode want the click to bubble to
+                // Stage so the mode handler can decide. Other modes that don't
+                // allow click on walls just no-op.
                 if (isDoorWindowMode || isTrayMode) return
+                if (!allowClick) return
                 e.cancelBubble = true
                 onWallClick?.(wall.id, e)
+              }}
+              onContextMenu={(e) => {
+                if (!capability?.allowContextMenu) return
+                e.evt.preventDefault?.()
+                e.cancelBubble = true
+                onWallContextMenu?.(wall.id, e)
               }}
             />
             {/* 門窗 opening 段 */}
@@ -181,18 +198,8 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems
                 />
               )
             })}
-            {/* 快速刪除按鈕（門窗模式下隱藏） */}
-            {isHovered && onDelete && !isDoorWindowMode && (
-              <DeleteButton
-                x={(wall.startX + wall.endX) / 2}
-                y={(wall.startY + wall.endY) / 2 - 18 * inverseScale}
-                scale={inverseScale}
-                onClick={() => onDelete(wall.id)}
-                setHoverCursor={setHoverCursor}
-              />
-            )}
-            {/* 端點拖曳把手（門窗模式下隱藏） */}
-            {!isDoorWindowMode && (isSelected || isHovered) && ['start', 'end'].map((which) => {
+            {/* 端點拖曳把手 — 只在 SELECT mode（showHandles=true）顯示 */}
+            {showHandles && (isSelected || isHovered) && ['start', 'end'].map((which) => {
               const ex = which === 'start' ? wall.startX : wall.endX
               const ey = which === 'start' ? wall.startY : wall.endY
               return (

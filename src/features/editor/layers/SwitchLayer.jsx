@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react'
 import { Group, Rect, Text, Line, Circle } from 'react-konva'
-import DeleteButton from './DeleteButton'
 import { useCableStore, getSwitchKindColor } from '@/store/useCableStore'
 import { useFocusedDevices } from '@/features/editor/useFocusedDevices'
 import { computeSwitchSnaps } from '@/features/cable/switchSnapStatus'
@@ -31,7 +30,7 @@ const KIND_LABEL = {
   router: 'RTR',
 }
 
-function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover, isDraggable, onClick, onMoved, onDragMove, inverseScale, onDelete, setHoverCursor }) {
+function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover, isDraggable, allowHover, allowClick, allowContextMenu, onClick, onContextMenu, onMoved, onDragMove, inverseScale, setHoverCursor }) {
   const s = inverseScale
   const color = getSwitchKindColor(sw.kind)
   const strokeColor = isSelected ? '#e74c3c' : color
@@ -47,10 +46,24 @@ function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover
       x={sw.x}
       y={sw.y}
       draggable={isDraggable}
-      onMouseEnter={() => { setHoverCursor?.('grab'); onHover(sw.id) }}
+      onMouseEnter={() => {
+        if (isDraggable) setHoverCursor?.('grab')
+        if (allowHover) onHover(sw.id)
+      }}
       onMouseLeave={() => { setHoverCursor?.(null); onHover(null) }}
-      onClick={(e) => { if (e.evt.button !== 0) return; e.cancelBubble = true; onClick(sw.id, e) }}
-      onDragStart={(e) => { e.cancelBubble = true; onClick(sw.id, e) }}
+      onClick={(e) => {
+        if (e.evt.button !== 0) return
+        if (!allowClick) return
+        e.cancelBubble = true
+        onClick?.(sw.id, e)
+      }}
+      onContextMenu={(e) => {
+        if (!allowContextMenu) return
+        e.evt.preventDefault?.()
+        e.cancelBubble = true
+        onContextMenu?.(sw.id, e)
+      }}
+      onDragStart={(e) => { e.cancelBubble = true; onClick?.(sw.id, e) }}
       onDragMove={(e) => {
         e.cancelBubble = true
         onDragMove?.(sw.id, e.target.x(), e.target.y())
@@ -176,21 +189,11 @@ function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover
           />
         </Group>
       )}
-      {/* Quick delete */}
-      {isHovered && onDelete && (
-        <DeleteButton
-          x={w / 2}
-          y={-h / 2}
-          scale={s}
-          onClick={() => onDelete(sw.id)}
-          setHoverCursor={setHoverCursor}
-        />
-      )}
     </Group>
   )
 }
 
-function SwitchLayer({ floorId, selectedSwitchId, selectedItems = [], onSwitchClick, onSwitchDragMove, onSwitchDragEnd, viewportScale, onDelete, setHoverCursor, dimmed }) {
+function SwitchLayer({ floorId, selectedSwitchId, selectedItems = [], onSwitchClick, onSwitchContextMenu, onSwitchDragMove, onSwitchDragEnd, viewportScale, setHoverCursor, dimmed, capability }) {
   const switches      = useCableStore((s) => s.switchesByFloor[floorId] ?? [])
   const trays         = useCableStore((s) => s.traysByFloor[floorId] ?? [])
   const updateSwitch  = useCableStore((s) => s.updateSwitch)
@@ -213,6 +216,11 @@ function SwitchLayer({ floorId, selectedSwitchId, selectedItems = [], onSwitchCl
     onSwitchDragEnd?.()
   }
 
+  const allowDrag        = !!capability?.allowDragExisting?.cable
+  const allowClick       = !!capability?.allowSelectClick?.cable
+  const allowHover       = !!capability?.allowSelectHover?.cable
+  const allowContextMenu = !!capability?.allowContextMenu
+
   return (
     <Group opacity={dimmed ? 0.2 : 1}>
       {switches.map((sw) => (
@@ -224,12 +232,15 @@ function SwitchLayer({ floorId, selectedSwitchId, selectedItems = [], onSwitchCl
           isFocused={focused.switches.has(sw.id)}
           snapState={snapBySwitch.get(sw.id)}
           onHover={setHoveredId}
-          isDraggable
+          isDraggable={allowDrag}
+          allowHover={allowHover}
+          allowClick={allowClick}
+          allowContextMenu={allowContextMenu}
           onClick={onSwitchClick}
+          onContextMenu={onSwitchContextMenu}
           onMoved={handleMoved}
           onDragMove={onSwitchDragMove}
           inverseScale={inverseScale}
-          onDelete={onDelete}
           setHoverCursor={setHoverCursor}
         />
       ))}

@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { Layer, Image as KonvaImage } from 'react-konva'
 
-function FloorImageLayer({ floor, isSelectMode, onFloorImageClick, layerProps }) {
+function FloorImageLayer({ floor, onFloorImageClick, onFloorImageContextMenu, layerProps, capability }) {
+  const allowClick       = !!capability?.allowSelectClick?.meta
+  const allowContextMenu = !!capability?.allowContextMenu
   const [image, setImage] = useState(null)
 
   useEffect(() => {
@@ -45,9 +47,15 @@ function FloorImageLayer({ floor, isSelectMode, onFloorImageClick, layerProps })
         rotation={rotation}
         onClick={(e) => {
           if (e.evt.button !== 0) return
-          if (!isSelectMode) return
+          if (!allowClick) return
           e.cancelBubble = true
           onFloorImageClick?.()
+        }}
+        onContextMenu={(e) => {
+          if (!allowContextMenu) return
+          e.evt.preventDefault?.()
+          e.cancelBubble = true
+          onFloorImageContextMenu?.(e)
         }}
       />
     </Layer>

@@ -1,7 +1,6 @@
 import React, { useState } from 'react'
 import { Group, Line, Circle } from 'react-konva'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
-import DeleteButton from './DeleteButton'
 
 const HOLE_FILL   = 'rgba(124, 58, 237, 0.20)'
 const HOLE_STROKE = '#7c3aed'
@@ -108,17 +107,23 @@ function FloorHoleLayer({
   selectedHoleId,
   selectedItems = [],
   onHoleClick,
+  onHoleContextMenu,
   dimmed,
   isSelectMode,
   isDrawingActive,
-  onDelete,
   viewportScale,
   setHoverCursor,
+  capability,
 }) {
   const holes           = useFloorHoleStore((s) => s.floorHolesByFloor[floorId] ?? [])
   const updateFloorHole = useFloorHoleStore((s) => s.updateFloorHole)
   const [hoveredId, setHoveredId] = useState(null)
   const batchSelectedIds = selectedItems.length > 1 ? new Set(selectedItems.filter((it) => it.type === 'floor_hole').map((it) => it.id)) : null
+
+  const allowDrag        = !!capability?.allowDragExisting?.struct
+  const allowClick       = !!capability?.allowSelectClick?.struct
+  const allowHover       = !!capability?.allowSelectHover?.struct
+  const allowContextMenu = !!capability?.allowContextMenu
 
   return (
     <Group opacity={dimmed ? 0.2 : 1}>
@@ -129,8 +134,11 @@ function FloorHoleLayer({
         return (
           <Group
             key={hole.id}
-            draggable
-            onMouseEnter={() => { setHoverCursor?.('move'); setHoveredId(hole.id) }}
+            draggable={allowDrag}
+            onMouseEnter={() => {
+              if (allowDrag) setHoverCursor?.('move')
+              if (allowHover) setHoveredId(hole.id)
+            }}
             onMouseLeave={() => { setHoverCursor?.(null); setHoveredId(null) }}
             onDragStart={(e) => {
               e.cancelBubble = true
@@ -161,28 +169,17 @@ function FloorHoleLayer({
               hitStrokeWidth={10}
               onClick={(e) => {
                 if (e.evt.button !== 0) return
+                if (!allowClick) return
                 e.cancelBubble = true
                 onHoleClick?.(hole.id, e)
               }}
+              onContextMenu={(e) => {
+                if (!allowContextMenu) return
+                e.evt.preventDefault?.()
+                e.cancelBubble = true
+                onHoleContextMenu?.(hole.id, e)
+              }}
             />
-            {/* 快速刪除按鈕 */}
-            {isHovered && onDelete && (() => {
-              let cx = 0, cy = 0
-              const n = hole.points.length / 2
-              for (let i = 0; i < hole.points.length; i += 2) {
-                cx += hole.points[i]; cy += hole.points[i + 1]
-              }
-              cx /= n; cy /= n
-              return (
-                <DeleteButton
-                  x={cx}
-                  y={cy}
-                  scale={1 / (viewportScale || 1)}
-                  onClick={() => onDelete(hole.id)}
-                  setHoverCursor={setHoverCursor}
-                />
-              )
-            })()}
           </Group>
         )
       })}

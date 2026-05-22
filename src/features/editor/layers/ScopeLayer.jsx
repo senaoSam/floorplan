@@ -1,7 +1,6 @@
 import React, { useState } from 'react'
 import { Group, Line, Circle } from 'react-konva'
 import { useScopeStore } from '@/store/useScopeStore'
-import DeleteButton from './DeleteButton'
 
 const ZONE_STYLE = {
   in:  { fill: 'rgba(46, 213, 115, 0.18)', stroke: '#2ed573' },
@@ -90,11 +89,16 @@ function DrawingPreview({ points, mousePos, snapRadius }) {
   )
 }
 
-function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScopeId, selectedItems = [], onScopeClick, isSelectMode, isDrawingActive, onScopeDragMove, onScopeDragEnd, onDelete, viewportScale, setHoverCursor, dimmed }) {
+function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScopeId, selectedItems = [], onScopeClick, onScopeContextMenu, isSelectMode, isDrawingActive, onScopeDragMove, onScopeDragEnd, viewportScale, setHoverCursor, dimmed, capability }) {
   const zones       = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
   const updateScope = useScopeStore((s) => s.updateScope)
   const [hoveredId, setHoveredId] = useState(null)
   const batchSelectedIds = selectedItems.length > 1 ? new Set(selectedItems.filter((it) => it.type === 'scope').map((it) => it.id)) : null
+
+  const allowDrag        = !!capability?.allowDragExisting?.struct
+  const allowClick       = !!capability?.allowSelectClick?.struct
+  const allowHover       = !!capability?.allowSelectHover?.struct
+  const allowContextMenu = !!capability?.allowContextMenu
 
   return (
     <Group opacity={dimmed ? 0.2 : 1}>
@@ -106,8 +110,11 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
         return (
           <Group
             key={zone.id}
-            draggable
-            onMouseEnter={() => { setHoverCursor?.('move'); setHoveredId(zone.id) }}
+            draggable={allowDrag}
+            onMouseEnter={() => {
+              if (allowDrag) setHoverCursor?.('move')
+              if (allowHover) setHoveredId(zone.id)
+            }}
             onMouseLeave={() => { setHoverCursor?.(null); setHoveredId(null) }}
             onDragStart={(e) => {
               e.cancelBubble = true
@@ -143,28 +150,17 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
               hitStrokeWidth={10}
               onClick={(e) => {
                 if (e.evt.button !== 0) return
+                if (!allowClick) return
                 e.cancelBubble = true
                 onScopeClick?.(zone.id, e)
               }}
+              onContextMenu={(e) => {
+                if (!allowContextMenu) return
+                e.evt.preventDefault?.()
+                e.cancelBubble = true
+                onScopeContextMenu?.(zone.id, e)
+              }}
             />
-            {/* 快速刪除按鈕 — 放在多邊形重心 */}
-            {isHovered && onDelete && (() => {
-              let cx = 0, cy = 0
-              const n = zone.points.length / 2
-              for (let i = 0; i < zone.points.length; i += 2) {
-                cx += zone.points[i]; cy += zone.points[i + 1]
-              }
-              cx /= n; cy /= n
-              return (
-                <DeleteButton
-                  x={cx}
-                  y={cy}
-                  scale={1 / (viewportScale || 1)}
-                  onClick={() => onDelete(zone.id)}
-                  setHoverCursor={setHoverCursor}
-                />
-              )
-            })()}
           </Group>
         )
       })}

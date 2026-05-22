@@ -329,18 +329,47 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 > 每個 Layer 用一堆 ad-hoc `if (isXMode)` 各自決定 hover / drag / handle / X / cursor，沒有單一真實來源。
 > 目標：把「每個 mode 允許什麼互動」變成 spec 級的規範，再讓 Layer 從同一來源讀。
 
-### Layer 23 — Mode capability matrix
+### Layer 23 — Mode capability matrix + 左右鍵分工
 
-| #    | 狀態 | Task                                                                                       |
-| ---- | ---- | ------------------------------------------------------------------------------------------ |
-| 23-1 | ⬜   | Audit + 文件化（`.claude/mode-matrix.md`）：列出每個 mode × 每種互動表面（hover handle / drag / X badge / cursor / click target / select-on-click / context menu）的期望行為 |
-| 23-2 | ⬜   | 引入 `modeCapabilities.js`：`getModeCapability(mode)` 回傳 `{ allowSelectHover, allowDragExisting, showQuickDelete, showHandles, cursor, ... }`，作為 Layer 唯一查詢源 |
-| 23-3 | ⬜   | Refactor 所有 Layer 改為 consult capability：WallLayer / APLayer / SwitchLayer / ScopeLayer / FloorHoleLayer / RiserLayer / CableTrayLayer / FloorImageLayer 全部拔掉散落的 `isXMode` 守門 |
+> 設計依據：`.claude/mode-matrix.md`
+> 核心 UX 規則：**左鍵 = 操作物件本身（select / drag / 落點）**；**右鍵 = 對物件下指令（開 context menu）**；**hover = 純視覺 affordance，不顯示動作按鈕**
 
-**為什麼分三步而不是直接動手**
-- 23-1 先 audit 才知道有多少漏網之魚（避免邊改邊發現新例外）
-- 23-2 是抽象層，要先確定欄位再實作
-- 23-3 才動 Layer code，且因為有共同來源，後續再加新 mode 不會再重蹈覆轍
+| #     | 狀態 | Task                                                                                       |
+| ----- | ---- | ------------------------------------------------------------------------------------------ |
+| 23-1  | ✅   | Audit + 文件化（`.claude/mode-matrix.md`）：14 mode × 9 互動表面矩陣 + 8 個 gap                |
+| 23-2a | ✅   | Data 補洞：Wall / Scope / FloorHole 加 `name` 欄位 + auto-naming（`WALL-{floor}-{seq}` 等），補齊 right-click menu 第一條「重新命名」需要 |
+| 23-2b | ✅   | `src/features/editor/modeCapabilities.js`：`getModeCapability(mode)` 回傳 9 flag — `allowSelectClick / allowSelectHover / allowDragExisting / showHandles / showMagnet / cursor / allowContextMenu / dimOthers`（已移除 `showQuickDelete`，刪除動作改進 context menu）|
+| 23-2c | ✅   | `useEditorStore.contextMenu` slice：`{ targetType, targetId, screenX, screenY } \| null` + `openContextMenu / closeContextMenu` |
+| 23-2d | ✅   | 共用 `<ObjectContextMenu>` 框架：對齊 `TrayContextMenu.jsx` 樣式（HTML overlay、inline rename、子選單、外部 click / Esc / 切樓層 / 換 mode 自動關），吃 `items: [{ label, icon?, disabled?, onClick, submenu? }]` |
+| 23-3a | ✅   | Refactor 8 Layer：拔掉散落 `isXMode`；改 consult `getModeCapability(mode)`；移除 hover `<DeleteButton>`；hover cursor 覆蓋只在 `allowDragExisting \|\| allowSelectClick` 為真時觸發 |
+| 23-3b | ✅   | Editor2D `onContextMenu` dispatcher：draft active → cancel；可開選單時 → `openContextMenu(...)`，**不動 selection**；其他 → no-op |
+| 23-3c | ✅   | 七個物件 context menu items（最小版：重新命名 + 刪除）：Wall / AP / Switch / Riser / Scope / FloorHole / FloorImage |
+| 23-3d | ✅   | Playwright MCP 真實滑鼠驗證：7 物件 × right-click → 選單正確開；非 SELECT mode → 不開選單；全 mode hover → 0 DeleteButton；end-to-end rename / delete 動作正常 |
+| 23-3e | ✅   | 左右鍵完全分離：右鍵 dispatcher 拿掉 `setSelected(...)`；menu `onDelete` 只在「被刪物件 = 當前選取」時才 `clearSelected()`；Tray 的 `onSplit` / `onDelete` 同步調整 |
+
+**為什麼分這麼細**
+- 23-2 全部是抽象層 / 共用基礎建設，先一次到位
+- 23-3a / 23-3b / 23-3c 各 Layer 改動範圍清楚分群，方便逐步 review
+- 23-3d 用 MCP 滑鼠事件驗證（不單純 store 注入），確認左右鍵分工真的落地
+
+**Capability flag 對照表（給 23-2b 用）**
+
+| flag | SELECT | DOOR_WINDOW | DRAW_CABLE_TRAY | 其他 draw / place | PAN / MARQUEE / ALIGN |
+|---|---|---|---|---|---|
+| allowSelectClick | ✓ | wall only（pick host） | – | – | – |
+| allowSelectHover | ✓ | wall only | tray/cable snap-only | – | – |
+| allowDragExisting | ✓ | – | – | – | – |
+| showHandles | ✓ | – | – | – | – |
+| showMagnet | selected/hover only | n/a | all trays | PLACE_SWITCH: all trays; PLACE_RISER: all risers | – |
+| allowContextMenu | ✓ | – | – | – | – |
+| dimOthers | – | non-wall dim | non-cable dim | dim non-target type | – |
+
+**Open question 已決（依 mode-matrix.md §7 推論）**
+- Q1 MARQUEE 點物件 = no-op（drag 才框選）
+- Q2 ALIGN_FLOOR 不允許物件互動
+- Q3 CROP_IMAGE 不允許物件互動
+- Q4 DRAW_CABLE_TRAY 下 hover switch/riser 不顯示 snap halo（維持現狀）
+- Q5 dimOthers 對非目標類型 opacity 0.4
 
 ---
 

@@ -1,6 +1,5 @@
 import React, { useState } from 'react'
 import { Group, Circle, Rect, Line, Text } from 'react-konva'
-import DeleteButton from './DeleteButton'
 import { useCableStore } from '@/store/useCableStore'
 
 // Riser icon = small square (cross-section view) with an arrow indicating the
@@ -11,7 +10,7 @@ const RISER_SELECTED = '#e74c3c'
 const MAGNET_FILL    = 'rgba(167, 139, 250, 0.14)'
 const MAGNET_STROKE  = 'rgba(167, 139, 250, 0.5)'
 
-function RiserMarker({ riser, isSelected, isHovered, onHover, isDraggable, onClick, onMoved, onDragMove, inverseScale, onDelete, setHoverCursor, showMagnet, floorCount }) {
+function RiserMarker({ riser, isSelected, isHovered, onHover, isDraggable, allowHover, allowClick, allowContextMenu, onClick, onContextMenu, onMoved, onDragMove, inverseScale, setHoverCursor, showMagnet, floorCount }) {
   const s = inverseScale
   const strokeColor = isSelected ? RISER_SELECTED : RISER_COLOR
   const size = 18 * s
@@ -22,10 +21,24 @@ function RiserMarker({ riser, isSelected, isHovered, onHover, isDraggable, onCli
       x={riser.x}
       y={riser.y}
       draggable={isDraggable}
-      onMouseEnter={() => { setHoverCursor?.('grab'); onHover(riser.id) }}
+      onMouseEnter={() => {
+        if (isDraggable) setHoverCursor?.('grab')
+        if (allowHover) onHover(riser.id)
+      }}
       onMouseLeave={() => { setHoverCursor?.(null); onHover(null) }}
-      onClick={(e) => { if (e.evt.button !== 0) return; e.cancelBubble = true; onClick(riser.id, e) }}
-      onDragStart={(e) => { e.cancelBubble = true; onClick(riser.id, e) }}
+      onClick={(e) => {
+        if (e.evt.button !== 0) return
+        if (!allowClick) return
+        e.cancelBubble = true
+        onClick?.(riser.id, e)
+      }}
+      onContextMenu={(e) => {
+        if (!allowContextMenu) return
+        e.evt.preventDefault?.()
+        e.cancelBubble = true
+        onContextMenu?.(riser.id, e)
+      }}
+      onDragStart={(e) => { e.cancelBubble = true; onClick?.(riser.id, e) }}
       onDragMove={(e) => {
         e.cancelBubble = true
         onDragMove?.(riser.id, e.target.x(), e.target.y())
@@ -104,15 +117,6 @@ function RiserMarker({ riser, isSelected, isHovered, onHover, isDraggable, onCli
         shadowOpacity={0.9}
         listening={false}
       />
-      {isHovered && onDelete && (
-        <DeleteButton
-          x={size / 2}
-          y={-size / 2}
-          scale={s}
-          onClick={() => onDelete(riser.id)}
-          setHoverCursor={setHoverCursor}
-        />
-      )}
     </Group>
   )
 }
@@ -120,7 +124,7 @@ function RiserMarker({ riser, isSelected, isHovered, onHover, isDraggable, onCli
 // Renders every riser whose floorIds contains `floorId`. Risers are global
 // (shared xy across floors) so this layer only displays the subset visible
 // on the active floor.
-function RiserLayer({ floorId, selectedRiserId, selectedItems = [], onRiserClick, onRiserDragMove, onRiserDragEnd, viewportScale, onDelete, setHoverCursor, dimmed, isPlacingMode }) {
+function RiserLayer({ floorId, selectedRiserId, selectedItems = [], onRiserClick, onRiserContextMenu, onRiserDragMove, onRiserDragEnd, viewportScale, setHoverCursor, dimmed, capability }) {
   const risers       = useCableStore((s) => s.risers)
   const updateRiser  = useCableStore((s) => s.updateRiser)
   const inverseScale = 1 / (viewportScale || 1)
@@ -136,11 +140,21 @@ function RiserLayer({ floorId, selectedRiserId, selectedItems = [], onRiserClick
 
   const visibleRisers = risers.filter((r) => (r.floorIds ?? []).includes(floorId))
 
+  const allowDrag        = !!capability?.allowDragExisting?.cable
+  const allowClick       = !!capability?.allowSelectClick?.cable
+  const allowHover       = !!capability?.allowSelectHover?.cable
+  const allowContextMenu = !!capability?.allowContextMenu
+  const magnetPolicy     = capability?.showMagnet?.riser ?? 'never'
+
   return (
     <Group opacity={dimmed ? 0.2 : 1}>
       {visibleRisers.map((r) => {
         const isSel = r.id === selectedRiserId || (batchSelectedIds?.has(r.id) ?? false)
         const isHov = r.id === hoveredId
+        const showMagnet =
+          magnetPolicy === 'all' ? true :
+          magnetPolicy === 'selectedOnly' ? (isSel || isHov) :
+          false
         return (
           <RiserMarker
             key={r.id}
@@ -148,14 +162,17 @@ function RiserLayer({ floorId, selectedRiserId, selectedItems = [], onRiserClick
             isSelected={isSel}
             isHovered={isHov}
             onHover={setHoveredId}
-            isDraggable
+            isDraggable={allowDrag}
+            allowHover={allowHover}
+            allowClick={allowClick}
+            allowContextMenu={allowContextMenu}
             onClick={onRiserClick}
+            onContextMenu={onRiserContextMenu}
             onMoved={handleMoved}
             onDragMove={onRiserDragMove}
             inverseScale={inverseScale}
-            onDelete={onDelete}
             setHoverCursor={setHoverCursor}
-            showMagnet={isPlacingMode || isSel || isHov}
+            showMagnet={showMagnet}
             floorCount={(r.floorIds ?? []).length}
           />
         )

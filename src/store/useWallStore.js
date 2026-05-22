@@ -2,12 +2,24 @@ import { create } from 'zustand'
 
 export const useWallStore = create((set, get) => ({
   // { [floorId]: Wall[] }
+  // Wall shape: { id, name?, startX, startY, endX, endY, material, openings?, ... }
+  // `name` is user-facing (e.g. "WALL-01"); falls back to `id` for legacy walls
+  // loaded without one.
   wallsByFloor: {},
+  globalWallCounter: 0,
 
   getWalls: (floorId) => get().wallsByFloor[floorId] ?? [],
 
+  // Auto-name format: WALL-{floorTag}-{seq}. Same convention as Tray naming.
+  nextWallName: ({ floor = null } = {}) => {
+    const seq = String(get().globalWallCounter + 1).padStart(2, '0')
+    const floorTag = floor?.name ? String(floor.name).replace(/\s+/g, '') : null
+    return floorTag ? `WALL-${floorTag}-${seq}` : `WALL-${seq}`
+  },
+
   addWall: (floorId, wall) =>
     set((state) => ({
+      globalWallCounter: state.globalWallCounter + 1,
       wallsByFloor: {
         ...state.wallsByFloor,
         [floorId]: [...(state.wallsByFloor[floorId] ?? []), wall],

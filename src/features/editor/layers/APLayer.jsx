@@ -1,6 +1,5 @@
 import React, { useState } from 'react'
 import { Group, Circle, Arc, Line, Text, Rect } from 'react-konva'
-import DeleteButton from './DeleteButton'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
@@ -41,7 +40,7 @@ const FREQ_LABEL = {
   6:   '6G',
 }
 
-function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, onClick, onMoved, onDragMove, isDrawingActive, showAPInfo, inverseScale, onDelete, setHoverCursor }) {
+function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, allowHover, allowClick, allowContextMenu, onClick, onContextMenu, onMoved, onDragMove, isDrawingActive, showAPInfo, inverseScale, setHoverCursor }) {
   const color = FREQ_COLOR[ap.frequency] ?? '#4fc3f7'
   const ringColor = isSelected ? '#e74c3c' : color
   const s = inverseScale
@@ -64,10 +63,24 @@ function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, 
       x={ap.x}
       y={ap.y}
       draggable={isDraggable}
-      onMouseEnter={() => { setHoverCursor?.('grab'); onHover(ap.id) }}
+      onMouseEnter={() => {
+        if (isDraggable) setHoverCursor?.('grab')
+        if (allowHover) onHover(ap.id)
+      }}
       onMouseLeave={() => { setHoverCursor?.(null); onHover(null) }}
-      onClick={(e) => { if (e.evt.button !== 0) return; e.cancelBubble = true; onClick(ap.id, e) }}
-      onDragStart={(e) => { e.cancelBubble = true; onClick(ap.id, e) }}
+      onClick={(e) => {
+        if (e.evt.button !== 0) return
+        if (!allowClick) return
+        e.cancelBubble = true
+        onClick?.(ap.id, e)
+      }}
+      onContextMenu={(e) => {
+        if (!allowContextMenu) return
+        e.evt.preventDefault?.()
+        e.cancelBubble = true
+        onContextMenu?.(ap.id, e)
+      }}
+      onDragStart={(e) => { e.cancelBubble = true; onClick?.(ap.id, e) }}
       onDragMove={(e) => {
         e.cancelBubble = true
         onDragMove?.(ap.id, e.target.x(), e.target.y())
@@ -161,16 +174,6 @@ function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, 
           />
         </Group>
       )}
-      {/* 快速刪除按鈕 */}
-      {isHovered && onDelete && (
-        <DeleteButton
-          x={9 * s}
-          y={-9 * s}
-          scale={s}
-          onClick={() => onDelete(ap.id)}
-          setHoverCursor={setHoverCursor}
-        />
-      )}
       {/* 名稱標籤（icon 上方） */}
       <Text
         text={ap.name}
@@ -212,7 +215,7 @@ function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, 
   )
 }
 
-function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPDragMove, onAPDragEnd, isDrawingActive, viewportScale, onDelete, setHoverCursor, dimmed }) {
+function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPContextMenu, onAPDragMove, onAPDragEnd, isDrawingActive, viewportScale, setHoverCursor, dimmed, capability }) {
   const aps        = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   const updateAP   = useAPStore((s) => s.updateAP)
   const showAPInfo = useEditorStore((s) => s.showAPInfo)
@@ -220,6 +223,11 @@ function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPDra
   const [hoveredId, setHoveredId] = useState(null)
   const batchSelectedIds = selectedItems.length > 1 ? new Set(selectedItems.filter((it) => it.type === 'ap').map((it) => it.id)) : null
   const focused = useFocusedDevices()
+
+  const allowDrag = !!capability?.allowDragExisting?.wireless
+  const allowClick = !!capability?.allowSelectClick?.wireless
+  const allowHover = !!capability?.allowSelectHover?.wireless
+  const allowContextMenu = !!capability?.allowContextMenu
 
   const handleMoved = (id, x, y) => {
     updateAP(floorId, id, { x, y })
@@ -236,14 +244,17 @@ function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPDra
           isHovered={ap.id === hoveredId}
           isFocused={focused.aps.has(ap.id)}
           onHover={setHoveredId}
-          isDraggable
+          isDraggable={allowDrag}
+          allowHover={allowHover}
+          allowClick={allowClick}
+          allowContextMenu={allowContextMenu}
           onClick={onAPClick}
+          onContextMenu={onAPContextMenu}
           onMoved={handleMoved}
           onDragMove={onAPDragMove}
           isDrawingActive={isDrawingActive}
           showAPInfo={showAPInfo}
           inverseScale={inverseScale}
-          onDelete={onDelete}
           setHoverCursor={setHoverCursor}
         />
       ))}

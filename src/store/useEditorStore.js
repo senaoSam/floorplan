@@ -106,6 +106,16 @@ export const useEditorStore = create((set, get) => ({
   toggleSidebarCollapsed: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   toggleLayer: (key) => set((s) => ({ [key]: !s[key] })),
 
+  // ── 23-2c Right-click object context menu ───────────────────────
+  // Centralised state so any Layer can request a menu and the same overlay
+  // component renders it. shape:
+  //   { targetType: 'wall'|'ap'|... , targetId, screenX, screenY, hitContext? } | null
+  // hitContext is optional payload the menu may consult (e.g. tray endpoint vs
+  // segment, used by TrayContextMenu for context-sensitive actions).
+  contextMenu: null,
+  openContextMenu: (payload) => set({ contextMenu: payload }),
+  closeContextMenu: () => set((s) => (s.contextMenu ? { contextMenu: null } : {})),
+
   setAlignRefFloors: (ids) => set({ alignRefFloors: ids }),
   toggleAlignRefFloor: (id) => set((s) => {
     const current = s.alignRefFloors ?? []

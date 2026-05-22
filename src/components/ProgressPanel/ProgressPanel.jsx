@@ -352,6 +352,26 @@ const PHASES = [
     ],
   },
   {
+    phase: 'Phase 17 — Mode Interaction Cleanup（左右鍵分工）',
+    groups: [
+      {
+        layer: 'Layer 23 — Mode capability matrix + 左右鍵分工',
+        items: [
+          { id: '23-1',  done: true, text: 'Mode × interaction audit + `.claude/mode-matrix.md`（14 mode × 9 surface + 8 gap）' },
+          { id: '23-2a', done: true, text: 'Wall / Scope / FloorHole 加 `name` 欄位 + auto-naming' },
+          { id: '23-2b', done: true, text: '`modeCapabilities.js` — `getModeCapability(mode)` 9-flag 單一真實來源' },
+          { id: '23-2c', done: true, text: 'useEditorStore.contextMenu slice + open/closeContextMenu' },
+          { id: '23-2d', done: true, text: '共用 `<ObjectContextMenu>` 框架（inline rename / submenu / 外部 click 關）' },
+          { id: '23-3a', done: true, text: '8 Layer refactor — 拔掉 isXMode、移除 hover DeleteButton、cursor 條件化' },
+          { id: '23-3b', done: true, text: 'Editor2D onContextMenu dispatcher（draft cancel vs open menu vs no-op）' },
+          { id: '23-3c', done: true, text: '7 物件 context menu items（最小版：rename + delete）' },
+          { id: '23-3d', done: true, text: 'Playwright MCP 真實滑鼠驗證（7 物件 × right-click + hover X 消失）' },
+          { id: '23-3e', done: true, text: '左右鍵完全分離：右鍵不動 selection、刪除只清「被選的」物件' },
+        ],
+      },
+    ],
+  },
+  {
     phase: 'Phase 9 — AI 輔助',
     groups: [
       {

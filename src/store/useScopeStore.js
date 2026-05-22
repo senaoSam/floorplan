@@ -1,11 +1,20 @@
 import { create } from 'zustand'
 
-// Zone: { id, points: [x,y,x,y,...], type: 'in'|'out' }
-export const useScopeStore = create((set) => ({
+// Zone: { id, name?, points: [x,y,x,y,...], type: 'in'|'out' }
+// `name` is user-facing (e.g. "ZONE-01"); falls back to `id` for legacy zones.
+export const useScopeStore = create((set, get) => ({
   scopesByFloor: {},
+  globalScopeCounter: 0,
+
+  nextScopeName: ({ floor = null } = {}) => {
+    const seq = String(get().globalScopeCounter + 1).padStart(2, '0')
+    const floorTag = floor?.name ? String(floor.name).replace(/\s+/g, '') : null
+    return floorTag ? `ZONE-${floorTag}-${seq}` : `ZONE-${seq}`
+  },
 
   addScope: (floorId, zone) =>
     set((state) => ({
+      globalScopeCounter: state.globalScopeCounter + 1,
       scopesByFloor: {
         ...state.scopesByFloor,
         [floorId]: [...(state.scopesByFloor[floorId] ?? []), zone],
