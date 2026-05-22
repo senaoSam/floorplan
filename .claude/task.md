@@ -384,8 +384,8 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 
 | #    | 狀態 | Task                                                                                       |
 | ---- | ---- | ------------------------------------------------------------------------------------------ |
-| 24-1 | ⬜   | Group 分類定案（10 群：4 物件群 + 6 功能群），決定每群代表色 / 圖示 / 擺放區域 — 詳見下表 |
-| 24-2 | ⬜   | Toolbar 重新佈局：物件群連續排、群之間 separator + 群名 label                                  |
+| 24-1 | ✅   | Group 分類定案（7 群實作版：操作 / 結構 / 無線 / 網路布線 / 標註 / 編輯 / 輔助），詳見 commit 訊息 |
+| 24-2 | ✅   | Toolbar 重新佈局：搬到畫布上方中央的浮動 panel、icon-only（SVG，無 emoji）、群之間細直線 separator、hover 顯示中文 tooltip（透過 React portal 避開 transform containing block） |
 | 24-3 | ⬜   | Right panel 框架共用化：同 group 共用容器 + 標準 section 骨架（Identity / Geometry / Properties / Health / Issues） |
 | 24-4 | ⬜   | Active mode 視覺指示：canvas 頂部 mode badge（例 "🔌 網路布線 / 線槽繪製"），減少使用者迷失       |
 | 24-5 | ⬜   | Color / icon legend 一張表整理（每 group 主色 + sub-type 變化），確保 toolbar / panel / canvas 三處用色一致 |

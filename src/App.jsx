@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import Toolbar from '@/components/Toolbar/Toolbar'
+import TopBar from '@/components/TopBar/TopBar'
 import SidebarLeft from '@/components/SidebarLeft/SidebarLeft'
 import CanvasArea from '@/components/CanvasArea/CanvasArea'
 import PanelRight from '@/components/PanelRight/PanelRight'
@@ -40,7 +40,7 @@ function App() {
 
   return (
     <div className="app">
-      <Toolbar />
+      <TopBar />
       <div className="app__body">
         <SidebarLeft />
         <CanvasArea />

@@ -5,6 +5,7 @@ import Editor2D from '@/features/editor/Editor2D'
 import Viewer3D from '@/features/viewer3d/Viewer3D'
 import HeatmapControl from '@/components/HeatmapControl/HeatmapControl'
 import CableSummaryPanel from '@/components/CableSummaryPanel/CableSummaryPanel'
+import Toolbar from '@/components/Toolbar/Toolbar'
 import './CanvasArea.sass'
 
 function CanvasArea() {
@@ -29,6 +30,10 @@ function CanvasArea() {
       <div className="canvas-area__pane" style={{ display: is2D ? 'none' : 'block' }}>
         <Viewer3D />
       </div>
+      {/* Phase 18 / Task 24-2: floating icon-only toolbar pinned to the
+          top-center of the canvas. Mounted in 2D + 3D so the user keeps the
+          same controls visible across view modes. */}
+      <Toolbar />
       {hasFloor && <HeatmapControl />}
       {hasFloor && <CableSummaryPanel />}
     </div>
