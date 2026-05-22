@@ -213,7 +213,7 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | 17-1  | ✅   | Tray 通道風格視覺（border + 虛線中線 + 半透明 body）                                 |
 | 17-2  | ✅   | 選取裝置 highlight 連線 + device halo（點 AP → cable + dest switch；點 SW → 所有 cable + AP + S2S peer）|
 | 17-3  | ✅   | Switch 視為 hub（spec §4 例外）：snap 到 magnet 內所有 tray，不再只挑最近               |
-| 17-4  | ⏸️   | 「snap 了但不通」視覺提示（待 17-3 之後評估是否還需要）                                |
+| 17-4  | ✅   | Switch snap 視覺提示（chassis 角落狀態 dot + 未連到 warning + 已 snap 顯示 foot drop）  |
 
 **17-1 細節**
 - 既有：tray 是單一一條粗線（2.4px），跟其他線（cable、wall）視覺易混
@@ -327,4 +327,4 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 |---|---|---|
 | 12-4 Hybrid routing | ⏸️ | 17-3 switch hub 落地後痛點變少，繼續延後 |
 | 15-2 Cable 3D polylines | ✅ | 19-2 把 tray 高度做成 per-tray 後順手補完；對齊 2D 樣式（虛實線）+ 新加 15-3 SwitchLayer3D |
-| 17-4 Snap 視覺提示 | ⏸️ | 17-3 hub 化後此情境罕見，待實際痛點出現再評估 |
+| 17-4 Snap 視覺提示 | ✅ | 20-1 期間實際出現「snap 但無 AP 流量」與「未 snap」視覺不可分的痛點，補完 |
