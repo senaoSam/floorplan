@@ -320,7 +320,7 @@ const PHASES = [
           { id: '20-1', done: true, text: 'Tray Planning BOM — 總長 / L 接 / T 接 / 跨接 / 餘料係數' },
           { id: '20-2', done: true,  text: 'Per-tray AP/cable 列表 + 容量瓶頸列表' },
           { id: '20-3', done: true,  text: 'Drawing snap 增強 — snap to wall / parallel / angle lock' },
-          { id: '20-4', done: false, text: 'Right-click context menu — rename / split / extend / merge / convert / delete' },
+          { id: '20-4', done: true,  text: 'Right-click context menu — rename / split / extend / merge / convert / delete' },
         ],
       },
     ],

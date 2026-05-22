@@ -222,6 +222,15 @@ src/components/
   ConfirmDialog/              # 通用確認對話框（離開對齊模式等）
   AutoPowerModal/             # HM-F4 自動功率規劃對話框（目標 RSSI + 進度 + 結果預覽）
   AIWallsModal/               # AI 牆壁辨識對話框（圖片 → 線段 → 加入 wall 圖層）
+  ContextMenu/
+    TrayContextMenu.jsx       # 20-4 Cable Tray 右鍵 context menu（HTML overlay）
+                              #   Actions: 重新命名 / 在此切割 / 從此端延伸 / 合併相鄰 tray / 轉換系統 › / 刪除
+                              #   - Rename: inline input（替代 window.prompt），Enter 確認 / Esc 取消
+                              #   - Split: 點 segment 中段才啟用；切兩條共用 vertex
+                              #   - Extend: 點端點才啟用；進 DRAW_CABLE_TRAY 並 seed 該端點
+                              #   - Merge: 端點恰有一條 tray 相連時啟用；合併兩條
+                              #   - Convert: inline 子選單列出 5 種 system（data / power / fire / backbone / mixed）
+                              #   - 外部 click / Esc 關閉；切樓層 / 換 mode 自動關
 ```
 
 ### Features（核心功能）

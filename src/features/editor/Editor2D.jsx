@@ -29,6 +29,7 @@ import FloorHoleLayer from './layers/FloorHoleLayer'
 import ScaleLayer from './layers/ScaleLayer'
 import CropLayer from './layers/CropLayer'
 import ScaleDialog from './ScaleDialog'
+import TrayContextMenu from '@/components/ContextMenu/TrayContextMenu'
 import LayerToggle from '@/components/LayerToggle/LayerToggle'
 import DevicePlanningPanel from '@/components/DevicePlanningPanel/DevicePlanningPanel'
 import RegulatorySelector from '@/components/RegulatorySelector/RegulatorySelector'
@@ -92,6 +93,13 @@ function Editor2D() {
 
   // ── Cable Tray 繪製狀態 ───────────────────────────────
   const [trayDraftPoints, setTrayDraftPoints] = useState([])  // [{x,y}, ...]
+
+  // ── 20-4 Tray 右鍵 context menu 狀態 ─────────────────
+  // null when closed; otherwise { trayId, screenX, screenY, hitContext, mergeCandidate }
+  //   hitContext: { kind: 'endpoint' | 'segment', endpointIdx?, segIdx?, foot? }
+  //   mergeCandidate: another tray whose endpoint coincides with this tray's
+  //     endpoint at the click side. null when there's 0 or >1 candidates.
+  const [trayCtxMenu, setTrayCtxMenu] = useState(null)
   // Shift held during draft → ghost segment locks to 0/45/90° from last vertex.
   // Tracked via ref so handleMouseMove / handleStageClick can read it without
   // re-creating the callbacks on every Shift up/down.
@@ -164,6 +172,7 @@ function Editor2D() {
   const addSwitch     = useCableStore((s) => s.addSwitch)
   const nextSwitchName = useCableStore((s) => s.nextSwitchName)
   const addTray       = useCableStore((s) => s.addTray)
+  const updateTray    = useCableStore((s) => s.updateTray)
   const nextTrayName  = useCableStore((s) => s.nextTrayName)
   const addRiser      = useCableStore((s) => s.addRiser)
   const nextRiserName = useCableStore((s) => s.nextRiserName)
@@ -530,6 +539,9 @@ function Editor2D() {
     setTrayDraftPoints([])
     if (!isScaleMode) resetScale()
   }, [editorMode])
+
+  // ── 20-4 切換樓層 / 模式時關掉 tray context menu ──────
+  useEffect(() => { setTrayCtxMenu(null) }, [editorMode, activeFloorId])
 
   // ── 滾輪縮放 ───────────────────────────────────────────
   const handleWheel = useCallback((e) => {
@@ -1271,7 +1283,12 @@ function Editor2D() {
     findNearestWall, projectToWall, dwWallId, dwStartFrac, dwOpeningType,
   ])
 
-  // ── 右鍵：有繪製進行中 → 停止繪製；否則 → 不做事（保留給未來右鍵 menu） ──
+  // ── 右鍵：有繪製進行中 → 停止繪製；否則 → hit-test tray 開 context menu ──
+  // (20-4) Tray context menu hit-test runs only when no draft is open, so the
+  //  Esc-equivalent "cancel draft" gestures still take priority. We hit-test
+  //  in canvas coords with a screen-px threshold; the screen position is read
+  //  from the native MouseEvent so the menu can pin to the actual cursor
+  //  (Konva's stage pointer is canvas-local).
   const handleContextMenu = useCallback((e) => {
     e.evt.preventDefault()
     if (isAlignMode) return
@@ -1282,7 +1299,78 @@ function Editor2D() {
     if (isDoorWindowMode && dwWallId) { setDwWallId(null); setDwStartFrac(null); return }
     // Right-click in tray draw mode: commit the polyline if it has ≥ 2 vertices.
     if (isTrayMode && trayDraftPoints.length > 0) { finishTrayDraft(); return }
-  }, [isAlignMode, isWallMode, wallDrawStart, isScopeMode, scopePoints, isFloorHoleMode, floorHolePoints, isCropMode, cropStart, isDoorWindowMode, dwWallId, isTrayMode, trayDraftPoints, finishTrayDraft])
+
+    // Hit-test cable trays on the active floor (any mode where no draft is in
+    // progress — including SELECT, PAN, and even other place modes — so users
+    // can manage trays without first switching back to select).
+    if (!activeFloorId) return
+    const stage = stageRef.current
+    const pointer = stage?.getPointerPosition()
+    if (!pointer) return
+    const canvasPos = toCanvasPos(pointer)
+    const trays = useCableStore.getState().traysByFloor[activeFloorId] ?? []
+    const threshSegPx = 14 / viewport.scale          // segment hit width
+    const threshEndpointPx = 18 / viewport.scale     // counts as endpoint click
+
+    let bestTray = null, bestSegIdx = -1, bestFoot = null, bestDist = threshSegPx
+    for (const t of trays) {
+      const pts = t.points
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i], b = pts[i + 1]
+        const dx = b.x - a.x, dy = b.y - a.y
+        const lenSq = dx * dx + dy * dy
+        if (lenSq < 1e-6) continue
+        const tt = Math.max(0, Math.min(1, ((canvasPos.x - a.x) * dx + (canvasPos.y - a.y) * dy) / lenSq))
+        const fx = a.x + tt * dx, fy = a.y + tt * dy
+        const d = Math.hypot(canvasPos.x - fx, canvasPos.y - fy)
+        if (d < bestDist) { bestDist = d; bestTray = t; bestSegIdx = i; bestFoot = { x: fx, y: fy } }
+      }
+    }
+    if (!bestTray) return   // miss — leave default no-op so browser context menu stays suppressed
+
+    // Endpoint test against the hit tray only — pick whichever endpoint is
+    // nearer the click. If within endpoint threshold, treat as endpoint click.
+    const pts = bestTray.points
+    const distStart = Math.hypot(canvasPos.x - pts[0].x, canvasPos.y - pts[0].y)
+    const distEnd   = Math.hypot(canvasPos.x - pts[pts.length - 1].x, canvasPos.y - pts[pts.length - 1].y)
+    const endpointIdx = distStart <= distEnd ? 0 : pts.length - 1
+    const endpointDist = Math.min(distStart, distEnd)
+    let hitContext
+    if (endpointDist <= threshEndpointPx) {
+      hitContext = { kind: 'endpoint', endpointIdx }
+    } else {
+      hitContext = { kind: 'segment', segIdx: bestSegIdx, foot: bestFoot }
+    }
+
+    // Merge candidate: another tray on the same floor whose endpoint xy is
+    // exactly equal to this tray's endpoint at the click side. Exact match
+    // (no epsilon) — matches the graph builder's coincidence-merge rule
+    // (12-2d / cable-spec §10). Ambiguous (>1 candidate) → null.
+    let mergeCandidate = null
+    if (hitContext.kind === 'endpoint') {
+      const ep = pts[endpointIdx]
+      const matches = []
+      for (const t of trays) {
+        if (t.id === bestTray.id) continue
+        const sp = t.points[0]
+        const epp = t.points[t.points.length - 1]
+        if (sp.x === ep.x && sp.y === ep.y) matches.push({ tray: t, side: 'start' })
+        else if (epp.x === ep.x && epp.y === ep.y) matches.push({ tray: t, side: 'end' })
+      }
+      if (matches.length === 1) mergeCandidate = matches[0]
+    }
+
+    // Use the browser MouseEvent for the menu position so it lands on the
+    // exact cursor (Konva's pointer is relative to the stage container).
+    const native = e.evt
+    setTrayCtxMenu({
+      trayId: bestTray.id,
+      screenX: native.clientX,
+      screenY: native.clientY,
+      hitContext,
+      mergeCandidate,
+    })
+  }, [isAlignMode, isWallMode, wallDrawStart, isScopeMode, scopePoints, isFloorHoleMode, floorHolePoints, isCropMode, cropStart, isDoorWindowMode, dwWallId, isTrayMode, trayDraftPoints, finishTrayDraft, activeFloorId, toCanvasPos, viewport.scale])
 
   // ── 比例尺 helpers ─────────────────────────────────────
   const resetScale = () => {
@@ -1800,6 +1888,103 @@ function Editor2D() {
           onCancel={handleScaleCancel}
         />
       )}
+
+      {/* 20-4 Tray right-click context menu. Actions are dispatched inline so
+          they can read the current `trayCtxMenu` payload without bouncing
+          through props chains. Each action calls setTrayCtxMenu(null) via the
+          menu's onClose, so the menu always closes after the action runs. */}
+      {trayCtxMenu && (() => {
+        const trays = useCableStore.getState().traysByFloor[activeFloorId] ?? []
+        const tray = trays.find((t) => t.id === trayCtxMenu.trayId)
+        if (!tray) return null
+        const close = () => setTrayCtxMenu(null)
+        const { hitContext, mergeCandidate } = trayCtxMenu
+
+        // Menu owns the rename input/validation; we just persist the value.
+        const onRename = (newName) => {
+          updateTray(activeFloorId, tray.id, { name: newName })
+        }
+
+        const onSplit = () => {
+          if (hitContext.kind !== 'segment') return
+          const { segIdx, foot } = hitContext
+          // Split at the perpendicular foot. Two new trays share `foot` xy so
+          // graph builder treats them as one node (12-2d coincidence merge).
+          const ptsA = [...tray.points.slice(0, segIdx + 1), foot]
+          const ptsB = [foot, ...tray.points.slice(segIdx + 1)]
+          removeTray(activeFloorId, tray.id)
+          const nameA = nextTrayName({ floor: activeFloor })
+          addTray(activeFloorId, { ...tray, id: generateId('tray'), name: nameA, points: ptsA })
+          const nameB = nextTrayName({ floor: activeFloor })
+          addTray(activeFloorId, { ...tray, id: generateId('tray'), name: nameB, points: ptsB })
+          clearSelected()
+        }
+
+        const onExtend = () => {
+          if (hitContext.kind !== 'endpoint') return
+          const ep = tray.points[hitContext.endpointIdx]
+          // Seed the tray draft with this endpoint's xy and enter draw mode.
+          // The user's next clicks append vertices; finishing creates a NEW
+          // tray that meets the original at exact xy → graph coincidence
+          // merge keeps the network connected (cable-spec §10 / 12-2d).
+          //
+          // The [editorMode] effect resets trayDraftPoints right after the
+          // mode flips, so we defer the seed by one tick — otherwise the seed
+          // we just wrote gets clobbered before the user sees it.
+          clearSelected()
+          setEditorMode(EDITOR_MODE.DRAW_CABLE_TRAY)
+          setTimeout(() => setTrayDraftPoints([{ x: ep.x, y: ep.y }]), 0)
+        }
+
+        const onMerge = () => {
+          if (hitContext.kind !== 'endpoint' || !mergeCandidate) return
+          const other = mergeCandidate.tray
+          const otherSide = mergeCandidate.side   // 'start' | 'end'
+          // Orient the picked tray so the merge endpoint is at the END of its
+          // point list, then concat the other tray's points (skipping the
+          // shared vertex) — flipped if the other tray's endpoint is at its
+          // end side. The merged tray inherits the picked tray's properties.
+          const aPoints = hitContext.endpointIdx === 0
+            ? [...tray.points].reverse()
+            : [...tray.points]
+          const otherPoints = otherSide === 'start'
+            ? other.points
+            : [...other.points].reverse()
+          const merged = [...aPoints, ...otherPoints.slice(1)]
+          removeTray(activeFloorId, tray.id)
+          removeTray(activeFloorId, other.id)
+          const name = nextTrayName({ floor: activeFloor })
+          const newId = generateId('tray')
+          addTray(activeFloorId, { ...tray, id: newId, name, points: merged })
+          setSelected(newId, 'cable_tray')
+        }
+
+        const onConvert = (systemValue) => {
+          updateTray(activeFloorId, tray.id, { system: systemValue })
+        }
+
+        const onDelete = () => {
+          removeTray(activeFloorId, tray.id)
+          clearSelected()
+        }
+
+        return (
+          <TrayContextMenu
+            x={trayCtxMenu.screenX}
+            y={trayCtxMenu.screenY}
+            trayName={tray.name ?? tray.id}
+            hitContext={hitContext}
+            mergeCandidate={mergeCandidate?.tray ?? null}
+            onRename={onRename}
+            onSplit={onSplit}
+            onExtend={onExtend}
+            onMerge={onMerge}
+            onConvert={onConvert}
+            onDelete={onDelete}
+            onClose={close}
+          />
+        )
+      })()}
 
     </div>
   )
