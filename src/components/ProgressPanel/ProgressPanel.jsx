@@ -228,7 +228,7 @@ const PHASES = [
           { id: '12-2d', done: true, text: 'Tray 端點 exact-coincidence merge（同 xy 視為共用 nodeId）' },
           { id: '12-3a', done: true, text: 'Cable Riser 點 + magnet（跨樓層共用 xy + floorIds）' },
           { id: '12-3b', done: true, text: 'Riser graph 整合（Steps 6/9/10：snap 多 tray + 相鄰樓層垂直邊）' },
-          { id: '12-4', done: false, text: '⏸️ 延後：Hybrid routing（走一段 tray 再 Manhattan 收尾）' },
+          { id: '12-4', done: true, text: '撤回 — Hybrid routing。17-3 switch hub 落地後痛點消失；MVP 嚴格版已足夠' },
         ],
       },
     ],
@@ -346,8 +346,8 @@ const PHASES = [
           { id: '22-1', done: true,  text: 'CSV Planning BOM export（4 區塊：AP CABLES / S2S / CABLE TRAYS / SUMMARY）' },
           { id: '22-2', done: true,  text: 'PDF report — 封面 + 每樓層平面圖 + AP / S2S / Tray 詳表 + 警告（jsPDF + autotable）' },
           { id: '22-3a', done: true,  text: 'PNG plan view export（樓層 ⋯ 選單「匯出 PNG」，fit-to-content，2× pixelRatio）' },
-          { id: '22-3b', done: false, text: 'SVG plan view export（延後，需自製 Konva → SVG）' },
-          { id: '22-4', done: false, text: 'DXF export（DWG 之後再評估）' },
+          { id: '22-3b', done: true,  text: '撤回 — SVG export（Konva 無 SVG renderer + PNG/PDF 已覆蓋 95% 需求）' },
+          { id: '22-4',  done: true,  text: '撤回 — DXF export（AutoCAD 交付不在 AP planner 工作流；Hamina 也無）' },
         ],
       },
     ],
@@ -384,6 +384,59 @@ const PHASES = [
           { id: '24-3', done: true,  text: '9 panels 全跑在 PanelShell + form primitives、5 群 accent 彩條、canonical 中文 section 名' },
           { id: '24-4', done: true,  text: 'Active mode badge — 永遠顯示「群 / 模式名 — 提示」+ group accent 左邊條' },
           { id: '24-5', done: true,  text: '`.claude/color-legend.md` — 5 群色票 + sub-type 色 + cross-surface check + 新物件 checklist' },
+        ],
+      },
+    ],
+  },
+  {
+    phase: 'Phase 19 — 自動 IDF 推薦',
+    groups: [
+      {
+        layer: 'Layer 25 — Auto IDF placement',
+        items: [
+          { id: '25-1', done: false, text: 'Spec — 演算法輸入/輸出 + capacity constraint 模型' },
+          { id: '25-2', done: false, text: '`autoIdfPlan.js` 純函式（k-means + capacity）' },
+          { id: '25-3', done: false, text: 'UI — 線纜總結 panel「⚡ 自動規劃 IDF」+ modal + Apply' },
+          { id: '25-4', done: false, text: '視覺預覽 ghost IDF 位置（apply 前確認）' },
+        ],
+      },
+    ],
+  },
+  {
+    phase: 'Phase 20 — 效能優化',
+    groups: [
+      {
+        layer: 'Layer 26 — Performance',
+        items: [
+          { id: '26-1', done: false, text: 'Perf profile（50 / 150 / 300 AP）找 lag 主來源' },
+          { id: '26-2', done: false, text: '根據 26-1 結果優化（cache / batchDraw / grid 降階...）' },
+          { id: '26-3', done: false, text: '`.claude/perf-baseline.md` 紀錄 before / after FPS' },
+        ],
+      },
+    ],
+  },
+  {
+    phase: 'Phase 21 — 熱圖 Polish',
+    groups: [
+      {
+        layer: 'Layer 27 — Heatmap polish',
+        items: [
+          { id: '27-1', done: false, text: 'Audit — `.claude/heatmap-audit.md` 列出 bug / 視覺缺陷' },
+          { id: '27-2', done: false, text: '根據 audit 結果動手（hover readout / contour AA / colormap toggle）' },
+        ],
+      },
+    ],
+  },
+  {
+    phase: 'Phase 22 — 3D 視覺強化',
+    groups: [
+      {
+        layer: 'Layer 28 — 3D enhancements',
+        items: [
+          { id: '28-1', done: false, text: '3D AP label — sprite 跟著 camera 旋轉' },
+          { id: '28-2', done: false, text: '3D 樓層切換 UI（不用切回 2D）' },
+          { id: '28-3', done: false, text: '3D camera presets — top / iso / front' },
+          { id: '28-4', done: false, text: '3D hover readout — AP tooltip（freq / channel / power）' },
         ],
       },
     ],

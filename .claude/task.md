@@ -46,7 +46,7 @@
 | 12-2d | ✅   | Tray 端點 exact-coincidence merge（同 xy 視為共用 nodeId，不走 epsilon）                                            |
 | 12-3a | ✅   | Cable Riser 點 + magnet（跨樓層共用 xy + floorIds）                                                                |
 | 12-3b | ✅   | Riser graph 整合（Steps 6/9/10：snap 多 tray + 相鄰樓層垂直邊）                                                     |
-| 12-4  | ⏸️   | **延後**：Hybrid routing（走一段 tray 再 Manhattan 收尾）。理由：需要 multi-source Dijkstra + virtual Manhattan edge，圖會炸；MVP 嚴格版 fallback 全 Manhattan |
+| 12-4  | ⏸️   | **撤回** — Hybrid routing（走一段 tray 再 Manhattan 收尾）。原理由：需要 multi-source Dijkstra + virtual Manhattan edge，圖會炸；MVP 嚴格版 fallback 全 Manhattan。17-3 switch hub 落地後痛點消失，沒人抱怨，不再需要做。 |
 
 **12-1 細節**
 - DRAW_CABLE_TRAY editor mode（類似 DRAW_WALL）
@@ -330,8 +330,8 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | 22-1  | ✅   | CSV Planning BOM export — 單檔 4 區塊（AP CABLES / S2S / CABLE TRAYS / SUMMARY），UTF-8 BOM 防中文亂碼，CRLF 結尾 Excel 友善；UI 入口 = 線纜總結 panel 底部「⬇ 匯出 CSV」按鈕 |
 | 22-2  | ✅   | PDF report — 多頁（封面 + 每樓層 1 頁含平面圖 PNG + AP CABLES + S2S（有才印）+ CABLE TRAYS + Warnings（有才印））；A4 landscape；jsPDF + jspdf-autotable；UI：線纜總結 panel 底部「⬇ 匯出 ▾」下拉 CSV/PDF；loading state；中文字限制：jsPDF 內建只 Latin，非 ASCII 文字 fallback `?` |
 | 22-3a | ✅   | PNG plan view export — 樓層 ⋯ 選單「匯出 PNG」；fit-to-content 不受目前 zoom 影響；2× pixelRatio；尊重 LayerToggle（含/不含熱圖跟著畫面狀態走）；UTF-8 BOM 不適用此檔（PNG 無編碼問題）；export 後 viewport 完整還原 |
-| 22-3b | ⬜   | SVG plan view export（需自製 Konva → SVG 轉換器，工程量大；延後）                  |
-| 22-4  | ⬜   | DXF export（DWG 視需求再評估）                                                       |
+| 22-3b | ⏸️   | **撤回** — SVG plan view export。Hamina 沒做；Konva 沒內建 SVG renderer（要自製 ~10× 工程）；PNG (22-3a) + PDF (22-2) 已覆蓋 95% 使用情境；Illustrator/Inkscape 編輯需求極窄 |
+| 22-4  | ⏸️   | **撤回** — DXF export。AutoCAD 交付場景在純 AP planner 工作流外（多半交付 PDF + PNG 就足夠）；DXF 需 dxf-writer library + 自己寫 entity 映射；Hamina 也沒做 |
 
 ---
 
@@ -439,10 +439,68 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 
 ---
 
+## Phase 19 — 自動 IDF 推薦
+
+> Reviewer 痛點推論：N 個 AP 散在大平面圖時，使用者要手動放 switch / IDF / 決定 uplink 關係。實作後缺一個「告訴我該放幾個 IDF / 放哪」的助手。
+> 目標：給定 AP 分布 + 容量限制，自動建議 IDF 數量與位置（k-means + Voronoi）。
+
+### Layer 25 — Auto IDF Placement
+
+| #    | 狀態 | Task |
+|------|------|------|
+| 25-1 | ⬜   | Spec — 演算法輸入（AP list + 每個 IDF 預算 ports / PoE / cable distance）+ 輸出（IDF 位置 + 對應 AP 分群）；用 k-means with capacity constraint 或 weighted Voronoi |
+| 25-2 | ⬜   | `src/features/cable/autoIdfPlan.js` — 純函式，吃 APs + constraints 回 `{idfs:[{x,y,assignedAPs:[]}], totalCableM}` |
+| 25-3 | ⬜   | UI — 線纜總結 panel 加「⚡ 自動規劃 IDF」按鈕；modal 顯示建議結果 + Apply 按鈕（一鍵 add switches）|
+| 25-4 | ⬜   | 視覺預覽 — apply 前畫面預覽 N 個建議 IDF 位置（半透明 ghost），讓使用者看了再決定 |
+
+---
+
+## Phase 20 — 效能優化
+
+> 大量 AP / 多樓層時的 perf 觀察 → 找出 lag 來源 → 對症下藥。
+
+### Layer 26 — Performance
+
+| #    | 狀態 | Task |
+|------|------|------|
+| 26-1 | ⬜   | Perf profile — 用 50 / 150 / 300 AP StressLoader 對比，找出主要 lag 來源（React render / Konva redraw / Heatmap GL / Routing 重算）|
+| 26-2 | ⬜   | 根據 26-1 結果動手 — 可能項：computeRoutes 加 memo cache、Layer 拆 batchDraw、heatmap grid 動態降階、Routing virtual scroll |
+| 26-3 | ⬜   | Bench 結果記錄到 `.claude/perf-baseline.md`（before / after FPS + frame time）|
+
+---
+
+## Phase 21 — 熱圖 Polish
+
+> Phase 5 已落地 JS + GL 雙引擎；可能還有打磨空間。
+
+### Layer 27 — Heatmap polish
+
+| #    | 狀態 | Task |
+|------|------|------|
+| 27-1 | ⬜   | Audit — 列出目前已知的熱圖 bug / 視覺缺陷（hover readout 對齊？colormap 對比？contour 平滑？SINR 邊界 case？）寫成 `.claude/heatmap-audit.md` |
+| 27-2 | ⬜   | 根據 audit 結果動手；至少包含「hover readout numeric precision」 + 「contour antialiasing」+ 「colormap 換國際標 vs 自訂 toggle」|
+
+---
+
+## Phase 22 — 3D 視覺強化
+
+> 目前 3D = read-only，只看不能編；補充導覽 + 標籤 + 互動細節。
+
+### Layer 28 — 3D enhancements
+
+| #    | 狀態 | Task |
+|------|------|------|
+| 28-1 | ⬜   | 3D AP label — 目前 3D AP 只一根柱子無文字，加 sprite 標籤跟著 camera 旋轉 |
+| 28-2 | ⬜   | 3D 樓層切換 UI — 在 3D 場景頂部 / 角落加 floor selector，不用切回 2D |
+| 28-3 | ⬜   | 3D camera presets — top / iso / front 三顆 button，一鍵跳常用角度 |
+| 28-4 | ⬜   | 3D hover readout — 滑到 AP 顯示「AP-01 5 GHz Ch36/40 20 dBm」浮 tooltip |
+
+---
+
 ## 既有延後項目歸位
 
 | ID | 狀態 | 原因 |
 |---|---|---|
-| 12-4 Hybrid routing | ⏸️ | 17-3 switch hub 落地後痛點變少，繼續延後 |
+| 12-4 Hybrid routing | ⏸️ | **撤回** — 17-3 switch hub 落地後痛點消失，沒人抱怨 |
 | 15-2 Cable 3D polylines | ✅ | 19-2 把 tray 高度做成 per-tray 後順手補完；對齊 2D 樣式（虛實線）+ 新加 15-3 SwitchLayer3D |
 | 17-4 Snap 視覺提示 | ✅ | 20-1 期間實際出現「snap 但無 AP 流量」與「未 snap」視覺不可分的痛點，補完 |
