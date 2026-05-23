@@ -382,7 +382,7 @@ const PHASES = [
           { id: '24-2', done: true,  text: 'Toolbar 改為畫布上方中央浮動 panel、icon-only（SVG）、群分隔線 + tooltip portal' },
           { id: '24-3', done: true,  text: '9 panels 全跑在 PanelShell + form primitives、5 群 accent 彩條、canonical 中文 section 名' },
           { id: '24-4', done: true,  text: 'Active mode badge — 永遠顯示「群 / 模式名 — 提示」+ group accent 左邊條' },
-          { id: '24-5', done: false, text: 'Color / icon legend 統一表（每 group 主色 + sub-type 變化）' },
+          { id: '24-5', done: true,  text: '`.claude/color-legend.md` — 5 群色票 + sub-type 色 + cross-surface check + 新物件 checklist' },
         ],
       },
     ],

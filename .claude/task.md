@@ -389,7 +389,7 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | 24-2 | ✅   | Toolbar 重新佈局：搬到畫布上方中央的浮動 panel、icon-only（SVG，無 emoji）、群之間細直線 separator、hover 顯示中文 tooltip（透過 React portal 避開 transform containing block） |
 | 24-3 | ✅   | Right panel 框架共用化：9 panels 全跑在 `<PanelShell>` + `<PanelHeader>` / `<PanelSection>` / `<PanelField>` + form primitives（TextInput / NumberInput / Select / Checkbox / Button）；每群獨立 accent 彩條（slate / cyan / violet / amber / gray）；section 標題對齊 canonical 中文（識別 / 幾何 / 狀態 / 警告 等） |
 | 24-4 | ✅   | Active mode badge：浮在 toolbar 正下方，永遠顯示（含 SELECT）；格式「{group} / {mode 名}」，左邊條配 group accent 色（pointer / structure / wireless / cable / measure / meta）；舊 mode-hint 升級為 badge |
-| 24-5 | ⬜   | Color / icon legend 一張表整理（每 group 主色 + sub-type 變化），確保 toolbar / panel / canvas 三處用色一致 |
+| 24-5 | ✅   | `.claude/color-legend.md`：5 group accent + sub-type 色票（AP 頻段 / Switch kind / Wall material / Tray system / Scope / Riser / FloorHole）+ cross-surface check 表 + 新增 object type 的 checklist + open colour debt（toolbar active icon 未跟 group 對齊等） |
 
 **24-1 Group 對照表**
 

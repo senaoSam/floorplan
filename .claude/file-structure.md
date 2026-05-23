@@ -16,6 +16,8 @@ floorplan/
     workflow.md               # 協作流程規範
     file-structure.md         # 本文件
     task.md                   # 任務進度追蹤
+    mode-matrix.md            # Phase 17 mode × interaction 矩陣（14 mode × 9 surface + gap）
+    color-legend.md           # Phase 18 group accent + sub-type 色票 + cross-surface check
     playwright-mcp-notes.md   # Playwright MCP 操作本專案的踩坑筆記
     settings.local.json       # Claude Code 本地設定
   public/
