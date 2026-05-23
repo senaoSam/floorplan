@@ -246,6 +246,10 @@ src/features/
                               #   - 端點吸附 (snap-to-grid)
                               #   - 整合 DropZone、LayerToggle、DevicePlanningPanel、RegulatorySelector、ScaleDialog
     ScaleDialog.jsx           # 比例尺對話框：輸入像素距離 + 實際公尺數 → 計算 px/m
+    exportPlanView.js         # 22-3a PNG plan view export
+                              #   - capturePlanPng({stage, imageWidth, imageHeight, pixelRatio}) → data URL
+                              #     viewport snapshot → identity transform → toDataURL → restore
+                              #   - triggerImageDownload(dataUrl, filename)
     layers/
       FloorImageLayer.jsx     # 平面圖圖層：旋轉/透明度/裁切 clipping，點擊選取
       HeatmapLayer.jsx        # 熱圖圖層：跟隨 floor 旋轉/裁切；吃 heatmapGL 產生的 canvas
@@ -362,6 +366,17 @@ src/features/
                               #   - computeTrayFill({tray, load, profile})
                               #     → {fillRatio, status, statusLabel, statusColor, ...}
                               #     status ∈ ok / warn / full / exceed
+    exportPlanningBOM.js      # 22-1 CSV Planning BOM — 單檔 4 區塊
+                              #   - buildPlanningBOMCsv({...}) → CSV string
+                              #     (AP CABLES / S2S / CABLE TRAYS / SUMMARY)
+                              #   - triggerCSVDownload(text, filename)
+                              #     UTF-8 BOM + CRLF for Excel friendliness
+    exportPlanningPdf.js      # 22-2 PDF Planning Report — jsPDF + autotable
+                              #   - buildPlanningPdf({...}) → Promise<Blob>
+                              #     cover + per-floor PNG snapshot + AP / S2S /
+                              #     Tray detail tables + warnings
+                              #   - triggerPdfDownload(blob, filename)
+                              #   ⚠ jsPDF 內建只 Latin；非 ASCII 文字 fallback `?`
 
   channel/                    # （頻道規劃相關 helper，視需要看內檔）
   floor/                      # （樓層管理相關 helper）

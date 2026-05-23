@@ -11,12 +11,14 @@
     "heatmap:diff": "node src/features/heatmap/__fixtures__/diff-golden.mjs"
   },
   "dependencies": {
+    "@react-three/fiber": "^7.0.29",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "konva": "^8.0.1",
     "pdfjs-dist": "^3.11.174",
     "react": "^17.0.2",
     "react-dom": "^17.0.2",
     "react-konva": "17.0.2-6",
-    "@react-three/fiber": "^7.0.29",
     "three": "^0.167.1",
     "zustand": "^4.5.4"
   },
@@ -26,6 +28,9 @@
     "vite": "^5.4.0"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["@parcel/watcher", "esbuild"]
+    "onlyBuiltDependencies": [
+      "@parcel/watcher",
+      "esbuild"
+    ]
   }
 }

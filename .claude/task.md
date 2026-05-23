@@ -316,7 +316,7 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | #     | 狀態 | Task                                                                              |
 | ----- | ---- | --------------------------------------------------------------------------------- |
 | 22-1  | ✅   | CSV Planning BOM export — 單檔 4 區塊（AP CABLES / S2S / CABLE TRAYS / SUMMARY），UTF-8 BOM 防中文亂碼，CRLF 結尾 Excel 友善；UI 入口 = 線纜總結 panel 底部「⬇ 匯出 CSV」按鈕 |
-| 22-2  | ⬜   | PDF report（平面圖 + 統計表 + warnings）                                              |
+| 22-2  | ✅   | PDF report — 多頁（封面 + 每樓層 1 頁含平面圖 PNG + AP CABLES + S2S（有才印）+ CABLE TRAYS + Warnings（有才印））；A4 landscape；jsPDF + jspdf-autotable；UI：線纜總結 panel 底部「⬇ 匯出 ▾」下拉 CSV/PDF；loading state；中文字限制：jsPDF 內建只 Latin，非 ASCII 文字 fallback `?` |
 | 22-3a | ✅   | PNG plan view export — 樓層 ⋯ 選單「匯出 PNG」；fit-to-content 不受目前 zoom 影響；2× pixelRatio；尊重 LayerToggle（含/不含熱圖跟著畫面狀態走）；UTF-8 BOM 不適用此檔（PNG 無編碼問題）；export 後 viewport 完整還原 |
 | 22-3b | ⬜   | SVG plan view export（需自製 Konva → SVG 轉換器，工程量大；延後）                  |
 | 22-4  | ⬜   | DXF export（DWG 視需求再評估）                                                       |

@@ -187,8 +187,11 @@
         background: rgba(255, 255, 255, 0.05)
         color: $text-primary
 
-  // 22-1 CSV export CTA — sits in the last section, full-width pill button
-  // so it visually anchors as the panel's wrap-up action.
+  // 22-1 + 22-2 Export CTA — sits in the last section, full-width pill
+  // button that opens a small menu for CSV / PDF.
+  &__export-wrap
+    position: relative
+
   &__export-btn
     display: flex
     align-items: center
@@ -205,5 +208,36 @@
     cursor: pointer
     transition: background 0.12s
 
-    &:hover
+    &:hover:not(:disabled)
       background: rgba(0, 229, 255, 0.18)
+
+    &:disabled
+      opacity: 0.6
+      cursor: not-allowed
+
+  &__export-menu
+    position: absolute
+    left: 0
+    right: 0
+    bottom: 100%
+    margin-bottom: 4px
+    background: rgba(15, 23, 42, 0.96)
+    border: 1px solid rgba(255, 255, 255, 0.12)
+    border-radius: 6px
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45)
+    display: flex
+    flex-direction: column
+    overflow: hidden
+    z-index: 60
+
+  &__export-item
+    padding: 7px 12px
+    background: transparent
+    border: none
+    color: $text-primary
+    font-size: 12px
+    text-align: left
+    cursor: pointer
+
+    &:hover
+      background: rgba(255, 255, 255, 0.08)

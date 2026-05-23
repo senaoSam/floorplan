@@ -7,6 +7,8 @@ import { computeRoutes } from '@/features/cable/computeRoutes'
 import { computeTrayBOM } from '@/features/cable/computeTrayBOM'
 import { computeTrayCableLoads, computeTrayFill } from '@/features/cable/computeTrayFill'
 import { buildPlanningBOMCsv, triggerCSVDownload } from '@/features/cable/exportPlanningBOM'
+import { buildPlanningPdf, triggerPdfDownload } from '@/features/cable/exportPlanningPdf'
+import Konva from 'konva'
 import './CableSummaryPanel.sass'
 
 // Building-wide cable BOM + per-route-status counts + unroutable list.
@@ -21,6 +23,8 @@ function CableSummaryPanel() {
   const traysByFloor    = useCableStore((s) => s.traysByFloor)
   const risers          = useCableStore((s) => s.risers)
   const setSelected     = useEditorStore((s) => s.setSelected)
+  const regulatoryDomain = useEditorStore((s) => s.regulatoryDomain)
+  const activeFloorId   = useFloorStore((s) => s.activeFloorId)
   const capacityProfile    = useCableStore((s) => s.capacityProfile)
   const customCapacity     = useCableStore((s) => s.customCapacity)
   const setCapacityProfile = useCableStore((s) => s.setCapacityProfile)
@@ -36,6 +40,9 @@ function CableSummaryPanel() {
   )
 
   const [collapsed, setCollapsed] = useState(true)
+  // 22-2 PDF / CSV export menu state
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [exportStatus, setExportStatus] = useState(null)  // null | string while generating
 
   const stats = useMemo(() => {
     const { routes, switchLinks, warnings } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
@@ -138,10 +145,12 @@ function CableSummaryPanel() {
     setSelected(trayId, 'cable_tray')
   }
 
-  // 22-1 CSV export — re-derive routes / switchLinks / per-tray fill on demand
-  // (cheap; only fires on click). Keeping the live `stats` memo lean.
-  const handleExportCsv = () => {
-    const { routes, switchLinks } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
+  // 22-1 / 22-2 Shared planning snapshot — both CSV and PDF need the same
+  // upstream computes (routes / switchLinks / per-tray fill). Computing on
+  // click rather than caching in the live `stats` memo keeps the panel
+  // cheap to re-render.
+  const buildPlanningSnapshot = () => {
+    const { routes, switchLinks, warnings } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
     const trayLoads = computeTrayCableLoads({ routes, switchLinks, traysByFloor })
     const profile = getCapacityProfile(capacityProfile, customCapacity)
     const trayFillByKey = new Map()
@@ -152,6 +161,12 @@ function CableSummaryPanel() {
         trayFillByKey.set(key, computeTrayFill({ tray, load, profile }))
       }
     }
+    return { routes, switchLinks, warnings, trayFillByKey }
+  }
+
+  const handleExportCsv = () => {
+    setExportMenuOpen(false)
+    const { routes, switchLinks, trayFillByKey } = buildPlanningSnapshot()
     const csv = buildPlanningBOMCsv({
       floors,
       apsByFloor,
@@ -163,8 +178,49 @@ function CableSummaryPanel() {
       traysByFloor,
       wasteFactor,
     })
-    const stamp = new Date().toISOString().slice(0, 10)  // YYYY-MM-DD
+    const stamp = new Date().toISOString().slice(0, 10)
     triggerCSVDownload(csv, `floorplan-bom-${stamp}.csv`)
+  }
+
+  // 22-2 PDF export — multi-page (cover + per-floor + tables + warnings).
+  // Async because each floor capture waits ~180 ms for React commit, and
+  // jsPDF can take a few hundred ms on its own. We surface progress strings
+  // into exportStatus so the button shows what stage we're on.
+  const handleExportPdf = async () => {
+    setExportMenuOpen(false)
+    if (exportStatus) return  // Already running
+    setExportStatus('準備中...')
+    try {
+      const snap = buildPlanningSnapshot()
+      const stage = Konva?.stages?.[0]
+      if (!stage) { setExportStatus(null); return }
+      const blob = await buildPlanningPdf({
+        stage,
+        floors,
+        apsByFloor,
+        switchesByFloor,
+        traysByFloor,
+        risers,
+        routes: snap.routes,
+        switchLinks: snap.switchLinks,
+        warnings: snap.warnings,
+        trayBOM,
+        trayFillByKey: snap.trayFillByKey,
+        wasteFactor,
+        regulatoryDomain,
+        setActiveFloor,
+        getActiveFloorId: () => activeFloorId,
+        onProgress: (msg) => setExportStatus(msg),
+      })
+      const stamp = new Date().toISOString().slice(0, 10)
+      triggerPdfDownload(blob, `floorplan-report-${stamp}.pdf`)
+    } catch (err) {
+      console.error('PDF export failed:', err)
+      setExportStatus('失敗 — 請看 console')
+      setTimeout(() => setExportStatus(null), 2500)
+      return
+    }
+    setExportStatus(null)
   }
 
   const sortedFloorEntries = [...stats.byFloor.entries()].sort((a, b) => {
@@ -442,20 +498,40 @@ function CableSummaryPanel() {
             </section>
           )}
 
-          {/* 22-1 CSV export — wraps everything above into a single file.
-              Sits at the bottom so the user has scrolled past the live
-              summary first (they shouldn't blindly export numbers they
-              haven't seen). */}
+          {/* 22-1 + 22-2 Export — wraps everything above into either CSV
+              (for spreadsheet workflows) or a multi-page PDF report. Sits
+              at the bottom so the user has scrolled past the live summary
+              first (they shouldn't blindly export numbers they haven't
+              seen). */}
           <section className="cable-summary__section">
-            <button
-              type="button"
-              className="cable-summary__export-btn"
-              onClick={handleExportCsv}
-            >
-              ⬇ 匯出 CSV
-            </button>
+            <div className="cable-summary__export-wrap">
+              <button
+                type="button"
+                className="cable-summary__export-btn"
+                onClick={() => setExportMenuOpen((v) => !v)}
+                disabled={!!exportStatus}
+              >
+                ⬇ {exportStatus ?? '匯出 ▾'}
+              </button>
+              {exportMenuOpen && !exportStatus && (
+                <div className="cable-summary__export-menu">
+                  <button
+                    className="cable-summary__export-item"
+                    onClick={handleExportCsv}
+                  >
+                    CSV（Excel / Sheets）
+                  </button>
+                  <button
+                    className="cable-summary__export-item"
+                    onClick={handleExportPdf}
+                  >
+                    PDF（含平面圖）
+                  </button>
+                </div>
+              )}
+            </div>
             <p className="cable-summary__hint">
-              一檔 4 區塊：AP 線、S2S、Tray、總計；Excel / Google Sheets 直接打開
+              CSV：BOM 4 區塊；PDF：封面 + 每樓層平面圖 + 詳表 + 警告
             </p>
           </section>
         </div>
