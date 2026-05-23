@@ -5,7 +5,16 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { computeRoutes } from '@/features/cable/computeRoutes'
 import { getAPPoeWattage } from '@/constants/apModels'
-import './APPanel.sass'
+import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
+import { TextInput, NumberInput, Select, Button } from './_shared/PanelControls'
+import './_shared/shared.sass'
+import './SwitchPanel.sass'
+
+const CABLE_TYPE_OPTIONS = [
+  { value: 'auto',   label: 'Auto' },
+  { value: 'copper', label: 'Copper' },
+  { value: 'fiber',  label: 'Fiber' },
+]
 
 function SwitchPanel({ floorId, swId }) {
   const sw            = useCableStore((s) => (s.switchesByFloor[floorId] ?? []).find((x) => x.id === swId))
@@ -25,13 +34,8 @@ function SwitchPanel({ floorId, swId }) {
   }, [floorId, swId, updateSwitch])
 
   const handleNumber = useCallback((field, raw, { min = 0 } = {}) => {
-    const num = parseFloat(raw)
-    if (isNaN(num) || num < min) return
-    updateSwitch(floorId, swId, { [field]: num })
-  }, [floorId, swId, updateSwitch])
-
-  const handleKind = useCallback((kind) => {
-    updateSwitch(floorId, swId, { kind })
+    if (isNaN(raw) || raw < min) return
+    updateSwitch(floorId, swId, { [field]: raw })
   }, [floorId, swId, updateSwitch])
 
   const handleDelete = () => {
@@ -56,8 +60,6 @@ function SwitchPanel({ floorId, swId }) {
         }
       }
     }
-    // S2S ports: 1 uplink port on this switch if it has uplinkTo; +1 port
-    // per other switch whose uplinkTo points at this one (downlinks).
     const uplinkUsed = sw.uplinkTo ? 1 : 0
     let downlinkCount = 0
     for (const list of Object.values(switchesByFloor)) {
@@ -77,169 +79,136 @@ function SwitchPanel({ floorId, swId }) {
   const portOver   = portsUsed > portCount
   const poeOver    = poeBudget > 0 && connected.totalPoe > poeBudget
 
-  return (
-    <div className="ap-panel">
-      <div className="ap-panel__header">
-        <span className="ap-panel__title">Switch 屬性</span>
-        <span className="ap-panel__dot" style={{ background: color }} />
-        <button className="panel-delete-btn" onClick={handleDelete}>刪除</button>
-      </div>
+  // Build options for the uplink-target select. Skip self; tag with floor.
+  const uplinkOptions = [
+    { value: '', label: '— 頂層（無 uplink）' },
+    ...Object.entries(switchesByFloor).flatMap(([fId, list]) =>
+      (list ?? []).filter((s) => s.id !== swId).map((s) => {
+        const f = floors.find((fl) => fl.id === fId)
+        return {
+          value: s.id,
+          label: `${s.name}（${s.kind?.toUpperCase() ?? 'SW'}${f ? ` @ ${f.name}` : ''}）`,
+        }
+      }),
+    ),
+  ]
 
-      {/* 類型 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">類型</p>
-        <div className="ap-panel__btn-group">
+  return (
+    <PanelShell accent="switch">
+      <PanelHeader
+        title={sw.name}
+        meta={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
+            Switch 屬性
+          </span>
+        }
+        onDelete={handleDelete}
+      />
+
+      <PanelSection title="類型">
+        <div className="switch-panel__kind-row">
           {SWITCH_KINDS.map((k) => {
             const active = sw.kind === k.value
             return (
               <button
                 key={k.value}
-                className={`ap-panel__btn${active ? ' ap-panel__btn--active' : ''}`}
+                className={`switch-panel__kind-btn${active ? ' switch-panel__kind-btn--active' : ''}`}
                 style={active ? { borderColor: k.color, color: k.color } : {}}
-                onClick={() => handleKind(k.value)}
+                onClick={() => handleField('kind', k.value)}
               >
                 {k.label}
               </button>
             )
           })}
         </div>
-      </section>
+      </PanelSection>
 
-      {/* 名稱 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">名稱</p>
-        <input
-          className="ap-panel__input"
-          type="text"
-          value={sw.name}
-          onChange={(e) => handleField('name', e.target.value)}
-        />
-      </section>
+      <PanelSection title="識別">
+        <PanelField label="名稱">
+          <TextInput value={sw.name} onChange={(v) => handleField('name', v)} />
+        </PanelField>
+        <PanelField label="型號">
+          <TextInput
+            value={sw.model ?? ''}
+            placeholder="例如 POE-24-port"
+            onChange={(v) => handleField('model', v)}
+          />
+        </PanelField>
+      </PanelSection>
 
-      {/* 型號 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">型號</p>
-        <input
-          className="ap-panel__input"
-          type="text"
-          value={sw.model ?? ''}
-          onChange={(e) => handleField('model', e.target.value)}
-          placeholder="例如 POE-24-port"
-        />
-      </section>
-
-      {/* Port 數 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">
-          Port 數
-          <span className={`ap-panel__hint-inline${portOver ? ' ap-panel__hint-inline--warn' : ''}`}>
-            （已用 {portsUsed} / {portCount}）
-          </span>
-        </p>
-        <p className="ap-panel__hint">
+      <PanelSection title="容量">
+        <PanelField
+          label="Port 數"
+          hint={portOver
+            ? `⚠ 已用 ${portsUsed} / ${portCount}（超出）`
+            : `已用 ${portsUsed} / ${portCount}`}
+        >
+          <NumberInput
+            value={portCount}
+            min={1}
+            step={1}
+            unit="ports"
+            width={70}
+            onChange={(v) => handleNumber('portCount', v, { min: 1 })}
+          />
+        </PanelField>
+        <div className="switch-panel__breakdown">
           AP {connected.aps.length}
           {connected.uplinkUsed ? ` + Uplink ${connected.uplinkUsed}` : ''}
           {connected.downlinkCount ? ` + Downlink ${connected.downlinkCount}` : ''}
-        </p>
-        <div className="ap-panel__number-row">
-          <input
-            className="ap-panel__input ap-panel__input--number"
-            type="number"
-            min="1"
-            step="1"
-            value={portCount}
-            onChange={(e) => handleNumber('portCount', e.target.value, { min: 1 })}
-          />
-          <span className="ap-panel__unit">ports</span>
         </div>
-        {portOver && (
-          <p className="ap-panel__hint ap-panel__hint--warn">
-            ⚠ Port 不足：已用 {portsUsed}，超過 {portCount}
-          </p>
-        )}
-      </section>
 
-      {/* PoE Budget */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">
-          PoE 預算
-          <span className={`ap-panel__hint-inline${poeOver ? ' ap-panel__hint-inline--warn' : ''}`}>
-            （已用 {connected.totalPoe.toFixed(0)} / {poeBudget} W）
-          </span>
-        </p>
-        <div className="ap-panel__number-row">
-          <input
-            className="ap-panel__input ap-panel__input--number"
-            type="number"
-            min="0"
-            step="10"
-            value={poeBudget}
-            onChange={(e) => handleNumber('poeBudget', e.target.value)}
-          />
-          <span className="ap-panel__unit">W（0 = 無 PoE）</span>
-        </div>
-        {poeOver && (
-          <p className="ap-panel__hint ap-panel__hint--warn">
-            ⚠ PoE 超標：{connected.totalPoe.toFixed(0)} W &gt; {poeBudget} W
-          </p>
-        )}
-      </section>
-
-      {/* 安裝高度 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">安裝高度</p>
-        <div className="ap-panel__number-row">
-          <input
-            className="ap-panel__input ap-panel__input--number"
-            type="number"
-            min="0"
-            step="0.1"
-            value={sw.mountHeight ?? 0.5}
-            onChange={(e) => handleNumber('mountHeight', e.target.value)}
-          />
-          <span className="ap-panel__unit">m</span>
-        </div>
-      </section>
-
-      {/* Uplink target — 14-1: which higher-level switch this one connects to.
-          Listing every other switch keeps the model expressive (any topology),
-          while the kind-based default in 14-2 will suggest the obvious pick. */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">上連 Uplink</p>
-        <select
-          className="ap-panel__input ap-panel__select"
-          value={sw.uplinkTo ?? ''}
-          onChange={(e) => handleField('uplinkTo', e.target.value || null)}
+        <PanelField
+          label="PoE 預算"
+          hint={poeOver
+            ? `⚠ 已用 ${connected.totalPoe.toFixed(0)} W / ${poeBudget} W（超出）`
+            : `已用 ${connected.totalPoe.toFixed(0)} W / ${poeBudget} W`}
         >
-          <option value="">— 頂層（無 uplink）</option>
-          {Object.entries(switchesByFloor).flatMap(([fId, list]) =>
-            (list ?? []).filter((s) => s.id !== swId).map((s) => {
-              const f = floors.find((fl) => fl.id === fId)
-              return (
-                <option key={s.id} value={s.id}>
-                  {s.name}（{s.kind?.toUpperCase()}{f ? ` @ ${f.name}` : ''}）
-                </option>
-              )
-            })
-          )}
-        </select>
-        <p className="ap-panel__hint">指定本 switch 的 uplink target（14-2 計算 S2S 線時用）</p>
-      </section>
+          <NumberInput
+            value={poeBudget}
+            min={0}
+            step={10}
+            unit="W"
+            width={70}
+            onChange={(v) => handleNumber('poeBudget', v)}
+          />
+        </PanelField>
+        <div className="switch-panel__hint">PoE 預算 = 0 → 該 Switch 無 PoE 供電</div>
+      </PanelSection>
 
-      {/* Cable type preference */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">線材偏好</p>
-        <div className="ap-panel__btn-group">
-          {[
-            { value: 'auto',   label: 'Auto' },
-            { value: 'copper', label: 'Copper' },
-            { value: 'fiber',  label: 'Fiber' },
-          ].map((opt) => {
+      <PanelSection title="安裝高度">
+        <PanelField label="高度">
+          <NumberInput
+            value={sw.mountHeight ?? 0.5}
+            min={0}
+            step={0.1}
+            unit="m"
+            width={70}
+            onChange={(v) => handleNumber('mountHeight', v)}
+          />
+        </PanelField>
+      </PanelSection>
+
+      <PanelSection title="上連 Uplink">
+        <Select
+          value={sw.uplinkTo ?? ''}
+          options={uplinkOptions}
+          onChange={(v) => handleField('uplinkTo', v || null)}
+        />
+        <div className="switch-panel__hint">
+          指定本 switch 的 uplink target（14-2 計算 S2S 線時用）
+        </div>
+      </PanelSection>
+
+      <PanelSection title="線材偏好">
+        <div className="switch-panel__kind-row">
+          {CABLE_TYPE_OPTIONS.map((opt) => {
             const active = (sw.cableType ?? 'auto') === opt.value
             return (
               <button
                 key={opt.value}
-                className={`ap-panel__btn${active ? ' ap-panel__btn--active' : ''}`}
+                className={`switch-panel__kind-btn${active ? ' switch-panel__kind-btn--active' : ''}`}
                 onClick={() => handleField('cableType', opt.value)}
               >
                 {opt.label}
@@ -247,37 +216,37 @@ function SwitchPanel({ floorId, swId }) {
             )
           })}
         </div>
-        <p className="ap-panel__hint">Auto：&lt; 90 m copper、&ge; 90 m fiber（Cat 6 規範上限）</p>
-      </section>
+        <div className="switch-panel__hint">
+          Auto：&lt; 90 m copper、&ge; 90 m fiber（Cat 6 規範上限）
+        </div>
+      </PanelSection>
 
-      {/* 已連接 AP 清單 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">已連接 AP</p>
+      <PanelSection title="已連接 AP">
         {connected.aps.length === 0 ? (
-          <p className="ap-panel__hint">尚無 AP 路由到本 Switch</p>
+          <div className="switch-panel__hint">尚無 AP 路由到本 Switch</div>
         ) : (
-          <ul className="ap-panel__conn-list">
+          <ul className="switch-panel__conn-list">
             {connected.aps.map((ap) => {
               const isCrossFloor = ap.floorId !== floorId
               const apFloor = isCrossFloor ? floors.find((f) => f.id === ap.floorId) : null
               return (
-                <li key={ap.id} className="ap-panel__conn-item">
-                  <span className="ap-panel__conn-name">
+                <li key={ap.id} className="switch-panel__conn-item">
+                  <span className="switch-panel__conn-name">
                     {ap.name}
                     {isCrossFloor && (
-                      <span className="ap-panel__hint-inline">
-                        ({apFloor?.name ?? ap.floorId})
+                      <span className="switch-panel__conn-floor">
+                        （{apFloor?.name ?? ap.floorId}）
                       </span>
                     )}
                   </span>
-                  <span className="ap-panel__conn-wattage">{getAPPoeWattage(ap)} W</span>
+                  <span className="switch-panel__conn-wattage">{getAPPoeWattage(ap)} W</span>
                 </li>
               )
             })}
           </ul>
         )}
-      </section>
-    </div>
+      </PanelSection>
+    </PanelShell>
   )
 }
 

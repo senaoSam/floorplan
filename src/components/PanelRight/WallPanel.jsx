@@ -2,8 +2,14 @@ import React, { useCallback } from 'react'
 import { useWallStore } from '@/store/useWallStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { MATERIAL_LIST, OPENING_TYPES, getMaterialById } from '@/constants/materials'
+import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
+import { NumberInput, Select, Button } from './_shared/PanelControls'
+import './_shared/shared.sass'
 import './WallPanel.sass'
 
+// Wall property panel — Identity / Material / Geometry / Openings.
+// The materials list and openings rows are bespoke layouts; everything else
+// uses the shared primitives.
 function WallPanel({ floorId, wallId }) {
   // 直接訂閱 wall 資料，store 更新時才會觸發 re-render
   const wall       = useWallStore((s) => (s.wallsByFloor[floorId] ?? []).find((w) => w.id === wallId))
@@ -18,8 +24,7 @@ function WallPanel({ floorId, wallId }) {
   }, [floorId, wallId, updateWall])
 
   const handleHeight = useCallback((field, value) => {
-    const num = parseFloat(value)
-    if (!isNaN(num) && num >= 0) updateWall(floorId, wallId, { [field]: num })
+    if (!isNaN(value) && value >= 0) updateWall(floorId, wallId, { [field]: value })
   }, [floorId, wallId, updateWall])
 
   const handleDelete = () => {
@@ -32,16 +37,14 @@ function WallPanel({ floorId, wallId }) {
   const len = Math.hypot(wall.endX - wall.startX, wall.endY - wall.startY).toFixed(1)
 
   return (
-    <div className="wall-panel">
-      <div className="wall-panel__header">
-        <span className="wall-panel__title">牆體屬性</span>
-        <span className="wall-panel__meta">{len} px</span>
-        <button className="panel-delete-btn" onClick={handleDelete}>刪除</button>
-      </div>
+    <PanelShell accent="wall">
+      <PanelHeader
+        title={wall.name ?? '牆體屬性'}
+        meta={`長度 ${len} px`}
+        onDelete={handleDelete}
+      />
 
-      {/* 材質選擇 */}
-      <section className="wall-panel__section">
-        <p className="wall-panel__label">材質</p>
+      <PanelSection title="材質">
         <div className="wall-panel__materials">
           {MATERIAL_LIST.map((mat) => {
             const isActive = wall.material.id === mat.id
@@ -62,52 +65,43 @@ function WallPanel({ floorId, wallId }) {
             )
           })}
         </div>
-      </section>
+      </PanelSection>
 
-      {/* 高度設定 — 影響 3D 視覺與未來的樓板 / 跨樓層計算 */}
-      <section className="wall-panel__section">
-        <p className="wall-panel__label">高度（公尺）</p>
-        <div className="wall-panel__heights">
-          <label className="wall-panel__height-field">
-            <span>頂部</span>
-            <input
-              type="number"
-              min="0"
-              step="0.1"
-              value={wall.topHeight}
-              onChange={(e) => handleHeight('topHeight', e.target.value)}
-            />
-            <span>m</span>
-          </label>
-          <label className="wall-panel__height-field">
-            <span>底部</span>
-            <input
-              type="number"
-              min="0"
-              step="0.1"
-              value={wall.bottomHeight}
-              onChange={(e) => handleHeight('bottomHeight', e.target.value)}
-            />
-            <span>m</span>
-          </label>
-        </div>
-      </section>
+      <PanelSection title="高度">
+        <PanelField label="頂部">
+          <NumberInput
+            value={wall.topHeight}
+            min={0}
+            step={0.1}
+            unit="m"
+            width={70}
+            onChange={(v) => handleHeight('topHeight', v)}
+          />
+        </PanelField>
+        <PanelField label="底部">
+          <NumberInput
+            value={wall.bottomHeight}
+            min={0}
+            step={0.1}
+            unit="m"
+            width={70}
+            onChange={(v) => handleHeight('bottomHeight', v)}
+          />
+        </PanelField>
+      </PanelSection>
 
-      {/* 門窗 */}
       {(wall.openings ?? []).length > 0 && (
-        <section className="wall-panel__section">
-          <p className="wall-panel__label">門窗</p>
+        <PanelSection title="門窗">
           <div className="wall-panel__openings">
             {wall.openings.map((op) => {
               const ot = OPENING_TYPES[op.type === 'window' ? 'WINDOW' : 'DOOR']
               const handleFracChange = (field, raw) => {
-                const pct = parseInt(raw, 10)
-                if (isNaN(pct)) return
-                const frac = Math.max(0, Math.min(100, pct)) / 100
+                if (isNaN(raw)) return
+                const frac = Math.max(0, Math.min(100, raw)) / 100
                 const newStart = field === 'startFrac' ? frac : op.startFrac
                 const newEnd   = field === 'endFrac'   ? frac : op.endFrac
                 if (newStart >= newEnd) return
-                // 檢查與其他 opening 是否重疊
+                // Skip if it would overlap another opening on the same wall.
                 const others = wall.openings.filter((o) => o.id !== op.id)
                 const overlaps = others.some((o) => newStart < o.endFrac && newEnd > o.startFrac)
                 if (overlaps) return
@@ -119,10 +113,6 @@ function WallPanel({ floorId, wallId }) {
                 const defaultMat = getMaterialById(newOt.defaultMaterial)
                 updateOpening(floorId, wallId, op.id, { type: newType, material: defaultMat })
               }
-              const handleMaterialChange = (matId) => {
-                const mat = getMaterialById(matId)
-                updateOpening(floorId, wallId, op.id, { material: mat })
-              }
               return (
                 <div key={op.id} className="wall-panel__opening-item">
                   <button
@@ -133,52 +123,46 @@ function WallPanel({ floorId, wallId }) {
                   >
                     {ot.label}
                   </button>
-                  <select
-                    className="wall-panel__opening-mat-select"
+                  <Select
                     value={op.material?.id ?? ''}
-                    onChange={(e) => handleMaterialChange(e.target.value)}
-                  >
-                    {MATERIAL_LIST.map((mat) => (
-                      <option key={mat.id} value={mat.id}>{mat.label} ({mat.dbLoss} dB)</option>
-                    ))}
-                  </select>
+                    onChange={(matId) => updateOpening(floorId, wallId, op.id, { material: getMaterialById(matId) })}
+                    options={MATERIAL_LIST.map((m) => ({ value: m.id, label: `${m.label} (${m.dbLoss} dB)` }))}
+                    className="wall-panel__opening-mat-select"
+                  />
                   <div className="wall-panel__opening-inputs">
-                    <input
-                      className="wall-panel__opening-input"
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="1"
+                    <NumberInput
                       value={Math.round(op.startFrac * 100)}
-                      onChange={(e) => handleFracChange('startFrac', e.target.value)}
+                      min={0}
+                      max={100}
+                      step={1}
+                      width={42}
+                      onChange={(v) => handleFracChange('startFrac', v)}
                     />
                     <span className="wall-panel__opening-sep">~</span>
-                    <input
-                      className="wall-panel__opening-input"
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="1"
+                    <NumberInput
                       value={Math.round(op.endFrac * 100)}
-                      onChange={(e) => handleFracChange('endFrac', e.target.value)}
+                      min={0}
+                      max={100}
+                      step={1}
+                      width={42}
+                      onChange={(v) => handleFracChange('endFrac', v)}
                     />
                     <span className="wall-panel__opening-pct">%</span>
                   </div>
-                  <button
-                    className="wall-panel__opening-del"
+                  <Button
+                    variant="ghost"
                     onClick={() => removeOpening(floorId, wallId, op.id)}
-                    title="刪除"
+                    className="wall-panel__opening-del"
                   >
                     ×
-                  </button>
+                  </Button>
                 </div>
               )
             })}
           </div>
-        </section>
+        </PanelSection>
       )}
-
-    </div>
+    </PanelShell>
   )
 }
 

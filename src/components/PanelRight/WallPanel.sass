@@ -1,55 +1,12 @@
 @use '@/styles/variables' as *
 
+// 24-3 Slimmed WallPanel-specific styles. Layout (header / section / field /
+// button) lives in _shared/shared.sass. This file keeps only the bits with
+// no shared equivalent: the material picker list and the opening row.
+
 .wall-panel
-  display: flex
-  flex-direction: column
-  gap: 0
-  height: 100%
-
-  &__header
-    display: flex
-    align-items: center
-    justify-content: space-between
-    padding: 12px 14px 10px
-    border-bottom: 1px solid $border-color
-
-  &__title
-    font-size: 13px
-    font-weight: 600
-    color: $text-primary
-
-  &__meta
-    font-size: 11px
-    color: $text-secondary
-
-  &__section
-    padding: 12px 14px
-    border-bottom: 1px solid $border-color
-
-    &--disabled
-      opacity: 0.4
-      pointer-events: none
-
-  &__coming-soon
-    font-size: 10px
-    font-weight: 400
-    color: $text-secondary
-    background: rgba(255, 255, 255, 0.08)
-    padding: 1px 6px
-    border-radius: 4px
-    margin-left: 6px
-    text-transform: none
-    letter-spacing: 0
-
-  &__label
-    font-size: 11px
-    font-weight: 600
-    color: $text-secondary
-    text-transform: uppercase
-    letter-spacing: 0.4px
-    margin-bottom: 8px
-
-  // 材質清單
+  // 材質清單 — vertical list of colour-swatch buttons. Active state uses
+  // the panel's accent (var(--panel-accent) set on .pnl by group).
   &__materials
     display: flex
     flex-direction: column
@@ -72,8 +29,8 @@
       background: rgba(255, 255, 255, 0.06)
 
     &--active
-      background: rgba($accent, 0.1)
-      border-color: rgba($accent, 0.4)
+      background: var(--panel-accent-soft, rgba(148, 163, 184, 0.15))
+      border-color: var(--panel-accent, $accent)
 
   &__mat-color
     width: 14px
@@ -91,39 +48,9 @@
     font-size: 11px
     color: $text-secondary
 
-  // 高度輸入
-  &__heights
-    display: flex
-    flex-direction: column
-    gap: 8px
-
-  &__height-field
-    display: flex
-    align-items: center
-    gap: 8px
-    font-size: 12px
-    color: $text-secondary
-
-    span:first-child
-      width: 32px
-
-    input
-      flex: 1
-      background: rgba(255, 255, 255, 0.07)
-      border: 1px solid $border-color
-      border-radius: 6px
-      color: $text-primary
-      font-size: 13px
-      padding: 5px 8px
-      outline: none
-
-      &:focus
-        border-color: $accent
-
-    span:last-child
-      width: 16px
-
-  // 門窗清單
+  // 門窗 — dense single-row item (type badge + material select + start~end %
+  // inputs + delete). Not worth modelling as <PanelField> since it has too
+  // many controls per row.
   &__openings
     display: flex
     flex-direction: column
@@ -156,21 +83,6 @@
   &__opening-mat-select
     flex: 1
     min-width: 0
-    background: rgba(255, 255, 255, 0.07)
-    border: 1px solid $border-color
-    border-radius: 4px
-    color: $text-primary
-    font-size: 11px
-    padding: 2px 4px
-    outline: none
-    cursor: pointer
-
-    &:focus
-      border-color: $accent
-
-    option
-      background: $bg-secondary
-      color: $text-primary
 
   &__opening-inputs
     display: flex
@@ -179,51 +91,18 @@
     flex: 1
     justify-content: flex-end
 
-  &__opening-input
-    width: 42px
-    background: rgba(255, 255, 255, 0.07)
-    border: 1px solid $border-color
-    border-radius: 4px
-    color: $text-primary
-    font-size: 12px
-    padding: 2px 4px
-    outline: none
-    text-align: center
-
-    &:focus
-      border-color: $accent
-
-    // 隱藏 spin buttons
-    -moz-appearance: textfield
-    &::-webkit-outer-spin-button,
-    &::-webkit-inner-spin-button
-      -webkit-appearance: none
-      margin: 0
-
-  &__opening-sep
-    font-size: 11px
-    color: $text-secondary
-
+  &__opening-sep,
   &__opening-pct
     font-size: 11px
     color: $text-secondary
 
   &__opening-del
-    width: 18px
-    height: 18px
-    border: none
-    border-radius: 3px
-    background: transparent
-    color: $text-secondary
+    width: 22px
+    height: 22px
+    padding: 0
     font-size: 14px
     line-height: 1
-    cursor: pointer
-    display: flex
-    align-items: center
-    justify-content: center
-    flex-shrink: 0
 
     &:hover
-      background: rgba(231, 76, 60, 0.2)
-      color: #e74c3c
-
+      background: rgba(231, 76, 60, 0.18)
+      color: #f87171
