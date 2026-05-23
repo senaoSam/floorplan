@@ -39,7 +39,7 @@ function RiserPanel({ riserId }) {
     <PanelShell accent="cable_riser">
       <PanelHeader title={riser.name} onDelete={handleDelete} />
 
-      <PanelSection title="位置">
+      <PanelSection title="幾何">
         <PanelField label="X (canvas px)">{Math.round(riser.x)}</PanelField>
         <PanelField label="Y (canvas px)">{Math.round(riser.y)}</PanelField>
         <div style={{ fontSize: 11, color: 'var(--text-secondary, #94a3b8)' }}>

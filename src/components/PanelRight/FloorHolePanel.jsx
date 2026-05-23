@@ -56,7 +56,7 @@ function FloorHolePanel({ floorId, holeId }) {
         <PanelField label="頂點數">{hole.points.length / 2}</PanelField>
       </PanelSection>
 
-      <PanelSection title="垂直延伸範圍">
+      <PanelSection title="跨樓層範圍">
         <PanelField label="底" hint={`底層所在樓層`}>
           <Select value={bottomId} onChange={setBottom} options={floorOptions} />
         </PanelField>

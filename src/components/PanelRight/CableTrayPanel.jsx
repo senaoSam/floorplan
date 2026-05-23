@@ -124,7 +124,7 @@ function CableTrayPanel({ floorId, trayId }) {
         onDelete={handleDelete}
       />
 
-      <PanelSection title="Identity / 身份">
+      <PanelSection title="識別">
         <PanelField label="名稱" hint="自動命名 TRAY-{樓層}-{序號}；可手動覆寫">
           <TextInput
             value={tray.name ?? ''}
@@ -149,8 +149,8 @@ function CableTrayPanel({ floorId, trayId }) {
         </div>
       </PanelSection>
 
-      <PanelSection title="Path / 路徑">
-        <PanelField label="幾何">
+      <PanelSection title="幾何">
+        <PanelField label="路徑">
           <span>
             {tray.points.length} 個頂點 ·
             {lengthM != null ? ` ${lengthM.toFixed(2)} m` : ' 需先校正比例尺'}
@@ -215,7 +215,7 @@ function CableTrayPanel({ floorId, trayId }) {
       </PanelSection>
 
       {fill && (
-        <PanelSection title="Load / 負載">
+        <PanelSection title="狀態">
           <PanelField label={
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               容量
@@ -300,7 +300,7 @@ function CableTrayPanel({ floorId, trayId }) {
       )}
 
       {issues.length > 0 && (
-        <PanelSection title={`Issues / 問題 (${issues.length})`}>
+        <PanelSection title={`警告 (${issues.length})`}>
           <ul className="tray-issue-list">
             {issues.map((it, i) => (
               <li key={i} className="tray-issue" style={{ borderLeftColor: it.color }}>

@@ -356,7 +356,7 @@ function APPanel({ floorId, apId }) {
       </PanelSection>
 
       {route && (
-        <PanelSection title="線纜">
+        <PanelSection title="狀態 / 線纜">
           {route.routeStatus === 'unroutable' ? (
             <div className="ap-panel__hint" style={{ color: '#ef4444' }}>
               ⚠ 同樓層沒有 Switch，AP 無法接線

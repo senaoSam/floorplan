@@ -137,7 +137,7 @@ function SwitchPanel({ floorId, swId }) {
         </PanelField>
       </PanelSection>
 
-      <PanelSection title="容量">
+      <PanelSection title="狀態">
         <PanelField
           label="Port 數"
           hint={portOver
