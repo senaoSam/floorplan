@@ -315,7 +315,7 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 
 | #     | 狀態 | Task                                                                              |
 | ----- | ---- | --------------------------------------------------------------------------------- |
-| 22-1  | ⬜   | CSV Planning BOM export（per-AP cable / tray length / fill ratio）                  |
+| 22-1  | ✅   | CSV Planning BOM export — 單檔 4 區塊（AP CABLES / S2S / CABLE TRAYS / SUMMARY），UTF-8 BOM 防中文亂碼，CRLF 結尾 Excel 友善；UI 入口 = 線纜總結 panel 底部「⬇ 匯出 CSV」按鈕 |
 | 22-2  | ⬜   | PDF report（平面圖 + 統計表 + warnings）                                              |
 | 22-3  | ⬜   | SVG / PNG plan view export                                                          |
 | 22-4  | ⬜   | DXF export（DWG 視需求再評估）                                                       |

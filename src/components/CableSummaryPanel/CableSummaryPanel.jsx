@@ -6,6 +6,7 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { computeRoutes } from '@/features/cable/computeRoutes'
 import { computeTrayBOM } from '@/features/cable/computeTrayBOM'
 import { computeTrayCableLoads, computeTrayFill } from '@/features/cable/computeTrayFill'
+import { buildPlanningBOMCsv, triggerCSVDownload } from '@/features/cable/exportPlanningBOM'
 import './CableSummaryPanel.sass'
 
 // Building-wide cable BOM + per-route-status counts + unroutable list.
@@ -135,6 +136,35 @@ function CableSummaryPanel() {
   const handleNavigateTray = (trayId, floorId) => {
     setActiveFloor(floorId)
     setSelected(trayId, 'cable_tray')
+  }
+
+  // 22-1 CSV export — re-derive routes / switchLinks / per-tray fill on demand
+  // (cheap; only fires on click). Keeping the live `stats` memo lean.
+  const handleExportCsv = () => {
+    const { routes, switchLinks } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
+    const trayLoads = computeTrayCableLoads({ routes, switchLinks, traysByFloor })
+    const profile = getCapacityProfile(capacityProfile, customCapacity)
+    const trayFillByKey = new Map()
+    for (const f of floors) {
+      for (const tray of traysByFloor[f.id] ?? []) {
+        const key = `${f.id}|${tray.id}`
+        const load = trayLoads.get(key) ?? { count: 0, copperCount: 0, fiberCount: 0 }
+        trayFillByKey.set(key, computeTrayFill({ tray, load, profile }))
+      }
+    }
+    const csv = buildPlanningBOMCsv({
+      floors,
+      apsByFloor,
+      switchesByFloor,
+      routes,
+      switchLinks,
+      trayBOM,
+      trayFillByKey,
+      traysByFloor,
+      wasteFactor,
+    })
+    const stamp = new Date().toISOString().slice(0, 10)  // YYYY-MM-DD
+    triggerCSVDownload(csv, `floorplan-bom-${stamp}.csv`)
   }
 
   const sortedFloorEntries = [...stats.byFloor.entries()].sort((a, b) => {
@@ -411,6 +441,23 @@ function CableSummaryPanel() {
               ))}
             </section>
           )}
+
+          {/* 22-1 CSV export — wraps everything above into a single file.
+              Sits at the bottom so the user has scrolled past the live
+              summary first (they shouldn't blindly export numbers they
+              haven't seen). */}
+          <section className="cable-summary__section">
+            <button
+              type="button"
+              className="cable-summary__export-btn"
+              onClick={handleExportCsv}
+            >
+              ⬇ 匯出 CSV
+            </button>
+            <p className="cable-summary__hint">
+              一檔 4 區塊：AP 線、S2S、Tray、總計；Excel / Google Sheets 直接打開
+            </p>
+          </section>
         </div>
       )}
     </div>

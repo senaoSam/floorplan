@@ -186,3 +186,24 @@
       &:hover
         background: rgba(255, 255, 255, 0.05)
         color: $text-primary
+
+  // 22-1 CSV export CTA — sits in the last section, full-width pill button
+  // so it visually anchors as the panel's wrap-up action.
+  &__export-btn
+    display: flex
+    align-items: center
+    justify-content: center
+    gap: 6px
+    width: 100%
+    padding: 7px 12px
+    border: 1px solid $accent
+    border-radius: 6px
+    background: rgba(0, 229, 255, 0.1)
+    color: $accent
+    font-size: 12px
+    font-weight: 600
+    cursor: pointer
+    transition: background 0.12s
+
+    &:hover
+      background: rgba(0, 229, 255, 0.18)

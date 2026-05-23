@@ -343,7 +343,7 @@ const PHASES = [
       {
         layer: 'Layer 22 — Export',
         items: [
-          { id: '22-1', done: false, text: 'CSV Planning BOM export' },
+          { id: '22-1', done: true,  text: 'CSV Planning BOM export（4 區塊：AP CABLES / S2S / CABLE TRAYS / SUMMARY）' },
           { id: '22-2', done: false, text: 'PDF report（平面圖 + 統計 + warnings）' },
           { id: '22-3', done: false, text: 'SVG / PNG plan view export' },
           { id: '22-4', done: false, text: 'DXF export（DWG 之後再評估）' },
