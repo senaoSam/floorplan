@@ -143,7 +143,32 @@ function Editor2D() {
   // 23-2b Single source of truth for Layer interaction policy under the
   // active mode. Replaces the scattered `isXMode` checks the layers used to
   // each maintain on their own.
-  const capability = React.useMemo(() => getModeCapability(editorMode), [editorMode])
+  const baseCapability = React.useMemo(() => getModeCapability(editorMode), [editorMode])
+
+  // 23-3f Has the user started but not finished a draft? Right-click is bound
+  // to "cancel / commit draft" in that state, so we must NOT also open a
+  // context menu. Likewise the weak hover hint would be misleading — the user
+  // is mid-drawing, not browsing. Stripping both flags when a draft is active
+  // means non-SELECT modes get the new right-click-anywhere behaviour ONLY
+  // when there's no in-progress draft to compete with.
+  const draftActive = (
+    !!wallDrawStart ||
+    scopePoints.length > 0 ||
+    floorHolePoints.length > 0 ||
+    trayDraftPoints.length > 0 ||
+    !!cropStart ||
+    !!scalePt1 ||
+    (dwWallId != null && dwStartFrac != null)
+  )
+
+  const capability = React.useMemo(() => {
+    if (!draftActive) return baseCapability
+    return {
+      ...baseCapability,
+      allowContextMenu: false,
+      allowCommandHover: { struct: false, wireless: false, cable: false, meta: false },
+    }
+  }, [baseCapability, draftActive])
 
   // 23-2c Right-click object context menu — shared slice in editor store.
   const contextMenu      = useEditorStore((s) => s.contextMenu)
@@ -2128,15 +2153,29 @@ function Editor2D() {
           return null
         }
 
-        const items = [
-          {
-            id: 'delete',
-            label: '刪除',
-            danger: true,
-            shortcut: 'Del',
-            onClick: onDelete,
-          },
-        ]
+        // 23-3f In non-SELECT modes the user might right-click an object only
+        // to inspect / edit its panel without leaving the current mode. Add an
+        // explicit "選取" item so they can promote the target into selection
+        // without abandoning their drawing intent. Skipped in SELECT (left-
+        // click already selects) and when the target IS the current selection.
+        const showSelectItem =
+          editorMode !== EDITOR_MODE.SELECT &&
+          !(selectedId === targetId && selectedType === targetType)
+        const items = []
+        if (showSelectItem) {
+          items.push({
+            id: 'select',
+            label: '選取',
+            onClick: () => { setSelected(targetId, targetType) },
+          })
+        }
+        items.push({
+          id: 'delete',
+          label: '刪除',
+          danger: true,
+          shortcut: 'Del',
+          onClick: onDelete,
+        })
 
         return (
           <ObjectContextMenu

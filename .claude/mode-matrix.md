@@ -34,7 +34,8 @@ use as capability flag names.
 | Flag | What it controls | Today's owner |
 |---|---|---|
 | `allowSelectClick` | Left-click on an existing object selects it (and opens its panel). | Most Layers wire `onClick={onXClick}` unconditionally. |
-| `allowSelectHover` | Hover highlight (hover state, stroke thicken, snap halo on related objects). | Mostly unconditional; some Layers gate via `dimmed`. |
+| `allowSelectHover` | **STRONG** hover highlight (stroke thicken / glow, move cursor) — implies "left-click will select / drag". | Mostly unconditional; some Layers gate via `dimmed`. |
+| `allowCommandHover` (23-3f) | **WEAK** hover highlight (faint outline only) — implies "right-click will open command menu". Visually quieter than `allowSelectHover` so non-SELECT modes don't pretend objects are selectable. | New; per-Layer 23-3f addition. |
 | `allowDragExisting` | Existing object can be dragged to a new position. | `WallLayer` gates on `!isDoorWindowMode && !isTrayMode`; AP/Switch/Scope/FloorHole/Riser always draggable; tray gates on `!isDrawingMode && !dimmed`. |
 | `showQuickDelete` | Red X badge on hover. | `WallLayer` hides under door-window mode; everyone else always shows. |
 | `showHandles` | Per-vertex / endpoint handles (wall endpoints, tray vertices, scope/scope-hole vertex handles when selected). | `WallLayer` hides under door-window mode; tray hides under drawing mode. |
@@ -191,12 +192,20 @@ Per-object hover cursor overrides should only fire when `allowDragExisting` or
 
 ### 3.8 `allowContextMenu`
 
-| Mode | Target | Behaviour |
+**23-3f update**: right-click on an object opens the command menu **in every mode without an active draft**. The draft-cancel semantics still take precedence whenever a draft is in progress (Editor2D computes `draftActive` and dynamically strips `allowContextMenu` + `allowCommandHover` for that frame).
+
+| Mode (no draft active) | Object right-click | Empty canvas right-click |
 |---|---|---|
-| SELECT 選取 | Tray | Open `TrayContextMenu` (rename/split/extend/merge/convert/delete) — 20-4 |
-| SELECT 選取 | Other objects | Reserved (future right-click menus per type) |
-| DRAW_WALL 畫牆 / DRAW_SCOPE 範圍 / DRAW_FLOOR_HOLE 中庭 / DRAW_SCALE 比例尺 / DRAW_CABLE_TRAY 繪製線槽 / DOOR_WINDOW 門窗 / CROP_IMAGE 裁切 | (any) | Right-click cancels / commits the in-progress draft (Editor2D `handleContextMenu` lines 1294–1373); never opens object menus. |
-| PAN 平移 / MARQUEE_SELECT 框選 / PLACE_* 放置類 / ALIGN_FLOOR 樓層對齊 | (any) | No-op |
+| SELECT 選取 | Open object menu (rename / 刪除; "選取" item hidden — left-click already does that) | No-op |
+| MARQUEE_SELECT 框選 / PAN 平移 | Open object menu (incl. "選取" item to promote into selection without leaving mode) | No-op |
+| DRAW_WALL 畫牆 / DOOR_WINDOW 門窗 / DRAW_SCOPE 範圍 / DRAW_FLOOR_HOLE 中庭 / PLACE_AP / PLACE_SWITCH / DRAW_CABLE_TRAY 繪製線槽 / PLACE_RISER / DRAW_SCALE 比例尺 | Open object menu (incl. "選取") | No-op |
+| CROP_IMAGE 裁切 / ALIGN_FLOOR 樓層對齊 | No object menu (these modes' draft IS the crop box / floor transform itself, no atomic "no draft" state) | No-op |
+
+Tray uses its own `TrayContextMenu` (rename / split / extend / merge / convert / delete — 20-4), wired through the same dispatcher.
+
+| Mode | Object right-click WITH draft active | Empty canvas right-click |
+|---|---|---|
+| Any mode with `draftActive === true` (wall draft / scope polygon / floor-hole polygon / tray polyline / scale points / crop box / door-window first click) | Cancel / commit the in-progress draft (NOT open menu) | Same — cancel draft |
 
 ---
 

@@ -60,10 +60,15 @@ function EndpointHandle({ x, y, which, wallId, walls, floorId, snapRadius, inver
 
 function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems = [], onWallClick, onWallContextMenu, onWallDragMove, onWallDragEnd, isDrawMode, isDrawingActive, isTrayMode, snapRadius, viewportScale, setHoverCursor, onExtendFromEndpoint, isDoorWindowMode, dwWallId, dwStartFrac, dwOpeningType, capability }) {
   // Capability flags (23-2b). Layer never reads `editorMode` directly.
-  const allowDrag   = !!capability?.allowDragExisting?.struct
-  const allowHover  = !!capability?.allowSelectHover?.struct
-  const allowClick  = !!capability?.allowSelectClick?.struct
-  const showHandles = !!capability?.showHandles?.struct
+  const allowDrag      = !!capability?.allowDragExisting?.struct
+  const allowHover     = !!capability?.allowSelectHover?.struct
+  // 23-3f weak hover: signals "right-click here will open command menu" without
+  // promising selectability. Strictly weaker than allowSelectHover — different
+  // visual treatment (faint outline only, no move cursor).
+  const allowCmdHover  = !!capability?.allowCommandHover?.struct
+  const allowAnyHover  = allowHover || allowCmdHover
+  const allowClick     = !!capability?.allowSelectClick?.struct
+  const showHandles    = !!capability?.showHandles?.struct
   // DOOR_WINDOW is a special read-only-hover case: hover/click are on for wall
   // (to pick host), but drag must stay off — capability flags already encode
   // that (allowDragExisting.struct === false in DOOR_WINDOW), so allowDrag is
@@ -99,8 +104,10 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems
             key={wall.id}
             draggable={allowDrag}
             onMouseEnter={() => {
+              // Cursor cue only when left-click would actually do something
+              // (select / drag). Weak-hover modes keep their mode cursor.
               if (allowDrag) setHoverCursor?.('move')
-              if (allowHover) setHoveredId(wall.id)
+              if (allowAnyHover) setHoveredId(wall.id)
             }}
             onMouseLeave={() => { setHoverCursor?.(null); setHoveredId(null) }}
             onDragStart={(e) => {
@@ -126,13 +133,27 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems
             }}
           >
             {/* hover 發光（門窗模式下用不同顏色提示） */}
-            {isHovered && !isSelected && !isDoorWindowMode && (
+            {/* 23-3f Strong hover (SELECT-like) = thick white glow. Weak
+                hover (allowCmdHover only) = thin faint outline that just
+                says "you're aimed at this object" without screaming
+                "I'm selectable". */}
+            {isHovered && !isSelected && !isDoorWindowMode && allowHover && (
               <Line
                 points={[wall.startX, wall.startY, wall.endX, wall.endY]}
                 stroke="#fff"
                 strokeWidth={18}
                 lineCap="round"
                 opacity={0.3}
+                listening={false}
+              />
+            )}
+            {isHovered && !isSelected && !isDoorWindowMode && !allowHover && allowCmdHover && (
+              <Line
+                points={[wall.startX, wall.startY, wall.endX, wall.endY]}
+                stroke="#fff"
+                strokeWidth={8}
+                lineCap="round"
+                opacity={0.15}
                 listening={false}
               />
             )}

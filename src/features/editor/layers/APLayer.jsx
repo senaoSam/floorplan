@@ -40,7 +40,7 @@ const FREQ_LABEL = {
   6:   '6G',
 }
 
-function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, allowHover, allowClick, allowContextMenu, onClick, onContextMenu, onMoved, onDragMove, isDrawingActive, showAPInfo, inverseScale, setHoverCursor }) {
+function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, allowHover, allowCmdHover, allowAnyHover, allowClick, allowContextMenu, onClick, onContextMenu, onMoved, onDragMove, isDrawingActive, showAPInfo, inverseScale, setHoverCursor }) {
   const color = FREQ_COLOR[ap.frequency] ?? '#4fc3f7'
   const ringColor = isSelected ? '#e74c3c' : color
   const s = inverseScale
@@ -65,7 +65,7 @@ function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, 
       draggable={isDraggable}
       onMouseEnter={() => {
         if (isDraggable) setHoverCursor?.('grab')
-        if (allowHover) onHover(ap.id)
+        if (allowAnyHover) onHover(ap.id)
       }}
       onMouseLeave={() => { setHoverCursor?.(null); onHover(null) }}
       onClick={(e) => {
@@ -99,6 +99,18 @@ function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, 
           stroke={FOCUS_HALO}
           strokeWidth={3 * s}
           opacity={0.85}
+          listening={false}
+        />
+      )}
+      {/* 23-3f Weak hover ring (command target) — only in non-SELECT modes.
+          Skipped when strong-hover (allowHover) is on, since strong hover's
+          other visuals already make targeting obvious. */}
+      {isHovered && !isSelected && !allowHover && allowCmdHover && (
+        <Circle
+          radius={14 * s}
+          stroke="#fff"
+          strokeWidth={1.2 * s}
+          opacity={0.35}
           listening={false}
         />
       )}
@@ -227,6 +239,9 @@ function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPCon
   const allowDrag = !!capability?.allowDragExisting?.wireless
   const allowClick = !!capability?.allowSelectClick?.wireless
   const allowHover = !!capability?.allowSelectHover?.wireless
+  // 23-3f weak hover for command targeting in non-SELECT modes.
+  const allowCmdHover = !!capability?.allowCommandHover?.wireless
+  const allowAnyHover = allowHover || allowCmdHover
   const allowContextMenu = !!capability?.allowContextMenu
 
   const handleMoved = (id, x, y) => {
@@ -246,6 +261,8 @@ function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPCon
           onHover={setHoveredId}
           isDraggable={allowDrag}
           allowHover={allowHover}
+          allowCmdHover={allowCmdHover}
+          allowAnyHover={allowAnyHover}
           allowClick={allowClick}
           allowContextMenu={allowContextMenu}
           onClick={onAPClick}

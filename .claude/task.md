@@ -346,6 +346,7 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | 23-3c | ✅   | 七個物件 context menu items（最小版：重新命名 + 刪除）：Wall / AP / Switch / Riser / Scope / FloorHole / FloorImage |
 | 23-3d | ✅   | Playwright MCP 真實滑鼠驗證：7 物件 × right-click → 選單正確開；非 SELECT mode → 不開選單；全 mode hover → 0 DeleteButton；end-to-end rename / delete 動作正常 |
 | 23-3e | ✅   | 左右鍵完全分離：右鍵 dispatcher 拿掉 `setSelected(...)`；menu `onDelete` 只在「被刪物件 = 當前選取」時才 `clearSelected()`；Tray 的 `onSplit` / `onDelete` 同步調整 |
+| 23-3f | ✅   | 任何 mode（沒 draft 進行中時）都可右鍵物件開選單；新增 `allowCommandHover` flag + 弱 hover 視覺（faint outline，不變 cursor、不顯示 handle）；menu 加「選取」item（非 SELECT mode 顯示，點下去只 setSelected 不切 mode）；mode-matrix.md §2 / §3.8 更新 |
 
 **為什麼分這麼細**
 - 23-2 全部是抽象層 / 共用基礎建設，先一次到位

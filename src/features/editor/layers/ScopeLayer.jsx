@@ -98,6 +98,8 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
   const allowDrag        = !!capability?.allowDragExisting?.struct
   const allowClick       = !!capability?.allowSelectClick?.struct
   const allowHover       = !!capability?.allowSelectHover?.struct
+  const allowCmdHover    = !!capability?.allowCommandHover?.struct
+  const allowAnyHover    = allowHover || allowCmdHover
   const allowContextMenu = !!capability?.allowContextMenu
 
   return (
@@ -113,7 +115,7 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
             draggable={allowDrag}
             onMouseEnter={() => {
               if (allowDrag) setHoverCursor?.('move')
-              if (allowHover) setHoveredId(zone.id)
+              if (allowAnyHover) setHoveredId(zone.id)
             }}
             onMouseLeave={() => { setHoverCursor?.(null); setHoveredId(null) }}
             onDragStart={(e) => {
@@ -140,12 +142,14 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
             <Line
               points={zone.points}
               closed
-              fill={isHovered && !isSelected ? style.fill.replace('0.18', '0.35') : style.fill}
-              stroke={isSelected ? '#e74c3c' : isHovered ? '#fff' : style.stroke}
-              strokeWidth={isSelected ? 5 : isHovered ? 4 : 3}
+              // 23-3f gating: strong-hover-only visuals stay tied to allowHover,
+              // so weak-hover modes don't promise selectability with bright fills.
+              fill={(isHovered && allowHover && !isSelected) ? style.fill.replace('0.18', '0.35') : style.fill}
+              stroke={isSelected ? '#e74c3c' : (isHovered && allowHover) ? '#fff' : style.stroke}
+              strokeWidth={isSelected ? 5 : (isHovered && allowHover) ? 4 : 3}
               dash={zone.type === 'out' ? [8, 4] : undefined}
-              shadowColor={isHovered ? '#fff' : 'rgba(0,0,0,0.6)'}
-              shadowBlur={isHovered ? 8 : 4}
+              shadowColor={(isHovered && allowHover) ? '#fff' : 'rgba(0,0,0,0.6)'}
+              shadowBlur={(isHovered && allowHover) ? 8 : 4}
               shadowOffset={{ x: 0, y: 0 }}
               hitStrokeWidth={10}
               onClick={(e) => {
@@ -161,6 +165,17 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
                 onScopeContextMenu?.(zone.id, e)
               }}
             />
+            {/* 23-3f Weak hover outline (command target) */}
+            {isHovered && !isSelected && !allowHover && allowCmdHover && (
+              <Line
+                points={zone.points}
+                closed
+                stroke="#fff"
+                strokeWidth={1.5}
+                opacity={0.35}
+                listening={false}
+              />
+            )}
           </Group>
         )
       })}

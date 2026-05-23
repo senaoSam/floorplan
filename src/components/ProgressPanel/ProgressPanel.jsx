@@ -367,6 +367,7 @@ const PHASES = [
           { id: '23-3c', done: true, text: '7 物件 context menu items（最小版：rename + delete）' },
           { id: '23-3d', done: true, text: 'Playwright MCP 真實滑鼠驗證（7 物件 × right-click + hover X 消失）' },
           { id: '23-3e', done: true, text: '左右鍵完全分離：右鍵不動 selection、刪除只清「被選的」物件' },
+          { id: '23-3f', done: true, text: '任何 mode 都可右鍵開選單（無 draft 時）+ 弱 hover 視覺 + menu 加「選取」item' },
         ],
       },
     ],

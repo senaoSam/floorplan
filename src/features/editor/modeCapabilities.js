@@ -39,9 +39,16 @@ function emptyCap() {
   return {
     // Click on existing object selects it (and opens panel).
     allowSelectClick: { struct: false, wireless: false, cable: false, meta: false },
-    // Hover highlight (stroke thicken / glow). Mode may still light snap halos
-    // through its own draft renderer regardless of this flag.
+    // STRONG hover highlight (stroke thicken / glow, move-cursor). Implies
+    // "left-click will select / drag". Use only when allowSelectClick or
+    // allowDragExisting is true for the category.
     allowSelectHover: { struct: false, wireless: false, cable: false, meta: false },
+    // WEAK hover highlight (faint outline only — no move cursor, no handles).
+    // 23-3f: signals "right-click here will open a context menu" without
+    // promising selectability. Modes that allow context menu but not drag/
+    // click should set this so users know what they're aiming at when they
+    // right-click in a draw / place mode.
+    allowCommandHover: { struct: false, wireless: false, cable: false, meta: false },
     // Object can be dragged to a new position.
     allowDragExisting: { struct: false, wireless: false, cable: false, meta: false },
     // Endpoint / vertex handles when the object is selected.
@@ -55,6 +62,10 @@ function emptyCap() {
     // allowDragExisting or allowSelectClick is true for that object.
     cursor: 'default',
     // Right-click opens object context menu (rename / delete / ...).
+    // 23-3f: Editor2D dynamically forces this OFF whenever a draft is in
+    // progress (wall draft / scope polygon / tray polyline / scale points /
+    // crop box / door-window first click), because right-click is already
+    // bound to "cancel draft" in that state.
     allowContextMenu: false,
     // Fade out objects of non-target categories to opacity ~0.4 so the canvas
     // visually reads as "you're in X mode". Empty array = nothing dimmed.
@@ -62,9 +73,18 @@ function emptyCap() {
   }
 }
 
+// 23-3f baseline for "non-SELECT mode without a draft in progress" — right-
+// click can target any object and weak hover signals which one. Editor2D
+// strips both flags off when a draft becomes active (see Step 2).
+const COMMAND_OVERLAY = {
+  allowCommandHover: { struct: true, wireless: true, cable: true, meta: true },
+  allowContextMenu: true,
+}
+
 const SELECT_CAP = {
   allowSelectClick:   { struct: true,  wireless: true,  cable: true,  meta: true  },
   allowSelectHover:   { struct: true,  wireless: true,  cable: true,  meta: true  },
+  // SELECT doesn't need allowCommandHover — strong hover already covers it.
   allowDragExisting:  { struct: true,  wireless: true,  cable: true,  meta: true  },
   showHandles:        { struct: true,  cable: true },
   showMagnet:         { tray: 'selectedOnly', riser: 'selectedOnly' },
@@ -75,16 +95,19 @@ const SELECT_CAP = {
 
 const PAN_CAP = {
   ...emptyCap(),
+  ...COMMAND_OVERLAY,
   cursor: 'grab',
 }
 
 const MARQUEE_CAP = {
   ...emptyCap(),
+  ...COMMAND_OVERLAY,
   cursor: 'crosshair',
 }
 
 const DRAW_WALL_CAP = {
   ...emptyCap(),
+  ...COMMAND_OVERLAY,
   cursor: 'crosshair',
   dimOthers: ['wireless', 'cable', 'meta'],
 }
@@ -99,6 +122,9 @@ const DOOR_WINDOW_CAP = (() => {
   // other capability flags to false.
   c.allowSelectClick.struct = true
   c.allowSelectHover.struct = true
+  // 23-3f: right-click on AP/switch/tray etc. should still open command menu.
+  c.allowCommandHover = { struct: true, wireless: true, cable: true, meta: true }
+  c.allowContextMenu = true
   c.cursor = 'crosshair'
   c.dimOthers = ['wireless', 'cable', 'meta']
   return c
@@ -106,24 +132,28 @@ const DOOR_WINDOW_CAP = (() => {
 
 const DRAW_SCOPE_CAP = {
   ...emptyCap(),
+  ...COMMAND_OVERLAY,
   cursor: 'crosshair',
   dimOthers: ['wireless', 'cable', 'meta'],
 }
 
 const DRAW_FLOOR_HOLE_CAP = {
   ...emptyCap(),
+  ...COMMAND_OVERLAY,
   cursor: 'crosshair',
   dimOthers: ['wireless', 'cable', 'meta'],
 }
 
 const PLACE_AP_CAP = {
   ...emptyCap(),
+  ...COMMAND_OVERLAY,
   cursor: 'crosshair',
   dimOthers: ['cable', 'meta'],
 }
 
 const PLACE_SWITCH_CAP = {
   ...emptyCap(),
+  ...COMMAND_OVERLAY,
   cursor: 'crosshair',
   // Switch hub snap to magnets: show all tray magnet halos so the user knows
   // which trays will auto-snap (17-3 spec §4).
@@ -133,6 +163,7 @@ const PLACE_SWITCH_CAP = {
 
 const DRAW_CABLE_TRAY_CAP = {
   ...emptyCap(),
+  ...COMMAND_OVERLAY,
   cursor: 'crosshair',
   // Drawing visibility: show every tray + riser magnet so user can plan snaps.
   showMagnet: { tray: 'all', riser: 'all' },
@@ -141,6 +172,7 @@ const DRAW_CABLE_TRAY_CAP = {
 
 const PLACE_RISER_CAP = {
   ...emptyCap(),
+  ...COMMAND_OVERLAY,
   cursor: 'crosshair',
   showMagnet: { tray: 'never', riser: 'all' },
   dimOthers: ['wireless', 'meta'],
@@ -148,6 +180,7 @@ const PLACE_RISER_CAP = {
 
 const DRAW_SCALE_CAP = {
   ...emptyCap(),
+  ...COMMAND_OVERLAY,
   cursor: 'crosshair',
   dimOthers: ['struct', 'wireless', 'cable'],
 }

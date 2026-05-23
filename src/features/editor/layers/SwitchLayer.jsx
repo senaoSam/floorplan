@@ -30,7 +30,7 @@ const KIND_LABEL = {
   router: 'RTR',
 }
 
-function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover, isDraggable, allowHover, allowClick, allowContextMenu, onClick, onContextMenu, onMoved, onDragMove, inverseScale, setHoverCursor }) {
+function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover, isDraggable, allowHover, allowCmdHover, allowAnyHover, allowClick, allowContextMenu, onClick, onContextMenu, onMoved, onDragMove, inverseScale, setHoverCursor }) {
   const s = inverseScale
   const color = getSwitchKindColor(sw.kind)
   const strokeColor = isSelected ? '#e74c3c' : color
@@ -48,7 +48,7 @@ function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover
       draggable={isDraggable}
       onMouseEnter={() => {
         if (isDraggable) setHoverCursor?.('grab')
-        if (allowHover) onHover(sw.id)
+        if (allowAnyHover) onHover(sw.id)
       }}
       onMouseLeave={() => { setHoverCursor?.(null); onHover(null) }}
       onClick={(e) => {
@@ -99,6 +99,20 @@ function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover
           stroke={FOCUS_HALO}
           strokeWidth={3 * s}
           opacity={0.85}
+          listening={false}
+        />
+      )}
+      {/* 23-3f Weak hover ring (command target) — only when strong hover off */}
+      {isHovered && !isSelected && !allowHover && allowCmdHover && (
+        <Rect
+          x={-w / 2 - 2 * s}
+          y={-h / 2 - 2 * s}
+          width={w + 4 * s}
+          height={h + 4 * s}
+          cornerRadius={4 * s}
+          stroke="#fff"
+          strokeWidth={1.2 * s}
+          opacity={0.35}
           listening={false}
         />
       )}
@@ -219,6 +233,8 @@ function SwitchLayer({ floorId, selectedSwitchId, selectedItems = [], onSwitchCl
   const allowDrag        = !!capability?.allowDragExisting?.cable
   const allowClick       = !!capability?.allowSelectClick?.cable
   const allowHover       = !!capability?.allowSelectHover?.cable
+  const allowCmdHover    = !!capability?.allowCommandHover?.cable
+  const allowAnyHover    = allowHover || allowCmdHover
   const allowContextMenu = !!capability?.allowContextMenu
 
   return (
@@ -234,6 +250,8 @@ function SwitchLayer({ floorId, selectedSwitchId, selectedItems = [], onSwitchCl
           onHover={setHoveredId}
           isDraggable={allowDrag}
           allowHover={allowHover}
+          allowCmdHover={allowCmdHover}
+          allowAnyHover={allowAnyHover}
           allowClick={allowClick}
           allowContextMenu={allowContextMenu}
           onClick={onSwitchClick}

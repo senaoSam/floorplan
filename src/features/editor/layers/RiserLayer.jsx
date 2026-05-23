@@ -10,7 +10,7 @@ const RISER_SELECTED = '#e74c3c'
 const MAGNET_FILL    = 'rgba(167, 139, 250, 0.14)'
 const MAGNET_STROKE  = 'rgba(167, 139, 250, 0.5)'
 
-function RiserMarker({ riser, isSelected, isHovered, onHover, isDraggable, allowHover, allowClick, allowContextMenu, onClick, onContextMenu, onMoved, onDragMove, inverseScale, setHoverCursor, showMagnet, floorCount }) {
+function RiserMarker({ riser, isSelected, isHovered, onHover, isDraggable, allowHover, allowCmdHover, allowAnyHover, allowClick, allowContextMenu, onClick, onContextMenu, onMoved, onDragMove, inverseScale, setHoverCursor, showMagnet, floorCount }) {
   const s = inverseScale
   const strokeColor = isSelected ? RISER_SELECTED : RISER_COLOR
   const size = 18 * s
@@ -23,7 +23,7 @@ function RiserMarker({ riser, isSelected, isHovered, onHover, isDraggable, allow
       draggable={isDraggable}
       onMouseEnter={() => {
         if (isDraggable) setHoverCursor?.('grab')
-        if (allowHover) onHover(riser.id)
+        if (allowAnyHover) onHover(riser.id)
       }}
       onMouseLeave={() => { setHoverCursor?.(null); onHover(null) }}
       onClick={(e) => {
@@ -67,6 +67,9 @@ function RiserMarker({ riser, isSelected, isHovered, onHover, isDraggable, allow
         </>
       )}
       {/* Cross-section square — top-down view of the vertical shaft */}
+      {/* 23-3f isHovered alone isn't enough — thicker stroke implies select
+          affordance, so only apply it under strong hover (allowHover). Weak
+          hover gets a faint outer ring instead (below). */}
       <Rect
         x={-size / 2}
         y={-size / 2}
@@ -75,8 +78,22 @@ function RiserMarker({ riser, isSelected, isHovered, onHover, isDraggable, allow
         cornerRadius={2 * s}
         fill="#1f2937"
         stroke={strokeColor}
-        strokeWidth={(isSelected ? 2.5 : isHovered ? 2 : 1.5) * s}
+        strokeWidth={(isSelected ? 2.5 : (isHovered && allowHover) ? 2 : 1.5) * s}
       />
+      {/* 23-3f Weak hover ring — appears in non-SELECT modes only */}
+      {isHovered && !isSelected && !allowHover && allowCmdHover && (
+        <Rect
+          x={-size / 2 - 2 * s}
+          y={-size / 2 - 2 * s}
+          width={size + 4 * s}
+          height={size + 4 * s}
+          cornerRadius={3 * s}
+          stroke="#fff"
+          strokeWidth={1.2 * s}
+          opacity={0.35}
+          listening={false}
+        />
+      )}
       {/* Inner cross "+" — symbolises the vertical chase */}
       <Line
         points={[-size / 2 + 4 * s, 0, size / 2 - 4 * s, 0]}
@@ -143,6 +160,8 @@ function RiserLayer({ floorId, selectedRiserId, selectedItems = [], onRiserClick
   const allowDrag        = !!capability?.allowDragExisting?.cable
   const allowClick       = !!capability?.allowSelectClick?.cable
   const allowHover       = !!capability?.allowSelectHover?.cable
+  const allowCmdHover    = !!capability?.allowCommandHover?.cable
+  const allowAnyHover    = allowHover || allowCmdHover
   const allowContextMenu = !!capability?.allowContextMenu
   const magnetPolicy     = capability?.showMagnet?.riser ?? 'never'
 
@@ -164,6 +183,8 @@ function RiserLayer({ floorId, selectedRiserId, selectedItems = [], onRiserClick
             onHover={setHoveredId}
             isDraggable={allowDrag}
             allowHover={allowHover}
+            allowCmdHover={allowCmdHover}
+            allowAnyHover={allowAnyHover}
             allowClick={allowClick}
             allowContextMenu={allowContextMenu}
             onClick={onRiserClick}

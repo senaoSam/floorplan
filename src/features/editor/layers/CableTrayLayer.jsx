@@ -242,7 +242,7 @@ function VertexHandle({
 //   'interactiveOnly' — handles + per-segment hit-tests + snap halos, no
 //                       body / magnet / body-drag. Used by the overlay so
 //                       handles + segments float above APs / switches.
-function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, startExt, endExt, onHover, onClick, inverseScale, setHoverCursor, isDrawingMode, dimmed, allowDrag, allowHover, allowClick, onVertexDragMove, onVertexDragEnd, onDeleteVertex, onSplitVertex, onInsertVertex, onSplitSegment, onTranslate }) {
+function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, startExt, endExt, onHover, onClick, inverseScale, setHoverCursor, isDrawingMode, dimmed, allowDrag, allowHover, allowCmdHover, allowAnyHover, allowClick, onVertexDragMove, onVertexDragEnd, onDeleteVertex, onSplitVertex, onInsertVertex, onSplitSegment, onTranslate }) {
   const s = inverseScale
   const flat = tray.points.flatMap((p) => [p.x, p.y])
   const sys = getTraySystem(tray.system)
@@ -283,13 +283,13 @@ function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, 
         // Cursor cue: 'pointer' if a click would select; 'move' once the tray
         // is already selected (so a drag now translates it). Drawing mode is
         // handled by Stage-level cursor; we still want to signal selectability
-        // when allowed.
+        // when allowed. Weak-hover modes keep their mode cursor unchanged.
         if (isDrawingMode) {
           // Stage already shows 'crosshair' — don't override.
         } else if (allowDrag || allowClick) {
           setHoverCursor?.(isSelected ? 'move' : 'pointer')
         }
-        if (allowHover) onHover(tray.id)
+        if (allowAnyHover) onHover(tray.id)
       }}
       onMouseLeave={() => { setHoverCursor?.(null); onHover(null) }}
       onClick={(e) => {
@@ -416,8 +416,16 @@ function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, 
         const polyFlat = buildChannelPolygon(tray.points, halfW, startExt, endExt)
         // Selected border is drawn thicker so the white still reads through
         // any contrast against the system-coloured body underneath.
-        const borderW  = (isSelected ? 2.2 : isHovered ? 1.3 : 1.1) * s
+        // 23-3f Thicker border only under strong hover (allowHover); weak
+        // hover keeps base width — we don't want to imply selectability.
+        const borderW  = (isSelected ? 2.2 : (isHovered && allowHover) ? 1.3 : 1.1) * s
         const fillCol  = bodyFillCol
+        // Weak hover (command-target) outline drawn slightly outside the
+        // body polygon so it doesn't compete with the system colour.
+        const weakHover = isHovered && !isSelected && !allowHover && allowCmdHover
+        const weakOutlinePoly = weakHover
+          ? buildChannelPolygon(tray.points, halfW + 1.5 * s, startExt, endExt)
+          : null
         return (
           <>
             <Line
@@ -439,6 +447,18 @@ function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, 
               lineCap="round"
               listening={false}
             />
+            {weakOutlinePoly && (
+              <Line
+                points={weakOutlinePoly}
+                closed
+                stroke="#fff"
+                strokeWidth={1 * s}
+                opacity={0.35}
+                lineJoin="miter"
+                miterLimit={10}
+                listening={false}
+              />
+            )}
           </>
         )
       })()}
@@ -480,10 +500,14 @@ function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, 
 //                (handles + segments + snap halos). Mounted AFTER APLayer
 //                in Editor2D so the handles float above other layers.
 function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayClick, viewportScale, setHoverCursor, isDrawingMode, draftPoints, draftMagnetPx, mousePos, snapHint, draftAnchor, dimmed, toCanvasPos, renderMode = 'all', capability }) {
-  const allowDrag  = !!capability?.allowDragExisting?.cable
-  const allowClick = !!capability?.allowSelectClick?.cable
-  const allowHover = !!capability?.allowSelectHover?.cable
-  const magnetPolicy = capability?.showMagnet?.tray ?? 'never'
+  const allowDrag     = !!capability?.allowDragExisting?.cable
+  const allowClick    = !!capability?.allowSelectClick?.cable
+  const allowHover    = !!capability?.allowSelectHover?.cable
+  // 23-3f weak hover so the user can see which tray a right-click will target
+  // when they're in DRAW_WALL / PLACE_AP / etc.
+  const allowCmdHover = !!capability?.allowCommandHover?.cable
+  const allowAnyHover = allowHover || allowCmdHover
+  const magnetPolicy  = capability?.showMagnet?.tray ?? 'never'
   const allTrays      = useCableStore((s) => s.traysByFloor[floorId] ?? [])
   const trays = renderMode === 'overlay'
     ? allTrays.filter((t) => t.id === selectedTrayId)
@@ -585,6 +609,8 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
             dimmed={dimmed}
             allowDrag={allowDrag}
             allowHover={allowHover}
+            allowCmdHover={allowCmdHover}
+            allowAnyHover={allowAnyHover}
             allowClick={allowClick}
             onTranslate={(dx, dy) => {
               // Read fresh store state each tick — Konva fires dragmove faster
