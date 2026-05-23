@@ -102,64 +102,65 @@ function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover
           listening={false}
         />
       )}
-      {/* 23-3f Weak hover ring (command target) — only when strong hover off */}
-      {isHovered && !isSelected && !allowHover && allowCmdHover && (
-        <Rect
-          x={-w / 2 - 2 * s}
-          y={-h / 2 - 2 * s}
-          width={w + 4 * s}
-          height={h + 4 * s}
-          cornerRadius={4 * s}
-          stroke="#fff"
-          strokeWidth={1.2 * s}
-          opacity={0.35}
-          listening={false}
-        />
-      )}
-      {/* Chassis */}
-      <Rect
-        x={-w / 2}
-        y={-h / 2}
-        width={w}
-        height={h}
-        cornerRadius={3 * s}
-        fill="#1f2937"
-        stroke={strokeColor}
-        strokeWidth={(isSelected ? 2.5 : isHovered ? 2 : 1.5) * s}
-      />
-      {/* Port row (visual only) */}
-      {Array.from({ length: 8 }).map((_, i) => (
-        <Rect
-          key={i}
-          x={-w / 2 + (3 + i * 3) * s}
-          y={h / 2 - 4 * s}
-          width={2 * s}
-          height={2 * s}
-          fill={color}
-          listening={false}
-        />
-      ))}
-      {/* PoE badge */}
-      {sw.poeBudget > 0 && (
-        <Line
-          points={[-w / 2 + 3 * s, -h / 2 + 4 * s, -w / 2 + 7 * s, -h / 2 + 4 * s]}
-          stroke="#facc15"
-          strokeWidth={1.5 * s}
-          listening={false}
-        />
-      )}
-      {/* Kind label inside chassis */}
-      <Text
-        text={KIND_LABEL[sw.kind] ?? 'SW'}
-        fontSize={9 * s}
-        fontStyle="bold"
-        fill="#fff"
-        align="center"
-        x={-w / 2}
-        y={-h / 2 + 3 * s}
-        width={w}
-        listening={false}
-      />
+      {/* 23-3f hover = colour invert.
+          Normal: dark slate chassis + kind-colour outline + kind-colour port row.
+          Hover:  kind-colour chassis + dark slate outline + dark slate ports
+                  (so the chassis "lights up" in its own kind colour). */}
+      {(() => {
+        const isInvert = isHovered && !isSelected
+        const chassisFill = isInvert ? color    : '#1f2937'
+        const chassisStrokeCol = isSelected ? '#e74c3c' : (isInvert ? '#1f2937' : color)
+        const portCol    = isInvert ? '#1f2937' : color
+        const labelCol   = isInvert ? '#1f2937' : '#ffffff'
+        return (
+          <>
+            {/* Chassis */}
+            <Rect
+              x={-w / 2}
+              y={-h / 2}
+              width={w}
+              height={h}
+              cornerRadius={3 * s}
+              fill={chassisFill}
+              stroke={chassisStrokeCol}
+              strokeWidth={(isSelected ? 2.5 : isHovered ? 2 : 1.5) * s}
+            />
+            {/* Port row (visual only) */}
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Rect
+                key={i}
+                x={-w / 2 + (3 + i * 3) * s}
+                y={h / 2 - 4 * s}
+                width={2 * s}
+                height={2 * s}
+                fill={portCol}
+                listening={false}
+              />
+            ))}
+            {/* PoE badge */}
+            {sw.poeBudget > 0 && (
+              <Line
+                points={[-w / 2 + 3 * s, -h / 2 + 4 * s, -w / 2 + 7 * s, -h / 2 + 4 * s]}
+                stroke="#facc15"
+                strokeWidth={1.5 * s}
+                listening={false}
+              />
+            )}
+            {/* Kind label inside chassis */}
+            <Text
+              text={KIND_LABEL[sw.kind] ?? 'SW'}
+              fontSize={9 * s}
+              fontStyle="bold"
+              fill={labelCol}
+              align="center"
+              x={-w / 2}
+              y={-h / 2 + 3 * s}
+              width={w}
+              listening={false}
+            />
+          </>
+        )
+      })()}
       {/* Name label above */}
       <Text
         text={sw.name}

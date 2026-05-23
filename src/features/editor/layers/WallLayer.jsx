@@ -132,18 +132,19 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems
               onWallDragEnd?.()
             }}
           >
-            {/* hover 發光（門窗模式下用不同顏色提示） */}
-            {/* 23-3f Strong hover (SELECT-like) = thick white glow. Weak
-                hover (allowCmdHover only) = thin faint outline that just
-                says "you're aimed at this object" without screaming
-                "I'm selectable". */}
+            {/* hover 發光（門窗模式下用不同顏色提示）
+                23-3f hover invert for walls = white "highlight beam".
+                Strong hover: thick + bright (matches the visual loudness of
+                  the inverted AP/Switch/Riser markers).
+                Weak hover: thinner, slightly transparent — still obvious
+                  against any heatmap background. */}
             {isHovered && !isSelected && !isDoorWindowMode && allowHover && (
               <Line
                 points={[wall.startX, wall.startY, wall.endX, wall.endY]}
                 stroke="#fff"
-                strokeWidth={18}
+                strokeWidth={22}
                 lineCap="round"
-                opacity={0.3}
+                opacity={0.45}
                 listening={false}
               />
             )}
@@ -151,9 +152,9 @@ function WallLayer({ floorId, drawStart, mousePos, selectedWallId, selectedItems
               <Line
                 points={[wall.startX, wall.startY, wall.endX, wall.endY]}
                 stroke="#fff"
-                strokeWidth={8}
+                strokeWidth={14}
                 lineCap="round"
-                opacity={0.15}
+                opacity={0.35}
                 listening={false}
               />
             )}

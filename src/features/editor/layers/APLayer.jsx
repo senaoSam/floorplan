@@ -102,18 +102,12 @@ function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, 
           listening={false}
         />
       )}
-      {/* 23-3f Weak hover ring (command target) — only in non-SELECT modes.
-          Skipped when strong-hover (allowHover) is on, since strong hover's
-          other visuals already make targeting obvious. */}
-      {isHovered && !isSelected && !allowHover && allowCmdHover && (
-        <Circle
-          radius={14 * s}
-          stroke="#fff"
-          strokeWidth={1.2 * s}
-          opacity={0.35}
-          listening={false}
-        />
-      )}
+      {/* 23-3f hover = full colour invert (per user spec). Was a faint outer
+          ring; that proved invisible against the busy heatmap. Inverting the
+          main circle's fill/stroke is loud enough to spot at a glance and
+          works for both strong (SELECT) and weak (any other mode) hover. The
+          actual recolour happens on the Circle / arrow markers below by
+          reading `isHovered && !isSelected`. */}
       {/* 定向覆蓋扇形（僅指示方向與波瓣寬度，不代表真實距離） */}
       {isDirectional && (
         <>
@@ -162,30 +156,34 @@ function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, 
           listening={false}
         />
       )}
-      {/* 圓形主體 — 外圍藍、裡面白（sample 風格，radius 10） */}
+      {/* 圓形主體 — 外圍藍、裡面白（sample 風格，radius 10）。
+          Hover (非 selected) → 反白：fill 變深藍、stroke 變白。 */}
       <Circle
         radius={10 * s}
-        fill="#ffffff"
-        stroke={isSelected ? '#e74c3c' : isHovered ? '#1e3a8a' : '#1e3a8a'}
+        fill={(isHovered && !isSelected) ? '#1e3a8a' : '#ffffff'}
+        stroke={isSelected ? '#e74c3c' : (isHovered && !isSelected) ? '#ffffff' : '#1e3a8a'}
         strokeWidth={(isSelected ? 3 : isHovered ? 2.5 : 2) * s}
         listening={false}
       />
-      {/* 方位指示：directional / custom 用箭頭；omni 無內部圖示（保持全白） */}
-      {isOriented && (
-        <Group rotation={azimuth} listening={false}>
-          <Line
-            points={[-4 * s, 0, 4 * s, 0]}
-            stroke="#1e3a8a"
-            strokeWidth={1.5 * s}
-            lineCap="round"
-          />
-          <Line
-            points={[7 * s, 0, 3 * s, -3 * s, 3 * s, 3 * s]}
-            closed
-            fill="#1e3a8a"
-          />
-        </Group>
-      )}
+      {/* 方位指示：directional / custom 用箭頭；hover 反白時箭頭也跟著反白 */}
+      {isOriented && (() => {
+        const iconCol = (isHovered && !isSelected) ? '#ffffff' : '#1e3a8a'
+        return (
+          <Group rotation={azimuth} listening={false}>
+            <Line
+              points={[-4 * s, 0, 4 * s, 0]}
+              stroke={iconCol}
+              strokeWidth={1.5 * s}
+              lineCap="round"
+            />
+            <Line
+              points={[7 * s, 0, 3 * s, -3 * s, 3 * s, 3 * s]}
+              closed
+              fill={iconCol}
+            />
+          </Group>
+        )
+      })()}
       {/* 名稱標籤（icon 上方） */}
       <Text
         text={ap.name}

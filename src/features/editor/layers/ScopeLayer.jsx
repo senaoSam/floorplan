@@ -139,17 +139,19 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
               updateScope(floorId, zone.id, { points: newPoints })
             }}
           >
+            {/* 23-3f hover = colour invert. Normal: low-opacity tinted fill +
+                green/red stroke. Hover: thicker, bright fill + white stroke.
+                Same effect for strong (SELECT) + weak (other modes) hover —
+                user-requested unified visual. */}
             <Line
               points={zone.points}
               closed
-              // 23-3f gating: strong-hover-only visuals stay tied to allowHover,
-              // so weak-hover modes don't promise selectability with bright fills.
-              fill={(isHovered && allowHover && !isSelected) ? style.fill.replace('0.18', '0.35') : style.fill}
-              stroke={isSelected ? '#e74c3c' : (isHovered && allowHover) ? '#fff' : style.stroke}
-              strokeWidth={isSelected ? 5 : (isHovered && allowHover) ? 4 : 3}
+              fill={(isHovered && !isSelected) ? style.fill.replace('0.18', '0.5') : style.fill}
+              stroke={isSelected ? '#e74c3c' : (isHovered && !isSelected) ? '#fff' : style.stroke}
+              strokeWidth={isSelected ? 5 : (isHovered && !isSelected) ? 5 : 3}
               dash={zone.type === 'out' ? [8, 4] : undefined}
-              shadowColor={(isHovered && allowHover) ? '#fff' : 'rgba(0,0,0,0.6)'}
-              shadowBlur={(isHovered && allowHover) ? 8 : 4}
+              shadowColor={(isHovered && !isSelected) ? '#fff' : 'rgba(0,0,0,0.6)'}
+              shadowBlur={(isHovered && !isSelected) ? 8 : 4}
               shadowOffset={{ x: 0, y: 0 }}
               hitStrokeWidth={10}
               onClick={(e) => {
@@ -165,17 +167,6 @@ function ScopeLayer({ floorId, drawingPoints, mousePos, snapRadius, selectedScop
                 onScopeContextMenu?.(zone.id, e)
               }}
             />
-            {/* 23-3f Weak hover outline (command target) */}
-            {isHovered && !isSelected && !allowHover && allowCmdHover && (
-              <Line
-                points={zone.points}
-                closed
-                stroke="#fff"
-                strokeWidth={1.5}
-                opacity={0.35}
-                listening={false}
-              />
-            )}
           </Group>
         )
       })}

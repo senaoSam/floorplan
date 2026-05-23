@@ -414,25 +414,24 @@ function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, 
       {showBody && (() => {
         const halfW = (TRAY_WIDTH_SCREEN_PX * s) / 2
         const polyFlat = buildChannelPolygon(tray.points, halfW, startExt, endExt)
-        // Selected border is drawn thicker so the white still reads through
-        // any contrast against the system-coloured body underneath.
-        // 23-3f Thicker border only under strong hover (allowHover); weak
-        // hover keeps base width — we don't want to imply selectability.
-        const borderW  = (isSelected ? 2.2 : (isHovered && allowHover) ? 1.3 : 1.1) * s
-        const fillCol  = bodyFillCol
-        // Weak hover (command-target) outline drawn slightly outside the
-        // body polygon so it doesn't compete with the system colour.
-        const weakHover = isHovered && !isSelected && !allowHover && allowCmdHover
-        const weakOutlinePoly = weakHover
-          ? buildChannelPolygon(tray.points, halfW + 1.5 * s, startExt, endExt)
-          : null
+        const borderW  = (isSelected ? 2.2 : isHovered ? 1.4 : 1.1) * s
+        // 23-3f hover = colour invert. Normal: body = sys.fill (low-opacity
+        // pastel), border = sys.color (solid). Hover: body = sys.color
+        // (solid — tray "fills in"), border = sys.fill (the previous body
+        // colour). Selected keeps its red border untouched.
+        const isInvert = isHovered && !isSelected
+        const fillCol  = isInvert ? sys.color : bodyFillCol
+        const strokeCol = isSelected ? TRAY_SELECTED_BORDER : (isInvert ? bodyFillCol : sys.color)
+        // Centreline stays the system colour for normal+selected; on hover
+        // invert it to white so it reads through the now-solid body.
+        const centerCol = isInvert ? '#ffffff' : centerLineColor
         return (
           <>
             <Line
               points={polyFlat}
               closed
               fill={fillCol}
-              stroke={borderColor}
+              stroke={strokeCol}
               strokeWidth={borderW}
               lineJoin="miter"
               miterLimit={10}
@@ -440,25 +439,13 @@ function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, 
             />
             <Line
               points={flat}
-              stroke={centerLineColor}
+              stroke={centerCol}
               strokeWidth={0.9 * s}
               dash={[6 * s, 4 * s]}
-              opacity={0.7}
+              opacity={isInvert ? 0.85 : 0.7}
               lineCap="round"
               listening={false}
             />
-            {weakOutlinePoly && (
-              <Line
-                points={weakOutlinePoly}
-                closed
-                stroke="#fff"
-                strokeWidth={1 * s}
-                opacity={0.35}
-                lineJoin="miter"
-                miterLimit={10}
-                listening={false}
-              />
-            )}
           </>
         )
       })()}

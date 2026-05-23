@@ -158,16 +158,16 @@ function FloorHoleLayer({
               updateFloorHole(floorId, hole.id, { points: newPoints })
             }}
           >
+            {/* 23-3f hover = colour invert (unified strong + weak). */}
             <Line
               points={hole.points}
               closed
-              // 23-3f Strong-hover-only visuals; weak hover gets its own outline below.
-              fill={(isHovered && allowHover && !isSelected) ? 'rgba(124, 58, 237, 0.35)' : HOLE_FILL}
-              stroke={isSelected ? '#e74c3c' : (isHovered && allowHover) ? '#fff' : HOLE_STROKE}
-              strokeWidth={isSelected ? 4 : (isHovered && allowHover) ? 4 : 3}
+              fill={(isHovered && !isSelected) ? 'rgba(124, 58, 237, 0.5)' : HOLE_FILL}
+              stroke={isSelected ? '#e74c3c' : (isHovered && !isSelected) ? '#fff' : HOLE_STROKE}
+              strokeWidth={isSelected ? 4 : (isHovered && !isSelected) ? 4 : 3}
               dash={[10, 4]}
-              shadowColor={(isHovered && allowHover) ? '#fff' : 'rgba(0,0,0,0.6)'}
-              shadowBlur={(isHovered && allowHover) ? 8 : 4}
+              shadowColor={(isHovered && !isSelected) ? '#fff' : 'rgba(0,0,0,0.6)'}
+              shadowBlur={(isHovered && !isSelected) ? 8 : 4}
               shadowOffset={{ x: 0, y: 0 }}
               hitStrokeWidth={10}
               onClick={(e) => {
@@ -183,17 +183,6 @@ function FloorHoleLayer({
                 onHoleContextMenu?.(hole.id, e)
               }}
             />
-            {/* 23-3f Weak hover outline */}
-            {isHovered && !isSelected && !allowHover && allowCmdHover && (
-              <Line
-                points={hole.points}
-                closed
-                stroke="#fff"
-                strokeWidth={1.5}
-                opacity={0.35}
-                listening={false}
-              />
-            )}
           </Group>
         )
       })}

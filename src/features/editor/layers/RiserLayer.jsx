@@ -66,60 +66,56 @@ function RiserMarker({ riser, isSelected, isHovered, onHover, isDraggable, allow
           />
         </>
       )}
-      {/* Cross-section square — top-down view of the vertical shaft */}
-      {/* 23-3f isHovered alone isn't enough — thicker stroke implies select
-          affordance, so only apply it under strong hover (allowHover). Weak
-          hover gets a faint outer ring instead (below). */}
-      <Rect
-        x={-size / 2}
-        y={-size / 2}
-        width={size}
-        height={size}
-        cornerRadius={2 * s}
-        fill="#1f2937"
-        stroke={strokeColor}
-        strokeWidth={(isSelected ? 2.5 : (isHovered && allowHover) ? 2 : 1.5) * s}
-      />
-      {/* 23-3f Weak hover ring — appears in non-SELECT modes only */}
-      {isHovered && !isSelected && !allowHover && allowCmdHover && (
-        <Rect
-          x={-size / 2 - 2 * s}
-          y={-size / 2 - 2 * s}
-          width={size + 4 * s}
-          height={size + 4 * s}
-          cornerRadius={3 * s}
-          stroke="#fff"
-          strokeWidth={1.2 * s}
-          opacity={0.35}
-          listening={false}
-        />
-      )}
-      {/* Inner cross "+" — symbolises the vertical chase */}
-      <Line
-        points={[-size / 2 + 4 * s, 0, size / 2 - 4 * s, 0]}
-        stroke={strokeColor}
-        strokeWidth={1.2 * s}
-        listening={false}
-      />
-      <Line
-        points={[0, -size / 2 + 4 * s, 0, size / 2 - 4 * s]}
-        stroke={strokeColor}
-        strokeWidth={1.2 * s}
-        listening={false}
-      />
-      {/* Up/down arrows above & below — make "vertical shaft" obvious */}
-      <Line
-        points={[0, -size / 2 - 5 * s, -3 * s, -size / 2 - 1 * s, 3 * s, -size / 2 - 1 * s]}
-        closed
-        fill={strokeColor}
-        listening={false}
-      />
-      <Line
-        points={[0, size / 2 + 5 * s, -3 * s, size / 2 + 1 * s, 3 * s, size / 2 + 1 * s]}
-        closed
-        fill={strokeColor}
-        listening={false}
-      />
+      {/* 23-3f hover = colour invert.
+          Normal: dark slate square + violet outline / cross / arrows.
+          Hover:  violet square + dark slate outline / cross / arrows.
+          Selected keeps the red stroke regardless. */}
+      {(() => {
+        const isInvert = isHovered && !isSelected
+        const squareFill = isInvert ? RISER_COLOR : '#1f2937'
+        const accentCol  = isSelected ? RISER_SELECTED : (isInvert ? '#1f2937' : RISER_COLOR)
+        return (
+          <>
+            {/* Cross-section square — top-down view of the vertical shaft */}
+            <Rect
+              x={-size / 2}
+              y={-size / 2}
+              width={size}
+              height={size}
+              cornerRadius={2 * s}
+              fill={squareFill}
+              stroke={accentCol}
+              strokeWidth={(isSelected ? 2.5 : isHovered ? 2 : 1.5) * s}
+            />
+            {/* Inner cross "+" — symbolises the vertical chase */}
+            <Line
+              points={[-size / 2 + 4 * s, 0, size / 2 - 4 * s, 0]}
+              stroke={accentCol}
+              strokeWidth={1.2 * s}
+              listening={false}
+            />
+            <Line
+              points={[0, -size / 2 + 4 * s, 0, size / 2 - 4 * s]}
+              stroke={accentCol}
+              strokeWidth={1.2 * s}
+              listening={false}
+            />
+            {/* Up/down arrows above & below — make "vertical shaft" obvious */}
+            <Line
+              points={[0, -size / 2 - 5 * s, -3 * s, -size / 2 - 1 * s, 3 * s, -size / 2 - 1 * s]}
+              closed
+              fill={accentCol}
+              listening={false}
+            />
+            <Line
+              points={[0, size / 2 + 5 * s, -3 * s, size / 2 + 1 * s, 3 * s, size / 2 + 1 * s]}
+              closed
+              fill={accentCol}
+              listening={false}
+            />
+          </>
+        )
+      })()}
       {/* Name + floor count label */}
       <Text
         text={floorCount > 0 ? `${riser.name} (${floorCount}F)` : riser.name}
