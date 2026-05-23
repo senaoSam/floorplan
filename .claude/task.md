@@ -302,10 +302,22 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 
 | #     | 狀態 | Task                                                                              |
 | ----- | ---- | --------------------------------------------------------------------------------- |
-| 21-2  | ⬜   | Zone box / consolidation point — trunk → zone → short drop 拓撲                      |
-| 21-3  | ⬜   | Routing 支援 zone box（home-run vs via zone box 兩種路徑可選） + capacity warning   |
+| 21-2  | ⏸️   | **撤回** — Zone box / consolidation point。詳下方說明                                |
+| 21-3  | ⏸️   | **撤回** — Routing 支援 zone box。詳下方說明                                          |
 
-> 21-1 Vertical tray / conduit 已撤回 — Hamina 並無此物件、Riser 已涵蓋跨樓層垂直走線需求；conduit 純當「同樓層垂直 pathway」實作後沒有實際 routing 價值（AP/SW 不 snap、dz 不進 BOM），決定不做。
+**21-1 / 21-2 / 21-3 三個 Advanced Topology task 全部撤回，理由：**
+
+| Task | 撤回原因 |
+|------|----------|
+| 21-1 Vertical tray / conduit | Hamina 並無此物件、Riser 已涵蓋跨樓層垂直走線需求；conduit 純當「同樓層垂直 pathway」實作後沒有實際 routing 價值（AP/SW 不 snap、dz 不進 BOM） |
+| 21-2 Zone box / 21-3 routing | Zone box (TIA-568 consolidation point) **業界主要用在有線工位 cabling**（開放式辦公、共用工作空間），**不是給 AP planning 用**。AP 規劃幾乎全 home-run，跨距大就用 IDF/MDF 分散。<br/>本工具已有 `kind:'idf'` switch + `uplinkTo` (14-1/14-2)，**大型場館的分散需求已涵蓋**。Hamina 沒做 zone box 也是同樣理由 — AP planner 沒這個需求。<br/>強行做 zone box 會：增加 ~5-7h 工程、複雜化 routing graph、UI 多一個物件 type、實務上使用率極低。 |
+
+**未來如果要回頭做進階拓撲**，方向應該是：
+- 「自動 IDF 推薦」演算法（給定 N 個 AP，建議放幾個 IDF + 位置）
+- 強化 riser cross-floor routing 視覺化
+- Switch capacity 超標時自動建議拆分 IDF
+
+而不是 zone box。
 
 ---
 

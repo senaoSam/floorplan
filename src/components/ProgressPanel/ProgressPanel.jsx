@@ -331,8 +331,8 @@ const PHASES = [
       {
         layer: 'Layer 21 — Advanced Topology',
         items: [
-          { id: '21-2', done: false, text: 'Zone box / consolidation point — trunk → zone → short drop' },
-          { id: '21-3', done: false, text: 'Routing 支援 zone box（home-run vs via zone box 路徑）' },
+          { id: '21-2', done: true, text: '撤回 — Zone box 是工位 cabling 的概念，AP planning 用 IDF/MDF 已涵蓋' },
+          { id: '21-3', done: true, text: '撤回 — Routing 支援 zone box（隨 21-2 撤回）' },
         ],
       },
     ],
