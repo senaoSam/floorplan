@@ -439,20 +439,31 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 
 ---
 
-## Phase 19 — 自動 IDF 推薦
+## Phase 19 — 自動 IDF 推薦（已撤回 2026-05-24）
 
-> Reviewer 痛點推論：N 個 AP 散在大平面圖時，使用者要手動放 switch / IDF / 決定 uplink 關係。實作後缺一個「告訴我該放幾個 IDF / 放哪」的助手。
-> 目標：給定 AP 分布 + 容量限制，自動建議 IDF 數量與位置。
-> Spec：[.claude/auto-idf-spec.md](auto-idf-spec.md)
+> **撤回說明**：25-1 ~ 25-4 已實作完成，但實際試用後發現整個功能定位有根本問題，全部移除。
+>
+> **撤回理由**
+> 1. **IDF 真實位置決定於空間語意（弱電間 / 機房 / 樓梯間 / 走廊），不是幾何最佳化**。本工具沒有房間 / 弱電間 / 防火區的概念，演算法只能基於座標分群 + tray vertex snap，產出的建議無法反映實際工程選位邏輯
+> 2. **候選點限制過窄**：只能 snap 到 tray vertex 或 grid，而 IDF 機櫃（60×60×200 cm）通常不放線槽上，而是靠牆 / 角落 / 機房內 — 跟 tray 沒關係
+> 3. **退化模式（1 SW 收 AP）邏輯不一致**：1 顆 SW 場景現實上根本不需要 IDF（SW 自己當頂層即可），但目前實作會強行幫使用者加一顆 IDF 直接收 AP，導致既有 SW 變孤兒
+> 4. **demo 試跑結果無法說服自己**：所有 AP 拉到最遠 IDF，因為 1 條 tray 只有兩端點可 snap，建議位置永遠死板
+>
+> **未來若回頭做需要先解決**
+> - 房間 / 弱電間 / 防火區的資料模型（需要使用者標記 room → IDF 候選 zone）
+> - IDF 機櫃尺寸 / 牆掛 / 立式的擺放規則
+> - 跨樓層 riser 跟 IDF 階層的關聯
+>
+> 在這些前置都沒做之前，Auto IDF 給出的建議很可能誤導使用者，不如不做。
 
 ### Layer 25 — Auto IDF Placement
 
 | #    | 狀態 | Task |
 |------|------|------|
-| 25-1 | ✅   | Spec — `.claude/auto-idf-spec.md`：k-means seed → snap candidate → reassign + 8× random restart；候選點來源 [switch, tray, grid(warning)]；目標函數排序：min k / ≤90m hard / port hard / min total cable / tie-break max cable；PoE warning-only；warm-start existing IDF fixed by default |
-| 25-2 | ⬜   | `src/features/cable/autoIdfPlan.js` — 純函式 + restart wrapper，吃 APs + candidatePoints + constraints 回 `{idfs:[{x,y,candidateSource,assignedAPs,...}], totalCableM, maxCableM, unassigned, warnings, meta}`；含 `collectCandidatePoints(floorId)` helper |
-| 25-3 | ⬜   | UI — 線纜總結 panel 加「⚡ 自動規劃 IDF」按鈕；modal 顯示建議結果 + Apply / Re-run / Cancel + Fixed/Clean-slate toggle；**Web Worker 封裝 + progress + 10s timeout abort**（spec §5 §9 要求）|
-| 25-4 | ⬜   | 視覺預覽 — apply 前畫面預覽 N 個建議 IDF 位置（半透明 ghost + 到 AP 的虛線連線），讓使用者看了再決定 |
+| 25-1 | ⏸️   | **撤回** — Spec auto-idf-spec.md 已刪除。詳見上方撤回說明 |
+| 25-2 | ⏸️   | **撤回** — autoIdfPlan.js + collectCandidatePoints helper 已刪除 |
+| 25-3 | ⏸️   | **撤回** — AutoIdfModal + autoIdfPlan.worker + CableSummaryPanel 按鈕已刪除 |
+| 25-4 | ⏸️   | **撤回** — AutoIdfPreviewLayer + useEditorStore.autoIdfPreview slice 已刪除 |
 
 ---
 
@@ -495,6 +506,32 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | 28-2 | ⬜   | 3D 樓層切換 UI — 在 3D 場景頂部 / 角落加 floor selector，不用切回 2D |
 | 28-3 | ⬜   | 3D camera presets — top / iso / front 三顆 button，一鍵跳常用角度 |
 | 28-4 | ⬜   | 3D hover readout — 滑到 AP 顯示「AP-01 5 GHz Ch36/40 20 dBm」浮 tooltip |
+
+---
+
+## Phase 23 — Switch kind 真的差別化
+
+> 目前 `switch / idf / mdf / router` 四種 kind 只差「chassis 顏色 + 名稱前綴 + 屬性面板標籤」，物件模型完全一樣（同樣 24 port / 370 W PoE / 同 uplinkTo 規則 / 同 routing 行為）。使用者腦中的網路階層沒被工具尊重。
+>
+> 撤回 Phase 19 Auto IDF 時也碰到這個問題 — IDF 沒被當「跟 SW 不同的東西」對待，演算法就沒辦法幫使用者規劃 IDF。
+>
+> 目標：把四種 kind 在資料模型 / 規則 / 視覺 / BOM 上拉開差異，讓「IDF / MDF」變成有實際意義的階層概念。
+
+### Layer 29 — Switch kind differentiation
+
+| #    | 狀態 | Task |
+|------|------|------|
+| 29-1 | ⬜   | Spec — `.claude/switch-kind-spec.md`：對每種 kind 定 default portCount / poeBudget / uplink port type (copper/fiber) / 階層約束（誰能上連誰）；列舉 enforce vs warning 的邊界 |
+| 29-2 | ⬜   | DEFAULTS 重設 — `useCableStore` 每種 kind 一組 `DEFAULT_SWITCH_BY_KIND`（access switch 24/370、IDF 48/740、MDF 48 fiber/0 PoE、Router 8 fiber/0 PoE 之類；數字依 29-1 spec 決定）；改 kind 時面板提示「要不要套新預設？」 |
+| 29-3 | ⬜   | 階層 enforcement — uplinkTo 下拉只列允許的目標（SW 可上連 IDF/MDF/Router；IDF 可上連 MDF/Router；MDF 可上連 Router 或 null；Router 上連 null）；現有資料有違反時顯示 warning 但不強制重設 |
+| 29-4 | ⬜   | Routing 階層偏好 — MDF↔IDF backbone link 優先走指定 tray system（如 'backbone'）；S2S route 不再一視同仁 |
+| 29-5 | ⬜   | BOM 細分 — `computeRoutes` 輸出 S2S link 加 `tier`（'backbone' MDF↔IDF / 'distribution' IDF↔SW / 'access' SW↔AP）；CableSummaryPanel 三段顯示 |
+| 29-6 | ⬜   | UI / 顏色一致性 — 屬性面板每種 kind 露出該 kind 的特殊欄位（IDF/MDF 顯示「下游 N 顆」、Router 顯示 WAN/LAN 區分等），對齊 `.claude/color-legend.md` |
+
+**順序建議**
+- 29-1 是設計決策（需要先跟使用者敲 default / 階層規則），其他都要先有 spec
+- 29-2 / 29-3 後做的影響最大（資料模型 + UI 都動）；29-4 / 29-5 是 routing / BOM 收尾；29-6 polish
+- 做完這個 phase 之後，**Phase 19 Auto IDF 才有條件重啟**（IDF 跟 SW 真的不同了，演算法才有意義）
 
 ---
 

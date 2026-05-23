@@ -389,15 +389,12 @@ const PHASES = [
     ],
   },
   {
-    phase: 'Phase 19 — 自動 IDF 推薦',
+    phase: 'Phase 19 — 自動 IDF 推薦（已撤回）',
     groups: [
       {
-        layer: 'Layer 25 — Auto IDF placement',
+        layer: 'Layer 25 — Auto IDF placement（撤回）',
         items: [
-          { id: '25-1', done: false, text: 'Spec — 演算法輸入/輸出 + capacity constraint 模型' },
-          { id: '25-2', done: false, text: '`autoIdfPlan.js` 純函式（k-means + capacity）' },
-          { id: '25-3', done: false, text: 'UI — 線纜總結 panel「⚡ 自動規劃 IDF」+ modal + Apply' },
-          { id: '25-4', done: false, text: '視覺預覽 ghost IDF 位置（apply 前確認）' },
+          { id: '25-1', done: true, text: '撤回 — Spec / 演算法 / UI / 預覽全部移除。理由：IDF 真實選位仰賴房間 / 弱電間語意，本工具沒這層資料，演算法給的建議無法反映實務' },
         ],
       },
     ],
@@ -437,6 +434,22 @@ const PHASES = [
           { id: '28-2', done: false, text: '3D 樓層切換 UI（不用切回 2D）' },
           { id: '28-3', done: false, text: '3D camera presets — top / iso / front' },
           { id: '28-4', done: false, text: '3D hover readout — AP tooltip（freq / channel / power）' },
+        ],
+      },
+    ],
+  },
+  {
+    phase: 'Phase 23 — Switch kind 真的差別化',
+    groups: [
+      {
+        layer: 'Layer 29 — Switch kind differentiation',
+        items: [
+          { id: '29-1', done: false, text: 'Spec — `.claude/switch-kind-spec.md` 定 default / uplink port type / 階層約束' },
+          { id: '29-2', done: false, text: 'DEFAULTS 重設 — 每 kind 一組 `DEFAULT_SWITCH_BY_KIND`，改 kind 時面板提示套用' },
+          { id: '29-3', done: false, text: '階層 enforcement — uplinkTo 下拉只列允許目標（SW→IDF/MDF/Router 等）' },
+          { id: '29-4', done: false, text: 'Routing 階層偏好 — backbone link 優先走指定 tray system' },
+          { id: '29-5', done: false, text: 'BOM 細分 — S2S link 加 tier（backbone / distribution）；panel 三段顯示' },
+          { id: '29-6', done: false, text: 'UI / 顏色 polish — 各 kind 顯示專屬欄位，對齊 color-legend' },
         ],
       },
     ],

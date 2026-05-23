@@ -6,11 +6,15 @@
 
 ---
 
+> ⚠ **過時通知（2026-05-24）**：本文件原為「Phase 19 自動 IDF 推薦」的接手指引，但該 Phase 已實作完成後又整批撤回（理由：IDF 真實選位仰賴房間 / 弱電間語意，本工具沒這層資料）。底下提到的 25-1 ~ 25-4 / auto-idf-spec.md 全部失效。**現在剩 4 個 Phase 待做：20 perf / 21 heatmap polish / 22 3D enhancements / 23 switch kind 差別化**。詳見 [task.md](task.md)。
+
+---
+
 ## 1. 現況一句話
 
-主功能（Phase 7-18 / Layer 11-24）全部完成。**剩 4 個新 Phase 待做**（Phase 19-22 / Layer 25-28），共 12 個 ⬜ task。
+主功能（Phase 7-18 / Layer 11-24）全部完成。Phase 19 已撤回，**剩 4 個新 Phase 待做**（Phase 20-23 / Layer 26-29）。
 
-撤回的：21-1 / 21-2 / 21-3 / 22-3b / 22-4 / 12-4（都因 Hamina 沒做 + AP planner 真實需求低）。
+撤回的：21-1 / 21-2 / 21-3 / 22-3b / 22-4 / 12-4 / **25-1~25-4**（Auto IDF：建議無法反映實務）。
 
 ---
 
