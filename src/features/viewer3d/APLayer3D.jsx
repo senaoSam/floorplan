@@ -200,7 +200,7 @@ function APLabel({ text, position, opacity }) {
 const SELECT_EMISSIVE = '#e74c3c'
 const HOVER_EMISSIVE  = '#ffffff'
 
-function APMarker({ ap, pxToM, dimOpacity, isActiveFloor }) {
+function APMarker({ ap, pxToM, dimOpacity, isActiveFloor, onHover }) {
   const color = FREQ_COLOR[ap.frequency] ?? DEFAULT_COLOR
   const x = (ap.x ?? 0) * pxToM
   const z = (ap.y ?? 0) * pxToM
@@ -239,8 +239,12 @@ function APMarker({ ap, pxToM, dimOpacity, isActiveFloor }) {
     if (!isActiveFloor) return
     e.stopPropagation()
     setHovered(true)
+    if (onHover) onHover(ap)
   }
-  const onPointerOut = () => setHovered(false)
+  const onPointerOut = () => {
+    setHovered(false)
+    if (onHover) onHover(null)
+  }
 
   return (
     <group
@@ -332,13 +336,20 @@ function APMarker({ ap, pxToM, dimOpacity, isActiveFloor }) {
   )
 }
 
-export default function APLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true }) {
+export default function APLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true, onAPHover }) {
   const aps = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   if (!aps.length || !pxToM) return null
   return (
     <group>
       {aps.map((ap) => (
-        <APMarker key={ap.id} ap={ap} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActiveFloor} />
+        <APMarker
+          key={ap.id}
+          ap={ap}
+          pxToM={pxToM}
+          dimOpacity={dimOpacity}
+          isActiveFloor={isActiveFloor}
+          onHover={isActiveFloor ? onAPHover : undefined}
+        />
       ))}
     </group>
   )

@@ -430,10 +430,10 @@ const PHASES = [
       {
         layer: 'Layer 28 — 3D enhancements',
         items: [
-          { id: '28-1', done: false, text: '3D AP label — sprite 跟著 camera 旋轉' },
-          { id: '28-2', done: false, text: '3D 樓層切換 UI（不用切回 2D）' },
-          { id: '28-3', done: false, text: '3D camera presets — top / iso / front' },
-          { id: '28-4', done: false, text: '3D hover readout — AP tooltip（freq / channel / power）' },
+          { id: '28-1', done: true, text: '3D AP label — sprite 跟著 camera 旋轉' },
+          { id: '28-2', done: true, text: '3D 樓層切換 UI（不用切回 2D）' },
+          { id: '28-3', done: true, text: '3D camera presets — top / iso / front' },
+          { id: '28-4', done: true, text: '3D hover readout — AP tooltip（freq / channel / power）' },
         ],
       },
     ],

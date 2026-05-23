@@ -502,10 +502,10 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 
 | #    | 狀態 | Task |
 |------|------|------|
-| 28-1 | ⬜   | 3D AP label — 目前 3D AP 只一根柱子無文字，加 sprite 標籤跟著 camera 旋轉 |
-| 28-2 | ⬜   | 3D 樓層切換 UI — 在 3D 場景頂部 / 角落加 floor selector，不用切回 2D |
-| 28-3 | ⬜   | 3D camera presets — top / iso / front 三顆 button，一鍵跳常用角度 |
-| 28-4 | ⬜   | 3D hover readout — 滑到 AP 顯示「AP-01 5 GHz Ch36/40 20 dBm」浮 tooltip |
+| 28-1 | ✅   | 3D AP label — sprite 跟著 camera 旋轉；name pill + canvas texture cache |
+| 28-2 | ✅   | 3D 樓層切換 UI — 右上 collapse 下拉，click outside / Esc 自動收起 |
+| 28-3 | ✅   | 3D camera presets — 俯瞰 / 等角 / 正視，用 CameraRig.tweenTo 過渡 |
+| 28-4 | ✅   | 3D hover readout — name + 頻段 pill + Ch/MHz + dBm + mountHeight + antennaMode；container-local pointer 追蹤、overflow 自動翻邊；OrbitControls damping 關閉避免「滾輪帶旋轉」 |
 
 ---
 
