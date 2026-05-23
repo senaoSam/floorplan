@@ -442,16 +442,17 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 ## Phase 19 — 自動 IDF 推薦
 
 > Reviewer 痛點推論：N 個 AP 散在大平面圖時，使用者要手動放 switch / IDF / 決定 uplink 關係。實作後缺一個「告訴我該放幾個 IDF / 放哪」的助手。
-> 目標：給定 AP 分布 + 容量限制，自動建議 IDF 數量與位置（k-means + Voronoi）。
+> 目標：給定 AP 分布 + 容量限制，自動建議 IDF 數量與位置。
+> Spec：[.claude/auto-idf-spec.md](auto-idf-spec.md)
 
 ### Layer 25 — Auto IDF Placement
 
 | #    | 狀態 | Task |
 |------|------|------|
-| 25-1 | ⬜   | Spec — 演算法輸入（AP list + 每個 IDF 預算 ports / PoE / cable distance）+ 輸出（IDF 位置 + 對應 AP 分群）；用 k-means with capacity constraint 或 weighted Voronoi |
-| 25-2 | ⬜   | `src/features/cable/autoIdfPlan.js` — 純函式，吃 APs + constraints 回 `{idfs:[{x,y,assignedAPs:[]}], totalCableM}` |
-| 25-3 | ⬜   | UI — 線纜總結 panel 加「⚡ 自動規劃 IDF」按鈕；modal 顯示建議結果 + Apply 按鈕（一鍵 add switches）|
-| 25-4 | ⬜   | 視覺預覽 — apply 前畫面預覽 N 個建議 IDF 位置（半透明 ghost），讓使用者看了再決定 |
+| 25-1 | ✅   | Spec — `.claude/auto-idf-spec.md`：k-means seed → snap candidate → reassign + 8× random restart；候選點來源 [switch, tray, grid(warning)]；目標函數排序：min k / ≤90m hard / port hard / min total cable / tie-break max cable；PoE warning-only；warm-start existing IDF fixed by default |
+| 25-2 | ⬜   | `src/features/cable/autoIdfPlan.js` — 純函式 + restart wrapper，吃 APs + candidatePoints + constraints 回 `{idfs:[{x,y,candidateSource,assignedAPs,...}], totalCableM, maxCableM, unassigned, warnings, meta}`；含 `collectCandidatePoints(floorId)` helper |
+| 25-3 | ⬜   | UI — 線纜總結 panel 加「⚡ 自動規劃 IDF」按鈕；modal 顯示建議結果 + Apply / Re-run / Cancel + Fixed/Clean-slate toggle；**Web Worker 封裝 + progress + 10s timeout abort**（spec §5 §9 要求）|
+| 25-4 | ⬜   | 視覺預覽 — apply 前畫面預覽 N 個建議 IDF 位置（半透明 ghost + 到 AP 的虛線連線），讓使用者看了再決定 |
 
 ---
 
