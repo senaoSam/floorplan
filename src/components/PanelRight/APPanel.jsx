@@ -9,6 +9,9 @@ import { ANTENNA_PATTERN_LIST, DEFAULT_PATTERN_ID, getPatternById } from '@/cons
 import { channelEntries, isChannelAllowed, allowedChannels } from '@/constants/regulatoryDomains'
 import { CHANNEL_WIDTHS, DEFAULT_CHANNEL_WIDTH, allowedWidthsForBand } from '@/constants/channelWidths'
 import PatternPreview from './PatternPreview'
+import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
+import { TextInput, NumberInput, Select } from './_shared/PanelControls'
+import './_shared/shared.sass'
 import './APPanel.sass'
 
 const FREQ_OPTIONS = [
@@ -95,8 +98,7 @@ function APPanel({ floorId, apId }) {
     }
   }, [floorId, apId, ap, updateAP, model, firstAllowedChannel])
 
-  const handleNumber = useCallback((field, raw) => {
-    const num = parseFloat(raw)
+  const handleNumber = useCallback((field, num) => {
     if (isNaN(num) || num < 0) return
     if (field === 'txPower') {
       const maxTx = model.maxTxPower[ap.frequency] ?? 23
@@ -121,23 +123,6 @@ function APPanel({ floorId, apId }) {
     updateAP(floorId, apId, patch)
   }, [floorId, apId, ap, updateAP])
 
-  const handlePattern = useCallback((patternId) => {
-    updateAP(floorId, apId, { patternId })
-  }, [floorId, apId, updateAP])
-
-  // Store raw user input; wrapping/clamping happens only for display and downstream use.
-  const handleAzimuth = useCallback((raw) => {
-    const num = parseFloat(raw)
-    if (isNaN(num)) return
-    updateAP(floorId, apId, { azimuth: num })
-  }, [floorId, apId, updateAP])
-
-  const handleBeamwidth = useCallback((raw) => {
-    const num = parseFloat(raw)
-    if (isNaN(num)) return
-    updateAP(floorId, apId, { beamwidth: num })
-  }, [floorId, apId, updateAP])
-
   const wrapAzimuth = (v) => (((v % 360) + 360) % 360)
   const clampBeamwidth = (v) => Math.max(MIN_BEAMWIDTH, Math.min(MAX_BEAMWIDTH, v))
 
@@ -149,56 +134,49 @@ function APPanel({ floorId, apId }) {
   if (!ap) return null
 
   const maxTxForBand = model.maxTxPower[ap.frequency] ?? 23
+  const freqColor = FREQ_OPTIONS.find((f) => f.value === ap.frequency)?.color ?? '#4fc3f7'
 
   return (
-    <div className="ap-panel">
-      <div className="ap-panel__header">
-        <span className="ap-panel__title">AP 屬性</span>
-        <span className="ap-panel__dot" style={{ background: FREQ_OPTIONS.find(f => f.value === ap.frequency)?.color ?? '#4fc3f7' }} />
-        <button className="panel-delete-btn" onClick={handleDelete}>刪除</button>
-      </div>
+    <PanelShell accent="ap">
+      <PanelHeader
+        title={ap.name}
+        meta={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: freqColor }} />
+            AP 屬性
+          </span>
+        }
+        onDelete={handleDelete}
+      />
 
-      {/* 型號 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">型號</p>
-        <select
-          className="ap-panel__input ap-panel__select"
-          value={ap.modelId ?? DEFAULT_AP_MODEL_ID}
-          onChange={(e) => handleModel(e.target.value)}
-        >
-          {AP_MODEL_LIST.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.vendor} {m.name} ({m.wifiGen})
-            </option>
-          ))}
-        </select>
-        <p className="ap-panel__hint">
-          支援：{model.supportedBands.map((b) => `${b} GHz`).join(' / ')}　最大 {maxTxForBand} dBm
-        </p>
-      </section>
+      <PanelSection title="識別">
+        <PanelField label="型號" hint={`最大 ${maxTxForBand} dBm`}>
+          <Select
+            value={ap.modelId ?? DEFAULT_AP_MODEL_ID}
+            onChange={handleModel}
+            options={AP_MODEL_LIST.map((m) => ({
+              value: m.id,
+              label: `${m.vendor} ${m.name} (${m.wifiGen})`,
+            }))}
+          />
+        </PanelField>
+        <div className="ap-panel__hint">
+          支援頻段：{model.supportedBands.map((b) => `${b} GHz`).join(' / ')}
+        </div>
+        <PanelField label="名稱">
+          <TextInput value={ap.name} onChange={(v) => handleField('name', v)} />
+        </PanelField>
+      </PanelSection>
 
-      {/* 名稱 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">名稱</p>
-        <input
-          className="ap-panel__input"
-          type="text"
-          value={ap.name}
-          onChange={(e) => handleField('name', e.target.value)}
-        />
-      </section>
-
-      {/* 頻段 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">頻段</p>
-        <div className="ap-panel__btn-group">
+      <PanelSection title="頻段">
+        <div className="ap-panel__pill-row">
           {FREQ_OPTIONS.map((f) => {
             const supported = model.supportedBands.includes(f.value)
             const active = ap.frequency === f.value
             return (
               <button
                 key={f.value}
-                className={`ap-panel__btn${active ? ' ap-panel__btn--active' : ''}${supported ? '' : ' ap-panel__btn--disabled'}`}
+                className={`ap-panel__pill${active ? ' ap-panel__pill--active' : ''}${supported ? '' : ' ap-panel__pill--disabled'}`}
                 style={active ? { borderColor: f.color, color: f.color } : {}}
                 onClick={() => handleField('frequency', f.value)}
                 disabled={!supported}
@@ -209,38 +187,29 @@ function APPanel({ floorId, apId }) {
             )
           })}
         </div>
-      </section>
+      </PanelSection>
 
       {/* 頻道 */}
       {(() => {
         const entries = channelEntries(domainId, ap.frequency)
         const curCh = ap.channel ?? DEFAULT_CHANNEL[ap.frequency] ?? 1
         const curAllowed = isChannelAllowed(domainId, ap.frequency, curCh)
+        const chanOptions = []
+        if (!curAllowed) chanOptions.push({ value: String(curCh), label: `Ch ${curCh}（不允許）` })
+        for (const c of entries) {
+          chanOptions.push({
+            value: String(c.ch),
+            label: `Ch ${c.ch}${c.dfs ? '（DFS）' : ''}${c.indoorOnly ? '（室內）' : ''}`,
+          })
+        }
         return (
-          <section className="ap-panel__section">
-            <p className="ap-panel__label">
-              頻道
-              {!curAllowed && (
-                <span className="ap-panel__hint-inline">（當前國家不支援）</span>
-              )}
-            </p>
-            <select
-              className="ap-panel__input ap-panel__select"
-              value={curCh}
-              onChange={(e) => handleField('channel', Number(e.target.value))}
-            >
-              {!curAllowed && (
-                <option key={`cur-${curCh}`} value={curCh}>Ch {curCh}（不允許）</option>
-              )}
-              {entries.map((c) => (
-                <option key={c.ch} value={c.ch}>
-                  Ch {c.ch}
-                  {c.dfs ? '（DFS）' : ''}
-                  {c.indoorOnly ? '（室內）' : ''}
-                </option>
-              ))}
-            </select>
-          </section>
+          <PanelSection title={`頻道${!curAllowed ? '（當前國家不支援）' : ''}`}>
+            <Select
+              value={String(curCh)}
+              onChange={(v) => handleField('channel', Number(v))}
+              options={chanOptions}
+            />
+          </PanelSection>
         )
       })()}
 
@@ -249,16 +218,15 @@ function APPanel({ floorId, apId }) {
         const allowedWidths = allowedWidthsForBand(ap.frequency)
         const curWidth = ap.channelWidth ?? DEFAULT_CHANNEL_WIDTH[ap.frequency] ?? 20
         return (
-          <section className="ap-panel__section">
-            <p className="ap-panel__label">頻寬</p>
-            <div className="ap-panel__btn-group">
+          <PanelSection title="頻寬">
+            <div className="ap-panel__pill-row">
               {CHANNEL_WIDTHS.map((w) => {
                 const supported = allowedWidths.includes(w)
                 const active = curWidth === w
                 return (
                   <button
                     key={w}
-                    className={`ap-panel__btn${active ? ' ap-panel__btn--active' : ''}${supported ? '' : ' ap-panel__btn--disabled'}`}
+                    className={`ap-panel__pill${active ? ' ap-panel__pill--active' : ''}${supported ? '' : ' ap-panel__pill--disabled'}`}
                     onClick={() => supported && handleField('channelWidth', w)}
                     disabled={!supported}
                     title={supported ? '' : `${ap.frequency} GHz 不建議使用 ${w} MHz`}
@@ -268,70 +236,56 @@ function APPanel({ floorId, apId }) {
                 )
               })}
             </div>
-            <p className="ap-panel__hint">
+            <div className="ap-panel__hint">
               Cisco 建議：2.4G 固定 20、5G 多用 20/40、6G 可開 80
-            </p>
-          </section>
+            </div>
+          </PanelSection>
         )
       })()}
 
-      {/* 發射功率 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">發射功率</p>
-        <div className="ap-panel__number-row">
-          <input
-            className="ap-panel__input ap-panel__input--number"
-            type="number"
-            min="0"
-            max={maxTxForBand}
-            step="1"
+      <PanelSection title="安裝">
+        <PanelField label="發射功率" hint={`上限 ${maxTxForBand} dBm`}>
+          <NumberInput
             value={ap.txPower}
-            onChange={(e) => handleNumber('txPower', e.target.value)}
+            min={0}
+            max={maxTxForBand}
+            step={1}
+            unit="dBm"
+            width={70}
+            onChange={(v) => handleNumber('txPower', v)}
           />
-          <span className="ap-panel__unit">dBm（上限 {maxTxForBand}）</span>
-        </div>
-      </section>
-
-      {/* 安裝高度 — 影響 3D 視覺與未來的樓板 / 穿透計算 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">安裝高度</p>
-        <div className="ap-panel__number-row">
-          <input
-            className="ap-panel__input ap-panel__input--number"
-            type="number"
-            min="0"
-            step="0.1"
+        </PanelField>
+        <PanelField label="安裝高度">
+          <NumberInput
             value={ap.z}
-            onChange={(e) => handleNumber('z', e.target.value)}
+            min={0}
+            step={0.1}
+            unit="m"
+            width={70}
+            onChange={(v) => handleNumber('z', v)}
           />
-          <span className="ap-panel__unit">m</span>
-        </div>
-      </section>
+        </PanelField>
+        <PanelField label="安裝方式">
+          <div className="ap-panel__pill-row" style={{ flex: 1 }}>
+            {MOUNT_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                className={`ap-panel__pill${ap.mountType === o.value ? ' ap-panel__pill--active' : ''}`}
+                onClick={() => updateAP(floorId, apId, { mountType: o.value })}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </PanelField>
+      </PanelSection>
 
-      {/* 安裝方式 — 影響 3D 視覺姿勢（天花板 vs 壁掛） */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">安裝方式</p>
-        <div className="ap-panel__btn-group">
-          {MOUNT_OPTIONS.map((o) => (
-            <button
-              key={o.value}
-              className={`ap-panel__btn${ap.mountType === o.value ? ' ap-panel__btn--active' : ''}`}
-              onClick={() => updateAP(floorId, apId, { mountType: o.value })}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      {/* 天線模式 */}
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">天線模式</p>
-        <div className="ap-panel__btn-group">
+      <PanelSection title="天線模式">
+        <div className="ap-panel__pill-row">
           {ANTENNA_OPTIONS.map((o) => (
             <button
               key={o.value}
-              className={`ap-panel__btn${ap.antennaMode === o.value ? ' ap-panel__btn--active' : ''}`}
+              className={`ap-panel__pill${ap.antennaMode === o.value ? ' ap-panel__pill--active' : ''}`}
               onClick={() => handleAntennaMode(o.value)}
             >
               {o.label}
@@ -345,69 +299,53 @@ function APPanel({ floorId, apId }) {
           const azChanged = effAz !== rawAz
           return (
             <>
-              <p className="ap-panel__label" style={{ marginTop: 10 }}>
-                方位角{azChanged ? (
-                  <span className="ap-panel__hint-inline">（實際 {effAz}°）</span>
-                ) : (
-                  <span className="ap-panel__hint-inline">（0°=右，順時針）</span>
-                )}
-              </p>
-              <div className="ap-panel__number-row">
-                <input
-                  className="ap-panel__input ap-panel__input--number"
-                  type="number"
-                  step="1"
+              <PanelField
+                label="方位角"
+                hint={azChanged ? `實際 ${effAz}°` : '0°=右，順時針'}
+              >
+                <NumberInput
                   value={rawAz}
-                  onChange={(e) => handleAzimuth(e.target.value)}
+                  step={1}
+                  unit="度"
+                  width={70}
+                  onChange={(v) => { if (!isNaN(v)) updateAP(floorId, apId, { azimuth: v }) }}
                 />
-                <span className="ap-panel__unit">度</span>
-              </div>
+              </PanelField>
 
               {ap.antennaMode === 'directional' && (() => {
                 const rawBw = ap.beamwidth ?? DEFAULT_BEAMWIDTH
                 const effBw = clampBeamwidth(rawBw)
                 const bwChanged = effBw !== rawBw
                 return (
-                  <>
-                    <p className="ap-panel__label" style={{ marginTop: 10 }}>
-                      波瓣寬度{bwChanged ? (
-                        <span className="ap-panel__hint-inline">（實際 {effBw}°）</span>
-                      ) : (
-                        <span className="ap-panel__hint-inline">（HPBW，{MIN_BEAMWIDTH}~{MAX_BEAMWIDTH}）</span>
-                      )}
-                    </p>
-                    <div className="ap-panel__number-row">
-                      <input
-                        className="ap-panel__input ap-panel__input--number"
-                        type="number"
-                        step="5"
-                        value={rawBw}
-                        onChange={(e) => handleBeamwidth(e.target.value)}
-                      />
-                      <span className="ap-panel__unit">度</span>
-                    </div>
-                  </>
+                  <PanelField
+                    label="波瓣寬度"
+                    hint={bwChanged ? `實際 ${effBw}°` : `HPBW，${MIN_BEAMWIDTH}~${MAX_BEAMWIDTH}`}
+                  >
+                    <NumberInput
+                      value={rawBw}
+                      step={5}
+                      unit="度"
+                      width={70}
+                      onChange={(v) => { if (!isNaN(v)) updateAP(floorId, apId, { beamwidth: v }) }}
+                    />
+                  </PanelField>
                 )
               })()}
 
               {ap.antennaMode === 'custom' && (() => {
                 const pattern = getPatternById(ap.patternId ?? DEFAULT_PATTERN_ID)
-                const color = FREQ_OPTIONS.find((f) => f.value === ap.frequency)?.color ?? '#4fc3f7'
                 return (
                   <>
-                    <p className="ap-panel__label" style={{ marginTop: 10 }}>Pattern</p>
-                    <select
-                      className="ap-panel__input ap-panel__select"
-                      value={pattern.id}
-                      onChange={(e) => handlePattern(e.target.value)}
-                    >
-                      {ANTENNA_PATTERN_LIST.map((p) => (
-                        <option key={p.id} value={p.id}>{p.label}</option>
-                      ))}
-                    </select>
-                    <p className="ap-panel__hint">{pattern.description}</p>
+                    <PanelField label="Pattern">
+                      <Select
+                        value={pattern.id}
+                        onChange={(v) => updateAP(floorId, apId, { patternId: v })}
+                        options={ANTENNA_PATTERN_LIST.map((p) => ({ value: p.id, label: p.label }))}
+                      />
+                    </PanelField>
+                    <div className="ap-panel__hint">{pattern.description}</div>
                     <div className="ap-panel__pattern-preview">
-                      <PatternPreview pattern={pattern} color={color} azimuth={effAz} />
+                      <PatternPreview pattern={pattern} color={freqColor} azimuth={effAz} />
                     </div>
                   </>
                 )
@@ -415,46 +353,39 @@ function APPanel({ floorId, apId }) {
             </>
           )
         })()}
-      </section>
+      </PanelSection>
 
-      {/* 線纜路徑（fallback Manhattan to nearest same-floor switch） */}
       {route && (
-        <section className="ap-panel__section">
-          <p className="ap-panel__label">線纜</p>
+        <PanelSection title="線纜">
           {route.routeStatus === 'unroutable' ? (
-            <p className="ap-panel__hint" style={{ color: '#ef4444' }}>
+            <div className="ap-panel__hint" style={{ color: '#ef4444' }}>
               ⚠ 同樓層沒有 Switch，AP 無法接線
-            </p>
+            </div>
           ) : (
             <>
-              <p className="ap-panel__hint">
-                目標 Switch：
+              <PanelField label="目標 Switch">
                 {(() => {
-                  // Switch may live on a different floor when routed via riser.
                   for (const list of Object.values(switchesByFloor)) {
                     const sw = (list ?? []).find((s) => s.id === route.switchId)
                     if (sw) return sw.name
                   }
                   return '—'
                 })()}
-              </p>
-              <p className="ap-panel__hint">
-                線長：{route.cableM != null ? `${route.cableM.toFixed(2)} m` : '需先校正比例尺'}
-                {route.cableM != null && (
-                  <span className="ap-panel__hint-inline">
-                    （Z drop {route.zDropM.toFixed(2)} m，含 20% slack）
-                  </span>
-                )}
-              </p>
-              <p className="ap-panel__hint">
-                狀態：{route.routeStatus === 'tray' ? '沿 Cable Tray' : 'fallback Manhattan'}
-              </p>
+              </PanelField>
+              <PanelField
+                label="線長"
+                hint={route.cableM != null ? `Z drop ${route.zDropM.toFixed(2)} m，含 20% slack` : null}
+              >
+                {route.cableM != null ? `${route.cableM.toFixed(2)} m` : '需先校正比例尺'}
+              </PanelField>
+              <PanelField label="狀態">
+                {route.routeStatus === 'tray' ? '沿 Cable Tray' : 'fallback Manhattan'}
+              </PanelField>
             </>
           )}
-        </section>
+        </PanelSection>
       )}
-
-    </div>
+    </PanelShell>
   )
 }
 

@@ -1,114 +1,38 @@
 @use '@/styles/variables' as *
 
+// 24-3 Slimmed APPanel-specific styles. Layout / form primitives live in
+// _shared/shared.sass. Only the pill button row, the hint text, and the
+// custom antenna pattern preview survive here.
+//
+// CableTrayPanel still imports this file (and will be migrated last in
+// C-3d) — so the tray-* class block at the bottom stays until then.
+
 .ap-panel
-  display: flex
-  flex-direction: column
-  gap: 0
-  height: 100%
-
-  &__header
-    display: flex
-    align-items: center
-    justify-content: space-between
-    padding: 12px 14px 10px
-    border-bottom: 1px solid $border-color
-
-  &__title
-    font-size: 13px
-    font-weight: 600
-    color: $text-primary
-
-  &__dot
-    width: 10px
-    height: 10px
-    border-radius: 50%
-    flex-shrink: 0
-
-  &__section
-    padding: 10px 14px
-    border-bottom: 1px solid $border-color
-
-    &--disabled
-      opacity: 0.4
-      pointer-events: none
-
-  &__coming-soon
-    font-size: 10px
-    font-weight: 400
-    color: $text-secondary
-    background: rgba(255, 255, 255, 0.08)
-    padding: 1px 6px
-    border-radius: 4px
-    margin-left: 6px
-    text-transform: none
-    letter-spacing: 0
-
-  &__label
-    font-size: 11px
-    font-weight: 600
-    color: $text-secondary
-    text-transform: uppercase
-    letter-spacing: 0.4px
-    margin-bottom: 6px
-
-  &__input
-    width: 100%
-    background: rgba(255, 255, 255, 0.07)
-    border: 1px solid $border-color
-    border-radius: 6px
-    color: $text-primary
-    font-size: 13px
-    padding: 5px 8px
-    outline: none
-    box-sizing: border-box
-
-    &:focus
-      border-color: $accent
-
-    &--number
-      width: auto
-      flex: 1
-
-  &__select
-    appearance: none
-    cursor: pointer
-
-    option
-      background: $bg-secondary
-      color: $text-primary
-
-  &__number-row
-    display: flex
-    align-items: center
-    gap: 8px
-
-  &__unit
-    font-size: 12px
-    color: $text-secondary
-    white-space: nowrap
-
-  // 切換按鈕組
-  &__btn-group
+  // Pill button row (頻段 / 頻寬 / 安裝方式 / 天線模式)
+  &__pill-row
     display: flex
     gap: 4px
+    flex-wrap: wrap
 
-  &__btn
+  &__pill
     flex: 1
-    padding: 5px 4px
-    border: 1px solid rgba(255, 255, 255, 0.15)
+    min-width: 40px
+    padding: 5px 8px
+    border: 1px solid $border-color
     border-radius: 6px
     background: transparent
     color: $text-secondary
-    font-size: 11px
+    font-size: 12px
     cursor: pointer
     transition: background 0.12s, border-color 0.12s, color 0.12s
 
-    &:hover
+    &:hover:not(:disabled)
       background: rgba(255, 255, 255, 0.06)
       color: $text-primary
 
     &--active
-      background: rgba(255, 255, 255, 0.1)
+      background: var(--panel-accent-soft, rgba(79, 195, 247, 0.15))
+      border-color: var(--panel-accent, $accent)
       color: $text-primary
 
     &--disabled,
@@ -116,55 +40,13 @@
       opacity: 0.35
       cursor: not-allowed
 
-      &:hover
-        background: transparent
-        color: $text-secondary
-
+  // Section-internal hint (one-liner under controls)
   &__hint
-    margin-top: 6px
     font-size: 11px
     color: $text-secondary
+    line-height: 1.4
 
-    &--warn
-      color: #ef4444
-
-  &__hint-inline
-    font-size: 10px
-    font-weight: 400
-    color: $text-secondary
-    text-transform: none
-    letter-spacing: 0
-    margin-left: 6px
-
-    &--warn
-      color: #ef4444
-      font-weight: 600
-
-  // Connected-AP list inside SwitchPanel
-  &__conn-list
-    list-style: none
-    padding: 0
-    margin: 0
-    display: flex
-    flex-direction: column
-    gap: 3px
-
-  &__conn-item
-    display: flex
-    align-items: center
-    justify-content: space-between
-    padding: 4px 8px
-    background: rgba(255, 255, 255, 0.04)
-    border-radius: 4px
-    font-size: 12px
-
-  &__conn-name
-    color: $text-primary
-
-  &__conn-wattage
-    color: $text-secondary
-    font-size: 11px
-
+  // Pattern preview SVG box (custom antenna)
   &__pattern-preview
     display: flex
     justify-content: center
@@ -176,29 +58,11 @@
   &__pattern-svg
     display: block
 
-  // Floor checkbox list inside RiserPanel
-  &__checkbox-list
-    display: flex
-    flex-direction: column
-    gap: 4px
-    margin-top: 4px
-
-  &__checkbox-row
-    display: flex
-    align-items: center
-    gap: 6px
-    font-size: 12px
-    color: $text-primary
-    padding: 3px 4px
-    border-radius: 4px
-    cursor: pointer
-
-    &:hover
-      background: rgba(255, 255, 255, 0.05)
-
-    input[type="checkbox"]
-      margin: 0
-      cursor: pointer
+// ── Legacy classes still used by CableTrayPanel (migrated in C-3d) ──
+//
+// These were named with the `ap-panel__*` prefix when CableTrayPanel
+// originally cribbed APPanel's stylesheet. C-3d will move CableTrayPanel
+// onto primitives and these can be dropped (or repurposed for tray-only).
 
 // 19-3 tray system color legend (shown in CableTrayPanel under the system selector).
 .tray-system-legend

@@ -13,6 +13,8 @@ import { allowedChannels, channelEntries } from '@/constants/regulatoryDomains'
 import { CHANNEL_WIDTHS, DEFAULT_CHANNEL_WIDTH, allowedWidthsForBand } from '@/constants/channelWidths'
 import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
 import PatternPreview from './PatternPreview'
+import { PanelShell, PanelHeader } from './_shared/PanelShell'
+import './_shared/shared.sass'
 import './BatchPanel.sass'
 
 const FREQ_OPTIONS = [
@@ -217,12 +219,12 @@ function BatchPanel() {
     : []
 
   return (
-    <div className="batch-panel">
-      <div className="batch-panel__header">
-        <span className="batch-panel__title">批次選取</span>
-        <span className="batch-panel__count">{selectedItems.length} 個物件</span>
-        <button className="panel-delete-btn" onClick={handleDeleteAll}>刪除</button>
-      </div>
+    <PanelShell accent="batch" className="batch-panel">
+      <PanelHeader
+        title="批次選取"
+        meta={`${selectedItems.length} 個物件`}
+        onDelete={handleDeleteAll}
+      />
 
       {/* 摘要 */}
       {/* [SELECTABLE-TYPE] 新增物件類型 → 在此加一個 chip，並於 BatchPanel.sass 加對應 chip 顏色 */}
@@ -628,7 +630,7 @@ function BatchPanel() {
         </section>
       )}
 
-    </div>
+    </PanelShell>
   )
 }
 
