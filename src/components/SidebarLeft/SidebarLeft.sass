@@ -215,8 +215,12 @@
     font-size: 12px
     cursor: pointer
 
-    &:hover
+    &:hover:not(:disabled)
       background: rgba(255, 255, 255, 0.08)
+
+    &:disabled
+      color: rgba(255, 255, 255, 0.3)
+      cursor: not-allowed
 
     &--danger
       color: #ff6b6b

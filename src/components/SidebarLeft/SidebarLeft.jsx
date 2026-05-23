@@ -15,6 +15,8 @@ import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorImport } from '@/features/importer/useFloorImport'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
+import Konva from 'konva'
+import { capturePlanPng, triggerImageDownload } from '@/features/editor/exportPlanView'
 import './SidebarLeft.sass'
 
 function SidebarLeft() {
@@ -143,6 +145,40 @@ function SidebarLeft() {
     setEditorMode(EDITOR_MODE.ALIGN_FLOOR)
     // Open right-panel context for the align panel (dispatched by PanelRight).
     setSelected(floor.id, 'floor_align')
+  }
+
+  // 22-3 Export the floor's plan view as a PNG (background image +
+  // heatmap if visible + every vector layer the user has toggled on).
+  // If the user is currently viewing a different floor, switch to the
+  // target floor first so its Konva stage holds the right content.
+  const exportPng = (floor) => {
+    setMenuOpenId(null)
+    if (!floor.imageUrl) return  // Nothing to export — no plan loaded
+    const doExport = () => {
+      // Konva auto-registers every active Stage in window globals; the
+      // app only mounts one Stage (Editor2D), so [0] is safe.
+      const stage = Konva?.stages?.[0]
+      if (!stage) return
+      const png = capturePlanPng({
+        stage,
+        imageWidth:  floor.imageWidth,
+        imageHeight: floor.imageHeight,
+        pixelRatio: 2,
+      })
+      if (!png) return
+      const safeName = (floor.name ?? 'plan').replace(/[^\w\-一-龥]+/g, '_')
+      const stamp = new Date().toISOString().slice(0, 10)
+      triggerImageDownload(png, `floorplan-${safeName}-${stamp}.png`)
+    }
+    if (floor.id !== activeFloorId) {
+      setActiveFloor(floor.id)
+      // Wait for React to commit + Editor2D to re-fit the new floor's
+      // viewport before capturing; one frame is enough on dev hardware
+      // but give it a generous slack for low-spec laptops.
+      setTimeout(doExport, 120)
+    } else {
+      doExport()
+    }
   }
 
   const confirmRemove = () => {
@@ -309,6 +345,14 @@ function SidebarLeft() {
                   >
                     <button className="sidebar-left__menu-item" onClick={() => startRename(floor)}>重新命名</button>
                     <button className="sidebar-left__menu-item" onClick={() => startAlign(floor)}>對齊樓層</button>
+                    <button
+                      className="sidebar-left__menu-item"
+                      disabled={!floor.imageUrl}
+                      title={floor.imageUrl ? '' : '此樓層尚未匯入平面圖'}
+                      onClick={() => exportPng(floor)}
+                    >
+                      匯出 PNG
+                    </button>
                     <button className="sidebar-left__menu-item sidebar-left__menu-item--danger" onClick={() => requestRemove(floor)}>刪除樓層</button>
                   </div>
                 )}

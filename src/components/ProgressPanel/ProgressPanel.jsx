@@ -345,7 +345,8 @@ const PHASES = [
         items: [
           { id: '22-1', done: true,  text: 'CSV Planning BOM export（4 區塊：AP CABLES / S2S / CABLE TRAYS / SUMMARY）' },
           { id: '22-2', done: false, text: 'PDF report（平面圖 + 統計 + warnings）' },
-          { id: '22-3', done: false, text: 'SVG / PNG plan view export' },
+          { id: '22-3a', done: true,  text: 'PNG plan view export（樓層 ⋯ 選單「匯出 PNG」，fit-to-content，2× pixelRatio）' },
+          { id: '22-3b', done: false, text: 'SVG plan view export（延後，需自製 Konva → SVG）' },
           { id: '22-4', done: false, text: 'DXF export（DWG 之後再評估）' },
         ],
       },
