@@ -1558,21 +1558,31 @@ function Editor2D() {
     return () => observer.disconnect()
   }, [stageCursor])
 
+  // 24-4 Mode badge spec — Phase 18 toolbar groups map directly to a
+  // coloured left strip on the badge so the user can read the active mode
+  // at a glance without scanning the toolbar. Group names mirror the
+  // separators in Toolbar.jsx GROUPS.
+  //   pointer    → 操作    → slate
+  //   structure  → 結構    → slate (same — both structure-adjacent)
+  //   wireless   → 無線    → cyan
+  //   cable      → 網路布線 → violet
+  //   measure    → 標註    → amber
+  //   meta       → 樓層    → gray   (crop / align)
   const modeHintMap = {
-    [EDITOR_MODE.SELECT]:          null,
-    [EDITOR_MODE.MARQUEE_SELECT]:  { label: '框選模式', hint: '左鍵拖曳框選多物件；Ctrl+Click 追加選取' },
-    [EDITOR_MODE.PAN]:             { label: '平移模式', hint: '拖曳畫布移動視角' },
-    [EDITOR_MODE.DRAW_SCALE]:      { label: '比例尺模式', hint: '點擊兩點設定比例' },
-    [EDITOR_MODE.DRAW_WALL]:       { label: '畫牆模式', hint: '左鍵點擊設定端點，右鍵或 Esc 結束｜數字鍵 1~6 切換材質' },
-    [EDITOR_MODE.DOOR_WINDOW]:     { label: '門窗模式', hint: '點擊牆體兩點設定門/窗位置；D 切換門、W 切換窗；右鍵或 Esc 取消' },
-    [EDITOR_MODE.PLACE_AP]:        { label: '放置 AP 模式', hint: '左鍵點擊放置 AP' },
-    [EDITOR_MODE.PLACE_SWITCH]:    { label: '放置 Switch 模式', hint: '左鍵點擊放置 Switch / IDF / MDF / Router；右側面板可調類型與規格' },
-    [EDITOR_MODE.DRAW_CABLE_TRAY]: { label: '繪製線槽模式', hint: '左鍵新增頂點；Shift 鎖 0/45/90°；自動 snap 到 tray / 牆角 / 牆邊；近牆方向自動平行；Backspace / Ctrl+Z 退一步；Enter / 右鍵 / Esc 完成（≥ 2 點才會建立）' },
-    [EDITOR_MODE.PLACE_RISER]:    { label: '放置 Riser 模式', hint: '左鍵點擊放置 Riser；放完用右側面板加入跨樓層' },
-    [EDITOR_MODE.DRAW_SCOPE]:      { label: '範圍模式',     hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
-    [EDITOR_MODE.DRAW_FLOOR_HOLE]: { label: '中庭模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
-    [EDITOR_MODE.CROP_IMAGE]:      { label: '裁切模式', hint: '左鍵點擊兩點定義裁切區域；右鍵或 Esc 取消' },
-    [EDITOR_MODE.ALIGN_FLOOR]:     { label: '樓層對齊模式', hint: '使用右側面板的偏移/縮放/旋轉對齊本樓層；其他樓層以半透明疊影顯示' },
+    [EDITOR_MODE.SELECT]:          { group: '操作', accent: 'pointer',   label: '選取模式', hint: '左鍵選取、拖曳；右鍵物件開選單' },
+    [EDITOR_MODE.MARQUEE_SELECT]:  { group: '操作', accent: 'pointer',   label: '框選模式', hint: '左鍵拖曳框選多物件；Ctrl+Click 追加選取' },
+    [EDITOR_MODE.PAN]:             { group: '操作', accent: 'pointer',   label: '平移模式', hint: '拖曳畫布移動視角' },
+    [EDITOR_MODE.DRAW_SCALE]:      { group: '標註', accent: 'measure',   label: '比例尺模式', hint: '點擊兩點設定比例' },
+    [EDITOR_MODE.DRAW_WALL]:       { group: '結構', accent: 'structure', label: '畫牆模式', hint: '左鍵點擊設定端點，右鍵或 Esc 結束｜數字鍵 1~6 切換材質' },
+    [EDITOR_MODE.DOOR_WINDOW]:     { group: '結構', accent: 'structure', label: '門窗模式', hint: '點擊牆體兩點設定門/窗位置；D 切換門、W 切換窗；右鍵或 Esc 取消' },
+    [EDITOR_MODE.PLACE_AP]:        { group: '無線', accent: 'wireless',  label: '放置 AP 模式', hint: '左鍵點擊放置 AP' },
+    [EDITOR_MODE.PLACE_SWITCH]:    { group: '網路布線', accent: 'cable', label: '放置 Switch 模式', hint: '左鍵點擊放置 Switch / IDF / MDF / Router；右側面板可調類型與規格' },
+    [EDITOR_MODE.DRAW_CABLE_TRAY]: { group: '網路布線', accent: 'cable', label: '繪製線槽模式', hint: '左鍵新增頂點；Shift 鎖 0/45/90°；自動 snap 到 tray / 牆角 / 牆邊；近牆方向自動平行；Backspace / Ctrl+Z 退一步；Enter / 右鍵 / Esc 完成（≥ 2 點才會建立）' },
+    [EDITOR_MODE.PLACE_RISER]:    { group: '網路布線', accent: 'cable', label: '放置 Riser 模式', hint: '左鍵點擊放置 Riser；放完用右側面板加入跨樓層' },
+    [EDITOR_MODE.DRAW_SCOPE]:      { group: '無線', accent: 'wireless',  label: '範圍模式',     hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
+    [EDITOR_MODE.DRAW_FLOOR_HOLE]: { group: '結構', accent: 'structure', label: '中庭模式', hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
+    [EDITOR_MODE.CROP_IMAGE]:      { group: '樓層', accent: 'meta',      label: '裁切模式', hint: '左鍵點擊兩點定義裁切區域；右鍵或 Esc 取消' },
+    [EDITOR_MODE.ALIGN_FLOOR]:     { group: '樓層', accent: 'meta',      label: '樓層對齊模式', hint: '使用右側面板的偏移/縮放/旋轉對齊本樓層；其他樓層以半透明疊影顯示' },
   }
   const modeHint = modeHintMap[editorMode]
 
@@ -1584,7 +1594,9 @@ function Editor2D() {
       onContextMenu={(e) => e.preventDefault()}
     >
       {modeHint && (
-        <div className="editor-2d__mode-hint">
+        <div className={`editor-2d__mode-hint editor-2d__mode-hint--${modeHint.accent}`}>
+          <span className="editor-2d__mode-hint-group">{modeHint.group}</span>
+          <span className="editor-2d__mode-hint-sep">/</span>
           <span className="editor-2d__mode-hint-label">{modeHint.label}</span>
           {isWallMode && (
             <span className="editor-2d__mode-hint-material">

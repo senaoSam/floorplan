@@ -16,13 +16,41 @@
     display: flex
     align-items: center
     gap: 8px
-    padding: 6px 16px
+    // 24-4 left strip uses the group's accent colour; a small inset shadow
+    // simulates the rounded-corner truncation without an extra element.
+    padding: 6px 14px 6px 12px
     background: rgba(0, 0, 0, 0.75)
     border: 1px solid rgba(255, 255, 255, 0.15)
+    border-left-width: 4px
     border-radius: 8px
     backdrop-filter: blur(8px)
     pointer-events: none
     user-select: none
+
+    // Per-group accent on the left border. Matches the toolbar group's
+    // visual identity + the right-panel accent (PanelShell var --panel-accent).
+    &--pointer
+      border-left-color: #94a3b8  // slate-400
+    &--structure
+      border-left-color: #94a3b8  // slate-400
+    &--wireless
+      border-left-color: #4fc3f7  // cyan
+    &--cable
+      border-left-color: #a78bfa  // violet
+    &--measure
+      border-left-color: #f1c40f  // amber
+    &--meta
+      border-left-color: #9ca3af  // gray
+
+  &__mode-hint-group
+    color: $text-secondary
+    font-size: 11px
+    font-weight: 500
+    letter-spacing: 0.4px
+
+  &__mode-hint-sep
+    color: rgba(255, 255, 255, 0.25)
+    font-size: 11px
 
   &__mode-hint-label
     color: #00e5ff
