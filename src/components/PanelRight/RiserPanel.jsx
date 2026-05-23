@@ -1,8 +1,10 @@
-import React, { useCallback } from 'react'
+import React from 'react'
 import { useCableStore, DEFAULT_RISER_MAGNET_PX } from '@/store/useCableStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
-import './APPanel.sass'
+import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
+import { NumberInput, Checkbox } from './_shared/PanelControls'
+import './_shared/shared.sass'
 
 // Riser editing — floorIds is the core knob: the user picks which floors the
 // riser actually serves. xy is global, so editing xy here would apply across
@@ -14,11 +16,7 @@ function RiserPanel({ riserId }) {
   const floors        = useFloorStore((s) => s.floors)
   const clearSelected = useEditorStore((s) => s.clearSelected)
 
-  const handleNumber = useCallback((field, raw, { min = 0 } = {}) => {
-    const num = parseFloat(raw)
-    if (isNaN(num) || num < min) return
-    updateRiser(riserId, { [field]: num })
-  }, [riserId, updateRiser])
+  if (!riser) return null
 
   const handleDelete = () => {
     removeRiser(riserId)
@@ -33,72 +31,64 @@ function RiserPanel({ riserId }) {
     updateRiser(riserId, { floorIds: next })
   }
 
-  if (!riser) return null
-
   const magnet = riser.magnetDistance ?? DEFAULT_RISER_MAGNET_PX
   const sortedFloors = [...floors].sort((a, b) => (a.elevation ?? 0) - (b.elevation ?? 0))
   const floorSet = new Set(riser.floorIds ?? [])
 
   return (
-    <div className="ap-panel">
-      <div className="ap-panel__header">
-        <span className="ap-panel__title">{riser.name}</span>
-        <span className="ap-panel__dot" style={{ background: '#a78bfa' }} />
-        <button className="panel-delete-btn" onClick={handleDelete}>刪除</button>
-      </div>
+    <PanelShell accent="cable_riser">
+      <PanelHeader title={riser.name} onDelete={handleDelete} />
 
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">位置（canvas px）</p>
-        <p className="ap-panel__hint">
-          x: {Math.round(riser.x)}, y: {Math.round(riser.y)}（拖曳 riser 圖示可移動，xy 跨樓層共用）
-        </p>
-      </section>
+      <PanelSection title="位置">
+        <PanelField label="X (canvas px)">{Math.round(riser.x)}</PanelField>
+        <PanelField label="Y (canvas px)">{Math.round(riser.y)}</PanelField>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary, #94a3b8)' }}>
+          拖曳 riser 圖示可移動；xy 跨樓層共用
+        </div>
+      </PanelSection>
 
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">
-          跨越樓層
-          <span className="ap-panel__hint-inline">（共 {floorSet.size} 層）</span>
-        </p>
-        <div className="ap-panel__checkbox-list">
+      <PanelSection title="跨越樓層">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {sortedFloors.map((f) => (
-            <label key={f.id} className="ap-panel__checkbox-row">
-              <input
-                type="checkbox"
-                checked={floorSet.has(f.id)}
-                onChange={() => handleToggleFloor(f.id)}
-              />
-              <span>{f.name ?? f.id}</span>
-              {f.elevation != null && (
-                <span className="ap-panel__hint-inline">（{f.elevation.toFixed(1)} m）</span>
-              )}
-            </label>
+            <Checkbox
+              key={f.id}
+              checked={floorSet.has(f.id)}
+              onChange={() => handleToggleFloor(f.id)}
+              label={
+                f.elevation != null
+                  ? `${f.name ?? f.id}（${f.elevation.toFixed(1)} m）`
+                  : (f.name ?? f.id)
+              }
+            />
           ))}
         </div>
-        {floorSet.size === 0 && (
-          <p className="ap-panel__hint" style={{ color: '#ef4444' }}>
+        {floorSet.size === 0 ? (
+          <div style={{ fontSize: 11, color: '#ef4444' }}>
             ⚠ 沒有選擇任何樓層 → riser 在 2D 不會顯示
-          </p>
+          </div>
+        ) : (
+          <div style={{ fontSize: 11, color: 'var(--text-secondary, #94a3b8)' }}>
+            共 {floorSet.size} 層
+          </div>
         )}
-      </section>
+      </PanelSection>
 
-      <section className="ap-panel__section">
-        <p className="ap-panel__label">磁吸範圍</p>
-        <div className="ap-panel__number-row">
-          <input
-            className="ap-panel__input ap-panel__input--number"
-            type="number"
-            min="1"
-            step="10"
+      <PanelSection title="磁吸設定">
+        <PanelField label="磁吸範圍">
+          <NumberInput
             value={magnet}
-            onChange={(e) => handleNumber('magnetDistance', e.target.value, { min: 1 })}
+            min={1}
+            step={10}
+            unit="px"
+            width={80}
+            onChange={(v) => { if (!isNaN(v) && v >= 1) updateRiser(riserId, { magnetDistance: v }) }}
           />
-          <span className="ap-panel__unit">px</span>
+        </PanelField>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary, #94a3b8)' }}>
+          Riser 是 hub：每樓層所有 magnet 內 tray 都會接過去（12-3b graph 用）
         </div>
-        <p className="ap-panel__hint">
-          Riser 是 hub：每個樓層的所有 magnet 內 tray 都會接過去（12-3b graph 用）
-        </p>
-      </section>
-    </div>
+      </PanelSection>
+    </PanelShell>
   )
 }
 

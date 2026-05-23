@@ -1,10 +1,12 @@
 import React from 'react'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useEditorStore } from '@/store/useEditorStore'
-import './ScopePanel.sass'
+import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
+import { Button } from './_shared/PanelControls'
+import './_shared/shared.sass'
 
 const TYPE_OPTIONS = [
-  { value: 'in',  label: 'In-Scope',  color: '#2ed573' },
+  { value: 'in',  label: 'In-Scope',     color: '#2ed573' },
   { value: 'out', label: 'Out-of-Scope', color: '#ff4757' },
 ]
 
@@ -24,35 +26,37 @@ function ScopePanel({ floorId, zoneId }) {
   const current = TYPE_OPTIONS.find((o) => o.value === zone.type) ?? TYPE_OPTIONS[0]
 
   return (
-    <div className="scope-panel">
-      <div className="scope-panel__header">
-        <span className="scope-panel__title">範圍</span>
-        <span className="scope-panel__dot" style={{ background: current.color }} />
-        <button className="panel-delete-btn" onClick={handleDelete}>刪除</button>
-      </div>
+    <PanelShell accent="scope">
+      <PanelHeader
+        title={zone.name ?? '範圍'}
+        meta={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: current.color }} />
+          {current.label}
+        </span>}
+        onDelete={handleDelete}
+      />
 
-      <section className="scope-panel__section">
-        <p className="scope-panel__label">類型</p>
-        <div className="scope-panel__btn-group">
+      <PanelSection title="類型">
+        <div style={{ display: 'flex', gap: 6 }}>
           {TYPE_OPTIONS.map((o) => (
-            <button
+            <Button
               key={o.value}
-              className={`scope-panel__btn${zone.type === o.value ? ' scope-panel__btn--active' : ''}`}
-              style={zone.type === o.value ? { borderColor: o.color, color: o.color } : {}}
+              variant={zone.type === o.value ? 'primary' : 'default'}
               onClick={() => updateScope(floorId, zoneId, { type: o.value })}
+              className="pnl-btn--block"
             >
               {o.label}
-            </button>
+            </Button>
           ))}
         </div>
-      </section>
+      </PanelSection>
 
-      <section className="scope-panel__section">
-        <p className="scope-panel__label">頂點數</p>
-        <span className="scope-panel__value">{zone.points.length / 2}</span>
-      </section>
-
-    </div>
+      <PanelSection title="幾何">
+        <PanelField label="頂點數">
+          {zone.points.length / 2}
+        </PanelField>
+      </PanelSection>
+    </PanelShell>
   )
 }
 
