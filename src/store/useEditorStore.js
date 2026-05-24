@@ -40,6 +40,17 @@ export const useEditorStore = create((set, get) => ({
   selectedItems: [],
   regulatoryDomain: 'TW',
   autoChannelOnPlace: true,
+  // Sub-type for placement modes — chosen via toolbar dropdown.
+  // placeApBand: 2.4 | 5 | 6 GHz, decides defaultFreq when placing an AP.
+  // placeSwitchKind: matches SWITCH_KINDS values; decides which kind is placed
+  // while in PLACE_SWITCH mode.
+  placeApBand: 5,
+  placeSwitchKind: 'switch',
+
+  // Toolbar dropdown open state — surfaced so the mode hint banner (which
+  // sits directly under the toolbar) can hide itself while a menu is
+  // expanded, otherwise they overlap.
+  toolbarMenuOpen: false,
   panelCollapsed: false,
   sidebarCollapsed: false,
   showFloorImage: true,
@@ -99,6 +110,10 @@ export const useEditorStore = create((set, get) => ({
     if (s.selectedId === id) return true
     return s.selectedItems.some((it) => it.id === id)
   },
+
+  setPlaceApBand: (band) => set({ placeApBand: band }),
+  setPlaceSwitchKind: (kind) => set({ placeSwitchKind: kind }),
+  setToolbarMenuOpen: (open) => set({ toolbarMenuOpen: open }),
 
   setRegulatoryDomain: (id) => set({ regulatoryDomain: id }),
   toggleAutoChannelOnPlace: () => set((s) => ({ autoChannelOnPlace: !s.autoChannelOnPlace })),

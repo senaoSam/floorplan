@@ -6,7 +6,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
-import { useCableStore, DEFAULT_SWITCH, DEFAULT_TRAY, DEFAULT_TRAY_MAGNET_PX, DEFAULT_RISER_MAGNET_PX, TRAY_SYSTEMS } from '@/store/useCableStore'
+import { useCableStore, DEFAULT_SWITCH, DEFAULT_SWITCH_BY_KIND, DEFAULT_TRAY, DEFAULT_TRAY_MAGNET_PX, DEFAULT_RISER_MAGNET_PX, TRAY_SYSTEMS } from '@/store/useCableStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { MATERIALS, MATERIAL_LIST, OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
@@ -122,7 +122,8 @@ function Editor2D() {
   const { editorMode, setEditorMode, selectedId, selectedType, setSelected, clearSelected,
           selectedItems, setSelectedItems, toggleSelectedItem,
           showFloorImage, showScopes, showFloorHoles, showWalls, showAPs, showSwitches, showCables, showCableTrays, showRisers,
-          autoChannelOnPlace, regulatoryDomain,
+          autoChannelOnPlace, regulatoryDomain, placeApBand, placeSwitchKind,
+          toolbarMenuOpen,
           alignRefFloors, alignRefOpacity } = useEditorStore()
   const isSelectMode    = editorMode === EDITOR_MODE.SELECT
   const isMarqueeMode   = editorMode === EDITOR_MODE.MARQUEE_SELECT
@@ -1126,8 +1127,10 @@ function Editor2D() {
     // AP 放置
     if (isAPMode) {
       const newId = generateId('ap')
-      const defaultFreq = 5
-      const defaultChannel = 36
+      // placeApBand is set by the toolbar dropdown (2.4 / 5 / 6).
+      const defaultFreq = placeApBand
+      // Conservative starting channel per band; auto-channel may override below.
+      const defaultChannel = defaultFreq === 2.4 ? 1 : defaultFreq === 6 ? 1 : 36
 
       let channel = defaultChannel
       if (autoChannelOnPlace) {
@@ -1153,7 +1156,7 @@ function Editor2D() {
         mountType: 'ceiling',
         modelId: DEFAULT_AP_MODEL_ID,
         name: nextAPName(),
-        color: '#4fc3f7',
+        color: defaultFreq === 2.4 ? '#f39c12' : defaultFreq === 6 ? '#a855f7' : '#4fc3f7',
       })
       return
     }
@@ -1174,9 +1177,11 @@ function Editor2D() {
 
     // Switch 放置
     if (isSwitchMode) {
-      const kind = DEFAULT_SWITCH.kind
+      // placeSwitchKind chosen via toolbar dropdown (switch | idf | mdf | router).
+      const kind = placeSwitchKind
+      const defaults = DEFAULT_SWITCH_BY_KIND[kind] ?? DEFAULT_SWITCH
       addSwitch(activeFloorId, {
-        ...DEFAULT_SWITCH,
+        ...defaults,
         id: generateId('sw'),
         name: nextSwitchName(kind),
         x: pos.x, y: pos.y,
@@ -1310,8 +1315,8 @@ function Editor2D() {
     isMarqueeMode, isDoorWindowMode,
     isScaleMode, showScaleDialog, scalePt1,
     isWallMode, wallDrawStart, activeFloorId, snapToWallEndpoint,
-    isAPMode, nextAPName, autoChannelOnPlace, regulatoryDomain,
-    isSwitchMode, addSwitch, nextSwitchName,
+    isAPMode, nextAPName, autoChannelOnPlace, regulatoryDomain, placeApBand,
+    isSwitchMode, addSwitch, nextSwitchName, placeSwitchKind,
     isRiserMode, addRiser, nextRiserName,
     isTrayMode, snapTrayPoint,
     isScopeMode, scopePoints, viewport.scale, addScope,
@@ -1586,7 +1591,7 @@ function Editor2D() {
       style={{ cursor: stageCursor }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {modeHint && (
+      {modeHint && !toolbarMenuOpen && (
         <div className={`editor-2d__mode-hint editor-2d__mode-hint--${modeHint.accent}`}>
           <span className="editor-2d__mode-hint-group">{modeHint.group}</span>
           <span className="editor-2d__mode-hint-sep">/</span>

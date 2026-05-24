@@ -1,8 +1,8 @@
 @use '@/styles/variables' as *
 
-// Floating, icon-only toolbar pinned to top-center of the canvas (Phase 18).
-// Styled to match HeatmapControl / DevicePlanningPanel — semi-transparent
-// dark background, 1-px border, soft shadow, rounded corners.
+// Floating, two-tier toolbar pinned to top-center of the canvas (Phase 24).
+// Tier 1: one button per group (representative icon).
+// Tier 2: hover-open vertical dropdown listing each item with icon + label.
 
 .toolbar-floating
   position: absolute
@@ -22,14 +22,14 @@
   white-space: nowrap
 
   &__group
+    position: relative
     display: flex
     gap: 2px
 
-  &__separator
-    width: 1px
-    height: 22px
-    background: rgba(255, 255, 255, 0.12)
-    margin: 0 4px
+  // Push edit (undo/redo) cluster to the right edge.
+  &__spacer
+    flex: 1 1 auto
+    min-width: 12px
 
   &__btn
     display: inline-flex
@@ -60,3 +60,66 @@
     &:disabled
       opacity: 0.3
       cursor: not-allowed
+
+  // Dropdown menu opened on group hover. Positioned just below the trigger
+  // with a small bridging gap that mouse can cross without closing
+  // (mouseleave on the parent .group fires after a 200ms close timer in JS).
+  &__menu
+    position: absolute
+    top: calc(100% + 6px)
+    left: 0
+    z-index: 1
+    display: flex
+    flex-direction: column
+    min-width: 180px
+    padding: 4px
+    background: rgba(15, 23, 42, 0.96)
+    border: 1px solid $border-color
+    border-radius: 8px
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5)
+
+    // Bridge the visual gap between trigger and menu so the cursor can move
+    // from one to the other without crossing dead space (which would fire
+    // mouseleave on .group). The pseudo-element is transparent but
+    // hit-testable.
+    &::before
+      content: ''
+      position: absolute
+      top: -6px
+      left: 0
+      right: 0
+      height: 6px
+
+  &__menu-item
+    display: flex
+    align-items: center
+    gap: 8px
+    width: 100%
+    padding: 6px 8px
+    border: none
+    border-radius: 4px
+    background: transparent
+    color: $text-secondary
+    font-size: 13px
+    text-align: left
+    cursor: pointer
+    transition: background 0.12s, color 0.12s
+
+    &:hover:not(:disabled)
+      background: rgba(255, 255, 255, 0.08)
+      color: $text-primary
+
+    &--active
+      background: rgba($accent, 0.18)
+      color: $accent
+
+      &:hover:not(:disabled)
+        background: rgba($accent, 0.25)
+        color: $accent
+
+    &:disabled
+      opacity: 0.4
+      cursor: not-allowed
+
+  &__menu-label
+    flex: 1 1 auto
