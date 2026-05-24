@@ -169,3 +169,186 @@ React reconciliation 不是主導項。P1 把 reconciliation 從 O(300) 降到 O
 ### 給 P2 用的訊號
 
 P2「heatmap 同值跳過」對應 §2 的 2.5 s 區段 — 預估省 ~30% 的 commit 時間。同時 P3「panel 共用 routes context」對應 §1 一部分（不只 routes — 多 panel 訂閱 apsByFloor 也都會被通知）。建議順序：**P2 → 重測 → P3**。
+
+---
+
+## After 26-2 — P2（HeatmapLayer 同值跳過 sampleFieldGL）
+
+**結論：單 AP no-op updateAP 從 ~5900 ms 降到 ~4300 ms（-27%）。視覺 0 diff。real change / HM toggle 都正常。**
+
+### 改動
+- `src/features/editor/layers/HeatmapLayer.jsx`
+  - 新增 `fingerprintRecompute(scenario, scopes, opts)`：把 post-`buildScenario` AP 欄位 / wall 端點 / scope 多邊形 / 全部 shader opts 串成單一字串
+  - 加 `lastFingerprintRef` + `lastWasSoloRef` 兩個 ref
+  - 在 full-recompute 分支進入 `sampleFieldGL` 前比對 fingerprint；命中 → 直接 `return`（既有 `gl.canvas` 像素仍有效，沒有 batchDraw 沒有 stale frame）
+  - solo-AP 分支永遠跑 — 不查 fingerprint（拖曳時必須每幀更新單顆 AP 的疊圖）
+  - 從 solo 跳回 main 強制 full re-render（`lastWasSoloRef.current` 為真就跳過 skip 邏輯）
+  - 加一個 `[enabled]` effect 把兩個 ref 都清空 — 關閉熱圖再打開要重新算
+
+### 視覺驗收
+8 場景 pixelmatch `0 / 4650888` 全 pass（`.playwright-mcp/perf-after-p2/` vs `.playwright-mcp/perf-before/`）
+
+### 數字（HM ON，300 AP，3 樣本）
+
+| 指標 | Before | After P1 | After P2 | 從 baseline 的 Δ |
+|---|---|---|---|---|
+| 單 AP no-op updateAP (median) | 6367 ms | ~6000 ms | **4281 ms** | **-2086 ms / -33%** |
+| → 300 commit | 5906 ms | 6528 ms | 8458 ms | run-to-run 噪聲；fingerprint 計算本身在 300 AP 有 ~50–100 ms 額外 cost |
+| → 150 commit | 2006 ms | 2105 ms | 2854 ms | 同上 |
+| → 50 commit | 556 ms | 657 ms | 651 ms | 同 |
+
+setAPs（count 變動）每次都 cache miss，理應走完整 recompute 路徑 — fingerprint 多算一輪，所以 commit time 沒降反小幅升。這是設計預期：**setAPs 不是 P2 的目標**，updateAP 才是。
+
+### Sanity 驗證
+
+| 驗證項 | 結果 |
+|---|---|
+| 真實值改變（txPower +10）後熱圖被重畫 | ✅ pixels differ |
+| 真實值改變後再做一次同值 no-op，第二次被 skip | ✅ pixels identical |
+| HM toggle off → on（沒其他變更）熱圖正確恢復 | ✅ pixels 同 toggle 前 |
+| Drag AP solo-AP 路徑沒被擋（理論：solo 分支不查 fingerprint）| ✅ 程式碼路徑保證 |
+
+### 為什麼不是預期的 -2.5 s
+
+預測是省 ~2.5 s，實測省 ~1.6 s。差異來自：
+- fingerprint 計算本身在 300 AP × 多欄位下要 ~50–100 ms（字串拼接 + GC）
+- 第 1 個 rAF 階段（React commit + react-konva reconcile + Konva batchDraw + KonvaImage 重畫）還在跑 — 即便跳過 sampleFieldGL，React 仍會 re-render HeatmapLayer 一次（dep 包含 scenario，scenario 是新 reference 即使內容相同）
+
+剩下的 4300 ms 分布（待 P3 後再 profile）：
+- zustand subscriber sweep 仍佔 ~1.5 s
+- React reconciliation + react-konva ~200 ms（P1 已縮 / 但其他 layer 還會跑）
+- Konva batchDraw + canvas redraw ~1 s
+- 殘餘 heatmap rendering pipeline（KonvaImage cache、setDisplayMode 等）~600 ms
+- fingerprint 計算 ~50–100 ms
+
+### 給 P3 用的訊號
+
+P3 對應 zustand subscriber sweep ~1.5 s — 把 5 個 panel 的 `computeRoutes` 合一份。但本基準場景沒 tray / switch，`computeRoutes` <1 ms — 沒得救。要在 tray 大場景重測才能驗證 P3。**先停手，跑使用者實際工作流量級的場景**。
+
+---
+
+## After 26-2 P2 — 真實工作流 benchmark + profile（2026-05-24）
+
+**動機**：StressLoader 觸發「網頁無回應」對話框；使用者質疑「真實 200+ AP 工作流順不順」。
+
+**結論：150 AP 已不能用，而且 P1+P2 已蓋的層不是主兇。需要 P3 改 react-konva → imperative Konva。**
+
+### 1. 真實操作 benchmark（demo 平面圖 + 1 switch + 1 tray，HM ON）
+
+| AP 數 | addAP 一顆 | 改 slider 一格 | 拖一顆 FPS | 判定 |
+|---|---|---|---|---|
+| 50 | 250 ms | 222 ms | 30 FPS | ⚠ 邊緣 |
+| 150 | 950 ms | 1784 ms | **0.98 FPS** | ❌ 不能用 |
+| 300 | 7500 ms | 6920 ms | 0.27 FPS | ❌ 觸發無回應對話框 |
+
+HM OFF 在 150 AP：addAP 418 ms / slider 790 ms / **drag 1.2 FPS**。HM 關掉只救一半，**剩下 50% 不在 heatmap**。
+
+### 2. 用 `PerformanceObserver('longtask')` + 元件 render counter 找瓶頸
+
+**150 AP / 改 txPower 真實值（real change）**
+- React render: HeatmapLayer×1, APLayer×1, APMarker×**1**（149 顆被 memo 擋掉，P1 正確生效）, CableLayer×1
+- Longtasks: 353 ms + 234 ms + **2273 ms**
+- 總耗時 2875 ms
+
+**150 AP / no-op txPower（P2 應 skip）**
+- 同上 React render count
+- Longtasks: 194 ms + 149 ms
+- 總耗時 **841 ms** ← P2 確實砍掉 2 秒 sampleFieldGL
+
+**150 AP / addAP 一顆**
+- HeatmapLayer×2, APLayer×2, APMarker×**1**（只有新加那顆 render，存量 150 顆全 skip）, CableLayer×2
+- Longtasks: 430 ms + 144 ms + **1668 ms**
+- 總耗時 2250 ms
+
+**150 AP / dragMove ×5 frames**
+- HeatmapLayer×6, CableLayer×6（每 frame 一次）
+- **APLayer×0, APMarker×0** — markers 都不動
+- 每 frame 平均 889 ms = **1.1 FPS**
+
+### 3. 真兇定位
+
+**1668 ms / 2273 ms / 889 ms 的單 longtask 都不在 React 元件 render 程式裡** —
+這些時間花在：
+- **react-konva 的 commit / reconcile 階段**：把 React vDOM 對齊到 Konva imperative 樹。150 AP × ~10 Konva 子節點 / AP = ~1500 個 Konva node 要 diff，即便 React tree 沒動 props 也得遍歷。
+- **Konva 的 `Layer.batchDraw()`**：每次 layer 重畫整張 canvas，要重畫 ~1500 個節點到 2D context。
+
+**Drag 的真兇是 CableLayer + HeatmapLayer 跟 dragAP**：
+- CableLayer 訂閱 `dragAP` 來即時更新 cable line — 每幀重渲染 ~150 條 polyline + drop-leg
+- HeatmapLayer 訂閱 `dragAP` 來重算 scenario.aps — 每幀 sampleFieldGL（位置變了 P2 不跳）
+
+### 4. P1 / P2 為什麼效果有限
+
+- **P1（APMarker memo）**：已經把 marker render 從 N 縮到 1。但**真正的時間花在 react-konva commit + Konva 整層 batchDraw**，這跟 React render count 沒關係，就算 0 個元件 re-render 也得 commit / batchDraw 整層。
+- **P2（HeatmapLayer fingerprint）**：no-op updateAP 砍掉 2 秒 sampleFieldGL，從 2875→841 ms 是真的省到。但 drag 的時候 fingerprint 永遠 mismatch（位置在動），救不到 drag FPS。
+
+### 5. 接下來該動什麼（給 P3 / P4）
+
+排序按 **杠杆 / 風險**：
+
+| 候選 | 預期效果 | 風險 | 工時 |
+|---|---|---|---|
+| **P3a — APLayer 改 imperative Konva** | 把 APMarker 從 react-konva 的 JSX 改成手動 `new Konva.Group()`，繞過 vDOM commit / diff。150 AP addAP 預期 1500 ms → 200 ms | 中：要重寫事件綁定 + 拖曳 + cleanup；hover/select/drag 4 個互動要再驗 | 4-6 h |
+| **P3b — CableLayer 不訂閱 dragAP，只在 dragEnd 重算 cable** | 拖 AP 時 cable 線「凍結」直到放開；現代設計工具普遍這樣做（Figma、Hamina）。150 AP drag FPS 1 → 30+ | 低：純 UX 變動，cable 短暫不跟手 | 1-2 h |
+| **P3c — HeatmapLayer dragMode 預設改 'solo'**（目前是 'live'） | drag 時用 single-AP 疊圖路徑，跳過 sampleFieldGL；既有 HM-drag-solo 機制只是預設沒開 | 低：HM-drag-solo 已實作完整 | 30 min（改一個預設值 + UI toggle） |
+
+**建議順序**：先 P3c（最便宜，可能 drag FPS 就從 1 跳到 20+）→ 重測 → 還不夠再做 P3b → 還不夠才動 P3a（最大但最貴）。
+
+### 6. addAP / slider 的命運
+
+addAP 跟 slider 的兇手是同一個（react-konva commit + batchDraw）。**只有 P3a 能砍**。P3c / P3b 都不會影響 addAP / slider — 那是 store 變動觸發整層重畫，跟 drag overlay 無關。
+
+所以：
+- 想救 drag → P3c → P3b
+- 想救 addAP / slider → 只能 P3a
+- 想救三個都 → P3c + P3b + P3a 全做
+
+---
+
+## After 26-2 P3 — drag 救回來了（2026-05-24）
+
+**結論：drag FPS 從 1 → 60。Visual 0 diff。Commit time 沒動。**
+
+### P3c 改動
+
+[useHeatmapStore.js](src/store/useHeatmapStore.js) — `dragMode` 預設從 `'live'` 改成 `'solo'`。
+
+「solo」是既有 HM-drag-solo 機制（拖牆/scope 整張凍結；拖 AP 只渲染那顆 AP 疊在快照上）。原本只是預設沒開。
+
+### P3b 改動
+
+[CableLayer.jsx](src/features/editor/layers/CableLayer.jsx) — 拿掉 `useDragOverlayStore` 訂閱。`dragAP / dragSwitch` 設成常數 null，既有「`dragAP && ...`」live-override 程式碼自動短路。
+
+副作用：拖 AP 期間，**該顆 AP 的 cable 線暫時不跟手**（停在原位）。放開時 store 提交，CableLayer 重新算 + 重畫，cable 對齊新位置。Figma / Hamina 都是這個 UX 模式。
+
+### 數字（HM ON，dragMode='solo'，3 樣本）
+
+| 指標 | Baseline | After P1+P2 | After P3 | 從 baseline 的 Δ |
+|---|---|---|---|---|
+| 150 AP **drag FPS** | 0.98 | 0.98 | **60.03** | **×60** 🎯 |
+| 300 AP **drag FPS** | 0.27 | 0.27 | **58.00** | **×215** 🎯 |
+| 150 AP idle FPS | 60 | 60 | 60 | — |
+| 300 AP idle FPS | 60 | 60 | 60 | — |
+| 300 AP 單 AP no-op updateAP | 6367 ms | 4281 ms | 同 P2 | drag 才會走 P3 路徑 |
+| 300 AP setAPs commit | 5906 ms | 5906 ms | 同 baseline | P3 不動 setAPs |
+| 300 AP addAP | 7500 ms | 7500 ms | 同 | 同上 |
+| 300 AP slider | 6920 ms | 6920 ms | 同 | 同上 |
+
+### 視覺驗收
+
+8 場景 pixelmatch `0 / 4650888` 全 pass — `.playwright-mcp/perf-after-p3/` vs `.playwright-mcp/perf-before/`。
+
+過程中發現一個 **harness bug**（不是程式 bug）：`setHeatmap(false)` 透過 `await import()` 拿到的是被 §9 HMR 切開的 store instance，React tree 沒收到變更。改用點 toolbar 的「熱圖 已開啟」按鈕就正確。`scripts/perf/bench-harness.js` 之後要修這條（或者 scenario 07 直接點 UI 按鈕）。
+
+### 沒救到 / 還在的問題
+
+- **addAP 一顆 ~7.5 s** — 動 store 觸發整層 commit + batchDraw，P3 沒救到
+- **slider 一格 ~6.9 s** — 同上
+- StressLoader 一鍵 300 AP 仍會卡 ~6 s
+
+這些都要 P3a（APMarker 改 imperative Konva）才動得了。下一步使用者要決定要不要做 P3a。
+
+### 給 P3a 用的訊號
+
+P3a 工程預期 4-6 h，要動 APLayer 整個 imperative 化（手動 `new Konva.Group()`、`.on('click', ...)`、`.draggable(true)`），繞過 react-konva 的 vDOM commit。預期 addAP / slider 從 ~7 s → ~200 ms（基於 longtask 拆解推測，未實測）。
+
+風險：要重做 click / hover / drag / context-menu 4 個互動的事件綁定 + cleanup。已有 P3c+P3b 的 drag-friendly 路徑兜底，所以 drag 部分可以放心，主要要驗 click + context menu。

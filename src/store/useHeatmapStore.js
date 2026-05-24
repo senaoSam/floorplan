@@ -30,7 +30,12 @@ export const useHeatmapStore = create((set) => ({
   enabled: false,
   mode: 'rssi',
   engine: 'shader',
-  dragMode: 'live',
+  // 26-2 P3c — 'solo' (HM-drag-solo, Hamina style): wall/scope freeze the
+  // heatmap during drag; AP renders only the dragged AP as overlay on a
+  // snapshot. At 150+ AP this is the difference between 1 FPS and 30+ FPS
+  // because sampleFieldGL during drag is ~700ms/frame. Users can flip back
+  // to 'live' in HeatmapControl.
+  dragMode: 'solo',
   reflections: true,
   diffraction: true,
   gridStepM: 0.5,

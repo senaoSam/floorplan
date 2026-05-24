@@ -3,7 +3,6 @@ import { Group, Line, Circle, Text } from 'react-konva'
 import { useAPStore } from '@/store/useAPStore'
 import { useCableStore } from '@/store/useCableStore'
 import { useFloorStore } from '@/store/useFloorStore'
-import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { computeRoutes } from '@/features/cable/computeRoutes'
 
@@ -30,10 +29,15 @@ function CableLayer({ floorId, viewportScale }) {
   const switchesByFloor = useCableStore((s) => s.switchesByFloor)
   const traysByFloor    = useCableStore((s) => s.traysByFloor)
   const risers          = useCableStore((s) => s.risers)
-  // Live drag overrides — keep cable lines tracking the cursor in real time
-  // instead of waiting for the dragend commit into the main stores.
-  const dragAP     = useDragOverlayStore((s) => s.ap)
-  const dragSwitch = useDragOverlayStore((s) => s.sw)
+  // 26-2 P3b — DON'T subscribe to dragAP / dragSwitch. The previous
+  // implementation rebuilt 150+ cable polylines per drag frame; at 150 AP
+  // that alone took ~700ms/frame. Now we freeze cable lines during drag and
+  // let them snap to the new position on dragEnd (store commits, this
+  // component re-renders normally). The visible side-effect: a single
+  // selected AP's cable temporarily lags its marker during drag — Figma /
+  // Hamina behave the same way.
+  const dragAP = null
+  const dragSwitch = null
   // 17-2: selection state drives the dim-the-others highlight pass.
   const selectedId   = useEditorStore((s) => s.selectedId)
   const selectedType = useEditorStore((s) => s.selectedType)

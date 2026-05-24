@@ -478,8 +478,11 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | 26-1 | ✅   | Perf profile — Playwright MCP 量 50 / 150 / 300 AP commit time + idle/pan FPS；結果寫入 `.claude/perf-baseline.md`（300 AP setAPs 5.9s / 單 AP updateAP 6.4s；steady-state 60 FPS）|
 | 26-1-base | ✅ | 視覺 baseline — `scripts/perf/{bench-harness,diff,decode-b64}.{js,mjs}` + `.playwright-mcp/perf-before/` 8 場景 PNG；自我比對 0 diff（pixelmatch + pngjs devDeps）|
 | 26-2-P1 | ✅ | APMarker `React.memo` + 自訂 comparator（忽略 callback 識別）；視覺 8 場景 0 diff；render count 300→1 驗證；click / hover / 右鍵 / drag 4 個互動 MCP 實測通過。**wall-clock 中性**（reconciliation 不是瓶頸）— 詳 `.claude/perf-baseline.md §After 26-2 — P1` |
-| 26-2-P2 | ⬜ | HeatmapLayer 同值跳過 recompute（真正的時間殺手，~2.5 s）— compare AP 實質欄位 hash，相同就 skip sampleFieldGL |
-| 26-2-P3 | ⬜ | Panel 共用 routes context — 5 處 computeRoutes 合 1 處（300 AP / 0 tray 不痛，tray 大場景未驗）|
+| 26-2-P2 | ✅ | HeatmapLayer fingerprint skip — 單 AP no-op updateAP 從 ~6000 ms 降到 ~4300 ms（-27% / -1.6 s）；視覺 0 diff；real change / HM toggle / solo-AP 路徑都正常 |
+| 26-2-P3c | ✅ | HM `dragMode` 預設 `'live'` → `'solo'`（HM-drag-solo / Hamina style）；drag 不再每幀跑 sampleFieldGL；視覺 0 diff |
+| 26-2-P3b | ✅ | CableLayer 不再訂閱 `dragAP / dragSwitch`；拖 AP 時 cable 線凍結，dragEnd 才重算（Figma/Hamina UX）；視覺 0 diff |
+| 26-2-P3-bench | ✅ | 150 AP drag FPS 0.98 → 60；300 AP drag FPS 0.27 → 58（×215）；commit time（addAP/slider）沒動 |
+| 26-2-P3a | ⬜ | APLayer 改 imperative Konva（繞過 react-konva vDOM commit）— 預期 addAP / slider 從 ~7 s → ~200 ms。要重做 4 個互動事件綁定，4-6 h |
 | 26-3 | ⬜   | Bench 結果記錄到 `.claude/perf-baseline.md` 第二段 `## After 26-2`（before / after FPS + frame time）|
 
 ---

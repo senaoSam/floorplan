@@ -407,8 +407,10 @@ const PHASES = [
         items: [
           { id: '26-1', done: true,  text: 'Perf profile（50 / 150 / 300 AP）找 lag 主來源 + 視覺 baseline' },
           { id: '26-2-P1', done: true,  text: 'APMarker React.memo（中性 — 證明 reconciliation 不是瓶頸）' },
-          { id: '26-2-P2', done: false, text: 'HeatmapLayer 同值跳過 recompute（真兇 ~2.5 s）' },
-          { id: '26-2-P3', done: false, text: 'Panel 共用 routes context（5 處 → 1 處）' },
+          { id: '26-2-P2', done: true,  text: 'HeatmapLayer 同值跳過 recompute（單 AP no-op -27%）' },
+          { id: '26-2-P3c', done: true,  text: 'HM dragMode 預設 solo（150 AP drag 0.98 → 60 FPS）' },
+          { id: '26-2-P3b', done: true,  text: 'CableLayer 拖曳時凍結 cable（300 AP drag ×215）' },
+          { id: '26-2-P3a', done: false, text: 'APLayer imperative Konva（救 addAP / slider ~7 s）' },
           { id: '26-3', done: false, text: '`.claude/perf-baseline.md` 紀錄 before / after FPS' },
         ],
       },

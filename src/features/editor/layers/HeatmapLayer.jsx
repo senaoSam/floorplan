@@ -20,6 +20,55 @@ import { createHeatmapGL } from '@/features/heatmap/heatmapGL.js'
 // which—on hover—cascades into a full sampleFieldGL recompute every frame.
 const EMPTY = Object.freeze([])
 
+// 26-2 P2 — compact fingerprint over the inputs sampleFieldGL + gl.render
+// actually read. If two consecutive runs hash the same, the previous canvas
+// pixels are still valid and the GPU work can be skipped.
+//
+// Built from the post-buildScenario shape so dependants of buildScenario
+// (centerMHz, scope mask polygons) are already normalised. Walls hash uses
+// segment endpoints + loss; scope hash uses raw scope polygons from props
+// (scenario.scopeMaskFn is a closure and can't be hashed directly).
+function fingerprintRecompute(scenario, scopes, opts) {
+  const parts = []
+  parts.push(`sz:${scenario.size.w.toFixed(3)}x${scenario.size.h.toFixed(3)}`)
+  parts.push(`rxZ:${(scenario.rxElevationM ?? 0).toFixed(3)}`)
+  parts.push(`fb:${(scenario.floorBoundaries ?? []).length}`)
+  // APs: only fields the shader reads after buildScenario normalisation.
+  parts.push('aps[')
+  for (const ap of scenario.aps) {
+    parts.push(
+      `${ap.id}|${ap.pos.x.toFixed(4)},${ap.pos.y.toFixed(4)}|z:${ap.zM.toFixed(3)}`
+      + `|tx:${ap.txDbm}|f:${ap.frequency}|c:${ap.channel}|w:${ap.channelWidth}`
+      + `|am:${ap.antennaMode}|az:${ap.azimuthDeg}|bw:${ap.beamwidthDeg}|p:${ap.patternId ?? '-'}`
+    )
+  }
+  parts.push(']')
+  // Walls — endpoint coords + loss / openings; geometry only.
+  parts.push('wl[')
+  for (const w of scenario.walls) {
+    parts.push(`${w.a.x.toFixed(3)},${w.a.y.toFixed(3)}-${w.b.x.toFixed(3)},${w.b.y.toFixed(3)}|L:${w.lossDb ?? '-'}`)
+  }
+  parts.push(']')
+  // Corners are derived from walls but only count for diffraction; include
+  // count as a guard against geometry oddities. Full coord hash overkill.
+  parts.push(`co:${(scenario.corners ?? []).length}`)
+  // Scopes — polygons (raw px) drive the mask. Reference change with same
+  // points must still hash identically.
+  parts.push('sc[')
+  for (const s of scopes ?? []) {
+    parts.push(`${s.id ?? ''}|${s.type}|${(s.points ?? []).join(',')}`)
+  }
+  parts.push(']')
+  // Shader opts. mode/engine/blur/contours all affect output pixels.
+  parts.push(
+    `o:${opts.mode}|${opts.engine}|grid:${opts.gridStepM}|refl:${opts.reflOrder}|diff:${opts.diff ? 1 : 0}`
+    + `|fov:${opts.freqOverrideN ?? '-'}|cf:${opts.cullFloorDbm ?? '-'}|ro:${opts.rssiOnly ? 1 : 0}`
+    + `|b:${opts.blur}|ct:${opts.contours ? 1 : 0}|fs:${opts.floorScale}`
+    + `|pad:${opts.padding.left},${opts.padding.right},${opts.padding.top},${opts.padding.bottom}`
+  )
+  return parts.join(';')
+}
+
 // Heatmap render layer. Sits between the floor image and the wall layer so
 // the plan is still visible underneath and wall strokes cut across the heat
 // on top.
@@ -56,6 +105,15 @@ export default function HeatmapLayer({ floorId }) {
   const dragScope = useDragOverlayStore((s) => s.scope)
 
   const glRef = useRef(null)
+  // 26-2 P2 — skip sampleFieldGL + gl.render when nothing observable to the
+  // shader has changed. updateAP(id, { txPower: ap.txPower }) and similar
+  // no-op store mutations still bubble through React; we'd otherwise rebuild
+  // scenario + rerun the shader at ~2.5s on 300 AP. Fingerprint covers the
+  // post-buildScenario AP / wall / scope geometry + every shader opt + drag
+  // state. lastWasSoloRef forces a full re-render on solo→main transition so
+  // the snapshot overlay's stale pixels get replaced.
+  const lastFingerprintRef = useRef('')
+  const lastWasSoloRef = useRef(false)
   // Konva node ref — used to imperatively redraw after the WebGL canvas has new
   // pixels, without forcing a React re-render. The previous `setVersion + key`
   // trick triggered a render loop: the post-render setState scheduled another
@@ -89,6 +147,14 @@ export default function HeatmapLayer({ floorId }) {
   useEffect(() => () => {
     if (glRef.current) { glRef.current.dispose(); glRef.current = null }
   }, [])
+
+  // 26-2 P2 — reset fingerprint cache when enabled toggles. When the heatmap
+  // is disabled the canvas isn't rendered to; re-enabling must redo the GL
+  // work even if the fingerprint happens to match the pre-disable state.
+  useEffect(() => {
+    lastFingerprintRef.current = ''
+    lastWasSoloRef.current = false
+  }, [enabled])
 
   const scenario = useMemo(() => {
     if (!enabled) return null
@@ -332,6 +398,35 @@ export default function HeatmapLayer({ floorId }) {
       // 1/N_AP work). Snapshot at 0.3 opacity provides context underneath.
       let field
       const isSoloAPRun = isSoloAP && dragAP
+      // 26-2 P2 — skip the GPU work when nothing the shader reads has changed.
+      // Only applies to full-recompute path; solo-AP always re-renders. Force
+      // a full re-render when we transition out of solo (last frame was the
+      // single-AP overlay so the canvas holds stale pixels). Disabling/re-
+      // enabling the heatmap resets the ref via the effect at line ~286.
+      if (!isSoloAPRun) {
+        const fp = fingerprintRecompute(scenario, scopes, {
+          mode, engine,
+          gridStepM: liveGridStepM,
+          reflOrder: liveMaxReflOrder,
+          diff: liveEnableDiffraction,
+          freqOverrideN: liveFreqOverrideN,
+          cullFloorDbm: liveCullFloorDbm,
+          rssiOnly: liveRssiOnly,
+          blur: liveBlur,
+          contours: liveShowContours,
+          floorScale: floor.scale,
+          padding,
+        })
+        if (fp === lastFingerprintRef.current && !lastWasSoloRef.current && displayMode === 'main') {
+          // Nothing observable changed. The gl.canvas pixels from last run are
+          // still correct; no need to re-render or batchDraw.
+          return
+        }
+        lastFingerprintRef.current = fp
+        lastWasSoloRef.current = false
+      } else {
+        lastWasSoloRef.current = true
+      }
       if (isSoloAPRun) {
         const soloAP = scenario.aps.find((a) => a.id === dragAP.id)
         if (!soloAP) return
