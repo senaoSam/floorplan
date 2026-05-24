@@ -116,4 +116,56 @@ window.__perf = {
 - 沒測 **多樓層** 場景：3D mode + Riser 跨樓層 routing 沒進評估。
 - 沒測 **拖曳中** FPS（HeatmapLayer dragMode === 'live' 會邊拖邊算）。
 - 沒測 **switch 滿載 tray 大場景** 的 computeRoutes 真實成本。
-- 26-2 動手後請重跑 §2 全部表格，貼到 `.claude/perf-baseline.md` 第二區段並標 `## After 26-2`。
+- 26-2 動手後請重跑 §2 全部表格，貼到本檔下方 `## After 26-2 — P1 / P2 / ...` 段。
+
+---
+
+## After 26-2 — P1（APMarker React.memo + 自訂 comparator）
+
+**結論：對使用者感知 perf 沒幫助（neutral），但 memo 本身是對的（300→1 marker 重渲染），保留作為 P2 的清潔地基。**
+
+### 改動
+- `src/features/editor/layers/APLayer.jsx`
+  - `APMarkerImpl` 提出 + 用 `React.memo(impl, comparator)` 包成 `APMarker`
+  - `comparator` 比對 `ap` ref 與所有 data flags（`isSelected` / `isHovered` / `isFocused` / capability bools / `showAPInfo` / `inverseScale`），**忽略 callback 參考**（Editor2D 傳 inline-lambda；callback 永遠是最新閉包，不比較反而更安全）
+  - `useMemo` 包 `batchSelectedIds`（小 polish，避免每次 render 重建 Set）
+
+### 視覺驗收
+8 場景 pixelmatch `0 / 4650888` 全 pass（`.playwright-mcp/perf-after-p1/` vs `.playwright-mcp/perf-before/`）
+
+### Render count 驗證（temporary probe）
+300 AP 場景下做一次 `updateAP(id, txPower)`，`APMarkerImpl` 執行次數從**期望的 300 → 實測 1**。memo 對 React 層工作量真實縮減。
+
+### 數字（HM ON，3 樣本中位數）
+
+| 指標 | Before | After P1 | 結論 |
+|---|---|---|---|
+| 5 AP idle FPS | 60.04 | 60.00 | 無變化（vsync 鎖） |
+| 300 AP idle FPS | 59.99 | 60.00 | 無變化 |
+| 300 AP pan FPS | 60.00 | 60.00 | 無變化 |
+| → 50 commit | 556 ms | 657 ms | +18% 在 run-to-run 噪聲內 |
+| → 150 commit | 2006 ms | 2105 ms | +5% 噪聲 |
+| → 300 commit | 5906 ms | 6528 ms | +11% 邊緣 |
+| 300 AP 單 AP no-op updateAP | 6367 ms | ~6000 ms | 同 |
+
+### 為什麼 P1 沒贏
+
+時序拆解（300 AP / HM ON / 單 AP no-op updateAP）：
+
+| 區段 | 耗時 |
+|---|---|
+| zustand `set()` 同步階段（subscribers 全跑 selector）| **1508 ms** |
+| 第 1 個 rAF 後（React commit + react-konva reconcile + Konva batchDraw）| 2246 ms |
+| 第 2 個 rAF 後（heatmap shader 算完 + 第二輪 paint）| 2489 ms |
+| **total** | **6244 ms** |
+
+React reconciliation 不是主導項。P1 把 reconciliation 從 O(300) 降到 O(1)，但 reconciliation 本來就只佔不到 200 ms — 砍掉 199 ms 在 6 s 裡看不出來。
+
+**真正的瓶頸**：
+1. **zustand subscriber sweep（~1.5 s）** — `setState` 觸發時所有訂閱 `apsByFloor` 的 hooks 同步跑 selector。APPanel / CableSummaryPanel / CableLayer / HeatmapLayer / SwitchPanel 全部都會跑一次。
+2. **Heatmap shader 重算（~2.5 s）** — 即便資料沒實質變化也跑完整張 sampleFieldGL。
+3. **Konva batchDraw + canvas redraw（~1 s）** — 純像素層的事，react-konva memo 救不到。
+
+### 給 P2 用的訊號
+
+P2「heatmap 同值跳過」對應 §2 的 2.5 s 區段 — 預估省 ~30% 的 commit 時間。同時 P3「panel 共用 routes context」對應 §1 一部分（不只 routes — 多 panel 訂閱 apsByFloor 也都會被通知）。建議順序：**P2 → 重測 → P3**。

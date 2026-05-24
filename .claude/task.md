@@ -477,7 +477,9 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 |------|------|------|
 | 26-1 | ✅   | Perf profile — Playwright MCP 量 50 / 150 / 300 AP commit time + idle/pan FPS；結果寫入 `.claude/perf-baseline.md`（300 AP setAPs 5.9s / 單 AP updateAP 6.4s；steady-state 60 FPS）|
 | 26-1-base | ✅ | 視覺 baseline — `scripts/perf/{bench-harness,diff,decode-b64}.{js,mjs}` + `.playwright-mcp/perf-before/` 8 場景 PNG；自我比對 0 diff（pixelmatch + pngjs devDeps）|
-| 26-2 | ⬜   | 根據 26-1 結果動手 — P1 AP store 訂閱粒度（最痛）→ P2 heatmap 同值跳過 → P3 panel 共用 routes context；每步用 `scripts/perf/diff.mjs` 視覺驗收 |
+| 26-2-P1 | ✅ | APMarker `React.memo` + 自訂 comparator（忽略 callback 識別）；視覺 8 場景 0 diff；render count 300→1 驗證；click / hover / 右鍵 / drag 4 個互動 MCP 實測通過。**wall-clock 中性**（reconciliation 不是瓶頸）— 詳 `.claude/perf-baseline.md §After 26-2 — P1` |
+| 26-2-P2 | ⬜ | HeatmapLayer 同值跳過 recompute（真正的時間殺手，~2.5 s）— compare AP 實質欄位 hash，相同就 skip sampleFieldGL |
+| 26-2-P3 | ⬜ | Panel 共用 routes context — 5 處 computeRoutes 合 1 處（300 AP / 0 tray 不痛，tray 大場景未驗）|
 | 26-3 | ⬜   | Bench 結果記錄到 `.claude/perf-baseline.md` 第二段 `## After 26-2`（before / after FPS + frame time）|
 
 ---

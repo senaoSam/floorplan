@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo, memo } from 'react'
 import { Group, Circle, Arc, Line, Text, Rect } from 'react-konva'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
@@ -40,7 +40,7 @@ const FREQ_LABEL = {
   6:   '6G',
 }
 
-function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, allowHover, allowCmdHover, allowAnyHover, allowClick, allowContextMenu, onClick, onContextMenu, onMoved, onDragMove, isDrawingActive, showAPInfo, inverseScale, setHoverCursor }) {
+function APMarkerImpl({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, allowHover, allowCmdHover, allowAnyHover, allowClick, allowContextMenu, onClick, onContextMenu, onMoved, onDragMove, isDrawingActive, showAPInfo, inverseScale, setHoverCursor }) {
   const color = FREQ_COLOR[ap.frequency] ?? '#4fc3f7'
   const ringColor = isSelected ? '#e74c3c' : color
   const s = inverseScale
@@ -225,6 +225,28 @@ function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, 
   )
 }
 
+// 26-2 P1 — memo with a custom comparator that ignores callback identity.
+// Editor2D passes inline-lambda handlers (onClick / onContextMenu / onMoved /
+// onDragMove) so their refs change every Editor2D render; comparing them in
+// memo would defeat the optimisation. Skipping the comparison is safe — when
+// a callback fires it always reads the latest closure via the live React tree.
+function apMarkerPropsEqual(prev, next) {
+  return prev.ap === next.ap
+    && prev.isSelected === next.isSelected
+    && prev.isHovered === next.isHovered
+    && prev.isFocused === next.isFocused
+    && prev.isDraggable === next.isDraggable
+    && prev.allowHover === next.allowHover
+    && prev.allowCmdHover === next.allowCmdHover
+    && prev.allowAnyHover === next.allowAnyHover
+    && prev.allowClick === next.allowClick
+    && prev.allowContextMenu === next.allowContextMenu
+    && prev.isDrawingActive === next.isDrawingActive
+    && prev.showAPInfo === next.showAPInfo
+    && prev.inverseScale === next.inverseScale
+}
+const APMarker = memo(APMarkerImpl, apMarkerPropsEqual)
+
 function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPContextMenu, onAPDragMove, onAPDragEnd, isDrawingActive, viewportScale, setHoverCursor, dimmed, capability }) {
   const allAPs     = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   const updateAP   = useAPStore((s) => s.updateAP)
@@ -235,7 +257,12 @@ function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPCon
   const aps = allAPs.filter((ap) => showAPBand[ap.frequency] !== false)
   const inverseScale = 1 / viewportScale
   const [hoveredId, setHoveredId] = useState(null)
-  const batchSelectedIds = selectedItems.length > 1 ? new Set(selectedItems.filter((it) => it.type === 'ap').map((it) => it.id)) : null
+  const batchSelectedIds = useMemo(
+    () => (selectedItems.length > 1
+      ? new Set(selectedItems.filter((it) => it.type === 'ap').map((it) => it.id))
+      : null),
+    [selectedItems],
+  )
   const focused = useFocusedDevices()
 
   const allowDrag = !!capability?.allowDragExisting?.wireless
