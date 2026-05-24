@@ -410,7 +410,7 @@ const PHASES = [
           { id: '26-2-P2', done: true,  text: 'HeatmapLayer 同值跳過 recompute（單 AP no-op -27%）' },
           { id: '26-2-P3c', done: true,  text: 'HM dragMode 預設 solo（150 AP drag 0.98 → 60 FPS）' },
           { id: '26-2-P3b', done: true,  text: 'CableLayer 拖曳時凍結 cable（300 AP drag ×215）' },
-          { id: '26-2-P3a', done: false, text: 'APLayer imperative Konva（救 addAP / slider ~7 s）' },
+          { id: '26-2-P3a', done: true,  text: 'APLayer imperative Konva（click commit 5.8s → 0.56s）' },
           { id: '26-3', done: false, text: '`.claude/perf-baseline.md` 紀錄 before / after FPS' },
         ],
       },

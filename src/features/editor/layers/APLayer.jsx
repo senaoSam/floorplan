@@ -1,5 +1,22 @@
-import React, { useState, useMemo, memo } from 'react'
-import { Group, Circle, Arc, Line, Text, Rect } from 'react-konva'
+// 26-2 P3a — APLayer rewritten to manage AP markers via imperative Konva.
+//
+// Why: at 150 AP each marker is ~10 Konva sub-nodes. react-konva's
+// commitWork pass walks the React fiber tree and calls setAttrs on every
+// matching Konva node — at ~1500 nodes / commit this dominated commit time
+// (1.6–5.8 s per click / addAP / slider step per the DevTools trace).
+//
+// Strategy: keep the outer wrapping <Group> in react-konva (so `dimmed`
+// still wires through React), but inside that group manage child Konva
+// nodes imperatively. apsByFloor + every prop dep is reflected onto the
+// Konva tree via diff-and-patch — same visuals, no react-konva reconciler.
+//
+// All four interactions (click / hover / drag / right-click context menu)
+// are re-bound using Konva's own event API. Callbacks read through a ref
+// so identity changes in the caller don't require rebinding listeners.
+
+import React, { useEffect, useRef } from 'react'
+import { Group } from 'react-konva'
+import Konva from 'konva'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
@@ -8,12 +25,12 @@ import { useFocusedDevices } from '@/features/editor/useFocusedDevices'
 // 17-2: indigo halo wrapped around devices related to the current selection.
 const FOCUS_HALO = '#818cf8'
 
-// Normalize azimuth to [0, 360) and beamwidth to [10, 180].
-const wrapAzimuth = (v) => (((v % 360) + 360) % 360)
+const FREQ_COLOR = { 2.4: '#f39c12', 5: '#4fc3f7', 6: '#a855f7' }
+const FREQ_LABEL = { 2.4: '2.4G',    5: '5G',     6: '6G' }
+
+const wrapAzimuth   = (v) => (((v % 360) + 360) % 360)
 const clampBeamwidth = (v) => Math.max(10, Math.min(180, v))
 
-// Build polygon points for a custom antenna pattern, scaled to given outer radius.
-// minDb caps the smallest visible gain; samples index 0 points +x (azimuth-relative).
 function patternPolygonPoints(pattern, outerR, azimuthRad, minDb = -30) {
   const samples = pattern.samples
   const n = samples.length
@@ -27,285 +44,464 @@ function patternPolygonPoints(pattern, outerR, azimuthRad, minDb = -30) {
   return pts
 }
 
-// 依頻段給顏色
-const FREQ_COLOR = {
-  2.4: '#f39c12',
-  5:   '#4fc3f7',
-  6:   '#a855f7',
-}
-
-const FREQ_LABEL = {
-  2.4: '2.4G',
-  5:   '5G',
-  6:   '6G',
-}
-
-function APMarkerImpl({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, allowHover, allowCmdHover, allowAnyHover, allowClick, allowContextMenu, onClick, onContextMenu, onMoved, onDragMove, isDrawingActive, showAPInfo, inverseScale, setHoverCursor }) {
-  const color = FREQ_COLOR[ap.frequency] ?? '#4fc3f7'
-  const ringColor = isSelected ? '#e74c3c' : color
-  const s = inverseScale
-
+// Derived visual state for one AP given its data + the layer-wide flags.
+function deriveVisual(ap, st) {
+  const isSelected = st.isSelected
+  const isHovered  = st.isHovered
+  const color      = FREQ_COLOR[ap.frequency] ?? '#4fc3f7'
+  const s          = st.inverseScale
   const isDirectional = ap.antennaMode === 'directional'
   const isCustom      = ap.antennaMode === 'custom'
   const isOriented    = isDirectional || isCustom
   const azimuth       = wrapAzimuth(ap.azimuth ?? 0)
   const beamwidth     = clampBeamwidth(ap.beamwidth ?? 60)
-  // Konva Arc: rotation 0° points to +x (right), sweeps clockwise for positive angle.
-  // Our azimuth uses the same convention → center axis = azimuth, arc starts at azimuth - beamwidth/2.
-  const arcStart = azimuth - beamwidth / 2
-  const axisRad  = azimuth * Math.PI / 180
-  const axisLen  = 32 * s
-  const customPattern = isCustom ? getPatternById(ap.patternId ?? DEFAULT_PATTERN_ID) : null
-  const customPts     = isCustom ? patternPolygonPoints(customPattern, 34 * s, axisRad) : null
-
-  return (
-    <Group
-      x={ap.x}
-      y={ap.y}
-      draggable={isDraggable}
-      onMouseEnter={() => {
-        if (isDraggable) setHoverCursor?.('grab')
-        if (allowAnyHover) onHover(ap.id)
-      }}
-      onMouseLeave={() => { setHoverCursor?.(null); onHover(null) }}
-      onClick={(e) => {
-        if (e.evt.button !== 0) return
-        if (!allowClick) return
-        e.cancelBubble = true
-        onClick?.(ap.id, e)
-      }}
-      onContextMenu={(e) => {
-        if (!allowContextMenu) return
-        e.evt.preventDefault?.()
-        e.cancelBubble = true
-        onContextMenu?.(ap.id, e)
-      }}
-      onDragStart={(e) => { e.cancelBubble = true; onClick?.(ap.id, e) }}
-      onDragMove={(e) => {
-        e.cancelBubble = true
-        onDragMove?.(ap.id, e.target.x(), e.target.y())
-      }}
-      onDragEnd={(e) => {
-        e.cancelBubble = true
-        onMoved(ap.id, e.target.x(), e.target.y())
-      }}
-    >
-      {/* 透明 hit circle — 唯一接收滑鼠事件的子元素，其餘全部 listening={false} */}
-      <Circle radius={14 * inverseScale} fill="transparent" />
-      {/* 17-2 focus halo — drawn first so the AP icon sits on top of it. */}
-      {isFocused && (
-        <Circle
-          radius={15 * s}
-          stroke={FOCUS_HALO}
-          strokeWidth={3 * s}
-          opacity={0.85}
-          listening={false}
-        />
-      )}
-      {/* 23-3f hover = full colour invert (per user spec). Was a faint outer
-          ring; that proved invisible against the busy heatmap. Inverting the
-          main circle's fill/stroke is loud enough to spot at a glance and
-          works for both strong (SELECT) and weak (any other mode) hover. The
-          actual recolour happens on the Circle / arrow markers below by
-          reading `isHovered && !isSelected`. */}
-      {/* 定向覆蓋扇形（僅指示方向與波瓣寬度，不代表真實距離） */}
-      {isDirectional && (
-        <>
-          <Arc
-            innerRadius={17 * s}
-            outerRadius={36 * s}
-            angle={beamwidth}
-            rotation={arcStart}
-            fill={color}
-            opacity={isSelected ? 0.35 : (isHovered ? 0.28 : 0.18)}
-            listening={false}
-          />
-          {isSelected && (
-            <Arc
-              innerRadius={35 * s}
-              outerRadius={36 * s}
-              angle={beamwidth}
-              rotation={arcStart}
-              stroke={color}
-              strokeWidth={1 * s}
-              dash={[3 * s, 3 * s]}
-              listening={false}
-            />
-          )}
-        </>
-      )}
-      {/* 自訂 pattern：極座標輪廓（位於外環外側，朝 azimuth 旋轉） */}
-      {isCustom && customPts && (
-        <Line
-          points={customPts}
-          closed
-          fill={color}
-          opacity={isSelected ? 0.35 : (isHovered ? 0.28 : 0.2)}
-          stroke={color}
-          strokeWidth={(isSelected ? 1.2 : 0.8) * s}
-          listening={false}
-        />
-      )}
-      {/* 方位中軸指示線（directional / custom 共用） */}
-      {isOriented && (
-        <Line
-          points={[0, 0, Math.cos(axisRad) * axisLen, Math.sin(axisRad) * axisLen]}
-          stroke={isSelected ? '#e74c3c' : color}
-          strokeWidth={(isSelected ? 2 : 1.2) * s}
-          opacity={0.85}
-          listening={false}
-        />
-      )}
-      {/* 圓形主體 — 外圍藍、裡面白（sample 風格，radius 10）。
-          Hover (非 selected) → 反白：fill 變深藍、stroke 變白。 */}
-      <Circle
-        radius={10 * s}
-        fill={(isHovered && !isSelected) ? '#1e3a8a' : '#ffffff'}
-        stroke={isSelected ? '#e74c3c' : (isHovered && !isSelected) ? '#ffffff' : '#1e3a8a'}
-        strokeWidth={(isSelected ? 3 : isHovered ? 2.5 : 2) * s}
-        listening={false}
-      />
-      {/* 方位指示：directional / custom 用箭頭；hover 反白時箭頭也跟著反白 */}
-      {isOriented && (() => {
-        const iconCol = (isHovered && !isSelected) ? '#ffffff' : '#1e3a8a'
-        return (
-          <Group rotation={azimuth} listening={false}>
-            <Line
-              points={[-4 * s, 0, 4 * s, 0]}
-              stroke={iconCol}
-              strokeWidth={1.5 * s}
-              lineCap="round"
-            />
-            <Line
-              points={[7 * s, 0, 3 * s, -3 * s, 3 * s, 3 * s]}
-              closed
-              fill={iconCol}
-            />
-          </Group>
-        )
-      })()}
-      {/* 名稱標籤（icon 上方） */}
-      <Text
-        text={ap.name}
-        fontSize={11 * s}
-        fill="#fff"
-        align="center"
-        offsetX={22 * s}
-        offsetY={25 * s}
-        width={44 * s}
-        shadowColor="#000"
-        shadowBlur={4}
-        shadowOpacity={0.9}
-        shadowOffsetX={0}
-        shadowOffsetY={0}
-        listening={false}
-      />
-      {/* AP 資訊標籤 */}
-      {showAPInfo && (
-        <Group y={19 * s} offsetX={40 * s} listening={false}>
-          <Rect
-            width={80 * s}
-            height={44 * s}
-            fill="rgba(0,0,0,0.75)"
-            cornerRadius={4 * s}
-          />
-          <Text
-            text={`${ap.name}\n${FREQ_LABEL[ap.frequency] || ap.frequency + 'G'} CH${ap.channel}/${ap.channelWidth ?? 20}\n${ap.txPower} dBm`}
-            fontSize={11 * s}
-            fill="#fff"
-            x={0}
-            y={4 * s}
-            width={80 * s}
-            align="center"
-            lineHeight={1.3}
-          />
-        </Group>
-      )}
-    </Group>
-  )
+  const arcStart      = azimuth - beamwidth / 2
+  const axisRad       = azimuth * Math.PI / 180
+  return { isSelected, isHovered, color, s, isDirectional, isCustom, isOriented, azimuth, beamwidth, arcStart, axisRad }
 }
 
-// 26-2 P1 — memo with a custom comparator that ignores callback identity.
-// Editor2D passes inline-lambda handlers (onClick / onContextMenu / onMoved /
-// onDragMove) so their refs change every Editor2D render; comparing them in
-// memo would defeat the optimisation. Skipping the comparison is safe — when
-// a callback fires it always reads the latest closure via the live React tree.
-function apMarkerPropsEqual(prev, next) {
-  return prev.ap === next.ap
-    && prev.isSelected === next.isSelected
-    && prev.isHovered === next.isHovered
-    && prev.isFocused === next.isFocused
-    && prev.isDraggable === next.isDraggable
-    && prev.allowHover === next.allowHover
-    && prev.allowCmdHover === next.allowCmdHover
-    && prev.allowAnyHover === next.allowAnyHover
-    && prev.allowClick === next.allowClick
-    && prev.allowContextMenu === next.allowContextMenu
-    && prev.isDrawingActive === next.isDrawingActive
-    && prev.showAPInfo === next.showAPInfo
-    && prev.inverseScale === next.inverseScale
+// Build a fresh Konva.Group containing every sub-shape required by this AP.
+// All listener bindings live on the outer Group; sub-nodes have listening=false.
+// Sub-nodes are stored on `group._nodes` for fast lookup during diff updates.
+function buildApGroup(ap, st, callbacksRef) {
+  const v = deriveVisual(ap, st)
+  const g = new Konva.Group({ x: ap.x, y: ap.y, draggable: st.isDraggable })
+  // Sub-node registry — flat so updateApGroup can mutate without rebuild.
+  const nodes = {}
+
+  // (1) Hit circle — only listener target
+  nodes.hit = new Konva.Circle({ radius: 14 * v.s, fill: 'transparent' })
+  g.add(nodes.hit)
+
+  // (2) Focus halo (17-2). Present only when isFocused; toggled by visible().
+  nodes.focusHalo = new Konva.Circle({
+    radius: 15 * v.s, stroke: FOCUS_HALO, strokeWidth: 3 * v.s, opacity: 0.85,
+    listening: false, visible: st.isFocused,
+  })
+  g.add(nodes.focusHalo)
+
+  // (3) Directional fan (Arc) + selected ring (Arc with dash). Visibility toggled.
+  nodes.directionalFan = new Konva.Arc({
+    innerRadius: 17 * v.s, outerRadius: 36 * v.s, angle: v.beamwidth, rotation: v.arcStart,
+    fill: v.color, opacity: v.isSelected ? 0.35 : (v.isHovered ? 0.28 : 0.18),
+    listening: false, visible: v.isDirectional,
+  })
+  g.add(nodes.directionalFan)
+  nodes.directionalSelectedRing = new Konva.Arc({
+    innerRadius: 35 * v.s, outerRadius: 36 * v.s, angle: v.beamwidth, rotation: v.arcStart,
+    stroke: v.color, strokeWidth: 1 * v.s, dash: [3 * v.s, 3 * v.s],
+    listening: false, visible: v.isDirectional && v.isSelected,
+  })
+  g.add(nodes.directionalSelectedRing)
+
+  // (4) Custom pattern polygon
+  let customPts = null
+  if (v.isCustom) {
+    const pattern = getPatternById(ap.patternId ?? DEFAULT_PATTERN_ID)
+    customPts = patternPolygonPoints(pattern, 34 * v.s, v.axisRad)
+  }
+  nodes.customPoly = new Konva.Line({
+    points: customPts ?? [], closed: true, fill: v.color,
+    opacity: v.isSelected ? 0.35 : (v.isHovered ? 0.28 : 0.2),
+    stroke: v.color, strokeWidth: (v.isSelected ? 1.2 : 0.8) * v.s,
+    listening: false, visible: v.isCustom && !!customPts,
+  })
+  g.add(nodes.customPoly)
+
+  // (5) Orientation axis line (directional / custom)
+  const axisLen = 32 * v.s
+  nodes.axisLine = new Konva.Line({
+    points: [0, 0, Math.cos(v.axisRad) * axisLen, Math.sin(v.axisRad) * axisLen],
+    stroke: v.isSelected ? '#e74c3c' : v.color,
+    strokeWidth: (v.isSelected ? 2 : 1.2) * v.s,
+    opacity: 0.85, listening: false, visible: v.isOriented,
+  })
+  g.add(nodes.axisLine)
+
+  // (6) Main body circle
+  nodes.body = new Konva.Circle({
+    radius: 10 * v.s,
+    fill:   (v.isHovered && !v.isSelected) ? '#1e3a8a' : '#ffffff',
+    stroke: v.isSelected ? '#e74c3c' : (v.isHovered && !v.isSelected) ? '#ffffff' : '#1e3a8a',
+    strokeWidth: (v.isSelected ? 3 : v.isHovered ? 2.5 : 2) * v.s,
+    listening: false,
+  })
+  g.add(nodes.body)
+
+  // (7) Orientation arrow group — only for directional / custom
+  const iconCol = (v.isHovered && !v.isSelected) ? '#ffffff' : '#1e3a8a'
+  nodes.arrowGroup = new Konva.Group({ rotation: v.azimuth, listening: false, visible: v.isOriented })
+  nodes.arrowBar = new Konva.Line({
+    points: [-4 * v.s, 0, 4 * v.s, 0], stroke: iconCol, strokeWidth: 1.5 * v.s, lineCap: 'round',
+  })
+  nodes.arrowTip = new Konva.Line({
+    points: [7 * v.s, 0, 3 * v.s, -3 * v.s, 3 * v.s, 3 * v.s], closed: true, fill: iconCol,
+  })
+  nodes.arrowGroup.add(nodes.arrowBar)
+  nodes.arrowGroup.add(nodes.arrowTip)
+  g.add(nodes.arrowGroup)
+
+  // (8) Name label
+  nodes.nameLabel = new Konva.Text({
+    text: ap.name, fontSize: 11 * v.s, fill: '#fff', align: 'center',
+    offsetX: 22 * v.s, offsetY: 25 * v.s, width: 44 * v.s,
+    shadowColor: '#000', shadowBlur: 4, shadowOpacity: 0.9, shadowOffsetX: 0, shadowOffsetY: 0,
+    listening: false,
+  })
+  g.add(nodes.nameLabel)
+
+  // (9) AP info pill (showAPInfo). Stays mounted; visibility toggled.
+  nodes.infoGroup = new Konva.Group({ y: 19 * v.s, offsetX: 40 * v.s, listening: false, visible: !!st.showAPInfo })
+  nodes.infoRect = new Konva.Rect({
+    width: 80 * v.s, height: 44 * v.s, fill: 'rgba(0,0,0,0.75)', cornerRadius: 4 * v.s,
+  })
+  nodes.infoText = new Konva.Text({
+    text: `${ap.name}\n${FREQ_LABEL[ap.frequency] || ap.frequency + 'G'} CH${ap.channel}/${ap.channelWidth ?? 20}\n${ap.txPower} dBm`,
+    fontSize: 11 * v.s, fill: '#fff', x: 0, y: 4 * v.s, width: 80 * v.s, align: 'center', lineHeight: 1.3,
+  })
+  nodes.infoGroup.add(nodes.infoRect)
+  nodes.infoGroup.add(nodes.infoText)
+  g.add(nodes.infoGroup)
+
+  g._nodes = nodes
+  g._ap = ap
+
+  // Bind events. Callbacks dereference through callbacksRef so they always
+  // see the latest closure even if the parent component re-renders.
+  g.on('mouseenter', () => {
+    const cb = callbacksRef.current
+    if (g._st.isDraggable) cb.setHoverCursor?.('grab')
+    if (g._st.allowAnyHover) cb.onHoverEnter(g._ap.id)
+  })
+  g.on('mouseleave', () => {
+    const cb = callbacksRef.current
+    cb.setHoverCursor?.(null)
+    cb.onHoverLeave()
+  })
+  g.on('click', (e) => {
+    if (e.evt.button !== 0) return
+    if (!g._st.allowClick) return
+    e.cancelBubble = true
+    callbacksRef.current.onClick?.(g._ap.id, e)
+  })
+  g.on('contextmenu', (e) => {
+    if (!g._st.allowContextMenu) return
+    e.evt.preventDefault?.()
+    e.cancelBubble = true
+    callbacksRef.current.onContextMenu?.(g._ap.id, e)
+  })
+  g.on('dragstart', (e) => {
+    e.cancelBubble = true
+    callbacksRef.current.onClick?.(g._ap.id, e)
+  })
+  g.on('dragmove', (e) => {
+    e.cancelBubble = true
+    callbacksRef.current.onDragMove?.(g._ap.id, e.target.x(), e.target.y())
+  })
+  g.on('dragend', (e) => {
+    e.cancelBubble = true
+    callbacksRef.current.onMoved(g._ap.id, e.target.x(), e.target.y())
+  })
+
+  return g
 }
-const APMarker = memo(APMarkerImpl, apMarkerPropsEqual)
 
-function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPContextMenu, onAPDragMove, onAPDragEnd, isDrawingActive, viewportScale, setHoverCursor, dimmed, capability }) {
-  const allAPs     = useAPStore((s) => s.apsByFloor[floorId] ?? [])
-  const updateAP   = useAPStore((s) => s.updateAP)
-  const showAPInfo = useEditorStore((s) => s.showAPInfo)
-  const showAPBand = useEditorStore((s) => s.showAPBand)
-  // Filter by per-band visibility. APs whose frequency is unknown are kept
-  // visible so we don't accidentally hide legacy data.
-  const aps = allAPs.filter((ap) => showAPBand[ap.frequency] !== false)
-  const inverseScale = 1 / viewportScale
-  const [hoveredId, setHoveredId] = useState(null)
-  const batchSelectedIds = useMemo(
-    () => (selectedItems.length > 1
-      ? new Set(selectedItems.filter((it) => it.type === 'ap').map((it) => it.id))
-      : null),
-    [selectedItems],
-  )
-  const focused = useFocusedDevices()
+// Apply (prevAp, prevSt) → (nextAp, nextSt) diff to an existing group's nodes.
+// Touches Konva nodes only where the relevant input changed. Caller must
+// trigger layer.batchDraw() after a batch of updates.
+function updateApGroup(g, nextAp, nextSt) {
+  const prevAp = g._ap
+  const prevSt = g._st
+  const v = deriveVisual(nextAp, nextSt)
+  const n = g._nodes
+  const sChanged = prevSt.inverseScale !== nextSt.inverseScale
 
-  const allowDrag = !!capability?.allowDragExisting?.wireless
-  const allowClick = !!capability?.allowSelectClick?.wireless
-  const allowHover = !!capability?.allowSelectHover?.wireless
-  // 23-3f weak hover for command targeting in non-SELECT modes.
-  const allowCmdHover = !!capability?.allowCommandHover?.wireless
-  const allowAnyHover = allowHover || allowCmdHover
-  const allowContextMenu = !!capability?.allowContextMenu
+  // Position
+  if (prevAp.x !== nextAp.x || prevAp.y !== nextAp.y) g.position({ x: nextAp.x, y: nextAp.y })
 
-  const handleMoved = (id, x, y) => {
-    updateAP(floorId, id, { x, y })
-    onAPDragEnd?.()
+  // Draggable
+  if (prevSt.isDraggable !== nextSt.isDraggable) g.draggable(nextSt.isDraggable)
+
+  // Hit
+  if (sChanged) n.hit.radius(14 * v.s)
+
+  // Focus halo
+  if (prevSt.isFocused !== nextSt.isFocused) n.focusHalo.visible(nextSt.isFocused)
+  if (sChanged && nextSt.isFocused) {
+    n.focusHalo.radius(15 * v.s)
+    n.focusHalo.strokeWidth(3 * v.s)
   }
 
-  return (
-    <Group opacity={dimmed ? 0.2 : 1}>
-      {aps.map((ap) => (
-        <APMarker
-          key={ap.id}
-          ap={ap}
-          isSelected={ap.id === selectedAPId || (batchSelectedIds?.has(ap.id) ?? false)}
-          isHovered={ap.id === hoveredId}
-          isFocused={focused.aps.has(ap.id)}
-          onHover={setHoveredId}
-          isDraggable={allowDrag}
-          allowHover={allowHover}
-          allowCmdHover={allowCmdHover}
-          allowAnyHover={allowAnyHover}
-          allowClick={allowClick}
-          allowContextMenu={allowContextMenu}
-          onClick={onAPClick}
-          onContextMenu={onAPContextMenu}
-          onMoved={handleMoved}
-          onDragMove={onAPDragMove}
-          isDrawingActive={isDrawingActive}
-          showAPInfo={showAPInfo}
-          inverseScale={inverseScale}
-          setHoverCursor={setHoverCursor}
-        />
-      ))}
-    </Group>
-  )
+  // Directional / custom / oriented flag recomputations
+  const prevDir    = prevAp.antennaMode === 'directional'
+  const prevCustom = prevAp.antennaMode === 'custom'
+  const prevOri    = prevDir || prevCustom
+  const dirChanged    = prevDir !== v.isDirectional
+  const customChanged = prevCustom !== v.isCustom
+  const oriChanged    = prevOri !== v.isOriented
+  const azBwChanged   = prevAp.azimuth !== nextAp.azimuth || prevAp.beamwidth !== nextAp.beamwidth
+  const selChanged    = prevSt.isSelected !== nextSt.isSelected
+  const hoverChanged  = prevSt.isHovered !== nextSt.isHovered
+  const freqChanged   = prevAp.frequency !== nextAp.frequency
+  const patternChanged = prevAp.patternId !== nextAp.patternId
+
+  // Directional fan
+  if (dirChanged || sChanged || azBwChanged || freqChanged || selChanged || hoverChanged) {
+    if (v.isDirectional) {
+      n.directionalFan.visible(true)
+      n.directionalFan.innerRadius(17 * v.s)
+      n.directionalFan.outerRadius(36 * v.s)
+      n.directionalFan.angle(v.beamwidth)
+      n.directionalFan.rotation(v.arcStart)
+      n.directionalFan.fill(v.color)
+      n.directionalFan.opacity(v.isSelected ? 0.35 : (v.isHovered ? 0.28 : 0.18))
+    } else {
+      n.directionalFan.visible(false)
+    }
+  }
+  // Directional selected ring
+  if (dirChanged || selChanged || sChanged || azBwChanged || freqChanged) {
+    if (v.isDirectional && v.isSelected) {
+      n.directionalSelectedRing.visible(true)
+      n.directionalSelectedRing.innerRadius(35 * v.s)
+      n.directionalSelectedRing.outerRadius(36 * v.s)
+      n.directionalSelectedRing.angle(v.beamwidth)
+      n.directionalSelectedRing.rotation(v.arcStart)
+      n.directionalSelectedRing.stroke(v.color)
+      n.directionalSelectedRing.strokeWidth(1 * v.s)
+      n.directionalSelectedRing.dash([3 * v.s, 3 * v.s])
+    } else {
+      n.directionalSelectedRing.visible(false)
+    }
+  }
+
+  // Custom pattern polygon — recompute points only when needed
+  if (customChanged || sChanged || patternChanged || azBwChanged || freqChanged || selChanged || hoverChanged) {
+    if (v.isCustom) {
+      const pattern = getPatternById(nextAp.patternId ?? DEFAULT_PATTERN_ID)
+      const customPts = patternPolygonPoints(pattern, 34 * v.s, v.axisRad)
+      n.customPoly.visible(true)
+      n.customPoly.points(customPts)
+      n.customPoly.fill(v.color)
+      n.customPoly.opacity(v.isSelected ? 0.35 : (v.isHovered ? 0.28 : 0.2))
+      n.customPoly.stroke(v.color)
+      n.customPoly.strokeWidth((v.isSelected ? 1.2 : 0.8) * v.s)
+    } else {
+      n.customPoly.visible(false)
+    }
+  }
+
+  // Axis line
+  if (oriChanged || sChanged || azBwChanged || selChanged || freqChanged) {
+    if (v.isOriented) {
+      const axisLen = 32 * v.s
+      n.axisLine.visible(true)
+      n.axisLine.points([0, 0, Math.cos(v.axisRad) * axisLen, Math.sin(v.axisRad) * axisLen])
+      n.axisLine.stroke(v.isSelected ? '#e74c3c' : v.color)
+      n.axisLine.strokeWidth((v.isSelected ? 2 : 1.2) * v.s)
+    } else {
+      n.axisLine.visible(false)
+    }
+  }
+
+  // Main body
+  if (sChanged || selChanged || hoverChanged) {
+    n.body.radius(10 * v.s)
+    n.body.fill((v.isHovered && !v.isSelected) ? '#1e3a8a' : '#ffffff')
+    n.body.stroke(v.isSelected ? '#e74c3c' : (v.isHovered && !v.isSelected) ? '#ffffff' : '#1e3a8a')
+    n.body.strokeWidth((v.isSelected ? 3 : v.isHovered ? 2.5 : 2) * v.s)
+  }
+
+  // Arrow group — visibility + rotation + recolor
+  if (oriChanged || azBwChanged) n.arrowGroup.rotation(v.azimuth)
+  if (oriChanged) n.arrowGroup.visible(v.isOriented)
+  if (sChanged || selChanged || hoverChanged) {
+    const iconCol = (v.isHovered && !v.isSelected) ? '#ffffff' : '#1e3a8a'
+    n.arrowBar.points([-4 * v.s, 0, 4 * v.s, 0])
+    n.arrowBar.stroke(iconCol)
+    n.arrowBar.strokeWidth(1.5 * v.s)
+    n.arrowTip.points([7 * v.s, 0, 3 * v.s, -3 * v.s, 3 * v.s, 3 * v.s])
+    n.arrowTip.fill(iconCol)
+  }
+
+  // Name label
+  if (prevAp.name !== nextAp.name) n.nameLabel.text(nextAp.name)
+  if (sChanged) {
+    n.nameLabel.fontSize(11 * v.s)
+    n.nameLabel.offsetX(22 * v.s)
+    n.nameLabel.offsetY(25 * v.s)
+    n.nameLabel.width(44 * v.s)
+  }
+
+  // Info pill visibility + content
+  if (prevSt.showAPInfo !== nextSt.showAPInfo) n.infoGroup.visible(!!nextSt.showAPInfo)
+  if (sChanged) {
+    n.infoGroup.y(19 * v.s)
+    n.infoGroup.offsetX(40 * v.s)
+    n.infoRect.width(80 * v.s)
+    n.infoRect.height(44 * v.s)
+    n.infoRect.cornerRadius(4 * v.s)
+    n.infoText.fontSize(11 * v.s)
+    n.infoText.y(4 * v.s)
+    n.infoText.width(80 * v.s)
+  }
+  const infoFieldsChanged =
+    prevAp.name !== nextAp.name
+    || prevAp.frequency !== nextAp.frequency
+    || prevAp.channel !== nextAp.channel
+    || prevAp.channelWidth !== nextAp.channelWidth
+    || prevAp.txPower !== nextAp.txPower
+  if (infoFieldsChanged && nextSt.showAPInfo) {
+    n.infoText.text(`${nextAp.name}\n${FREQ_LABEL[nextAp.frequency] || nextAp.frequency + 'G'} CH${nextAp.channel}/${nextAp.channelWidth ?? 20}\n${nextAp.txPower} dBm`)
+  }
+
+  // Latch new snapshot
+  g._ap = nextAp
+  g._st = nextSt
+}
+
+function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPContextMenu, onAPDragMove, onAPDragEnd, isDrawingActive, viewportScale, setHoverCursor, dimmed, capability }) {
+  // React-side subscriptions are limited to **layer-wide flags** (capability,
+  // selection, focused devices, showAPInfo, showAPBand, inverseScale, dimmed).
+  // The aps array is read imperatively from useAPStore.getState() inside
+  // useEffect and via a subscribe() listener — never as a React render input.
+  const showAPInfo = useEditorStore((s) => s.showAPInfo)
+  const showAPBand = useEditorStore((s) => s.showAPBand)
+  const focused    = useFocusedDevices()
+  const updateAP   = useAPStore((s) => s.updateAP)
+
+  const allowDrag        = !!capability?.allowDragExisting?.wireless
+  const allowClick       = !!capability?.allowSelectClick?.wireless
+  const allowHover       = !!capability?.allowSelectHover?.wireless
+  const allowCmdHover    = !!capability?.allowCommandHover?.wireless
+  const allowAnyHover    = allowHover || allowCmdHover
+  const allowContextMenu = !!capability?.allowContextMenu
+
+  const batchSelectedIds = (selectedItems.length > 1
+    ? new Set(selectedItems.filter((it) => it.type === 'ap').map((it) => it.id))
+    : null)
+
+  const inverseScale = 1 / viewportScale
+
+  // Refs for the Konva-side managed state.
+  const outerGroupRef = useRef(null)         // the react-konva Group node
+  const nodesByIdRef  = useRef(new Map())    // apId -> Konva.Group
+  const hoveredIdRef  = useRef(null)         // imperative hover state
+
+  // Callbacks are passed as inline lambdas from Editor2D → identity changes
+  // every render. Stash latest into a ref so listener closures always see
+  // the current callbacks without rebinding.
+  const callbacksRef = useRef({})
+  callbacksRef.current = {
+    onClick: onAPClick,
+    onContextMenu: onAPContextMenu,
+    onDragMove: onAPDragMove,
+    onMoved: (id, x, y) => { updateAP(floorId, id, { x, y }); onAPDragEnd?.() },
+    setHoverCursor,
+    onHoverEnter: (id) => {
+      hoveredIdRef.current = id
+      applyHoverVisuals()
+    },
+    onHoverLeave: () => {
+      hoveredIdRef.current = null
+      applyHoverVisuals()
+    },
+  }
+
+  // Snapshot of per-AP layer-wide flags. Used both during initial group build
+  // and whenever any flag changes (we re-walk every group with new flags).
+  const buildState = (ap) => ({
+    isSelected: ap.id === selectedAPId || (batchSelectedIds?.has(ap.id) ?? false),
+    isHovered:  ap.id === hoveredIdRef.current,
+    isFocused:  focused.aps.has(ap.id),
+    isDraggable: allowDrag,
+    allowHover, allowCmdHover, allowAnyHover, allowClick, allowContextMenu,
+    showAPInfo, inverseScale,
+  })
+
+  // Apply only-hover-changed update path. Walks both old + new hovered groups,
+  // updates them in place. Cheaper than rebuilding state for all 150 groups.
+  const applyHoverVisuals = () => {
+    const parent = outerGroupRef.current
+    if (!parent) return
+    // Mark both prev and current hovered groups for visual refresh.
+    // Re-derive state for each via buildState (which reads hoveredIdRef.current).
+    for (const [id, g] of nodesByIdRef.current) {
+      const ap = g._ap
+      const nextSt = buildState(ap)
+      if (nextSt.isHovered !== g._st.isHovered) {
+        updateApGroup(g, ap, nextSt)
+      }
+    }
+    parent.getLayer?.()?.batchDraw()
+  }
+
+  // Full sync from current store state → Konva node tree.
+  // Adds groups for new APs, removes groups for vanished APs, applies prop
+  // patches via updateApGroup for surviving APs.
+  const syncFromStore = () => {
+    const parent = outerGroupRef.current
+    if (!parent) return
+    const allAps = useAPStore.getState().apsByFloor[floorId] ?? []
+    // Band filter
+    const visibleAps = allAps.filter((ap) => showAPBand[ap.frequency] !== false)
+    const visibleIds = new Set(visibleAps.map((ap) => ap.id))
+    // Remove gone
+    for (const [id, g] of nodesByIdRef.current) {
+      if (!visibleIds.has(id)) {
+        g.destroy()
+        nodesByIdRef.current.delete(id)
+      }
+    }
+    // Add / update
+    for (const ap of visibleAps) {
+      const nextSt = buildState(ap)
+      let g = nodesByIdRef.current.get(ap.id)
+      if (!g) {
+        g = buildApGroup(ap, nextSt, callbacksRef)
+        g._st = nextSt
+        nodesByIdRef.current.set(ap.id, g)
+        parent.add(g)
+      } else {
+        updateApGroup(g, ap, nextSt)
+      }
+    }
+    parent.getLayer?.()?.batchDraw()
+  }
+
+  // Subscribe to the AP store imperatively. selector returns the per-floor
+  // array; equality fn skips when reference is identical (zustand default).
+  useEffect(() => {
+    syncFromStore()
+    const unsub = useAPStore.subscribe((state, prev) => {
+      const cur = state.apsByFloor[floorId]
+      const old = prev?.apsByFloor?.[floorId]
+      if (cur === old) return
+      syncFromStore()
+    })
+    return () => {
+      unsub()
+      for (const g of nodesByIdRef.current.values()) g.destroy()
+      nodesByIdRef.current.clear()
+    }
+    // syncFromStore captures latest closures via refs and props at call time;
+    // we want re-sync when floorId changes (destroy + rebuild for new floor).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floorId])
+
+  // Whenever layer-wide flags change, re-sync (touches every group's state).
+  // This is cheap compared to a full React commit because we only mutate
+  // changed attrs imperatively.
+  useEffect(() => {
+    syncFromStore()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selectedAPId, selectedItems, showAPInfo, showAPBand, focused,
+    allowDrag, allowClick, allowHover, allowCmdHover, allowAnyHover, allowContextMenu,
+    inverseScale,
+  ])
+
+  return <Group ref={outerGroupRef} opacity={dimmed ? 0.2 : 1} />
 }
 
 export default APLayer

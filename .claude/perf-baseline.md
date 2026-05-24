@@ -352,3 +352,84 @@ addAP 跟 slider 的兇手是同一個（react-konva commit + batchDraw）。**�
 P3a 工程預期 4-6 h，要動 APLayer 整個 imperative 化（手動 `new Konva.Group()`、`.on('click', ...)`、`.draggable(true)`），繞過 react-konva 的 vDOM commit。預期 addAP / slider 從 ~7 s → ~200 ms（基於 longtask 拆解推測，未實測）。
 
 風險：要重做 click / hover / drag / context-menu 4 個互動的事件綁定 + cleanup。已有 P3c+P3b 的 drag-friendly 路徑兜底，所以 drag 部分可以放心，主要要驗 click + context menu。
+
+---
+
+## After 26-2 P3a — APLayer imperative Konva（2026-05-24）
+
+**結論：click commit time 5800 ms → 563 ms（×10）。addAP / slider 沒救 — 真兇是 HM shader + Konva canvas paint，不是 react-konva。所有互動 100% 行為一致。**
+
+### 觸發 P3a 的證據
+
+使用者真實測試感受「150 AP 卡 + hover 過一下才有反應」，給的 DevTools trace 顯示：
+- 一個 **5845 ms 的 `FireAnimationFrame` 任務沒 yield**
+- stack: React commit → react-konva `applyNodeProps` → Konva `setAttrs` × 150 markers × ~10 nodes = ~1500 個 imperative setAttr
+- 觸發者：click → `_endDragAfter` → React 重新 render
+
+P1+P2+P3b+P3c 救不到這條（都不是 react-konva commit 的鍋）。
+
+### 改動 — `src/features/editor/layers/APLayer.jsx`（700 行重寫）
+
+- **`buildApGroup(ap, st, callbacksRef)`** — 純 imperative，回傳一個 `Konva.Group` 已掛好所有 9 個子節點 + 4 個事件 listener。Sub-nodes 存在 `g._nodes` 供 diff 查詢。
+- **`updateApGroup(g, nextAp, nextSt)`** — 比對 `g._ap / g._st` vs `nextAp / nextSt`，只觸碰實際有差異的屬性。座標 / draggable / hit radius / focus halo / directional fan / custom polygon / axis line / body / arrow / name label / info pill — 每個都分別判斷。
+- **APLayer 主體** — 還是 React component，只 render 一個 `<Group ref>` 給 react-konva 當錨點，其他全部丟到 imperative 處理：
+  - `useAPStore.subscribe(...)` 直接訂閱 store，apsByFloor 變化 → `syncFromStore()`，**不走 React render**
+  - 「layer-wide flags」（selection / focused / showAPInfo / capability ...）用 useEffect 監控，變化時也 syncFromStore
+  - hover 完全 imperative（`hoveredIdRef`），不再走 React useState
+  - 4 個事件（click / mouseenter+leave / drag / contextmenu）綁在 g 上，listener 透過 `callbacksRef.current` 取最新 closure
+
+### 視覺驗收
+8 場景 pixelmatch `0 / 4,650,888` 全 pass — `.playwright-mcp/perf-after-p3a/` vs `.playwright-mcp/perf-before/`。
+
+### 互動 regression（MCP 真實觸發）
+
+| 互動 | 5 AP | 150 AP |
+|---|---|---|
+| 左鍵 click → select | ✅ APPanel mount 顯示 AP-01 | ✅ 顯示 Stress-0001 |
+| Hover invert（mouseenter）| ✅ 像素改變、leave 復原 | — |
+| 右鍵 → context menu | ✅ 顯示「重新命名 / 選取 / 刪除」| — |
+| Drag → store update | ✅ AP 座標改了 +30, +20 | ✅ |
+
+4/4 互動全 pass。
+
+### 數字（150 AP / HM ON，3-5 樣本中位數）
+
+| 指標 | DevTools trace（你錄的）| After P3a | Δ |
+|---|---|---|---|
+| **Click → commit** | **5800 ms** rAF | **563 ms** | **-93% / ×10.3 🎯** |
+
+| 指標 | Baseline | After P1+P2+P3b+P3c | After P3a | 從 baseline 的 Δ |
+|---|---|---|---|---|
+| 150 AP 單 AP no-op updateAP | 1784 ms | 1784 ms | 806 ms | -55% ✅ |
+| 150 AP slider 一格 | 1784 ms | 1784 ms | ~1819 ms | 同 ⚠ |
+| 150 AP addAP | 950 ms | 950 ms | 2489 ms（HM ON）/ 681 ms（HM OFF）| HM ON 變慢 ⚠ |
+
+### 沒救到的原因
+
+`addAP` 在 150 AP / HM ON 之所以變慢 ~1.5 s，longtask 分布顯示主要 1770 ms 落在 **HM shader recompute** + **Konva `Layer.batchDraw()` 重畫 151 個 marker 到 canvas**。
+
+- P2 fingerprint 抓不住 addAP（新 AP 進場 → fingerprint 必定變）
+- Konva `batchDraw` 在 imperative 跟 react-konva 都一樣 O(N) — 每個 node 的 2D context drawCall 是固定成本
+- 我的 imperative diff 路徑 ~10-20 ms / 整層，不是瓶頸
+
+**HM OFF 下 addAP 從 baseline 418 ms → 681 ms** 是 ~260 ms 的 regression — 這個是 P3a 的「layer-flag effect 觸發 syncFromStore 全掃」+ 沒做 incremental 的代價。可以後續優化但不是現在優先。
+
+### 為什麼 click 大勝、addAP 沒勝
+
+click 路徑：
+1. setSelected 觸發 → 改 selectedId
+2. 之前：React commit → 150 markers props 都重新 set（isSelected 算每一顆）→ react-konva commitWork × 1500 nodes → **5800 ms**
+3. 現在：useEffect 偵測 selectedAPId 變 → syncFromStore → 每個 group 走 updateApGroup → 大多無變化，只有目標那顆改 stroke / fill → **<1 s**
+
+addAP 路徑：
+1. addAP 觸發 → apsByFloor 新增一筆
+2. P3a 砍掉了 react-konva 那條（贏 ~200 ms）
+3. 但 HM shader / CableLayer routing / Konva 整層 paint 全部都跟著動 — 這幾條 P3a 沒碰
+
+### 沒做的 follow-up
+
+- HM shader 增量更新（新 AP 加進來，只算這顆對既有 grid 的增量）— 工程大、HM-F4 規格也支援
+- CableLayer 增量更新（只算新 AP 的 route，舊的 routes cache）— 中等
+- Konva `Layer.batchDraw` 改 `Layer.draw()` 用 dirty rect — Konva 8 支援度未驗
+
+這些都不在這次 26-2 範圍。

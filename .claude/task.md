@@ -482,7 +482,7 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | 26-2-P3c | ✅ | HM `dragMode` 預設 `'live'` → `'solo'`（HM-drag-solo / Hamina style）；drag 不再每幀跑 sampleFieldGL；視覺 0 diff |
 | 26-2-P3b | ✅ | CableLayer 不再訂閱 `dragAP / dragSwitch`；拖 AP 時 cable 線凍結，dragEnd 才重算（Figma/Hamina UX）；視覺 0 diff |
 | 26-2-P3-bench | ✅ | 150 AP drag FPS 0.98 → 60；300 AP drag FPS 0.27 → 58（×215）；commit time（addAP/slider）沒動 |
-| 26-2-P3a | ⬜ | APLayer 改 imperative Konva（繞過 react-konva vDOM commit）— 預期 addAP / slider 從 ~7 s → ~200 ms。要重做 4 個互動事件綁定，4-6 h |
+| 26-2-P3a | ✅ | APLayer 改 imperative Konva（繞過 react-konva vDOM commit）；click commit 5800 ms → 563 ms（×10），單 AP no-op -55%。addAP / slider 沒救 — 真兇是 HM shader + Konva canvas paint，不是 react-konva。4 互動 regression 全 pass，視覺 0 diff |
 | 26-3 | ⬜   | Bench 結果記錄到 `.claude/perf-baseline.md` 第二段 `## After 26-2`（before / after FPS + frame time）|
 
 ---

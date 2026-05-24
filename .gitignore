@@ -60,3 +60,6 @@ sampleImg/
 
 # Heatmap diff harness outputs (regenerated on demand)
 src/features/heatmap/__fixtures__/**/diff-report.html
+
+# Scratch / temp scratch (DevTools perf traces, etc.)
+src/tmp/
