@@ -80,6 +80,9 @@ function ObjectContextMenu({
   }
 
   const renderItem = (item, isSub = false) => {
+    if (item.kind === 'divider') {
+      return <div key={item.id} className="tray-ctx-menu__divider" />
+    }
     const disabled = !!item.disabled
     const hasSub = Array.isArray(item.submenu) && item.submenu.length > 0
     const expanded = expandedSubId === item.id
@@ -104,6 +107,12 @@ function ObjectContextMenu({
           }
         >
           <span className="tray-ctx-menu__label">
+            {item.swatch && (
+              <span
+                className="tray-ctx-menu__swatch"
+                style={{ background: item.swatch }}
+              />
+            )}
             {item.icon && <span style={{ marginRight: 4 }}>{item.icon}</span>}
             {item.label}
             {item.hintInline && <span className="tray-ctx-menu__hint">{item.hintInline}</span>}

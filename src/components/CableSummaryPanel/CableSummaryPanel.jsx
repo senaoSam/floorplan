@@ -53,11 +53,17 @@ function CableSummaryPanel() {
     const unroutable = []
     // 14-3 BOM buckets: cableType (copper vs fiber) and length brackets
     // <30 / 30-89 / 90+ m. AP cables default to copper (drops are short).
+    // 29-5 add per-tier breakdown (backbone / distribution / access).
     const bom = {
       apToSwitch: 0,
       s2s:        { copper: 0, fiber: 0 },
       byLength:   { short: 0, mid: 0, long: 0 },        // total metres
       counts:     { short: 0, mid: 0, long: 0 },        // number of cables
+      byTier:     {
+        backbone:     { totalM: 0, copper: 0, fiber: 0, count: 0 },
+        distribution: { totalM: 0, copper: 0, fiber: 0, count: 0 },
+        access:       { totalM: 0, copper: 0, fiber: 0, count: 0 },
+      },
     }
     const bucketLen = (m) => m < 30 ? 'short' : m < 90 ? 'mid' : 'long'
 
@@ -81,7 +87,7 @@ function CableSummaryPanel() {
       }
     }
 
-    // S2S links — separate from AP cables, tracked per cableType.
+    // S2S links — separate from AP cables, tracked per cableType + tier.
     for (const link of switchLinks.values()) {
       if (link.cableM == null) continue
       totalS2sM += link.cableM
@@ -89,6 +95,13 @@ function CableSummaryPanel() {
       const b = bucketLen(link.cableM)
       bom.byLength[b] += link.cableM
       bom.counts[b]   += 1
+      // 29-5 per-tier accumulation
+      const tier = link.tier ?? 'access'
+      const slot = bom.byTier[tier] ?? bom.byTier.access
+      slot.totalM += link.cableM
+      slot.count  += 1
+      if (link.cableType === 'fiber') slot.fiber += link.cableM
+      else if (link.cableType === 'copper') slot.copper += link.cableM
     }
 
     // 20-2 容量瓶頸 — score every tray by fill ratio, surface the non-OK
@@ -322,6 +335,48 @@ function CableSummaryPanel() {
                   )}
                 </>
               )}
+            </section>
+          )}
+
+          {/* 29-5 BOM by tier — backbone / distribution / access (per spec §5).
+              Only shown when there's at least one S2S link (i.e. an IDF /
+              MDF / Router is in the topology), otherwise it adds noise to
+              the AP-only case. */}
+          {stats.totalS2s > 0 && (
+            <section className="cable-summary__section">
+              <p className="cable-summary__label">階層細分 (Backbone / Distribution / Access)</p>
+              {[
+                { tier: 'backbone',     label: 'Backbone',     desc: 'MDF↔Router / IDF↔MDF' },
+                { tier: 'distribution', label: 'Distribution', desc: 'Access↔IDF' },
+                { tier: 'access',       label: 'Access (S2S)', desc: '其他 switch↔switch' },
+              ].map(({ tier, label, desc }) => {
+                const s = stats.bom.byTier[tier]
+                if (!s || s.totalM <= 0) return null
+                return (
+                  <React.Fragment key={tier}>
+                    <div className="cable-summary__row">
+                      <span>
+                        {label}
+                        <span className="cable-summary__sub">（{desc}）</span>
+                      </span>
+                      <span>
+                        {s.totalM.toFixed(1)} m
+                        <span className="cable-summary__sub">（{s.count}）</span>
+                      </span>
+                    </div>
+                    {(s.copper > 0 || s.fiber > 0) && (
+                      <div className="cable-summary__row cable-summary__row--sub">
+                        <span>　介質</span>
+                        <span>
+                          {s.copper > 0 && <>Copper {s.copper.toFixed(1)} m</>}
+                          {s.copper > 0 && s.fiber > 0 && <>　</>}
+                          {s.fiber > 0 && <>Fiber {s.fiber.toFixed(1)} m</>}
+                        </span>
+                      </div>
+                    )}
+                  </React.Fragment>
+                )
+              })}
             </section>
           )}
 

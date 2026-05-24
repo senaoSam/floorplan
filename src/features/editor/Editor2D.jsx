@@ -6,7 +6,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
-import { useCableStore, DEFAULT_SWITCH, DEFAULT_TRAY, DEFAULT_TRAY_MAGNET_PX, DEFAULT_RISER_MAGNET_PX } from '@/store/useCableStore'
+import { useCableStore, DEFAULT_SWITCH, DEFAULT_TRAY, DEFAULT_TRAY_MAGNET_PX, DEFAULT_RISER_MAGNET_PX, TRAY_SYSTEMS } from '@/store/useCableStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { MATERIALS, MATERIAL_LIST, OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
@@ -29,7 +29,6 @@ import FloorHoleLayer from './layers/FloorHoleLayer'
 import ScaleLayer from './layers/ScaleLayer'
 import CropLayer from './layers/CropLayer'
 import ScaleDialog from './ScaleDialog'
-import TrayContextMenu from '@/components/ContextMenu/TrayContextMenu'
 import ObjectContextMenu from '@/components/ContextMenu/ObjectContextMenu'
 import { getModeCapability } from './modeCapabilities'
 import LayerToggle from '@/components/LayerToggle/LayerToggle'
@@ -1177,16 +1176,10 @@ function Editor2D() {
     if (isSwitchMode) {
       const kind = DEFAULT_SWITCH.kind
       addSwitch(activeFloorId, {
+        ...DEFAULT_SWITCH,
         id: generateId('sw'),
         name: nextSwitchName(kind),
         x: pos.x, y: pos.y,
-        kind,
-        mountHeight: DEFAULT_SWITCH.mountHeight,
-        model: DEFAULT_SWITCH.model,
-        portCount: DEFAULT_SWITCH.portCount,
-        poeBudget: DEFAULT_SWITCH.poeBudget,
-        uplinkTo: DEFAULT_SWITCH.uplinkTo,
-        cableType: DEFAULT_SWITCH.cableType,
       })
       return
     }
@@ -2057,29 +2050,72 @@ function Editor2D() {
           clearIfTargetSelected()
         }
 
+        // 23-3f parity — surface "選取" in every mode unless the tray IS
+        // already the current selection. Lets users switch the right panel
+        // to this tray without losing their current draw / place context.
+        const canSelect = !(selectedId === tray.id && selectedType === 'cable_tray')
+        const onSelect = () => setSelected(tray.id, 'cable_tray')
+
+        // Tray-specific gating: split is meaningful on a segment hit;
+        // extend / merge need an endpoint hit.
+        const canSplit  = hitContext?.kind === 'segment'
+        const canEndpoint = hitContext?.kind === 'endpoint'
+        const canMerge  = canEndpoint && !!mergeCandidate
+
+        // Build the unified items[] payload for ObjectContextMenu. Sub-menu
+        // carries swatch colours so 「轉換系統」keeps its colour-coded list.
+        const trayItems = []
+        if (canSelect) {
+          trayItems.push({ id: 'select', label: '選取', onClick: onSelect })
+          trayItems.push({ id: 'div-after-select', kind: 'divider' })
+        }
+        trayItems.push(
+          { id: 'split',  label: '在此切割',
+            disabled: !canSplit,
+            hint: canSplit ? '在點擊處將 tray 切成兩段（共用 vertex）' : '在線段中段點右鍵才能切割',
+            onClick: canSplit ? onSplit : undefined },
+          { id: 'extend', label: '從此端延伸',
+            disabled: !canEndpoint,
+            hint: canEndpoint ? '從這個端點開始畫一條延伸的新 tray（共用端點 xy）' : '在端點附近右鍵才能延伸',
+            onClick: canEndpoint ? onExtend : undefined },
+          { id: 'merge',  label: '合併相鄰 tray',
+            hintInline: canMerge ? `→ ${mergeCandidate.tray.name ?? mergeCandidate.tray.id}` : undefined,
+            disabled: !canMerge,
+            hint: canMerge ? `合併到 ${mergeCandidate.tray.name ?? mergeCandidate.tray.id}（共用端點）`
+                : canEndpoint ? '此端點沒有恰好一條 tray 可合併' : '在端點附近右鍵才能合併',
+            onClick: canMerge ? onMerge : undefined },
+          { id: 'div-after-edit', kind: 'divider' },
+          { id: 'convert', label: '轉換系統',
+            submenu: TRAY_SYSTEMS.map((sys) => ({
+              id: `convert-${sys.value}`,
+              label: sys.label,
+              swatch: sys.color,
+              onClick: () => onConvert(sys.value),
+            })) },
+          { id: 'div-before-delete', kind: 'divider' },
+          { id: 'delete', label: '刪除', danger: true, shortcut: 'Del', onClick: onDelete },
+        )
+
         return (
-          <TrayContextMenu
+          <ObjectContextMenu
             x={trayCtxMenu.screenX}
             y={trayCtxMenu.screenY}
-            trayName={tray.name ?? tray.id}
-            hitContext={hitContext}
-            mergeCandidate={mergeCandidate?.tray ?? null}
+            title={tray.name ?? tray.id}
+            currentName={tray.name ?? ''}
+            items={trayItems}
             onRename={onRename}
-            onSplit={onSplit}
-            onExtend={onExtend}
-            onMerge={onMerge}
-            onConvert={onConvert}
-            onDelete={onDelete}
             onClose={close}
           />
         )
       })()}
 
       {/* 23-3b Generic object context menu — drives Wall / AP / Switch /
-          Riser / Scope / FloorHole / FloorImage. Tray uses its own
-          TrayContextMenu above because it has the rich 20-4 actions
-          (split / extend / merge / convert). Both are mutually exclusive:
-          Tray opens trayCtxMenu, others open contextMenu. */}
+          Riser / Scope / FloorHole / FloorImage. Tray uses the same
+          ObjectContextMenu above (the unified component supports tray's
+          rich 20-4 actions via items[]: disabled hints, sub-menu with
+          colour swatches, dividers). Tray opens trayCtxMenu, others open
+          contextMenu — kept separate because trayCtxMenu's payload also
+          carries hitContext + mergeCandidate. */}
       {contextMenu && contextMenu.targetType !== 'cable_tray' && (() => {
         const { targetType, targetId, screenX, screenY } = contextMenu
         const close = () => closeContextMenu()
@@ -2165,13 +2201,13 @@ function Editor2D() {
           return null
         }
 
-        // 23-3f In non-SELECT modes the user might right-click an object only
-        // to inspect / edit its panel without leaving the current mode. Add an
-        // explicit "選取" item so they can promote the target into selection
-        // without abandoning their drawing intent. Skipped in SELECT (left-
-        // click already selects) and when the target IS the current selection.
+        // 23-3f "選取" item — always shown except when the target IS already
+        // the current selection (no-op there). Originally hidden in SELECT
+        // mode on the rationale that left-click already selects, but in
+        // practice users want to keep a current selection and right-click a
+        // different object to switch panels without losing context, so we
+        // surface it in every mode.
         const showSelectItem =
-          editorMode !== EDITOR_MODE.SELECT &&
           !(selectedId === targetId && selectedType === targetType)
         const items = []
         if (showSelectItem) {

@@ -68,9 +68,12 @@ export function buildFloorGraph({ floor, aps, switches, trays, risers = [] }) {
     adj.set(id, [])
     return id
   }
-  const addEdge = (a, b, weightM, kind) => {
-    adj.get(a).push({ to: b, weightM, kind })
-    adj.get(b).push({ to: a, weightM, kind })
+  // Extra `meta` (optional) attaches per-edge data Dijkstra weight functions
+  // can read — e.g. tier preference inspects `meta.traySystem` (29-4).
+  const addEdge = (a, b, weightM, kind, meta = null) => {
+    const ext = meta ? { to: b, weightM, kind, ...meta } : { to: b, weightM, kind }
+    adj.get(a).push(ext)
+    adj.get(b).push({ to: a, weightM, kind, ...(meta ?? {}) })
   }
 
   // ── Step 3: tray vertices → graph nodes + anchor list ────────────────────
@@ -248,6 +251,10 @@ export function buildFloorGraph({ floor, aps, switches, trays, risers = [] }) {
   // reach the endpoint via the tray.
   for (const meta of trayMeta) {
     meta.anchors.sort((a, b) => a.chain - b.chain)
+    // 29-4 — tray's `system` propagates to every edge along that tray so
+    // routing can prefer a specific system for a given S2S tier (e.g. MDF↔IDF
+    // backbone link prefers tray.system === 'backbone').
+    const traySystem = meta.tray.system ?? 'data'
     for (let i = 0; i < meta.anchors.length - 1; i++) {
       const A = meta.anchors[i]
       const B = meta.anchors[i + 1]
@@ -255,7 +262,7 @@ export function buildFloorGraph({ floor, aps, switches, trays, risers = [] }) {
       const weightM = pxPerM && pxPerM > 0
         ? (chainPx / pxPerM) * (1 + SLACK_TRAY)
         : 0
-      addEdge(A.nodeId, B.nodeId, weightM, 'tray')
+      addEdge(A.nodeId, B.nodeId, weightM, 'tray', { traySystem })
     }
   }
 

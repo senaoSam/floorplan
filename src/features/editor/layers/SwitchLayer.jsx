@@ -34,8 +34,16 @@ function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover
   const s = inverseScale
   const color = getSwitchKindColor(sw.kind)
   const strokeColor = isSelected ? '#e74c3c' : color
-  const w = 30 * s
-  const h = 18 * s
+  // 29-6 — chassis sizing by port count & core layer:
+  //   24-port    = 1.0× width
+  //   48-port    = 1.5× width
+  //   Router 8   = 0.8× width
+  //   Core layer = +2 px height (1U → 2U look)
+  const portCount = sw.portCount ?? 24
+  const isCore    = !!sw.isCoreLayer || sw.kind === 'mdf' || sw.kind === 'router'
+  const widthMult = portCount >= 48 ? 1.5 : portCount <= 12 ? 0.8 : 1.0
+  const w = 30 * s * widthMult
+  const h = (isCore ? 22 : 18) * s
 
   const snapped = snapState?.snapped ?? false
   const drops   = snapState?.drops ?? []
@@ -125,18 +133,25 @@ function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover
               stroke={chassisStrokeCol}
               strokeWidth={(isSelected ? 2.5 : isHovered ? 2 : 1.5) * s}
             />
-            {/* Port row (visual only) */}
-            {Array.from({ length: 8 }).map((_, i) => (
-              <Rect
-                key={i}
-                x={-w / 2 + (3 + i * 3) * s}
-                y={h / 2 - 4 * s}
-                width={2 * s}
-                height={2 * s}
-                fill={portCol}
-                listening={false}
-              />
-            ))}
+            {/* Port row (visual only). Count proxies the real port density:
+                12 ports → 6 dots, 24 → 8 dots, 48 → 12 dots, router 8 → 4. */}
+            {(() => {
+              const dotCount = portCount >= 48 ? 12 : portCount >= 24 ? 8 : portCount >= 12 ? 6 : 4
+              const dotSize  = 2 * s
+              const totalW   = w - 6 * s
+              const step     = totalW / dotCount
+              return Array.from({ length: dotCount }).map((_, i) => (
+                <Rect
+                  key={i}
+                  x={-w / 2 + 3 * s + i * step}
+                  y={h / 2 - 4 * s}
+                  width={dotSize}
+                  height={dotSize}
+                  fill={portCol}
+                  listening={false}
+                />
+              ))
+            })()}
             {/* PoE badge */}
             {sw.poeBudget > 0 && (
               <Line
@@ -145,6 +160,65 @@ function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover
                 strokeWidth={1.5 * s}
                 listening={false}
               />
+            )}
+            {/* 29-6 — kind-specific decoration above chassis. IDF / MDF = one
+                or two thin horizontal bars (distribution / core layers).
+                Router = antenna mark (WAN edge). Access = no decoration. */}
+            {sw.kind === 'idf' && (
+              <Line
+                points={[-w / 4, -h / 2 - 3 * s, w / 4, -h / 2 - 3 * s]}
+                stroke={portCol}
+                strokeWidth={1.5 * s}
+                listening={false}
+              />
+            )}
+            {sw.kind === 'mdf' && (
+              <>
+                <Line
+                  points={[-w / 3, -h / 2 - 3 * s, w / 3, -h / 2 - 3 * s]}
+                  stroke={portCol}
+                  strokeWidth={1.5 * s}
+                  listening={false}
+                />
+                <Line
+                  points={[-w / 4, -h / 2 - 6 * s, w / 4, -h / 2 - 6 * s]}
+                  stroke={portCol}
+                  strokeWidth={1.5 * s}
+                  listening={false}
+                />
+              </>
+            )}
+            {sw.kind === 'router' && (
+              <>
+                {/* Antenna mast */}
+                <Line
+                  points={[0, -h / 2 - 3 * s, 0, -h / 2 - 9 * s]}
+                  stroke={portCol}
+                  strokeWidth={1.4 * s}
+                  listening={false}
+                />
+                {/* Antenna top blob */}
+                <Circle
+                  x={0}
+                  y={-h / 2 - 10 * s}
+                  radius={1.6 * s}
+                  fill={portCol}
+                  listening={false}
+                />
+                {/* Wing waves */}
+                <Line
+                  points={[-3 * s, -h / 2 - 7 * s, -5 * s, -h / 2 - 5 * s]}
+                  stroke={portCol}
+                  strokeWidth={1.0 * s}
+                  listening={false}
+                />
+                <Line
+                  points={[3 * s, -h / 2 - 7 * s, 5 * s, -h / 2 - 5 * s]}
+                  stroke={portCol}
+                  strokeWidth={1.0 * s}
+                  listening={false}
+                />
+              </>
             )}
             {/* Kind label inside chassis */}
             <Text

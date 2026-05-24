@@ -444,12 +444,12 @@ const PHASES = [
       {
         layer: 'Layer 29 — Switch kind differentiation',
         items: [
-          { id: '29-1', done: false, text: 'Spec — `.claude/switch-kind-spec.md` 定 default / uplink port type / 階層約束' },
-          { id: '29-2', done: false, text: 'DEFAULTS 重設 — 每 kind 一組 `DEFAULT_SWITCH_BY_KIND`，改 kind 時面板提示套用' },
-          { id: '29-3', done: false, text: '階層 enforcement — uplinkTo 下拉只列允許目標（SW→IDF/MDF/Router 等）' },
-          { id: '29-4', done: false, text: 'Routing 階層偏好 — backbone link 優先走指定 tray system' },
-          { id: '29-5', done: false, text: 'BOM 細分 — S2S link 加 tier（backbone / distribution）；panel 三段顯示' },
-          { id: '29-6', done: false, text: 'UI / 顏色 polish — 各 kind 顯示專屬欄位，對齊 color-legend' },
+          { id: '29-1', done: true, text: 'Spec — `.claude/switch-kind-spec.md` 定 default / uplink port type / 階層約束' },
+          { id: '29-2', done: true, text: 'DEFAULTS 重設 — 每 kind 一組 `DEFAULT_SWITCH_BY_KIND`，改 kind 時面板提示套用' },
+          { id: '29-3', done: true, text: '階層 enforcement — uplinkTo 下拉只列允許目標（SW→IDF/MDF/Router 等）' },
+          { id: '29-4', done: true, text: 'Routing 階層偏好 — backbone link 優先走指定 tray system' },
+          { id: '29-5', done: true, text: 'BOM 細分 — S2S link 加 tier（backbone / distribution）；panel 三段顯示' },
+          { id: '29-6', done: true, text: 'UI / 顏色 polish — 各 kind 顯示專屬欄位，對齊 color-legend' },
         ],
       },
     ],

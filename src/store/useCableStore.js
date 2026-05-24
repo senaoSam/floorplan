@@ -17,16 +17,113 @@ export const SWITCH_KINDS = [
   { value: 'router', label: 'Router', color: '#f59e0b' },
 ]
 
-export const DEFAULT_SWITCH = {
-  kind: 'switch',
-  mountHeight: 0.5,
-  model: 'POE-24-port',
-  portCount: 24,
-  poeBudget: 370,
-  // 14-1: switch→switch uplink. null = top of the hierarchy (typically the
-  // MDF/Router). 'auto' picks copper for <90 m, fiber for ≥90 m.
-  uplinkTo: null,
-  cableType: 'auto',
+// Phase 23 / 29-2 — per-kind real-world defaults.
+// References: Cisco Catalyst 9200/9300/9500, Aruba CX 6200/6300/8400,
+// Juniper EX2300/EX4400/QFX5120, TIA-942 §5.4, BICSI TDMM 14ed.
+//
+//   access  (Cisco C9200-24P)        : 24 port / 370 W PoE / SFP+ uplink
+//   idf     (Cisco C9300-48S aggreg.) : 48 port / 740 W PoE / SFP28 uplink
+//   mdf     (Cisco C9500-48Y4C core)  : 48 port / 0 W / QSFP28 100G uplink
+//   router  (Cisco Cat 8300)          : 8 port (4 WAN + 4 LAN) / 0 W / SFP+
+//
+// uplinkPortType is descriptive (shown in panel, not enforced by routing).
+// isCoreLayer flag drives 3D chassis sizing and "no PoE" enforcement.
+export const DEFAULT_SWITCH_BY_KIND = {
+  switch: {
+    kind: 'switch',
+    mountHeight: 2.4,
+    model: 'Catalyst 9200-24P',
+    portCount: 24,
+    poeBudget: 370,
+    uplinkPortType: 'sfp+',
+    uplinkCount: 4,
+    uplinkTo: null,
+    cableType: 'fiber',
+    isCoreLayer: false,
+  },
+  idf: {
+    kind: 'idf',
+    mountHeight: 0.5,
+    model: 'Catalyst 9300-48S',
+    portCount: 48,
+    poeBudget: 740,
+    uplinkPortType: 'sfp28',
+    uplinkCount: 2,
+    uplinkTo: null,
+    cableType: 'fiber',
+    isCoreLayer: false,
+  },
+  mdf: {
+    kind: 'mdf',
+    mountHeight: 0.5,
+    model: 'Catalyst 9500-48Y4C',
+    portCount: 48,
+    poeBudget: 0,
+    uplinkPortType: 'qsfp28',
+    uplinkCount: 2,
+    uplinkTo: null,
+    cableType: 'fiber',
+    isCoreLayer: true,
+  },
+  router: {
+    kind: 'router',
+    mountHeight: 0.5,
+    model: 'Catalyst 8300',
+    portCount: 8,
+    poeBudget: 0,
+    uplinkPortType: 'sfp+',
+    uplinkCount: 2,
+    uplinkTo: null,
+    cableType: 'fiber',
+    isCoreLayer: true,
+    wanPortCount: 4,
+    lanPortCount: 4,
+  },
+}
+
+// Kept for legacy imports — same as DEFAULT_SWITCH_BY_KIND.switch.
+export const DEFAULT_SWITCH = DEFAULT_SWITCH_BY_KIND.switch
+
+// Phase 23 / 29-3 — uplink hierarchy rules. For each (srcKind, targetKind)
+// pair, three states:
+//   'main'  — the canonical / recommended target. Shown in dropdown first.
+//   'warn'  — technically allowed (e.g. collapsed core / VSS pair), but
+//             not the textbook topology. Shown with warning text.
+//   null    — disallowed. Hidden from dropdown; existing data showing this
+//             gets a flagged warning instead of silent rewrite.
+//
+// `null` as the *target* in code below means "this kind is allowed to be
+// top-of-hierarchy" (final hop, no further uplink).
+export const UPLINK_RULES = {
+  switch: { switch: null, idf: 'main', mdf: 'warn',  router: null,  null: null },
+  idf:    { switch: null, idf: 'warn', mdf: 'main',  router: null,  null: null },
+  mdf:    { switch: null, idf: null,   mdf: 'warn',  router: 'main', null: 'main' },
+  router: { switch: null, idf: null,   mdf: null,    router: null,   null: 'main' },
+}
+
+// Helper: list of allowed target kinds for a given source kind, sorted with
+// 'main' first then 'warn'.
+export function allowedUplinkKinds(srcKind) {
+  const rules = UPLINK_RULES[srcKind] ?? {}
+  const main = [], warn = []
+  for (const [k, level] of Object.entries(rules)) {
+    if (k === 'null') continue
+    if (level === 'main') main.push(k)
+    else if (level === 'warn') warn.push(k)
+  }
+  return { main, warn, allowsNull: rules.null != null }
+}
+
+// Helper: classify a (src, target) pair. Returns 'main' / 'warn' / 'forbidden'.
+// Used by SwitchPanel to flag bad existing data without auto-resetting.
+export function classifyUplinkPair(srcKind, targetKind) {
+  if (targetKind == null) {
+    return UPLINK_RULES[srcKind]?.null === 'main' ? 'main' : 'forbidden'
+  }
+  const level = UPLINK_RULES[srcKind]?.[targetKind]
+  if (level === 'main') return 'main'
+  if (level === 'warn') return 'warn'
+  return 'forbidden'
 }
 
 // Cat 6 spec limit; beyond this, fiber is the practical choice.
@@ -194,13 +291,38 @@ export const useCableStore = create((set, get) => ({
   },
 
   addSwitch: (floorId, sw) =>
-    set((state) => ({
-      globalSwitchCounter: state.globalSwitchCounter + 1,
-      switchesByFloor: {
-        ...state.switchesByFloor,
-        [floorId]: [...(state.switchesByFloor[floorId] ?? []), sw],
-      },
-    })),
+    set((state) => {
+      // 29-3 — auto-fill uplinkTo if the new switch has no uplinkTo yet.
+      // Walks building-wide switches looking for the recommended target kind
+      // for this src kind ('main' first, fall back to 'warn'), picks the
+      // physically nearest by Manhattan distance. If nothing valid is found,
+      // uplinkTo stays null (user can wire manually).
+      let finalSw = sw
+      if (sw.uplinkTo == null && UPLINK_RULES[sw.kind]) {
+        const rules = UPLINK_RULES[sw.kind]
+        let bestMain = null, bestMainDist = Infinity
+        let bestWarn = null, bestWarnDist = Infinity
+        for (const list of Object.values(state.switchesByFloor)) {
+          for (const other of (list ?? [])) {
+            if (other.id === sw.id) continue
+            const level = rules[other.kind]
+            if (level !== 'main' && level !== 'warn') continue
+            const dist = Math.abs((other.x ?? 0) - sw.x) + Math.abs((other.y ?? 0) - sw.y)
+            if (level === 'main' && dist < bestMainDist) { bestMain = other; bestMainDist = dist }
+            else if (level === 'warn' && dist < bestWarnDist) { bestWarn = other; bestWarnDist = dist }
+          }
+        }
+        const pick = bestMain ?? bestWarn
+        if (pick) finalSw = { ...sw, uplinkTo: pick.id }
+      }
+      return {
+        globalSwitchCounter: state.globalSwitchCounter + 1,
+        switchesByFloor: {
+          ...state.switchesByFloor,
+          [floorId]: [...(state.switchesByFloor[floorId] ?? []), finalSw],
+        },
+      }
+    }),
 
   updateSwitch: (floorId, swId, patch) =>
     set((state) => ({
@@ -212,23 +334,98 @@ export const useCableStore = create((set, get) => ({
       },
     })),
 
+  // 29-2 — change a switch's kind and auto-apply the new kind's defaults
+  // (portCount / poeBudget / uplinkPortType / mountHeight / model / etc).
+  // Preserves position (x, y), id, name, and the explicit uplinkTo *only if*
+  // the new kind still allows that target (UPLINK_RULES). User-customised
+  // free-text fields (model) get reset since the new kind's hardware family
+  // is fundamentally different — easier to re-edit than to deduce equivalence.
+  changeSwitchKind: (floorId, swId, newKind) =>
+    set((state) => {
+      const list = state.switchesByFloor[floorId] ?? []
+      const cur = list.find((s) => s.id === swId)
+      if (!cur || cur.kind === newKind) return {}
+      const newDefaults = DEFAULT_SWITCH_BY_KIND[newKind]
+      if (!newDefaults) return {}
+      // Keep uplinkTo only if still allowed under the new kind's rules.
+      // Resolving the target's kind needs a flat lookup across all floors.
+      let keepUplink = false
+      if (cur.uplinkTo) {
+        let targetKind = null
+        for (const swArr of Object.values(state.switchesByFloor)) {
+          const t = (swArr ?? []).find((s) => s.id === cur.uplinkTo)
+          if (t) { targetKind = t.kind; break }
+        }
+        if (targetKind != null) {
+          const level = UPLINK_RULES[newKind]?.[targetKind]
+          keepUplink = level === 'main' || level === 'warn'
+        }
+      }
+      // If we're dropping the old uplinkTo, try to auto-fill a new one based
+      // on the same nearest-main-target logic addSwitch uses. This handles
+      // "改 SW → IDF" right when an MDF already exists somewhere — without
+      // it, the user sees a 「尚未指定上連目標」 warning even though there's
+      // a perfectly fine target one click away.
+      let nextUplinkTo = keepUplink ? cur.uplinkTo : null
+      if (!keepUplink && UPLINK_RULES[newKind]) {
+        const rules = UPLINK_RULES[newKind]
+        let bestMain = null, bestMainDist = Infinity
+        let bestWarn = null, bestWarnDist = Infinity
+        for (const swArr of Object.values(state.switchesByFloor)) {
+          for (const other of (swArr ?? [])) {
+            if (other.id === cur.id) continue
+            const level = rules[other.kind]
+            if (level !== 'main' && level !== 'warn') continue
+            const dist = Math.abs((other.x ?? 0) - cur.x) + Math.abs((other.y ?? 0) - cur.y)
+            if (level === 'main' && dist < bestMainDist) { bestMain = other; bestMainDist = dist }
+            else if (level === 'warn' && dist < bestWarnDist) { bestWarn = other; bestWarnDist = dist }
+          }
+        }
+        const pick = bestMain ?? bestWarn
+        if (pick) nextUplinkTo = pick.id
+      }
+      const merged = {
+        ...newDefaults,
+        id: cur.id,
+        name: cur.name,
+        x: cur.x,
+        y: cur.y,
+        uplinkTo: nextUplinkTo,
+      }
+      return {
+        switchesByFloor: {
+          ...state.switchesByFloor,
+          [floorId]: list.map((s) => (s.id === swId ? merged : s)),
+        },
+      }
+    }),
+
   removeSwitch: (floorId, swId) =>
-    set((state) => ({
-      switchesByFloor: {
-        ...state.switchesByFloor,
-        [floorId]: (state.switchesByFloor[floorId] ?? []).filter((s) => s.id !== swId),
-      },
-    })),
+    set((state) => {
+      // Drop dangling uplinkTo across the whole building so no other switch
+      // ends up pointing at a now-deleted target. Without this the
+      // surviving switches keep a stale id that the UI has to detect and
+      // warn about — annoying since the user already destroyed the target.
+      const next = {}
+      for (const [fId, list] of Object.entries(state.switchesByFloor)) {
+        next[fId] = (list ?? [])
+          .filter((s) => !(fId === floorId && s.id === swId))
+          .map((s) => (s.uplinkTo === swId ? { ...s, uplinkTo: null } : s))
+      }
+      return { switchesByFloor: next }
+    }),
 
   removeSwitches: (floorId, swIds) =>
     set((state) => {
       const idSet = new Set(swIds)
-      return {
-        switchesByFloor: {
-          ...state.switchesByFloor,
-          [floorId]: (state.switchesByFloor[floorId] ?? []).filter((s) => !idSet.has(s.id)),
-        },
+      // Same dangling-uplink cleanup as removeSwitch but for a batch.
+      const next = {}
+      for (const [fId, list] of Object.entries(state.switchesByFloor)) {
+        next[fId] = (list ?? [])
+          .filter((s) => !(fId === floorId && idSet.has(s.id)))
+          .map((s) => (idSet.has(s.uplinkTo) ? { ...s, uplinkTo: null } : s))
       }
+      return { switchesByFloor: next }
     }),
 
   setSwitches: (floorId, switches) =>

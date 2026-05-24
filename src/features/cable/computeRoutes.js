@@ -32,6 +32,52 @@ function resolveCableType(sw, cableM) {
   return pref
 }
 
+// 29-5 — S2S link tier classification. Drives both BOM grouping and
+// 29-4 routing preference. Mapping by (srcKind, targetKind) pair:
+//   backbone     : idf↔mdf, mdf↔router, mdf→null (top)
+//   distribution : access(switch)↔idf, access→mdf (collapsed core)
+//   access       : anything terminating on an access switch
+// router→null is intentionally 'backbone' since router IS top-of-hierarchy
+// and the link is to WAN equipment which we don't model.
+export function classifyLinkTier(srcKind, targetKind) {
+  if (targetKind == null) {
+    if (srcKind === 'router') return 'backbone'
+    if (srcKind === 'mdf')    return 'backbone'  // collapsed (small site)
+    return 'distribution'
+  }
+  const pair = `${srcKind}->${targetKind}`
+  if (pair === 'idf->mdf')    return 'backbone'
+  if (pair === 'mdf->router') return 'backbone'
+  if (pair === 'idf->router') return 'backbone'
+  if (pair === 'switch->idf') return 'distribution'
+  if (pair === 'switch->mdf') return 'distribution'  // collapsed core
+  if (pair === 'switch->router') return 'distribution'
+  // Peer links (mdf↔mdf VSS pair, idf↔idf MC-LAG pair) — count as backbone.
+  if (srcKind === 'mdf' && targetKind === 'mdf') return 'backbone'
+  if (srcKind === 'idf' && targetKind === 'idf') return 'backbone'
+  return 'access'
+}
+
+// 29-4 — preferred tray system for each link tier. Discount applied to tray
+// edges that match; non-matching edges keep base weight. The numbers reflect
+// "we'd rather take a 30%-longer backbone-system tray than the shortest mixed
+// tray" — empirically that picks the engineered route over the convenience
+// route. Tune if real sites end up over-preferring.
+const TIER_PREFERENCE = {
+  backbone:     { system: 'backbone', discount: 0.70 },
+  distribution: { system: 'data',     discount: 0.90 },
+  access:       { system: null,       discount: 1.00 },
+}
+
+function makeTierWeightFn(tier) {
+  const pref = TIER_PREFERENCE[tier]
+  if (!pref || !pref.system || pref.discount >= 1.0) return null
+  return (e) => {
+    if (e.kind === 'tray' && e.traySystem === pref.system) return e.weightM * pref.discount
+    return e.weightM
+  }
+}
+
 // Returns { routes, switchLinks, warnings }:
 //   routes:   Map<apId, route> across ALL floors (see route shape below).
 //   switchLinks: Map<srcSwId, link> for switch→switch uplinks (14-2).
@@ -62,13 +108,19 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
   const g = buildBuildingGraph({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
 
   // Flatten all switches into one list with floor reference for fallback +
-  // unroutable checks below.
-  const allSwitches = []
-  const swById = new Map()
+  // unroutable checks below. swById covers ALL kinds (used for S2S link
+  // lookup); accessSwitches is the subset that AP cables are allowed to
+  // terminate on. Phase 23 rule: AP drops only land on access switches
+  // (`kind === 'switch'`); IDF/MDF/Router never accept AP drops in real
+  // enterprise topology, even when geometrically closer.
+  const allSwitches    = []
+  const accessSwitches = []
+  const swById         = new Map()
   for (const [floorId, list] of Object.entries(switchesByFloor)) {
     for (const sw of list ?? []) {
       allSwitches.push({ sw, floorId })
       swById.set(sw.id, sw)
+      if ((sw.kind ?? 'switch') === 'switch') accessSwitches.push({ sw, floorId })
     }
   }
 
@@ -86,11 +138,13 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
       const zDropM = Math.max(0, ceilingHeight - (ap.z ?? 0))
 
       // ── Path 1: building-wide graph route ───────────────────────────────
+      // Restrict targets to access switches — AP drops never terminate on
+      // IDF/MDF/Router in real topology (Phase 23 rule).
       const apNodeId = g.endpointNodeIds.aps.get(ap.id)?.nodeId
-      if (apNodeId && allSwitches.length > 0) {
+      if (apNodeId && accessSwitches.length > 0) {
         const apRoot = uf.find(apNodeId)
         const reachable = []
-        for (const { sw, floorId: swFloorId } of allSwitches) {
+        for (const { sw, floorId: swFloorId } of accessSwitches) {
           const swNodeId = g.endpointNodeIds.switches.get(sw.id)?.nodeId
           if (swNodeId && uf.find(swNodeId) === apRoot) {
             reachable.push({ sw, swNodeId, swFloorId })
@@ -126,9 +180,12 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
       }
 
       // ── Path 2 / 3: fallback Manhattan or unroutable ─────────────────────
-      // Fallback is strictly same-floor (spec §6).
-      const sameFloorSwitches = (switchesByFloor[floorId] ?? [])
-      if (sameFloorSwitches.length === 0) {
+      // Fallback is strictly same-floor (spec §6) AND only to access switches.
+      // A floor with only IDF/MDF/Router and no access switch → AP unroutable;
+      // the user needs to add an access switch.
+      const sameFloorAccess = (switchesByFloor[floorId] ?? [])
+        .filter((sw) => (sw.kind ?? 'switch') === 'switch')
+      if (sameFloorAccess.length === 0) {
         out.set(ap.id, {
           apId: ap.id, switchId: null, points: null,
           cableM: null, zDropM: null,
@@ -138,11 +195,11 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
         continue
       }
 
-      let best = sameFloorSwitches[0]
+      let best = sameFloorAccess[0]
       let bestD = Math.abs(ap.x - best.x) + Math.abs(ap.y - best.y)
-      for (let i = 1; i < sameFloorSwitches.length; i++) {
-        const d = Math.abs(ap.x - sameFloorSwitches[i].x) + Math.abs(ap.y - sameFloorSwitches[i].y)
-        if (d < bestD) { bestD = d; best = sameFloorSwitches[i] }
+      for (let i = 1; i < sameFloorAccess.length; i++) {
+        const d = Math.abs(ap.x - sameFloorAccess[i].x) + Math.abs(ap.y - sameFloorAccess[i].y)
+        if (d < bestD) { bestD = d; best = sameFloorAccess[i] }
       }
       const cableM = pxPerM && pxPerM > 0
         ? (bestD / pxPerM) * (1 + SLACK_DIRECT) + zDropM
@@ -184,9 +241,15 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
     const srcNodeId     = g.endpointNodeIds.switches.get(srcId)?.nodeId
     const tgtNodeId     = g.endpointNodeIds.switches.get(targetId)?.nodeId
 
+    // 29-4 / 29-5 — classify tier up-front so we can both (a) bias Dijkstra
+    // toward the preferred tray.system and (b) tag the resulting link with
+    // its tier for downstream BOM grouping.
+    const tier = classifyLinkTier(sw.kind, target.kind)
+    const weightFn = makeTierWeightFn(tier)
+
     let link = null
     if (srcNodeId && tgtNodeId && uf.find(srcNodeId) === uf.find(tgtNodeId)) {
-      const { dist, prev } = dijkstra(g.adj, srcNodeId)
+      const { dist, prev } = dijkstra(g.adj, srcNodeId, weightFn)
       const d = dist.get(tgtNodeId)
       if (d !== undefined && d !== Infinity) {
         const nodePath = reconstructPath(prev, srcNodeId, tgtNodeId) ?? [srcNodeId, tgtNodeId]
@@ -194,9 +257,21 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
           const n = g.nodes.get(id)
           return { x: n.xy.x, y: n.xy.y, kind: n.kind, floorId: n.floorId }
         })
+        // When weightFn applies a tier discount the Dijkstra distance is the
+        // *biased* total — not the real cable length. Re-walk the chosen path
+        // summing each edge's true weightM for the BOM number.
+        let trueCableM = d
+        if (weightFn) {
+          trueCableM = 0
+          for (let i = 0; i < nodePath.length - 1; i++) {
+            const from = nodePath[i], to = nodePath[i + 1]
+            const e = (g.adj.get(from) ?? []).find((edge) => edge.to === to)
+            if (e) trueCableM += e.weightM
+          }
+        }
         link = {
           srcId, targetId, points,
-          cableM: d, routeStatus: 'tray',
+          cableM: trueCableM, routeStatus: 'tray',
           srcFloorId, targetFloorId,
         }
       }
@@ -231,6 +306,7 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
     }
 
     link.cableType = resolveCableType(sw, link.cableM)
+    link.tier = tier  // 29-5 — backbone / distribution / access
 
     switchLinks.set(srcId, link)
   }

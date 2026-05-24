@@ -196,9 +196,11 @@ Per-object hover cursor overrides should only fire when `allowDragExisting` or
 
 | Mode (no draft active) | Object right-click | Empty canvas right-click |
 |---|---|---|
-| SELECT 選取 | Open object menu (rename / 刪除; "選取" item hidden — left-click already does that) | No-op |
+| SELECT 選取 | Open object menu (incl. "選取" item — lets user switch the right panel to a different object without losing the current selection) | No-op |
 | MARQUEE_SELECT 框選 / PAN 平移 | Open object menu (incl. "選取" item to promote into selection without leaving mode) | No-op |
 | DRAW_WALL 畫牆 / DOOR_WINDOW 門窗 / DRAW_SCOPE 範圍 / DRAW_FLOOR_HOLE 中庭 / PLACE_AP / PLACE_SWITCH / DRAW_CABLE_TRAY 繪製線槽 / PLACE_RISER / DRAW_SCALE 比例尺 | Open object menu (incl. "選取") | No-op |
+
+> "選取" item is hidden only when the right-clicked object IS already the current selection (clicking would be a no-op).
 | CROP_IMAGE 裁切 / ALIGN_FLOOR 樓層對齊 | No object menu (these modes' draft IS the crop box / floor transform itself, no atomic "no draft" state) | No-op |
 
 Tray uses its own `TrayContextMenu` (rename / split / extend / merge / convert / delete — 20-4), wired through the same dispatcher.

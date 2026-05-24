@@ -1,5 +1,11 @@
 import React, { useCallback, useMemo } from 'react'
-import { useCableStore, SWITCH_KINDS, getSwitchKindColor } from '@/store/useCableStore'
+import {
+  useCableStore,
+  SWITCH_KINDS,
+  getSwitchKindColor,
+  classifyUplinkPair,
+  UPLINK_RULES,
+} from '@/store/useCableStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
@@ -17,9 +23,10 @@ const CABLE_TYPE_OPTIONS = [
 ]
 
 function SwitchPanel({ floorId, swId }) {
-  const sw            = useCableStore((s) => (s.switchesByFloor[floorId] ?? []).find((x) => x.id === swId))
-  const updateSwitch  = useCableStore((s) => s.updateSwitch)
-  const removeSwitch  = useCableStore((s) => s.removeSwitch)
+  const sw               = useCableStore((s) => (s.switchesByFloor[floorId] ?? []).find((x) => x.id === swId))
+  const updateSwitch     = useCableStore((s) => s.updateSwitch)
+  const changeSwitchKind = useCableStore((s) => s.changeSwitchKind)
+  const removeSwitch     = useCableStore((s) => s.removeSwitch)
   const clearSelected = useEditorStore((s) => s.clearSelected)
   // Building-wide subscriptions: a cross-floor riser route can connect APs
   // on other floors to this switch, so we need every AP / tray / riser.
@@ -79,19 +86,83 @@ function SwitchPanel({ floorId, swId }) {
   const portOver   = portsUsed > portCount
   const poeOver    = poeBudget > 0 && connected.totalPoe > poeBudget
 
-  // Build options for the uplink-target select. Skip self; tag with floor.
-  const uplinkOptions = [
-    { value: '', label: '— 頂層（無 uplink）' },
-    ...Object.entries(switchesByFloor).flatMap(([fId, list]) =>
-      (list ?? []).filter((s) => s.id !== swId).map((s) => {
-        const f = floors.find((fl) => fl.id === fId)
-        return {
-          value: s.id,
-          label: `${s.name}（${s.kind?.toUpperCase() ?? 'SW'}${f ? ` @ ${f.name}` : ''}）`,
-        }
-      }),
-    ),
-  ]
+  // 29-3 Build uplink dropdown filtered by hierarchy rules. We list every
+  // switch building-wide except self, but tag each option with its
+  // classification ('main' / 'warn' / 'forbidden'). 'forbidden' targets are
+  // hidden from the dropdown unless they're the *currently selected* uplinkTo
+  // — in that case we surface them with a 「違規」 marker so the user can see
+  // the bad data and fix it (don't silently rewrite).
+  const allowsNullTop = UPLINK_RULES[sw.kind]?.null === 'main'
+  const uplinkOptions = []
+  if (allowsNullTop) {
+    uplinkOptions.push({ value: '', label: '— 頂層（無 uplink）', warn: false })
+  }
+  for (const [fId, list] of Object.entries(switchesByFloor)) {
+    for (const s of (list ?? [])) {
+      if (s.id === swId) continue
+      const f = floors.find((fl) => fl.id === fId)
+      const cls = classifyUplinkPair(sw.kind, s.kind)
+      const isCurrent = sw.uplinkTo === s.id
+      if (cls === 'forbidden' && !isCurrent) continue
+      const tag = (s.kind ?? 'switch').toUpperCase()
+      const floorTag = f ? ` @ ${f.name}` : ''
+      const marker = cls === 'warn' ? ' ⚠' : cls === 'forbidden' ? ' ✗' : ''
+      uplinkOptions.push({
+        value: s.id,
+        label: `${s.name}（${tag}${floorTag}）${marker}`,
+        warn: cls !== 'main',
+      })
+    }
+  }
+  // Sort: main first, then warn / forbidden. Keep "top" option (if present) first.
+  uplinkOptions.sort((a, b) => {
+    if (a.value === '') return -1
+    if (b.value === '') return 1
+    return (a.warn ? 1 : 0) - (b.warn ? 1 : 0)
+  })
+
+  // Resolve uplinkTo's target switch (across all floors). Distinguish four
+  // states for the warning logic below:
+  //   uplinkTo === null, null-target allowed     → user chose "top of hierarchy" (OK)
+  //   uplinkTo === null, null-target forbidden   → unset uplink (e.g. IDF with no MDF picked) — "請選一個目標"
+  //   uplinkTo set, target found                 → real link, classify by kind
+  //   uplinkTo set, target missing               → dangling reference (target was deleted)
+  const uplinkTargetSw = (() => {
+    if (!sw.uplinkTo) return null
+    for (const list of Object.values(switchesByFloor)) {
+      const t = (list ?? []).find((x) => x.id === sw.uplinkTo)
+      if (t) return t
+    }
+    return undefined  // sentinel: uplinkTo set but target gone
+  })()
+  const uplinkDangling = sw.uplinkTo != null && uplinkTargetSw === undefined
+  // "Unset" = uplinkTo is null but the rules don't allow null (so the switch
+  // SHOULD have a target but doesn't yet). Distinct from "forbidden current
+  // target" because the user hasn't picked anything wrong — they haven't
+  // picked anything at all.
+  const uplinkUnset = sw.uplinkTo == null && !allowsNullTop
+  const uplinkClass = uplinkDangling
+    ? 'dangling'
+    : uplinkUnset
+      ? 'unset'
+      : classifyUplinkPair(sw.kind, uplinkTargetSw?.kind ?? null)
+  const uplinkWarn = uplinkClass === 'warn'
+  const uplinkBad  = uplinkClass === 'forbidden'
+
+  // 29-6 — Conditional fields by kind.
+  const isCore       = !!sw.isCoreLayer || sw.kind === 'mdf' || sw.kind === 'router'
+  const showPoe      = !isCore                  // MDF / Router force PoE = 0
+  const showUplinkTo = sw.kind !== 'router'    // Router IS top-of-hierarchy
+  const showWanLan   = sw.kind === 'router'
+  const downstreamCount = (() => {
+    let n = 0
+    for (const list of Object.values(switchesByFloor)) {
+      for (const other of list ?? []) {
+        if (other.id !== swId && other.uplinkTo === swId) n++
+      }
+    }
+    return n
+  })()
 
   return (
     <PanelShell accent="switch">
@@ -115,12 +186,15 @@ function SwitchPanel({ floorId, swId }) {
                 key={k.value}
                 className={`switch-panel__kind-btn${active ? ' switch-panel__kind-btn--active' : ''}`}
                 style={active ? { borderColor: k.color, color: k.color } : {}}
-                onClick={() => handleField('kind', k.value)}
+                onClick={() => changeSwitchKind(floorId, swId, k.value)}
               >
                 {k.label}
               </button>
             )
           })}
+        </div>
+        <div className="switch-panel__hint">
+          切換 kind 會套用該類型的業界 default（port 數 / PoE / uplink 介面）。
         </div>
       </PanelSection>
 
@@ -131,9 +205,14 @@ function SwitchPanel({ floorId, swId }) {
         <PanelField label="型號">
           <TextInput
             value={sw.model ?? ''}
-            placeholder="例如 POE-24-port"
+            placeholder="例如 Catalyst 9200-24P"
             onChange={(v) => handleField('model', v)}
           />
+        </PanelField>
+        <PanelField label="Uplink 介面">
+          <span className="switch-panel__readonly-chip">
+            {(sw.uplinkPortType ?? 'sfp+').toUpperCase()} × {sw.uplinkCount ?? 4}
+          </span>
         </PanelField>
       </PanelSection>
 
@@ -159,22 +238,63 @@ function SwitchPanel({ floorId, swId }) {
           {connected.downlinkCount ? ` + Downlink ${connected.downlinkCount}` : ''}
         </div>
 
-        <PanelField
-          label="PoE 預算"
-          hint={poeOver
-            ? `⚠ 已用 ${connected.totalPoe.toFixed(0)} W / ${poeBudget} W（超出）`
-            : `已用 ${connected.totalPoe.toFixed(0)} W / ${poeBudget} W`}
-        >
-          <NumberInput
-            value={poeBudget}
-            min={0}
-            step={10}
-            unit="W"
-            width={70}
-            onChange={(v) => handleNumber('poeBudget', v)}
-          />
-        </PanelField>
-        <div className="switch-panel__hint">PoE 預算 = 0 → 該 Switch 無 PoE 供電</div>
+        {showPoe ? (
+          <>
+            <PanelField
+              label="PoE 預算"
+              hint={poeOver
+                ? `⚠ 已用 ${connected.totalPoe.toFixed(0)} W / ${poeBudget} W（超出）`
+                : `已用 ${connected.totalPoe.toFixed(0)} W / ${poeBudget} W`}
+            >
+              <NumberInput
+                value={poeBudget}
+                min={0}
+                step={10}
+                unit="W"
+                width={70}
+                onChange={(v) => handleNumber('poeBudget', v)}
+              />
+            </PanelField>
+            <div className="switch-panel__hint">PoE 預算 = 0 → 該 Switch 無 PoE 供電</div>
+          </>
+        ) : (
+          <div className="switch-panel__hint">
+            {sw.kind === 'mdf' ? 'MDF（核心交換器）' : 'Router（WAN 邊界）'} 預設不供 PoE。
+          </div>
+        )}
+
+        {showWanLan && (
+          <>
+            <PanelField label="WAN port 數">
+              <NumberInput
+                value={sw.wanPortCount ?? 2}
+                min={0}
+                step={1}
+                unit="ports"
+                width={70}
+                onChange={(v) => handleNumber('wanPortCount', v)}
+              />
+            </PanelField>
+            <PanelField label="LAN port 數">
+              <NumberInput
+                value={sw.lanPortCount ?? 4}
+                min={0}
+                step={1}
+                unit="ports"
+                width={70}
+                onChange={(v) => handleNumber('lanPortCount', v)}
+              />
+            </PanelField>
+          </>
+        )}
+
+        {(sw.kind === 'idf' || sw.kind === 'mdf' || sw.kind === 'router') && (
+          <PanelField label="下游裝置">
+            <span className="switch-panel__readonly-chip">
+              {downstreamCount} 個 switch / IDF
+            </span>
+          </PanelField>
+        )}
       </PanelSection>
 
       <PanelSection title="安裝高度">
@@ -190,16 +310,60 @@ function SwitchPanel({ floorId, swId }) {
         </PanelField>
       </PanelSection>
 
-      <PanelSection title="上連 Uplink">
-        <Select
-          value={sw.uplinkTo ?? ''}
-          options={uplinkOptions}
-          onChange={(v) => handleField('uplinkTo', v || null)}
-        />
-        <div className="switch-panel__hint">
-          指定本 switch 的 uplink target（14-2 計算 S2S 線時用）
-        </div>
-      </PanelSection>
+      {showUplinkTo && (
+        <PanelSection title="上連 Uplink">
+          <Select
+            value={
+              uplinkDangling ? '__dangling__'
+              : uplinkUnset ? '__unset__'
+              : (sw.uplinkTo ?? '')
+            }
+            options={(() => {
+              if (uplinkDangling) {
+                return [{ value: '__dangling__', label: '— 已刪除的目標（無效）—' }, ...uplinkOptions]
+              }
+              if (uplinkUnset) {
+                return [{ value: '__unset__', label: '— 請選一個目標 —' }, ...uplinkOptions]
+              }
+              return uplinkOptions
+            })()}
+            onChange={(v) => {
+              if (v === '__dangling__' || v === '__unset__') return
+              handleField('uplinkTo', v || null)
+            }}
+          />
+          {uplinkDangling ? (
+            <div className="switch-panel__hint switch-panel__hint--warn">
+              ✗ 目前上連的目標 switch 已被刪除。請改選其他目標，或
+              <button
+                type="button"
+                className="switch-panel__inline-btn"
+                onClick={() => handleField('uplinkTo', null)}
+              >清除上連</button>。
+            </div>
+          ) : uplinkUnset ? (
+            <div className="switch-panel__hint switch-panel__hint--warn">
+              ⚠ 尚未指定上連目標。{sw.kind.toUpperCase()} 應該上連到
+              {sw.kind === 'switch' && '一個 IDF（沒有 IDF 時可上連 MDF）'}
+              {sw.kind === 'idf' && '一個 MDF'}
+              {sw.kind === 'mdf' && '一個 Router 或設為頂層'}
+              。
+            </div>
+          ) : uplinkBad ? (
+            <div className="switch-panel__hint switch-panel__hint--warn">
+              ✗ 不允許的階層：{sw.kind.toUpperCase()} 不該上連到目前的目標。建議改選主選類別。
+            </div>
+          ) : uplinkWarn ? (
+            <div className="switch-panel__hint switch-panel__hint--warn">
+              ⚠ 跳階上連（collapsed core / 同階對等）。技術上可行，僅推薦小場館或冗餘 pair。
+            </div>
+          ) : (
+            <div className="switch-panel__hint">
+              依業界拓撲規則過濾：access → IDF，IDF → MDF，MDF → Router/頂層。
+            </div>
+          )}
+        </PanelSection>
+      )}
 
       <PanelSection title="線材偏好">
         <div className="switch-panel__kind-row">

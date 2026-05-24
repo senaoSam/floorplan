@@ -36,7 +36,13 @@ export function unionFind(nodeIds, adj) {
 // Single-source shortest path. Array-based priority queue (sort each pop) —
 // adequate for the graph sizes we deal with (< 1000 nodes). Returns:
 //   { dist: Map<id, m>, prev: Map<id, parentId> }
-export function dijkstra(adj, source) {
+//
+// Optional `weightFn(edge) → number` lets callers re-cost edges on the fly
+// (e.g. tier-preference for S2S backbone links: cheaper through tray.system
+// === 'backbone'). Default uses `edge.weightM` unmodified. The function must
+// return a finite non-negative number; results below 0 break Dijkstra's
+// non-decreasing assumption and will mis-route.
+export function dijkstra(adj, source, weightFn = null) {
   const dist = new Map()
   const prev = new Map()
   dist.set(source, 0)
@@ -48,7 +54,8 @@ export function dijkstra(adj, source) {
     const [d, u] = pq.pop()
     if (d > (dist.get(u) ?? Infinity)) continue
     for (const e of adj.get(u) ?? []) {
-      const nd = d + e.weightM
+      const w = weightFn ? weightFn(e) : e.weightM
+      const nd = d + w
       if (nd < (dist.get(e.to) ?? Infinity)) {
         dist.set(e.to, nd)
         prev.set(e.to, u)

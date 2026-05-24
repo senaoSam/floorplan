@@ -521,17 +521,26 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 
 | #    | 狀態 | Task |
 |------|------|------|
-| 29-1 | ⬜   | Spec — `.claude/switch-kind-spec.md`：對每種 kind 定 default portCount / poeBudget / uplink port type (copper/fiber) / 階層約束（誰能上連誰）；列舉 enforce vs warning 的邊界 |
-| 29-2 | ⬜   | DEFAULTS 重設 — `useCableStore` 每種 kind 一組 `DEFAULT_SWITCH_BY_KIND`（access switch 24/370、IDF 48/740、MDF 48 fiber/0 PoE、Router 8 fiber/0 PoE 之類；數字依 29-1 spec 決定）；改 kind 時面板提示「要不要套新預設？」 |
-| 29-3 | ⬜   | 階層 enforcement — uplinkTo 下拉只列允許的目標（SW 可上連 IDF/MDF/Router；IDF 可上連 MDF/Router；MDF 可上連 Router 或 null；Router 上連 null）；現有資料有違反時顯示 warning 但不強制重設 |
-| 29-4 | ⬜   | Routing 階層偏好 — MDF↔IDF backbone link 優先走指定 tray system（如 'backbone'）；S2S route 不再一視同仁 |
-| 29-5 | ⬜   | BOM 細分 — `computeRoutes` 輸出 S2S link 加 `tier`（'backbone' MDF↔IDF / 'distribution' IDF↔SW / 'access' SW↔AP）；CableSummaryPanel 三段顯示 |
-| 29-6 | ⬜   | UI / 顏色一致性 — 屬性面板每種 kind 露出該 kind 的特殊欄位（IDF/MDF 顯示「下游 N 顆」、Router 顯示 WAN/LAN 區分等），對齊 `.claude/color-legend.md` |
+| 29-1 | ✅   | Spec — `.claude/switch-kind-spec.md`：Cisco/Aruba/Juniper/TIA-942 業界 default 規格、UPLINK_RULES 階層表、tier preference 折扣比例 |
+| 29-2 | ✅   | DEFAULTS 重設 — `DEFAULT_SWITCH_BY_KIND`（access 24/370 sfp+、IDF 48/740 sfp28、MDF 48/0 qsfp28、Router 8/0 sfp+ + wan/lan count）；`changeSwitchKind` 切 kind 時自動套 default + 嘗試保留合法 uplinkTo + 自動 fill 新 main target |
+| 29-3 | ✅   | 階層 enforcement — uplinkTo 下拉依 `classifyUplinkPair` 過濾 main/warn，forbidden 隱藏（既有 dangling 顯示「已刪除」、未指定顯示「請選一個目標」）；warn 顯示橘色提示；`addSwitch` 自動選最近 main target |
+| 29-4 | ✅   | Routing 階層偏好 — buildGraph tray edge 帶 `traySystem`；`computeRoutes` S2S Dijkstra 用 weightFn 對 backbone tier ×0.7、distribution tier ×0.9 折扣；用真實 weightM 重算 cableM |
+| 29-5 | ✅   | BOM 細分 — `link.tier`（backbone/distribution/access）；CableSummaryPanel「階層細分」段，per-tier copper/fiber 切分 |
+| 29-6 | ✅   | 視覺差異化 — 2D chassis 寬度依 portCount × 0.8/1.0/1.5、IDF + 一條 / MDF + 兩條 / Router + 天線；port dot 數隨 port 等級；3D chassis 高度 core 2U + Router 天線 mast；SwitchPanel 條件式：core 隱藏 PoE、router 顯示 WAN/LAN、IDF/MDF/Router 顯示下游裝置數 |
 
 **順序建議**
 - 29-1 是設計決策（需要先跟使用者敲 default / 階層規則），其他都要先有 spec
 - 29-2 / 29-3 後做的影響最大（資料模型 + UI 都動）；29-4 / 29-5 是 routing / BOM 收尾；29-6 polish
 - 做完這個 phase 之後，**Phase 19 Auto IDF 才有條件重啟**（IDF 跟 SW 真的不同了，演算法才有意義）
+
+### Layer 29 follow-up（同 commit）
+
+| # | 狀態 | Task |
+|---|---|---|
+| 29-fix-1 | ✅ | AP routing 限定 access switch — `computeRoutes` 只把 `kind === 'switch'` 列入 AP cable target；IDF/MDF/Router 即使更近也跳過（業界 AP 不直接接 IDF） |
+| 29-fix-2 | ✅ | TrayContextMenu 統一進 `ObjectContextMenu` — items[] 支援 `swatch` / `kind: 'divider'`；TrayContextMenu.jsx 刪除；tray 右鍵 menu 行為跟 7 個物件一致（含 23-3f「選取」item 在所有 mode 常駐） |
+| 29-fix-3 | ✅ | 選取 item 改在所有 mode 常駐（含 SELECT）— 唯獨「目標 = 當前選取」時隱藏（no-op）；mode-matrix.md §3.8 更新 |
+| 29-fix-4 | ✅ | Uplink dropdown dangling / unset 處理 — `<select value>` 對不上 options 時瀏覽器 fallback 第一個 option 造成「畫面選 MDF 卻警告 forbidden」誤導；新增 `__unset__` / `__dangling__` placeholder + 對應警告「請選一個目標」/「目標已刪除」；`removeSwitch`/`removeSwitches` 順手清掉所有指向被刪 switch 的 uplinkTo |
 
 ---
 
