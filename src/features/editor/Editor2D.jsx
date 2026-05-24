@@ -123,6 +123,7 @@ function Editor2D() {
           selectedItems, setSelectedItems, toggleSelectedItem,
           showFloorImage, showScopes, showFloorHoles, showWalls, showAPs, showSwitches, showCables, showCableTrays, showRisers,
           autoChannelOnPlace, regulatoryDomain, placeApBand, placeSwitchKind,
+          setPlaceApBand, setPlaceSwitchKind,
           toolbarMenuOpen,
           alignRefFloors, alignRefOpacity } = useEditorStore()
   const isSelectMode    = editorMode === EDITOR_MODE.SELECT
@@ -545,6 +546,33 @@ function Editor2D() {
         }
       }
 
+      // ── Tab：放置 AP / Switch 時切換子類型 ────────────
+      // AP 模式 → 2.4 → 5 → 6 → 2.4 ...; Switch 模式 → switch → idf → mdf → router → ...
+      // Shift+Tab 反向。瀏覽器預設 Tab 會切換 focus 元素，所以一定要 preventDefault。
+      if (e.key === 'Tab' && (isAPMode || isSwitchMode)) {
+        const tag = e.target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return
+        e.preventDefault()
+        const dir = e.shiftKey ? -1 : 1
+        if (isAPMode) {
+          const bands = [2.4, 5, 6]
+          const idx = bands.indexOf(placeApBand)
+          const next = bands[(idx + dir + bands.length) % bands.length]
+          setPlaceApBand(next)
+          const colorByBand = { 2.4: '#f39c12', 5: '#4fc3f7', 6: '#a855f7' }
+          setMaterialToast({ label: `${next} GHz`, color: colorByBand[next], key: 'Tab' })
+        } else {
+          const kinds = ['switch', 'idf', 'mdf', 'router']
+          const labels = { switch: 'Switch', idf: 'IDF', mdf: 'MDF', router: 'Router' }
+          const colors = { switch: '#10b981', idf: '#3b82f6', mdf: '#8b5cf6', router: '#f59e0b' }
+          const idx = kinds.indexOf(placeSwitchKind)
+          const next = kinds[(idx + dir + kinds.length) % kinds.length]
+          setPlaceSwitchKind(next)
+          setMaterialToast({ label: labels[next], color: colors[next], key: 'Tab' })
+        }
+        return
+      }
+
       // ── 數字鍵 1~6：切換牆體材質 ─────────────────────
       const keyNum = parseInt(e.key, 10)
       if (keyNum >= 1 && keyNum <= 6) {
@@ -566,7 +594,7 @@ function Editor2D() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, selectedType, activeFloorId, isWallMode, isDoorWindowMode, isAlignMode, isTrayMode, trayDraftPoints, finishTrayDraft, removeWall, removeWalls, updateWall, removeAP, removeAPs, removeScope, removeScopes, removeFloorHole, removeFloorHoles, removeSwitch, removeSwitches, removeTray, removeTrays, removeRiser, removeRisers, clearSelected])
+  }, [selectedId, selectedType, activeFloorId, isWallMode, isDoorWindowMode, isAlignMode, isTrayMode, isAPMode, isSwitchMode, placeApBand, placeSwitchKind, setPlaceApBand, setPlaceSwitchKind, trayDraftPoints, finishTrayDraft, removeWall, removeWalls, updateWall, removeAP, removeAPs, removeScope, removeScopes, removeFloorHole, removeFloorHoles, removeSwitch, removeSwitches, removeTray, removeTrays, removeRiser, removeRisers, clearSelected])
 
   // ── 切換模式時清除繪製狀態 ────────────────────────────
   useEffect(() => {
@@ -1573,8 +1601,8 @@ function Editor2D() {
     [EDITOR_MODE.DRAW_SCALE]:      { group: '標註', accent: 'measure',   label: '比例尺模式', hint: '點擊兩點設定比例' },
     [EDITOR_MODE.DRAW_WALL]:       { group: '結構', accent: 'structure', label: '畫牆模式', hint: '左鍵點擊設定端點，右鍵或 Esc 結束｜數字鍵 1~6 切換材質' },
     [EDITOR_MODE.DOOR_WINDOW]:     { group: '結構', accent: 'structure', label: '門窗模式', hint: '點擊牆體兩點設定門/窗位置；D 切換門、W 切換窗；右鍵或 Esc 取消' },
-    [EDITOR_MODE.PLACE_AP]:        { group: '無線', accent: 'wireless',  label: '放置 AP 模式', hint: '左鍵點擊放置 AP' },
-    [EDITOR_MODE.PLACE_SWITCH]:    { group: '網路布線', accent: 'cable', label: '放置 Switch 模式', hint: '左鍵點擊放置 Switch / IDF / MDF / Router；右側面板可調類型與規格' },
+    [EDITOR_MODE.PLACE_AP]:        { group: '無線', accent: 'wireless',  label: `放置 AP — ${placeApBand} GHz`, hint: '左鍵點擊放置；Tab 切換 2.4 / 5 / 6 GHz（Shift+Tab 反向）' },
+    [EDITOR_MODE.PLACE_SWITCH]:    { group: '網路布線', accent: 'cable', label: `放置 Switch — ${({ switch: 'Switch', idf: 'IDF', mdf: 'MDF', router: 'Router' })[placeSwitchKind] ?? placeSwitchKind}`, hint: '左鍵點擊放置；Tab 切換 Switch / IDF / MDF / Router（Shift+Tab 反向）' },
     [EDITOR_MODE.DRAW_CABLE_TRAY]: { group: '網路布線', accent: 'cable', label: '繪製線槽模式', hint: '左鍵新增頂點；Shift 鎖 0/45/90°；自動 snap 到 tray / 牆角 / 牆邊；近牆方向自動平行；Backspace / Ctrl+Z 退一步；Enter / 右鍵 / Esc 完成（≥ 2 點才會建立）' },
     [EDITOR_MODE.PLACE_RISER]:    { group: '網路布線', accent: 'cable', label: '放置 Riser 模式', hint: '左鍵點擊放置 Riser；放完用右側面板加入跨樓層' },
     [EDITOR_MODE.DRAW_SCOPE]:      { group: '無線', accent: 'wireless',  label: '範圍模式',     hint: '左鍵點擊設定端點，靠近起點閉合區域；右鍵或 Esc 取消' },
