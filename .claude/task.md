@@ -475,9 +475,10 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 
 | #    | 狀態 | Task |
 |------|------|------|
-| 26-1 | ⬜   | Perf profile — 用 50 / 150 / 300 AP StressLoader 對比，找出主要 lag 來源（React render / Konva redraw / Heatmap GL / Routing 重算）|
-| 26-2 | ⬜   | 根據 26-1 結果動手 — 可能項：computeRoutes 加 memo cache、Layer 拆 batchDraw、heatmap grid 動態降階、Routing virtual scroll |
-| 26-3 | ⬜   | Bench 結果記錄到 `.claude/perf-baseline.md`（before / after FPS + frame time）|
+| 26-1 | ✅   | Perf profile — Playwright MCP 量 50 / 150 / 300 AP commit time + idle/pan FPS；結果寫入 `.claude/perf-baseline.md`（300 AP setAPs 5.9s / 單 AP updateAP 6.4s；steady-state 60 FPS）|
+| 26-1-base | ✅ | 視覺 baseline — `scripts/perf/{bench-harness,diff,decode-b64}.{js,mjs}` + `.playwright-mcp/perf-before/` 8 場景 PNG；自我比對 0 diff（pixelmatch + pngjs devDeps）|
+| 26-2 | ⬜   | 根據 26-1 結果動手 — P1 AP store 訂閱粒度（最痛）→ P2 heatmap 同值跳過 → P3 panel 共用 routes context；每步用 `scripts/perf/diff.mjs` 視覺驗收 |
+| 26-3 | ⬜   | Bench 結果記錄到 `.claude/perf-baseline.md` 第二段 `## After 26-2`（before / after FPS + frame time）|
 
 ---
 

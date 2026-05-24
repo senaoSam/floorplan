@@ -405,7 +405,7 @@ const PHASES = [
       {
         layer: 'Layer 26 — Performance',
         items: [
-          { id: '26-1', done: false, text: 'Perf profile（50 / 150 / 300 AP）找 lag 主來源' },
+          { id: '26-1', done: true,  text: 'Perf profile（50 / 150 / 300 AP）找 lag 主來源 + 視覺 baseline' },
           { id: '26-2', done: false, text: '根據 26-1 結果優化（cache / batchDraw / grid 降階...）' },
           { id: '26-3', done: false, text: '`.claude/perf-baseline.md` 紀錄 before / after FPS' },
         ],
