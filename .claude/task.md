@@ -483,7 +483,28 @@ AP 終點 Z drop = `(ceiling_height - AP.mountHeight)` × 1.0（無 slack）
 | 26-2-P3b | ✅ | CableLayer 不再訂閱 `dragAP / dragSwitch`；拖 AP 時 cable 線凍結，dragEnd 才重算（Figma/Hamina UX）；視覺 0 diff |
 | 26-2-P3-bench | ✅ | 150 AP drag FPS 0.98 → 60；300 AP drag FPS 0.27 → 58（×215）；commit time（addAP/slider）沒動 |
 | 26-2-P3a | ✅ | APLayer 改 imperative Konva（繞過 react-konva vDOM commit）；click commit 5800 ms → 563 ms（×10），單 AP no-op -55%。addAP / slider 沒救 — 真兇是 HM shader + Konva canvas paint，不是 react-konva。4 互動 regression 全 pass，視覺 0 diff |
+| 26-2-P4 | ⏸️ | **撤回** — 試過「CableLayer 改 imperative Konva（對等 P3a）」，失敗。結果：(1) 視覺有 ~1% pixel diff，dash phase / 抗鋸齒對不上 react-konva 版本；(2) 300 AP setAPs commit 7375 → 7665 ms 沒效能改善。CableLayer 的瓶頸位置跟 APLayer 不同（不在 react-konva commit），所以 P3a 的招數對 CableLayer 不適用 |
 | 26-3 | ⬜   | Bench 結果記錄到 `.claude/perf-baseline.md` 第二段 `## After 26-2`（before / after FPS + frame time）|
+
+---
+
+### 後續構想：RF / Cable 模式切換（先記著，不在 Phase 20 動）
+
+實測 300 AP / SW+tray：
+- 全開（HM + cable layers）：7375 ms commit
+- 只開 RF（HM on + cable layers 全隱藏）：3319 ms（-55%）
+- 只開 Cable（HM off + cable on）：5008 ms
+
+LayerToggle 既有 `showCables / showCableTrays / showSwitches / showRisers` 已能個別關，但沒有「一鍵切 RF/Cable mode preset」。
+
+未來實作建議：
+- Toolbar 加 3-button 切換組 `🛰 RF` / `📡 Cable` / `🌐 All`
+- 各 mode 對應 preset：
+  - RF: showAPs=on, showWalls=on, showHeatmap=on, showCables/Trays/Switches/Risers=off
+  - Cable: showAPs=on, showWalls=on, showHeatmap=off, showCables/Trays/Switches/Risers=on
+  - All: 全 on（現況預設）
+- 工程小（30 min UI + store action），但 UX 對大型場景幫助巨大
+- 對應 Hamina「mode-driven layer visibility」設計
 
 ---
 
