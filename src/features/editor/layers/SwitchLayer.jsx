@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { Group, Rect, Text, Line, Circle } from 'react-konva'
 import { useCableStore, getSwitchKindColor } from '@/store/useCableStore'
+import { useEditorStore } from '@/store/useEditorStore'
 import { useFocusedDevices } from '@/features/editor/useFocusedDevices'
 import { computeSwitchSnaps } from '@/features/cable/switchSnapStatus'
 
@@ -283,9 +284,13 @@ function SwitchMarker({ sw, isSelected, isHovered, isFocused, snapState, onHover
 }
 
 function SwitchLayer({ floorId, selectedSwitchId, selectedItems = [], onSwitchClick, onSwitchContextMenu, onSwitchDragMove, onSwitchDragEnd, viewportScale, setHoverCursor, dimmed, capability }) {
-  const switches      = useCableStore((s) => s.switchesByFloor[floorId] ?? [])
+  const allSwitches   = useCableStore((s) => s.switchesByFloor[floorId] ?? [])
   const trays         = useCableStore((s) => s.traysByFloor[floorId] ?? [])
   const updateSwitch  = useCableStore((s) => s.updateSwitch)
+  const showSwitchKind = useEditorStore((s) => s.showSwitchKind)
+  // Per-kind visibility (gated by the master showSwitches in Editor2D).
+  // Unknown/legacy kinds stay visible to avoid silently hiding data.
+  const switches = allSwitches.filter((sw) => showSwitchKind[sw.kind] !== false)
   const inverseScale  = 1 / (viewportScale || 1)
   const [hoveredId, setHoveredId] = useState(null)
   const batchSelectedIds = selectedItems.length > 1 ? new Set(selectedItems.filter((it) => it.type === 'switch').map((it) => it.id)) : null

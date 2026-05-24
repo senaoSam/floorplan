@@ -1,5 +1,6 @@
 import React from 'react'
 import { useCableStore, getSwitchKindColor } from '@/store/useCableStore'
+import { useEditorStore } from '@/store/useEditorStore'
 
 // 3D switch / IDF / MDF / router chassis. Each device renders as a small
 // rack-shaped box at its `mountHeight` so the user sees the same position
@@ -104,7 +105,10 @@ function SwitchMarker({ sw, pxToM, dimOpacity }) {
 }
 
 export default function SwitchLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
-  const switches = useCableStore((s) => s.switchesByFloor[floorId] ?? [])
+  const allSwitches = useCableStore((s) => s.switchesByFloor[floorId] ?? [])
+  // Keep 2D and 3D visibility in sync — same per-kind filter.
+  const showSwitchKind = useEditorStore((s) => s.showSwitchKind)
+  const switches = allSwitches.filter((sw) => showSwitchKind[sw.kind] !== false)
   if (!switches.length || !pxToM) return null
   return (
     <group>

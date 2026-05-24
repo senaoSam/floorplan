@@ -226,9 +226,13 @@ function APMarker({ ap, isSelected, isHovered, isFocused, onHover, isDraggable, 
 }
 
 function APLayer({ floorId, selectedAPId, selectedItems = [], onAPClick, onAPContextMenu, onAPDragMove, onAPDragEnd, isDrawingActive, viewportScale, setHoverCursor, dimmed, capability }) {
-  const aps        = useAPStore((s) => s.apsByFloor[floorId] ?? [])
+  const allAPs     = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   const updateAP   = useAPStore((s) => s.updateAP)
   const showAPInfo = useEditorStore((s) => s.showAPInfo)
+  const showAPBand = useEditorStore((s) => s.showAPBand)
+  // Filter by per-band visibility. APs whose frequency is unknown are kept
+  // visible so we don't accidentally hide legacy data.
+  const aps = allAPs.filter((ap) => showAPBand[ap.frequency] !== false)
   const inverseScale = 1 / viewportScale
   const [hoveredId, setHoveredId] = useState(null)
   const batchSelectedIds = selectedItems.length > 1 ? new Set(selectedItems.filter((it) => it.type === 'ap').map((it) => it.id)) : null

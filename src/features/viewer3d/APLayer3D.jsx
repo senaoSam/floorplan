@@ -337,7 +337,10 @@ function APMarker({ ap, pxToM, dimOpacity, isActiveFloor, onHover }) {
 }
 
 export default function APLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true, onAPHover }) {
-  const aps = useAPStore((s) => s.apsByFloor[floorId] ?? [])
+  const allAPs = useAPStore((s) => s.apsByFloor[floorId] ?? [])
+  // Keep 2D and 3D visibility in sync — same per-band filter.
+  const showAPBand = useEditorStore((s) => s.showAPBand)
+  const aps = allAPs.filter((ap) => showAPBand[ap.frequency] !== false)
   if (!aps.length || !pxToM) return null
   return (
     <group>

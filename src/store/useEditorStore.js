@@ -63,6 +63,12 @@ export const useEditorStore = create((set, get) => ({
   showCables: true,
   showCableTrays: true,
   showRisers: true,
+  // Per-band AP visibility (gated by showAPs master toggle).
+  // Keys are numeric: 2.4 / 5 / 6 — match `ap.frequency`.
+  showAPBand: { 2.4: true, 5: true, 6: true },
+  // Per-kind Switch visibility (gated by showSwitches master toggle).
+  // Keys match SWITCH_KINDS values.
+  showSwitchKind: { switch: true, idf: true, mdf: true, router: true },
 
   // Align-mode reference overlay. `alignRefFloors` is a Set of floor IDs that
   // should render as semi-transparent reference layers while in ALIGN_FLOOR
@@ -120,6 +126,12 @@ export const useEditorStore = create((set, get) => ({
   togglePanelCollapsed: () => set((s) => ({ panelCollapsed: !s.panelCollapsed })),
   toggleSidebarCollapsed: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   toggleLayer: (key) => set((s) => ({ [key]: !s[key] })),
+  toggleAPBand: (band) => set((s) => ({
+    showAPBand: { ...s.showAPBand, [band]: !s.showAPBand[band] },
+  })),
+  toggleSwitchKind: (kind) => set((s) => ({
+    showSwitchKind: { ...s.showSwitchKind, [kind]: !s.showSwitchKind[kind] },
+  })),
 
   // ── 23-2c Right-click object context menu ───────────────────────
   // Centralised state so any Layer can request a menu and the same overlay

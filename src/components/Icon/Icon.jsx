@@ -143,6 +143,37 @@ const ICONS = {
     />
   ),
 
+  // Eye — open (layer visible)
+  eye: (
+    <>
+      <path d="M2.5 12 C5 7, 8.5 5, 12 5 S19 7, 21.5 12 C19 17, 15.5 19, 12 19 S5 17, 2.5 12 Z"
+        fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="2.4" fill="currentColor" />
+    </>
+  ),
+
+  // Eye-off — closed (layer hidden) — slashed eye
+  eyeOff: (
+    <>
+      <path d="M2.5 12 C5 7, 8.5 5, 12 5 S19 7, 21.5 12 C19 17, 15.5 19, 12 19 S5 17, 2.5 12 Z"
+        fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="2.4" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </>
+  ),
+
+  // Chevron right (collapsed)
+  chevronRight: (
+    <path d="M9 5 L16 12 L9 19" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" />
+  ),
+
+  // Chevron down (expanded)
+  chevronDown: (
+    <path d="M5 9 L12 16 L19 9" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" />
+  ),
+
   // AI Walls — wand-like sparkle on a wall segment
   aiWalls: (
     <>
