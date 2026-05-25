@@ -1,7 +1,11 @@
-# Konva Layer 架構 — 設計規格
+# Canvas 渲染架構 — 設計規格
 
-> 三輪設計討論收斂版本，2026-05-25。
-> 對應問題：SW + Tray + 50AP 場景下，畫布內拖曳 AP / Switch / Tray 卡頓。
+> 多輪設計討論 + PixiJS pivot 收斂版本，2026-05-25。
+>
+> 雙重對應：
+> 1. **短期**：SW + Tray + 50AP 拖曳卡頓（Phase 24 已 ship 解決）
+> 2. **長期目標規格**：1000+ AP、5000+ walls、100+ SW、50+ tray、heatmap real-time recompute，30–60 fps 流暢
+>
 > 落地依據：本 spec + `.claude/task.md` 對應 Phase。
 
 ---
@@ -19,264 +23,575 @@
 
 畫布外操作（hover 熱圖 legend、切 panel、開進度等）任何場景都順。
 
-### 1.2 根因
+### 1.2 根因（Phase 24 處理）
 
-所有可互動的向量物件目前全部掛在 `src/features/editor/Editor2D.jsx` 行 1710–1947 的同一個 `<Layer>`：
-
-```
-ScopeLayer / FloorHoleLayer / WallLayer / CableTrayLayer (base) /
-SwitchLayer / RiserLayer / APLayer / CableLayer /
-CableTrayLayer (overlay) / ScaleLayer / CropLayer
-```
-
-Konva 在 `dragmove` 是 **per-layer batchDraw** —— 拖任何節點都會把整層 canvas 重畫一遍。
+所有可互動的向量物件目前全部掛在 [Editor2D.jsx:1710-1947](src/features/editor/Editor2D.jsx#L1710-L1947) 的同一個 `<Layer>`。Konva 在 `dragmove` 是 **per-layer batchDraw** —— 拖任何節點都會把整層 canvas 重畫一遍。
 
 對應卡頓場景：
-- `Tray + 10AP`：`accessSwitches.length === 0` → `computeRoutes` 全部 unroutable →
-  `CableLayer.jsx:87` 的 early return（`routes.size === 0 && switchLinks.size === 0`）讓 CableLayer 完全不產生 Konva 節點。順。
-- `SW + 10AP`：每條 fallback Manhattan 路線只有 3 點 / 2 段 / 少數 Circle，總節點數小。順。
-- `SW + Tray + 10AP`：只有 10 條 tray-route，總節點 < 100。順。
-- `SW + Tray + 50AP`：50 條 tray-route，每條多 waypoint + drop legs + 端點 Circle，估 500–1000 個 cable Konva 節點，跟 50 個 AP marker / Tray polygon 同層，每幀 batchDraw 都全部 repaint。卡。
+- `Tray + 10AP`（沒有 SW）：`accessSwitches.length === 0` → 所有 AP unroutable → CableLayer return null，零 cable 節點
+- `SW + 10AP`（沒有 Tray）：每條 fallback Manhattan 只有 3 點，cable 節點少
+- `SW + Tray + 10AP`：10 條 tray-route，總節點 < 100
+- `SW + Tray + 50AP`：50 條 tray-route，估 500–1000 個 cable 子節點，跟 50 個 AP marker 同層每幀 repaint。卡。
 
-### 1.3 次要放大因子
+### 1.3 元層級的設計原則（過程中確立）
 
-`CableTrayLayer.jsx:602-619` 的 `onTranslate` / `onVertexDragMove` 每個 dragmove tick 都直接寫 `updateTray` 到 store，造成：
+`動一下就回 store + re-render` 是這類大 canvas 系統的根本性能陷阱。原則：
 
-1. `traysByFloor` 變動 → `CableLayer.jsx:64-85` 的 `useMemo` 每幀重跑 `computeRoutes`（Dijkstra × 50 AP）。
-2. `useFocusedDevices.js:29` 同樣每幀重跑。
-3. 整層 React reconcile 跟著走。
+> **Transient state（暫時狀態）不該進 store**。
+> mousedown / keypress / hover / 繪製途中都是 transient，活在 ref / local state / dragOverlay。
+> 邊界（mouseup / blur / dragend）才 commit 正式 store。
 
-此問題跟 layer 拆分**正交**：layer 拆完拖 Tray 還是會卡，因為 cable 那層真的有資料變動觸發 repaint。所以必須一起修。
+對應的反例與已處理 / 待處理盤點：
+
+| 物件 | 位置 | 狀態 |
+|---|---|---|
+| AP / Switch / Wall / Scope drag | Editor2D | ✅ 已 dragOverlay |
+| Marquee drag | imperative + 獨立 layer | ✅ 已繞開 React |
+| **Tray body drag** | `CableTrayLayer.jsx` onTranslate | ✅ Phase 24-30-2 dragOverlay |
+| **Tray vertex drag** | `CableTrayLayer.jsx` onVertexDragMove | ✅ Phase 24-30-2 dragOverlay |
+| HeatmapControl slider | `HeatmapControl.jsx` 171/179 | ❌ 每 tick 寫 store |
+| AlignFloorPanel slider | 98/141/158/181/203 | ❌ 每 tick 寫 store |
+| FloorImagePanel slider | 67/94 | ❌ 每 tick 寫 store |
+
+Panel slider 三條未處理，Phase 25 過程或之後可順手收尾。
 
 ---
 
-## 2. 目標架構
+## 2. Phase 24 — Konva Layer 拆分（已 ship）
 
-### 2.1 分層原則
+### 2.1 已完成
 
-按重要性排：
+| # | 狀態 | 動作 |
+|---|---|---|
+| 30-1 | ✅ commit `a30139f` | CableLayer 拆獨立 `<Layer listening={false}>` |
+| 30-2 | ✅ commit `a30139f` | Tray dragmove → `useDragOverlayStore.tray / trayVertex`，dragend 才 commit |
 
-1. **拖曳區域要小** —— Konva 以 layer 為 batchDraw 單位，常被拖的東西要單獨一層。
-2. **衍生 / 唯讀的東西獨立放** —— `listening={false}` 的純視覺層成本低（跳過 hit graph），收益高（隔絕重畫）。
-3. **互動頻率分檔** —— 靜態 / 偶爾編輯 / 頻繁拖曳 / 短暫繪製中。
-4. **層數預算 6–8** —— Konva 官方建議 3–5，現代硬體 + `listening:false` 撐到 7–8 還合理；主產品要整合進 React 17 環境，要顧到低階機器。
-5. **z-order 仍需手動維護** —— Layer 是堆疊順序，視覺要對到產品需求。
+### 2.2 撤回的 task
 
-### 2.2 八層配置
+| # | 狀態 | 理由 |
+|---|---|---|
+| 30-3 | ⏸️ 撤回 | Structural / Trays / Devices 三層拆 —— 在 react-konva 環境做會白工，架構決策融入 Phase 25 PixiJS Container 階層 |
+| 30-4 | ⏸️ 撤回 | Overlay 拆 visual / interactive —— 同上理由 |
+| 30-5 | ⏸️ 撤回 | FloorImage listening=false —— PixiJS Sprite 互動靠 InteractionManager，邏輯重新設計 |
+| 30-6 | ⏸️ 撤回 | DragLayer —— PixiJS 不需要（每 Mesh 已是獨立 draw call） |
+| 30-7 | ⏸️ 撤回 | Cable focus halo 拆層 —— PixiJS 走 mesh attribute / multi-pass，不再需要 layer 拆 |
 
-| # | Layer | listening | 內容 | 何時 repaint |
+### 2.3 Phase 24 的角色定位
+
+Phase 24 是「**ship-able 妥協**」：
+- 解掉 SW+Tray+50AP 操作卡頓的臨床問題
+- Cable 拖曳期間凍結（跟 Figma / Hamina 同行為）
+- 為 Phase 25 PixiJS 改寫鋪路：dragOverlay store / layer 邊界思維 / transient state 原則都已成立
+
+但 Phase 24 不是最終解 —— **1000+ AP 規格 Konva 撞牆**（純 Konva 估算上限 300-500 AP）。Phase 25 才是達標的方案。
+
+---
+
+## 3. Phase 25 — PixiJS hybrid renderer（規格達標方案）
+
+### 3.1 規格目標
+
+| 元素 | 數量 |
+|---|---|
+| AP | 1000+ |
+| Walls | 5000+ |
+| Switch / IDF / MDF / Router | 100+ |
+| Cable Tray | 50+ |
+| Cable routes（衍生）| ~1000，segment ~30000 |
+| Heatmap | real-time recompute |
+| **流暢度** | **30–60 fps** |
+
+### 3.2 為什麼是 PixiJS hybrid（而非純 Konva / 純 PixiJS / raw WebGL）
+
+| 選項 | 1000 AP 達標 | 工程量 | 維護成本 | 結論 |
 |---|---|---|---|---|
-| 1 | Background + FloorImage | false（mode 切換時開） | 深色底 + 樓層圖（含 align refs） | 換樓 / align / viewport |
-| 2 | Heatmap | false | 熱圖 canvas | AP / wall / scope drag overlay（已實作） |
-| 3 | Structural | true | Wall / Scope / FloorHole / RefWall / RefVector | 編輯這幾類時 |
-| 4 | Trays | true | Tray body / magnet / base hit | 編輯 tray 時 |
-| 5 | **Cables (derived)** | **false** | CableLayer 全部 Lines/Circles + focus halo + drop legs | route 資料真的變了才重畫 |
-| 6 | Devices | true | AP / Switch / Riser | 拖任一裝置 |
-| 7 | Visual overlays + Marquee | false（多數） | snap halo / draft preview / badge / unroutable / draftAnchor / marquee Rect | 繪製中 / hover snap / 框選中 |
-| 8 | Interactive handles | true | Tray vertex / segment handles / Scale draw / Crop draw / 未來 transformer | 處理中 |
+| 維持 Konva | ❌ 撞牆 | 0 | 低 | 規格不允許 |
+| 純 Konva 改寫 | ❌ 撞牆 | 2–3 週 | 低 | **白工**，要再做一次 PixiJS migration |
+| **PixiJS hybrid**（**選**） | ✅ | **3–4 週** | 中 | 標準 PixiJS 處理 99% + 自寫 shader 處理熱點 |
+| 全 PixiJS（Graphics）| 邊緣 | 3–4 週 | 中 | Graphics 高頻 mutation 慢，cable/wall 量大會卡 |
+| Raw WebGL 全套 | ✅ | 6–8 週 | 高 | DX 災難，scene graph/hit-test/text 全自寫，bug surface 大 |
 
-### 2.3 各層拆分理由
+PixiJS hybrid 的具體分工：
+- PixiJS 管產品複雜度（scene graph、viewport、互動 overlay、Sprite、Container、Graphics）
+- Custom Mesh + shader 管 bulk simple geometry（walls、cables）
+- GPU shader 管 RF heatmap（fragment shader 起步，長期升 WebGPU compute）
+- Worker 管 CPU-side task（tile invalidation、R-tree/BVH query、routing/Dijkstra、candidate list preparation）
+- React 不直接管理 Pixi objects
 
-**L1 Background + FloorImage 合併**：兩者都是 listening=false 的靜態底，沒必要兩張 canvas。合併省一層。Mode 切到 `ALIGN_FLOOR` 或 `EDIT_FLOOR_IMAGE` 時透過 capability 把這層的 listening 動態打開。空白處取消選取交給 Stage onClick 處理。
+### 3.3 八層配置（PixiJS Container 階層）
 
-**L2 Heatmap**：已實作獨立層（`HeatmapLayer.jsx:568`），現狀保留。`listening=false` 已設。
+| # | Layer | 後端 | 量級 | 備註 |
+|---|---|---|---|---|
+| 1 | Background | renderer background / Graphics | 1 | 深色底 |
+| 2 | FloorImage | PIXI.Sprite | 1 | 大圖未來可 tile |
+| 3 | **Heatmap** | **既有 raw WebGL2** → PIXI.Sprite（texture） | 1 | MVP 直接接，長期 tile-based + dirty update |
+| 4 | **Walls** | **PIXI.Mesh + custom line shader** | 5000 | 1 個 draw call、screen-space width + AA + per-material color + partial buffer update |
+| 5 | Scopes / FloorHoles / RefWall / RefVector | PIXI.Graphics（Mesh 若量超過 500） | tens | 量少、互動需求中 |
+| 6 | **Cables (derived)** | **PIXI.Mesh + dashed line shader** | ~30000 segments | listening=false、純視覺、`eventMode='none'` |
+| 7 | Trays（base + magnet）| PIXI.Container + Graphics | 50 | vertex handle / segment hit / drag 複雜 |
+| 8a | Devices — AP markers | PIXI.Sprite + texture atlas / SDF atlas | 1000 | Sprite batching 1 draw call |
+| 8b | Devices — Switches | PIXI.Container + Sprite | 100 | 複雜組合、互動多 |
+| 8c | Devices — Risers | PIXI.Sprite | ~20 | 小 |
+| 9 | Visual overlays（snap halo / draft / badge / unroutable / marquee）| PIXI.Graphics | 動態 | listening=false |
+| 10 | Interactive handles（tray vertex/segment / scale draw / crop draw / transformer）| PIXI.Container + Graphics | 動態 | 高互動 |
+| 11 | Text labels（AP name / SW name / Tray name / dB readout）| **PIXI.BitmapText** **或 SDF/MSDF**（看 zoom 範圍）| 1000+ glyphs | 大量；**禁用 PIXI.Text** |
 
-**L3 Structural**：Wall / Scope / FloorHole 是「畫一次擺著」的物件，編輯頻率低，跟 Devices 拆開避免被連累。RefWall / RefVector 跟它們同性質歸一層。
+Z-order：1 在底、11 在頂。
 
-**L4 Trays（單獨一層，不混 Devices）**：Tray 有 body drag / segment 點選 / vertex drag / context menu，互動面複雜且節點數量比 AP marker 多，混進 Devices 會彼此拖累。獨立一層讓 Tray 操作只動自己。
+### 3.4 為什麼這幾層走 custom shader
 
-**L5 Cables（最重要的一拆）**：CableLayer 本來就 `listening={false}`（`CableLayer.jsx:93`），搬出去零副作用。拆出後拖 AP / SW / Tray 都不會碰到這層的 canvas（前提是 dragmove 不寫 store —— 見 L4 與 §3 step 2 配套）。
+**只有 3 條 layer 走自寫 shader**：
 
-**L6 Devices**：AP / Switch / Riser 是頻繁拖曳的，集中一層讓 batchDraw 範圍可預期。拆開後此層只有 ~50 AP marker + 幾個 SW / Riser，repaint 便宜。
+#### 3.4.1 Heatmap
+- 既有 `heatmapGL.js` 是 WebGL2 raw shader
+- 整合方式：原本離畫面 canvas → Konva.Image；改成離畫面 canvas → PIXI.Sprite (`PIXI.Texture.from(canvas)`)
+- 0 邏輯改動，只換 host
 
-**L7 Visual overlays + Marquee**：snap halo、DraftTray、unroutable badge、draftAnchor、focus halo（暫不從 L5 拆）、marquee Rect 都是 `listening=false` 的視覺裝飾。合併一層減少層數。Marquee 跟 drawing mode 互斥（不會同時出現），共層不互相影響 batchDraw。
+**長期升級路徑**：
+- current: GPU fragment shader（已實作）
+- next: **tiled fragment shader + AP data texture + dirty tile update**
+- future: WebGPU compute shader（PixiJS v8 自動處理 fallback）
 
-**L8 Interactive handles**：Tray 被選取後的 vertex / segment handles、Scale draw、Crop draw、未來可能的 transformer 都需要 `listening=true`。拆出來讓「正在編輯中的 widget」獨立 repaint，不會干擾 L4 的 tray base。
+#### 3.4.2 Walls — PIXI.Mesh + line shader（新寫）
 
----
+```
+所有 5000 條 wall 塞進一個 Float32Array
+每條展成 quad：4 vertices + 6 indices
+1 個 draw call 畫全部
+```
 
-## 3. 落地順序
+Shader 要處理：
+- **粗線**（quad 展開，screen-space width 維持，世界寬度為主 + min/max clamp）
+- **per-material color**（per-vertex color attribute，drives by material loss）
+- **AA**（fragment shader smoothstep edge）
+- **Opening**（門窗）：**預切成 visible sub-segments**，不走 shader discard
 
-| step | 動作 | 解決什麼 | 動工估計 |
+**Stroke width 公式**：
+```
+finalWidthPx = max(worldWidth * viewportScale, minPx) * devicePixelRatio
+
+啟用 cap 時：
+finalWidthPx = clamp(worldWidth * viewportScale, minPx, maxPx) * devicePixelRatio
+```
+- 預設 real thickness，`maxPx` 不啟用
+- 極端 zoom-in 才啟用高 cap（例如 `maxPx = 200`）
+- UI 模式切換：`real thickness` ↔ `symbolic line`
+- Retina 螢幕乘 DPR
+
+**Opening 更新策略**：
+```
+dragging:
+  freeze full wall mesh
+  只更新拖曳中那條 wall / opening 對應的 sub-segments
+dragend:
+  commit segmentation, batch update geometry buffer
+新增 / 刪除 wall:
+  append / free-list segment slots，必要時 lazy compact / rebuild
+```
+
+5000 條全切估 10-50 ms，drag 中不能跑 → 必須 partial update。
+
+#### 3.4.3 Cables — PIXI.Mesh + dashed line shader（新寫）
+
+同 walls 的 mesh pattern + 三件事：
+- **Dash pattern**：fragment shader 用「沿線距離」（per-vertex attribute）對 dash period 取模
+  - **Dash period 用 screen-space distance**（不是 world-space），viewport scale uniform 在 shader 換算
+  - 沿用現有 [CableLayer.jsx](src/features/editor/layers/CableLayer.jsx) 各 route 類型的 dash semantics（tray run / drop leg / fiber / fallback Manhattan）
+  - Attributes：`dashOnPx`、`dashOffPx`、`dashPhasePx`、`routeType`、`routeColor / materialId`
+- **多色 per-route**：tray cyan / S2S fiber rose / fallback grey，per-vertex color attribute
+- **Focus halo**：第二 pass 畫較粗半透明 indigo band
+
+Cables 純視覺，**`eventMode='none'`**，完全不走 PixiJS hit-test。
+
+### 3.5 AP data texture layout（heatmap shader 用）
+
+```
+texture format: RGBA32F（或 RGBA16F 看精度需求）
+layout: K=4 rows per AP
+
+row 0: vec4(x, y, z, txDbm)
+row 1: vec4(freq, channel, channelWidth, antennaModeEncoded)
+row 2: vec4(azimuth, beamwidth, patternId, modelId)
+row 3: vec4(reserved0, reserved1, reserved2, reserved3)
+
+物理 texture size: width=K, height=AP_COUNT
+1000 AP × 4 row = 4000 texel ≈ 64 KB
+```
+
+Shader 讀取：
+```glsl
+vec4 ap0 = texelFetch(apTex, ivec2(0, apIndex), 0);
+vec4 ap1 = texelFetch(apTex, ivec2(1, apIndex), 0);
+vec4 ap2 = texelFetch(apTex, ivec2(2, apIndex), 0);
+vec4 ap3 = texelFetch(apTex, ivec2(3, apIndex), 0);
+```
+
+**更新策略**：整張重 upload（64 KB / ~0.1ms，太便宜不必 partial），AP store 變動觸發 `gl.texImage2D(...)` re-upload。
+
+### 3.6 Tile-based heatmap
+
+1000 AP fragment shader 每 pixel 迭代不可行（O(N_pixel × N_AP)）。必須採：
+
+```
+每個 heatmap tile 預先產生 candidate AP list（CPU side，Worker 處理）
+  ↓
+shader / compute 只迭代該 tile 相關 AP
+  ↓
+拖 AP 時只 invalidate affected tiles
+```
+
+Tile invalidation 條件：
+- AP 移動 → 影響半徑 R 內的 tile 全部 dirty
+- AP 屬性變動（txDbm / freq / pattern）→ 同上
+- Wall 變動 → 寬一點，可能整條 ray 影響的 tile
+
+Worker 負責計算 affected tiles + 維護 candidate list；GPU 負責跑 shader。
+
+### 3.7 Hit-test 策略
+
+| 對象 | 幾何 | Spatial index | 後端 |
 |---|---|---|---|
-| **1** | **CableLayer 拆獨立 Layer + `listening=false`** | **立即解 SW+Tray+50AP 拖 AP/SW 卡頓** | 5 行 |
-| **2** | **Tray dragmove 改寫 `useDragOverlayStore`，dragend 才 commit `updateTray`** | **解拖 Tray 卡頓** | 30 行 |
-| 3 | Structural / Trays / Devices 分三層 | 為更多裝置類型擴張舖路 | 1 小時 |
-| 4 | Overlay 拆 visual overlay / interactive handles 兩層（marquee 併入 visual） | 繪製中事件流更乾淨 | 1 小時 |
-| 5 | FloorImage 預設 `listening=false`，Stage onClick 處理 deselect | 小整理 | 15 分鐘 |
-| 6 | （延後）DragLayer | 量測 Devices layer 仍慢才做 | — |
-| 7 | （延後）Cable focus halo 拆出 L5 | 未來改成 hover 觸發才需要 | — |
+| AP / Switch / Riser | point | **uniform grid**（world-space cell ≈ 50–100 px equivalent） | App-level |
+| Wall | line segment AABB | **R-tree / BVH** | App-level |
+| Tray segment | line / polyline segment | R-tree / BVH | App-level |
+| Scope / FloorHole | polygon AABB | R-tree / BVH | App-level |
+| Cables | n/a | 不需要（`eventMode='none'`）| n/a |
+| Handles | small UI object | PixiJS InteractionManager | PixiJS |
 
-**Step 1 + Step 2 是解卡頓的最小集合**；step 3–5 是為未來擴張舖路，可分批做。
+**Walls click 流程**：
+```
+PixiJS stage pointer event
+→ world coordinate（共用 viewport transform）
+→ R-tree query candidate walls
+→ line-segment distance test
+→ select wall id
+```
 
-### 3.1 Step 1 細節
+比讓 PixiJS 對 5000 walls 自動 hit-test 穩。
 
-`Editor2D.jsx:1904-1906` 的 `<CableLayer>` 從共用 `<Layer>` 內搬出來，包進獨立 `<Layer listening={false}>`。注意：
+**Marquee 框選**：rect AABB → spatial index query → AABB-rect intersection → 選擇 set 更新。Walls partial-in-rect 視為選中（沿用既有 policy）。
 
-- z-order：CableLayer 原本在 APLayer 之上（線會蓋住 AP 末端）。拆層後新 Layer 要放在 Devices Layer 之**上**才能維持。但 AP body 蓋住 cable drop leg 末端是可接受的視覺（drop leg 收進 AP），所以也可以放 Devices 之**下**，由使用者最終決定。
-- CableLayer 內 `<Group listening={false}>` 包裹可以拿掉（整層已 listening=false）。
+### 3.8 Hover state 渲染
 
-### 3.2 Step 2 細節
+對 walls / cables（在 Mesh 裡）：
 
-Tray 兩種拖曳行為都要改：
+| 物件 | Hover 策略 |
+|---|---|
+| Walls | `hoverWallId` uniform，shader 判斷 `if (wallId == hoverId)`，1 個 uniform update／hover；不動 attribute buffer |
+| Cables | 純視覺，不 hover |
+| AP / SW / Tray | PixiJS InteractionManager 標準 hover |
 
-**Body drag**（`CableTrayLayer.jsx:316-329` 的 `onDragMove`）：
-- 目前：每 tick 計算 incDx / incDy → `onTranslate(dx, dy)` → `updateTray` 寫 store。
-- 改後：每 tick 累計 totalDx / totalDy 到 `useDragOverlayStore.setTray({ id, dx, dy })`。
-- dragend：把最終 dx/dy 加到 tray.points 上、`updateTray` 一次 commit、清掉 overlay。
+對 1 個 hover wall 用 uniform 就夠（只能 hover 一個 wall 符合 UX）。
 
-**Vertex drag**（`CableTrayLayer.jsx:613-619` 的 `onVertexDragMove`）：
-- 目前：每 tick 改 vertex 位置 → `updateTray` 寫 store + 計算 snap target。
-- 改後：每 tick 寫 `useDragOverlayStore.setTrayVertex({ trayId, vertexIdx, x, y })` + snap target 仍即時顯示。
-- dragend：commit 到 store。
+### 3.9 Selection 渲染
 
-`useDragOverlayStore` 需要擴充：
+| 物件 | Selection 策略 |
+|---|---|
+| Walls | 大量多選 → mesh attribute（per-segment `isSelected` byte attribute，partial buffer update）<br>少量選取 → overlay Graphics |
+| Cables | 純視覺，通常不選 |
+| Focus halo（被選的 device 的 cable）| Second pass 畫粗的半透明 indigo band |
+| AP / SW / Tray | overlay Graphics 畫 selection ring + handles |
+
+### 3.10 Text 渲染
+
+| 量級 | 後端 |
+|---|---|
+| 大量 AP / SW / Tray labels（1000+ glyphs）| **SDF / MSDF text atlas**（非 BitmapText 也非 Text）|
+| 少量 debug / tooltip / hover readout | PIXI.Text 可 |
+
+理由：BitmapText 點陣字 batch 好但 zoom in 會糊；SDF/MSDF 任意 scale 不糊，floor planner zoom in 讀 label 必要。
+
+**生成工具**：`msdf-bmfont-xml` 或 `msdf-atlas-gen` preprocessing。
+
+### 3.11 PixiJS 版本與後端鎖定
+
+```
+Phase 25 鎖定：
+- PixiJS v8
+- WebGPU preferred where available
+- WebGL2 fallback
+- Mouse-first interaction
+- Touch / pinch zoom 留 extension point（Phase 26 後評估）
+```
+
+**Required WebGL extensions**：
+- WebGL2 內建 ✓
+- `EXT_color_buffer_float`（render-to-float texture，heatmap 可能需要）
+- 不支援 `EXT_color_buffer_float` 時 fallback：heatmap precision 降為 RGBA8 unorm
+
+**Custom shader 雙寫**：
+- 第一版只寫 WebGL2 GLSL，PixiJS WebGPU 跑時自動 fallback
+- 第二版補 WGSL，WebGPU 跑時真 GPU
+- 第三版升 WebGPU compute（heatmap RF tile compute）
+
+**單一 Shader 物件帶兩種**：
+```js
+new PIXI.Shader({
+  glProgram:  new PIXI.GlProgram({ vertex: glVS, fragment: glFS }),
+  gpuProgram: new PIXI.GpuProgram({ vertex: {source: wgslVS}, fragment: {source: wgslFS} }),
+})
+```
+
+### 3.12 Animation framework
+
+**決定**：用 `app.ticker` + 手寫 ease util（非 tween library）。
+
+理由：
+- 動畫場景 5 個都是「單一物件 + 單一屬性 + 固定 ease」（focus halo pulse / selection ring grow-in / hover transition / drag feedback / badge fade）
+- 寫一個 50 行的 Tween util 就夠
+- 比引入 `@tweenjs/tween.js` 省 20 KB bundle，不需要的通用性不要
 
 ```js
-{
-  ap: null,
-  sw: null,
-  wall: null,
-  scope: null,
-  hole: null,
-  tray: null,         // 新增: { id, dx, dy }
-  trayVertex: null,   // 新增: { trayId, vertexIdx, x, y }
+// tween util sketch
+class Tween {
+  constructor(target, prop, fromVal, toVal, durationMs, ease) {...}
+  update(deltaMs) { ... target[prop] = interp; if (done) onComplete?.() }
 }
+const tweens = []
+app.ticker.add((delta) => { tweens.forEach(t => t.update(delta * 16.67)) })
 ```
 
-CableLayer 跟 useFocusedDevices 的 useMemo 視情況訂閱 overlay；通常拖 Tray 時不需要 cable 跟手（拖完 commit 一次就好），跟現有 AP/SW 行為一致（cable 在 AP/SW drag 中也不跟手）。Tray 本身的視覺更新由 TrayPolyline 直接吃 overlay 渲染暫時位置。
+### 3.13 Worker 分工
 
----
+PixiJS 渲染與主 RF compute 都在主執行緒（前者 CPU prep + GPU；後者 GPU shader）。Worker 負責 CPU-side：
 
-## 4. 不做的事 / 延後決定
-
-### 4.1 DragLayer 模式（延後）
-
-Konva 的 DragLayer 模式：dragstart 把節點 `moveTo()` 到專屬層，dragend 再搬回。
-
-**為什麼延後**：
-- react-konva 的 fiber 樹跟著 parent 走，硬搬會被 unmount + remount。必須用 imperative `Konva.Node.moveTo()` 處理，並在 dragstart / dragend 維護絕對座標一致（避免「跳一下」）。
-- Step 1 完成後 Devices layer 只剩 ~50 AP + 幾個 SW，repaint 本來就便宜。
-- DragLayer 是「再優化」工具，**先量測 Devices layer 仍慢再加**。
-
-### 4.2 Cable focus halo 拆出 L5（延後）
-
-`CableLayer.jsx:312-336` 的 `HighlightBand`（focus halo）目前跟 cable lines 同層。
-
-**為什麼延後**：
-- 目前 focus halo 是 click-once 觸發（`selectedId` 變動），低頻事件，跟 cable 本體同層完全沒問題。
-- 拆出的場景是「hover 觸發 focus halo」這種高頻變化。目前 `useFocusedDevices.js:14` 吃的是 `selectedId`，不是 hover。
-- **未來若改成 hover focus，那時再拆**。現在拆是預先優化。
-
-### 4.3 Tray 拖曳時 cable 跟手（Phase 24 不做，Phase 26 重新評估）
-
-**Phase 24 決策**：cable 線在裝置拖曳中**凍結**，dragend 後 snap 到新位置。AP / SW drag 已是此行為，Phase 24 step 2 讓 Tray drag 也走同樣模式。
-
-**但這是降規格的妥協**。Hamina 實測能做到 100+ AP + 多 SW + 多 Tray 拖曳時 cable 即時跟手且順暢。差距在兩個結構性的點：
-
-1. **渲染後端**：Hamina 推測是純 Canvas / WebGL。每幀更新 = mutate buffer + 一次 draw call，零 React reconciliation。我們的 cable 走 react-konva，每幀 fiber walk + setAttrs × N nodes 是主要成本。
-2. **Routing 演算法**：Hamina 推測是增量 routing —— 拖一顆 AP 只重算這顆 AP 的單源 Dijkstra；拖 tray body 只平移 edge 座標，graph topology 不變。我們的 `computeRoutes` 每幀**從零重建整張 graph + 跑 N×Dijkstra**，O(N_AP × (|V| + |E|) log |V|)。
-
-**Phase 24 凍結方案的位置**：是一個能 ship 的妥協，不是最終解。Phase 25/26 之後重新評估解凍。
-
-### 4.4 Real-time cable follow — 決策樹（Phase 25 完成後重評）
-
-Phase 25（純 Konva）完成後**先量測 `computeRoutes` 在 50 / 150 / 300 AP 情境下的單次 wall-clock 時間**，再依照結果走分支：
-
-```
-Phase 25 完成 → 量測 computeRoutes wall-clock @ 50 AP
-                ├─ < 5 ms/frame  → 路線 D：解凍 cable，每 dragmove tick 直接重算 + 重畫
-                │                  零額外工程，達 Hamina 級 real-time follow
-                ├─ 5–16 ms       → 路線 B：WebGL cable rendering（沿用 heatmap pattern）
-                │                  Routing 算法不動，只把畫的成本降到接近零
-                │                  工程估 1–3 天
-                └─ > 16 ms       → 路線 C：增量 routing（dirty / incremental Dijkstra）
-                                   + 視情況再加 WebGL cable
-                                   工程估 3–7 天 + 1–3 天
-```
-
-**決策依據**：
-- 16 ms 是 60fps 預算。Routing 跑得贏這個就還有空間給 paint。
-- 5 ms 是「即使有其他開銷（heatmap recompute、Konva paint、event handling）也仍有餘裕」的舒適區間。
-- 純 Konva 後 react-konva commit 成本歸零，`computeRoutes` 本身的 dijkstra × N 是否會成為瓶頸**目前無法預測**，必須實測才知道。
-
-**為什麼這個決定不在 Phase 24 / Phase 25 做**：
-- Phase 24（layer 拆 + Tray drag overlay）解掉的是「**操作不卡**」這個臨床問題。即使 cable 凍結，使用者操作體感是順的。
-- Phase 25（純 Konva）動的是渲染後端，跟 routing 算法正交。但純 Konva 後 routing 的 wall-clock 才有意義 —— 現在量到的 routing time 混合了 react-konva 開銷。
-- 在沒量測前選 B / C 都是預先優化。先做 Phase 25 → 量 → 看到底瓶頸在哪 → 對症下藥。
-
-**WebGL cable rendering 實作備忘**（路線 B 走時）：
-- 沿用 `src/features/heatmap/heatmapGL.js` 的 pattern：WebGL2 canvas → `Konva.Image` 掛在 cable layer
-- 需自寫的 shader：粗線（gl.LINES 不支援，要展三角形 strip）、dash pattern（fragment 沿線距離）、多色（per-vertex color attribute）、AA（smoothstep 邊緣）、focus halo（multi-pass）
-- 端點圓 / vertex marker 量少可留 Konva 原生 Circle
-- Hit-testing 不需要（cable layer 本來就 `listening=false`）
-
-**增量 routing 實作備忘**（路線 C 走時）：
-- Graph topology cache：trays + risers 結構（nodes + adjacency）跟 tray/riser 位置解耦；AP/SW 位置變動不重建 graph
-- Endpoint snap spatial index：R-tree 或 grid hash，O(log N) 取代 O(N²)
-- Per-AP single-source Dijkstra：拖一顆 AP 只重算這顆 AP
-- 拖 tray vertex：影響半徑內的 edge weight 更新，受影響 routes 重算
-- 拖 tray body（純平移）：所有 edge weight 不變（同條 tray 內部 chainage 不變），只更新 cable polyline 座標，不重跑 Dijkstra
-
----
-
-## 5. 風險與取捨
-
-### 5.1 層數預算
-
-8 層在現代硬體沒問題。若整合進主產品後在低階機器上發現 compositing 成本太高，最先合併的對象：
-
-- L7 Visual overlays + L8 Interactive handles 合併（兩者都是繪製中才有內容，可共存）。
-- L3 Structural 跟 L4 Trays 合併（Trays 編輯頻率不算高）。
-
-### 5.2 z-order 變動
-
-拆完後須確認以下視覺意圖維持：
-
-- Cable drop leg 末端 vs AP body —— 看 L5 在 L6 之上還是之下決定誰蓋誰。
-- Tray vertex handles vs AP / SW —— L8 必須在 L6 之上才能維持「選 tray 時 handles 不被裝置遮住」的現有行為（`CableTrayLayer.jsx` overlay 模式的設計意圖）。
-- Marquee Rect 在所有可選物件之上 —— L7 在 L6 之上（已滿足）。
-
-### 5.3 FloorImage listening 切換
-
-預設 `listening=false` 後，以下動作需要 Stage onClick 接管：
-
-- 點空白處取消選取（目前透過點 FloorImageLayer 的 Rect 觸發）。
-- 點空白處關閉 context menu。
-
-切到 `ALIGN_FLOOR` mode 時要把 listening 改回 true（拖曳對齊功能需要事件）。
-
-### 5.4 imperative 路徑
-
-Marquee 從獨立層併入 L7 後，現有的 `marqueeNodeRef.current.batchDraw()` 路徑要改成指向 L7 的 layer ref。L7 上有其他 React 管理的節點（badge / unroutable）時，imperative batchDraw 只 repaint canvas，不會跑 React reconcile，所以安全。但若未來加入 hover-driven 的 L7 元素（如 hover 顯示距離標尺），marquee 同時拖會雙倍 repaint，那時把 marquee 拆回獨立層。
-
----
-
-## 6. 驗收標準
-
-實作完 step 1 + 2 後：
-
-- [ ] SW + Tray + 50AP 場景下，拖 AP 流暢（目測 ≥ 30 fps）
-- [ ] SW + Tray + 50AP 場景下，拖 Switch 流暢
-- [ ] SW + Tray + 50AP 場景下，拖 Tray body 流暢
-- [ ] SW + Tray + 50AP 場景下，拖 Tray vertex 流暢
-- [ ] 拖曳結束後 cable 線正確 snap 到新位置（commit 行為不變）
-- [ ] 既有的 AP / SW dragOverlay 行為不變
-- [ ] 框選、繪製 tray、繪製 wall 等操作流程不受影響
-
-實作完 step 3–5 後額外：
-
-- [ ] 同樣 50AP 場景下拖 Wall / Scope 不受 cable / device 數量影響
-- [ ] 切 mode（DRAW_WALL / PLACE_AP 等）視覺上無 glitch
-
----
-
-## 7. 對應的程式碼變更點
-
-| step | 主要檔案 |
+| Worker task | 用途 |
 |---|---|
-| 1 | `src/features/editor/Editor2D.jsx`（行 1710–1947 拆 Layer） |
-| 2 | `src/features/editor/layers/CableTrayLayer.jsx`（onTranslate / onVertexDragMove）<br>`src/store/useDragOverlayStore.js`（新增 tray / trayVertex slot） |
-| 3 | `src/features/editor/Editor2D.jsx`（Layer 拆三） |
-| 4 | `src/features/editor/Editor2D.jsx`（再拆 visual / interactive）<br>各 Layer 元件內視覺 vs handle 分離 |
-| 5 | `src/features/editor/layers/FloorImageLayer.jsx`（listening 預設 false）<br>`src/features/editor/Editor2D.jsx`（Stage onClick 接 deselect） |
+| Spatial index build / query | R-tree, uniform grid |
+| Routing (Dijkstra) | 1000 AP × graph search |
+| Tile invalidation candidate | 哪些 tile 受影響 |
+| Candidate AP list per tile | shader 跑哪些 AP |
+| Geometry preprocessing | Wall sub-segment 切割（openings） |
+| Fallback / debug compute | 無 GPU 時降級路線 |
+
+**Worker 不做 RF heatmap field compute**。主 RF compute 永遠 GPU。
+
+### 3.14 Cross-cutting concerns
+
+#### 3.14.1 GPU memory budget
+- Hard budget：**< 200 MB**
+- Warning threshold：150 MB
+- 主要項目：heatmap tile textures、floor image、AP atlas、SDF font atlas、wall/cable mesh buffers、AP data texture、selection/overlay buffers
+- 超過時策略：heatmap tile LRU、降 tile resolution、釋放 offscreen buffers、wall/cable mesh LOD、隱藏遠 zoom label
+
+#### 3.14.2 Context loss / restore
+所有 custom Mesh / shader / texture layer 必須：
+- rebuild geometry buffers
+- re-upload textures
+- recreate shaders / pipelines
+- restore uniforms
+
+**驗證**：
+```js
+const ext = gl.getExtension('WEBGL_lose_context')
+ext.loseContext()
+// 驗證 Mesh / shader / texture / AP data / heatmap tiles / wall+cable buffers 全部復原
+// 視覺 0 diff 或 within tolerance
+// 互動仍可
+```
+納入 Phase 25 validation。
+
+#### 3.14.3 DPR（retina 螢幕）
+PixiJS auto-handles 整體 DPR，但自寫 shader 的 stroke width 公式要乘 DPR：
+```
+finalWidthPx = max(worldWidth * viewportScale, minPx) * devicePixelRatio
+```
+
+#### 3.14.4 Viewport transform 統一
+PixiJS layer、heatmap、hit-test、R-tree query 必須共用同一套 world ↔ screen transform。Zoom / pan 後 click、label、heatmap 對不準 = 這條沒守。
+
+#### 3.14.5 Fallback / unsupported browser
+```
+Primary:     WebGPU if available
+Fallback:    WebGL2
+Unsupported: 顯示 unsupported browser message
+             提供主產品 read-only / non-edit mode link（如有）
+```
+
+**不承諾 Canvas 2D fallback 可完整支援 planner**。Canvas 2D 最多 read-only snapshot / degraded preview。
+
+#### 3.14.6 Bundle size 預算
+- PixiJS v8 minimal：~190 KB gzip
+- 自寫 shader：~5 KB
+- SDF font atlas：50–200 KB
+- Floor textures、AP atlas
+- 整合進主產品時，floorplan 子模組總增量 ≈ 300–500 KB gzip
+
+### 3.15 Profiling metrics
+
+擴充既有 `scripts/perf/bench-harness.js`（Phase 20 26-1-base），新增：
+
+| Metric | 量哪裡 |
+|---|---|
+| Draw call count | per frame |
+| GPU frame time | requestAnimationFrame delta |
+| CPU render prep time | tick start → submit |
+| Buffer update time | mesh attribute upload |
+| Texture upload time | AP data / heatmap tile upload |
+| RF shader time | heatmap compute |
+| Tile invalidation time | Worker side |
+| Hit-test time | spatial query + precise test |
+| Label render time | text atlas blit |
+| Memory usage | GPU + CPU |
+| Shader compile time | one-time cold start |
+| Pipeline creation time | WebGPU pipeline |
+| Cold-start first render time | page load → first paint |
+| Idle FPS | 待機 |
+| Pan/zoom FPS | viewport stress |
+| AP dragging FPS | single AP drag |
+| Wall dragging FPS | single wall drag |
+| Heatmap dirty tile update FPS | drag AP 時 |
+| Operation latency p50 / p95 / p99 | per metric |
+
+**測試場景**至少包含：
+- 1000 AP
+- 5000 walls
+- 30000 cable segments
+- 1000+ labels
+- Heatmap dirty tile update
+- AP drag preview
+- Wall drag preview
+- Zoom / pan stress test
+
+### 3.16 Migration 策略：src → oldSrc
+
+```bash
+git mv src oldSrc
+mkdir src
+# 新 src/main.jsx 第一天就要有最小 PixiJS app 骨架
+```
+
+紀律：
+- 新 `/src` **嚴禁** import `/oldSrc`（破例就喪失乾淨重來意義）
+- `vite.config.js` `@` alias 維持 `./src`
+- `oldSrc/` 加 `.eslintignore` + vitest glob 排除
+- `index.html` 預設指 `/src/main.jsx`，所以新 `main.jsx` 必須立即存在
+
+**Migration 不可逆**：沒有「邊改邊跑舊版」的選項。第一週新 src 可能跑得很慘，要有心理準備。
+
+### 3.17 Layer 改寫順序
+
+由易到難（對應 `task.md` Layer 31）：
+1. PixiJS scaffold（Application、Container 階層、viewport）
+2. Store wiring（Zustand subscribe imperative）
+3. Heatmap 整合（既有 WebGL2 canvas → PIXI.Sprite）
+4. Walls Mesh + line shader
+5. Cables Mesh + dashed line shader
+6. Devices (AP sprite atlas + SW container + Riser sprite)
+7. Trays (Graphics + vertex handle)
+8. Scopes / FloorHoles / RefWall / RefVector
+9. Interactions (InteractionManager + spatial index hit-test)
+10. Overlays / Marquee / draft preview / SDF text
+11. Validation
+12. `oldSrc/` removal
+
+詳細 task ID 對應 `task.md` Layer 31。
+
+---
+
+## 4. Phase 26 — 條件式 follow-ups（Phase 25 完成後重評）
+
+Phase 25 PixiJS hybrid 落地後**先量測 routing + heatmap**，再依照結果走分支。對應 `task.md` Layer 32。
+
+### 4.1 Phase 24 凍結 cable 的解凍
+
+Phase 24 凍結 cable 是 Konva 環境的妥協。PixiJS Mesh + custom line shader 後，cable 渲染成本接近零。是否解凍取決於 `computeRoutes` 在 PixiJS 環境下的 wall-clock：
+
+```
+Phase 25 完成 → 量測 computeRoutes @ 50 AP / 1000 AP
+                ├─ < 5 ms/frame  → 路線 D：解凍 cable，dragmove 即時重算
+                ├─ 5–16 ms       → 路線 B：cable 已是 raw Mesh shader，僅 routing 是瓶頸 → 路線 C
+                └─ > 16 ms       → 路線 C：增量 routing（dirty / single-source Dijkstra）
+```
+
+**注意**：Phase 25 已將 cable 走 raw shader，所以原 Phase 26 路線 B（「加上 WebGL cable rendering」）**已併入 Phase 25**，不再是 Phase 26 task。剩下 Phase 26 真正要做的是「解凍 + 增量 routing」。
+
+### 4.2 增量 routing 實作備忘（路線 C）
+
+- **Graph topology cache**：trays + risers 結構（nodes + adjacency）跟 tray/riser 位置解耦；AP/SW 位置變動不重建 graph
+- **Endpoint snap spatial index**：R-tree / uniform grid，O(log N) 取代 O(N²)
+- **Per-AP single-source Dijkstra**：拖一顆 AP 只重算這顆 AP
+- **拖 tray vertex**：影響半徑內的 edge weight 更新，受影響 routes 重算
+- **拖 tray body（純平移）**：所有 edge weight 不變（同 tray 內 chainage 不變），只更新 cable polyline 座標，不跑 Dijkstra
+
+---
+
+## 5. 拍板決策 summary
+
+| 項目 | 決定 |
+|---|---|
+| Wall stroke width | `max(worldWidth × scale, 1) × DPR`，`maxPx` 預設不啟用，UI 切 real/symbolic |
+| Wall opening update | drag 中只更新拖中那條的 sub-segments，dragend commit；新增/刪除 wall 用 append + lazy compact |
+| Cable dash | screen-space distance，沿用 CableLayer.jsx 各 route 類型的 dash semantics |
+| AP data texture | K=4 row layout，整張重 upload（不 partial） |
+| Spatial index | AP/SW/Riser uniform grid；Wall/Tray/Scope/Hole R-tree；cell size world-space ≈ 50–100 screen-px equiv |
+| Hover state（wall）| `hoverWallId` uniform，不動 attribute buffer |
+| Selection (wall 大量) | mesh attribute partial upload |
+| Selection (wall 少量 / Tray / AP) | overlay Graphics |
+| Text | SDF / MSDF atlas（禁 PIXI.Text 大量用） |
+| Animation framework | `app.ticker` + 手寫 ease util（非 tween library） |
+| PixiJS version | v8，WebGPU preferred，WebGL2 fallback |
+| Shader 雙寫策略 | 第一版 GLSL only，PixiJS auto-fallback；第二版補 WGSL；第三版升 compute |
+| Worker 分工 | CPU-side（spatial / routing / tile invalidation），**不做 main RF compute** |
+| Touch | Phase 25 mouse-first，Phase 26 後評估 |
+| GPU memory | hard 200 MB，warning 150 MB |
+| Bundle 增量 | ~300–500 KB gzip |
+
+---
+
+## 6. 風險與不確定性
+
+| 風險 | 機率 | 影響 | 緩解 |
+|---|---|---|---|
+| PixiJS v8 + WebGPU 主產品瀏覽器不支援 | 中 | 高 | 自動 WebGL2 fallback，要驗主產品 target browser |
+| 自寫 wall / cable shader bugs（dash AA、邊緣 artifact）| 高 | 中 | 31-11 validation 視覺 8 場景對比 oldSrc |
+| 1000 AP heatmap fragment shader scale 撞 GPU 限制 | 中 | 高 | Tile-based + AP data texture 兜，再不行升 WebGPU compute |
+| Context loss 自寫 shader 沒復原好 | 中 | 中 | Validation 步驟強制測 |
+| Phase 25 工程超期 | 高 | 中 | 不可逆 migration，超期時 git rollback 回 Phase 24 + 重新評估 |
+| SDF text 工具鏈生疏 | 低 | 低 | preprocessing 一次性 |
+| 主產品 bundle 預算不夠 | 中 | 中 | 整合前 confirm 預算 |
+
+---
+
+## 7. 驗收標準
+
+### Phase 24（已完成）
+- [x] SW + Tray + 50AP 拖 AP / Switch / Tray body / Tray vertex 都流暢
+- [x] 拖曳結束 cable 線正確 snap 到新位置
+- [x] 既有 AP / SW dragOverlay 行為不變
+
+### Phase 25 PixiJS hybrid
+- [ ] 1000 AP / 5000 walls / 30000 cable segments / 1000+ labels 場景 idle FPS ≥ 30
+- [ ] AP drag / Wall drag / Pan / Zoom 操作 FPS ≥ 30
+- [ ] Heatmap dirty tile update 流暢（FPS ≥ 30 during drag）
+- [ ] 視覺對比 `oldSrc` 8 場景 diff < 5%（aliasing / dash / color tolerance）
+- [ ] 4 互動 regression（click / hover / 右鍵 / drag）全 pass
+- [ ] Context loss / restore 視覺 0 diff（or within tolerance）+ 互動仍 work
+- [ ] GPU memory < 200 MB
+- [ ] Cold-start first render < 3s
+- [ ] Profiling harness 完整跑過 p50/p95/p99 metric
+- [ ] Main 主產品整合接口（`<FloorplanSystem buildingData onSave>`）不變
+- [ ] `oldSrc/` 廢棄
+
+### Phase 26（條件式）
+- [ ] 量測產出 → 對應路線 C/D 完成後，拖 AP / SW / Tray 期 cable real-time follow（解凍）
+- [ ] 全部 Phase 24 凍結機制反向解掉
+
+---
+
+## 8. 對應變更點
+
+| Phase | 主要檔案 |
+|---|---|
+| 24 step 1+2（已 ship）| `Editor2D.jsx`、`CableTrayLayer.jsx`、`useDragOverlayStore.js` |
+| 25 整體 | **全 `/src` 改寫**（`src → oldSrc` rename）|
+| 25 入口 / 配置 | `vite.config.js`（alias 維持 `./src`）、`.eslintignore`（加 oldSrc）、`vitest.config.*`（排除 oldSrc）、`index.html`（指新 `/src/main.jsx`）、新 `package.json` 加 `pixi.js@^8` |
+| 25 自寫 shader | `src/render/shaders/wallLine.{glsl,wgsl}`、`src/render/shaders/cableDashed.{glsl,wgsl}` |
+| 25 整合 | 既有 `src/features/heatmap/heatmapGL.js` 不動，整合層 `src/render/heatmapAdapter.js` 套到 PIXI.Sprite |
+| 26 增量 routing | 重寫 `src/features/cable/computeRoutes.js`、新 `src/features/cable/buildGraphIncremental.js`、新 `src/features/cable/spatialIndex.js` |
+
+---
+
+## 9. 最終一句話
+
+> **PixiJS 管產品複雜度。Custom Mesh + shader 管 walls / cables 這種大量簡單幾何。GPU texture / shader 管 heatmap。Worker 管 CPU-side preparation，不管主 heatmap field compute。React 不管理 Pixi object lifecycle。所有高風險項目都要進 profiling / validation：memory、cold-start、operation FPS、context restore、fallback。**
