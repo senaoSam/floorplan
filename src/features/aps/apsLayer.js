@@ -1,23 +1,45 @@
-import { Container, Graphics, Circle } from 'pixi.js'
+import { Container, Graphics, Circle, Text, TextStyle } from 'pixi.js'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
 
-// AP markers adapter — Graphics circle per AP, interactive (pointer cursor
-// + click selects + drag moves). MVP fidelity: world-space radius (will
-// look bigger when zoomed in); no sprite atlas batching yet.
+// AP markers adapter — per-AP interactive Container with click select,
+// drag, hover, right-click context menu, frequency-colored marker, and
+// name label underneath. Per-band visibility (showAPBand) + master
+// showAPs handled by the layer's container.visible (master) + per-AP
+// container.visible (band filter).
 
 const FREQ_COLOR = {
   2.4: '#f39c12',
   5:   '#4fc3f7',
   6:   '#a855f7',
 }
+const FREQ_LABEL = {
+  2.4: '2.4G',
+  5:   '5G',
+  6:   '6G',
+}
 
 const FALLBACK_COLOR = '#9aa3ad'
 const colorForAP = (ap) => FREQ_COLOR[ap.frequency] ?? FALLBACK_COLOR
+const bandLabelForAP = (ap) => FREQ_LABEL[ap.frequency] ?? ''
 
 const AP_RADIUS = 9
 const DRAG_COMMIT_THRESHOLD_PX = 1
+const NAME_TEXT_STYLE = new TextStyle({
+  fill: '#ffffff',
+  fontFamily: 'system-ui, sans-serif',
+  fontSize: 11,
+  align: 'center',
+  stroke: { color: '#0b0d12', width: 3, join: 'round' },
+})
+const BAND_TEXT_STYLE = new TextStyle({
+  fill: '#0b0d12',
+  fontFamily: 'system-ui, sans-serif',
+  fontSize: 8,
+  fontWeight: '700',
+  align: 'center',
+})
 
 export function attachAPsLayer({ scene, useFloorStore, useAPStore }) {
   const layer = scene.layers.devicesAP
@@ -35,9 +57,18 @@ export function attachAPsLayer({ scene, useFloorStore, useAPStore }) {
       c.cursor = 'pointer'
       c.hitArea = new Circle(0, 0, AP_RADIUS + 4)
       const g = new Graphics()
+      const bandText = new Text({ text: '', style: BAND_TEXT_STYLE })
+      bandText.anchor.set(0.5)
+      bandText.eventMode = 'none'
+      const nameText = new Text({ text: '', style: NAME_TEXT_STYLE })
+      nameText.anchor.set(0.5, 0)
+      nameText.y = AP_RADIUS + 5
+      nameText.eventMode = 'none'
       c.addChild(g)
+      c.addChild(bandText)
+      c.addChild(nameText)
       layer.addChild(c)
-      entry = { container: c, graphics: g, ap, floorId }
+      entry = { container: c, graphics: g, bandText, nameText, ap, floorId }
       containers.set(ap.id, entry)
       bindInteractions(entry)
     } else {
@@ -56,15 +87,38 @@ export function attachAPsLayer({ scene, useFloorStore, useAPStore }) {
   }
 
   const drawAP = (entry, overrideX, overrideY) => {
-    const { graphics, ap } = entry
+    const { graphics, bandText, nameText, ap } = entry
     const x = overrideX ?? ap.x
     const y = overrideY ?? ap.y
     entry.container.position.set(x, y)
+
     graphics.clear()
     graphics
       .circle(0, 0, AP_RADIUS)
       .fill({ color: colorForAP(ap), alpha: 0.95 })
       .stroke({ width: 2, color: 0xffffff, alpha: 0.9 })
+
+    // Directional APs show a wedge in their broadcast direction. (Omni
+    // / custom skipped — omni doesn't need a direction hint and custom
+    // patterns need a per-pattern preview, deferred to its own bundle.)
+    if (ap.antennaMode === 'directional') {
+      const az = ((ap.azimuth ?? 0) - 90) * Math.PI / 180
+      const half = ((ap.beamwidth ?? 60) / 2) * Math.PI / 180
+      const r = AP_RADIUS + 12
+      graphics.moveTo(0, 0)
+        .lineTo(Math.cos(az - half) * r, Math.sin(az - half) * r)
+        .arc(0, 0, r, az - half, az + half, false)
+        .closePath()
+        .fill({ color: colorForAP(ap), alpha: 0.18 })
+    }
+
+    bandText.text = bandLabelForAP(ap)
+    nameText.text = ap.name ?? ''
+
+    // Per-band visibility filter (read fresh each draw so toggling in
+    // LayerToggle doesn't need its own subscription path).
+    const showAPBand = useEditorStore.getState().showAPBand
+    entry.container.visible = !!(showAPBand?.[ap.frequency] ?? true)
   }
 
   const bindInteractions = (entry) => {
@@ -164,15 +218,36 @@ export function attachAPsLayer({ scene, useFloorStore, useAPStore }) {
     }
   }
 
+  // Re-draw all when showAPBand changes so per-band visibility filter
+  // applies without restructuring the container tree. Tracked by ref so
+  // unrelated editor-store changes (selection / mode / hover) don't pay
+  // the full redraw cost on every set.
+  let lastShowAPBand = useEditorStore.getState().showAPBand
+  const redrawAll = () => {
+    const nextBand = useEditorStore.getState().showAPBand
+    if (nextBand === lastShowAPBand) return
+    lastShowAPBand = nextBand
+    for (const entry of containers.values()) {
+      const drag = useDragOverlayStore.getState().ap
+      if (drag && drag.id === entry.ap.id) {
+        drawAP(entry, drag.x, drag.y)
+      } else {
+        drawAP(entry)
+      }
+    }
+  }
+
   const unsubFloor = useFloorStore.subscribe(reconcile)
   const unsubAP = useAPStore.subscribe(reconcile)
   const unsubDrag = useDragOverlayStore.subscribe(applyDragOverlay)
+  const unsubEditor = useEditorStore.subscribe(redrawAll)
   reconcile()
 
   return () => {
     unsubFloor()
     unsubAP()
     unsubDrag()
+    unsubEditor()
     for (const id of Array.from(containers.keys())) removeContainer(id)
   }
 }

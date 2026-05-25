@@ -1,0 +1,115 @@
+@use '@/styles/variables' as *
+
+// Layer visibility panel (Phase 24 redesign).
+//   Header (eye + 圖層 + chevron) → toggles whole panel
+//   Body: 3 accordion groups (structure / wireless / cable)
+//     each group header → toggles that group
+//     group body → row buttons with eye / eye-off + label
+
+.layer-toggle
+  background: rgba(18, 18, 30, 0.90)
+  backdrop-filter: blur(8px)
+  border: 1px solid rgba(255, 255, 255, 0.12)
+  border-radius: 8px
+  min-width: 160px
+  user-select: none
+  font-size: 12px
+
+  &__header
+    display: flex
+    align-items: center
+    gap: 8px
+    width: 100%
+    padding: 7px 10px
+    background: transparent
+    border: none
+    border-radius: 8px
+    color: $text-secondary
+    cursor: pointer
+    transition: background 0.12s, color 0.12s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.06)
+      color: $text-primary
+
+  &__title
+    flex: 1 1 auto
+    text-align: left
+    font-size: 11px
+    font-weight: 600
+    text-transform: uppercase
+    letter-spacing: 0.4px
+
+  &__body
+    padding: 2px 4px 4px
+
+  // ── Group header (accordion control) ─────────────
+  &__group-header
+    display: flex
+    align-items: center
+    gap: 6px
+    width: 100%
+    padding: 6px 8px
+    margin: 2px 0
+    background: transparent
+    border: none
+    border-radius: 5px
+    color: $text-secondary
+    cursor: pointer
+    transition: background 0.12s, color 0.12s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.06)
+      color: $text-primary
+
+  &__group-label
+    flex: 1 1 auto
+    text-align: left
+    font-size: 11px
+    font-weight: 600
+    letter-spacing: 0.3px
+
+  &__group-body
+    padding: 2px 0 4px 4px
+    // Subtle indent guide so the group's items read as a unit.
+    border-left: 1px solid rgba(255, 255, 255, 0.06)
+    margin-left: 10px
+
+  // ── Visibility row (eye + label, full-width button) ──
+  &__row
+    display: flex
+    align-items: center
+    gap: 8px
+    width: 100%
+    padding: 4px 8px
+    background: transparent
+    border: none
+    border-radius: 4px
+    color: $text-primary
+    cursor: pointer
+    text-align: left
+    transition: background 0.12s, color 0.12s, opacity 0.15s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.06)
+
+    // Layer hidden — keep clickable, just look "off".
+    &--off
+      color: $text-secondary
+      opacity: 0.6
+
+    // Indented child row (e.g. AP 2.4/5/6, Switch kinds).
+    &--indent
+      padding-left: 18px
+
+    // Master is off — children dim to hint they're not currently rendered,
+    // but stay independently toggleable.
+    &--dim
+      opacity: 0.4
+
+      &.layer-toggle__row--off
+        opacity: 0.3
+
+  &__row-label
+    flex: 1 1 auto
+    font-size: 12px

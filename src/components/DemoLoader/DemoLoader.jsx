@@ -6,6 +6,7 @@ import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useCableStore, DEFAULT_TRAY } from '@/store/useCableStore'
 import { floorplanFromLines } from '@/utils/floorplanFromLines'
 import { generateId } from '@/utils/id'
+import Icon from '@/components/Icon/Icon'
 import './DemoLoader.sass'
 
 const DEMO_IMG_SRC  = import.meta.env.BASE_URL + 'sample-walls/example3.png'
@@ -164,7 +165,12 @@ function DemoLoader() {
       disabled={loading}
       title="再次點擊可新增另一個 Demo 樓層"
     >
-      {loading ? '載入中…' : '🗺 載入 Demo 平面圖'}
+      {loading ? (
+        <span className="demo-loader__spinner" />
+      ) : (
+        <Icon name="aiWalls" size={14} />
+      )}
+      <span>{loading ? '載入中…' : '載入 Demo 平面圖'}</span>
     </button>
   )
 }

@@ -28,6 +28,8 @@ export function bindViewport({
   store,
   onBackgroundClick,
   onMarqueeCommit,
+  onPlaceModeClick,
+  isPlaceMode,
 }) {
   const stage = app.stage
   stage.eventMode = 'static'
@@ -78,6 +80,15 @@ export function bindViewport({
       return
     }
     if (isBackground && button === 0) {
+      // Place modes (PLACE_AP / PLACE_SWITCH / PLACE_RISER) treat the
+      // background click as "drop here" instead of "marquee select".
+      if (typeof isPlaceMode === 'function' && isPlaceMode()) {
+        const wp = world.toLocal(e.global)
+        if (typeof onPlaceModeClick === 'function') {
+          onPlaceModeClick({ x: wp.x, y: wp.y })
+        }
+        return
+      }
       pendingDrag = {
         startGlobal: { x: e.global.x, y: e.global.y },
         startWorld: { ...world.toLocal(e.global) },

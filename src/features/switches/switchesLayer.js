@@ -4,9 +4,10 @@ import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
 
-// Switch chassis adapter — per-switch interactive Container with click
-// select + body drag + drag overlay. MVP fidelity: no port row / label /
-// hover halo. Full chassis decoration lands with the 31-7 spec rewrite.
+// Switch chassis adapter — per-switch interactive Container. Renders the
+// dark chassis with kind-coloured border, an LED corner dot, a row of
+// port pips along the bottom edge, and kind-specific decoration on the
+// top edge (IDF: one bar; MDF: two bars; Router: a short antenna mast).
 
 const CHASSIS_HEIGHT = 14
 const CHASSIS_WIDTH_BY_KIND = {
@@ -15,6 +16,8 @@ const CHASSIS_WIDTH_BY_KIND = {
   mdf:    44,
   router: 30,
 }
+const PORT_PIP_RADIUS = 0.85
+const MAX_PORT_PIPS = 24
 const DRAG_COMMIT_THRESHOLD_PX = 1
 
 export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
@@ -60,12 +63,44 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
     const h = CHASSIS_HEIGHT
     const color = getSwitchKindColor(kind)
     container.hitArea = new Rectangle(-w / 2 - 2, -h / 2 - 2, w + 4, h + 4)
+
     graphics.clear()
+
+    // Kind-specific decoration above the chassis: IDF=1 bar, MDF=2 bars,
+    // Router=a short antenna mast. Switch=nothing.
+    if (kind === 'idf') {
+      graphics.rect(-w / 2 + 3, -h / 2 - 3, w - 6, 1.5).fill({ color, alpha: 1 })
+    } else if (kind === 'mdf') {
+      graphics.rect(-w / 2 + 3, -h / 2 - 5, w - 6, 1.5).fill({ color, alpha: 1 })
+      graphics.rect(-w / 2 + 3, -h / 2 - 2.5, w - 6, 1.5).fill({ color, alpha: 1 })
+    } else if (kind === 'router') {
+      graphics.moveTo(0, -h / 2).lineTo(0, -h / 2 - 5)
+        .stroke({ width: 1.2, color, alpha: 1 })
+      graphics.circle(0, -h / 2 - 5.5, 1.4).fill({ color, alpha: 1 })
+    }
+
+    // Chassis body.
     graphics
       .rect(-w / 2, -h / 2, w, h)
       .fill({ color: 0x1f2937, alpha: 0.95 })
       .stroke({ width: 1.4, color, alpha: 1 })
+
+    // Status LED — top-left corner.
     graphics.circle(-w / 2 + 3, -h / 2 + 3, 1.5).fill({ color, alpha: 1 })
+
+    // Port pip row along the bottom edge.
+    const portCount = Math.min(sw.portCount ?? 8, MAX_PORT_PIPS)
+    if (portCount > 0) {
+      const inset = 3.5
+      const rowY = h / 2 - 3
+      const span = w - inset * 2
+      const gap = portCount > 1 ? span / (portCount - 1) : 0
+      const startX = -w / 2 + inset
+      for (let i = 0; i < portCount; i++) {
+        const px = portCount > 1 ? startX + gap * i : 0
+        graphics.circle(px, rowY, PORT_PIP_RADIUS).fill({ color: 0xfacc15, alpha: 0.85 })
+      }
+    }
   }
 
   const bindInteractions = (entry) => {

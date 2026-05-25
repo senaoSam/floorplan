@@ -9,6 +9,7 @@ import { attachTraysLayer } from '@/features/trays/traysLayer'
 import { attachCablesLayer } from '@/features/cables/cablesLayer'
 import { attachSelectionOverlay } from '@/features/selection/selectionOverlayLayer'
 import { attachHoverOverlay } from '@/features/selection/hoverOverlayLayer'
+import { bindLayerVisibility } from '@/render/layerVisibilityBinder'
 import { attachHeatmapLayer } from '@/render/heatmapAdapter'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useFloorStore } from '@/store/useFloorStore'
@@ -16,7 +17,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useCableStore } from '@/store/useCableStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
-import { useEditorStore } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import './FloorplanSystem.sass'
@@ -42,6 +43,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachHeatmap = null
     let detachSelection = null
     let detachHover = null
+    let detachLayerVisibility = null
     let cancelled = false
 
     initScene({ container: el }).then((s) => {
@@ -68,6 +70,63 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           useEditorStore.getState().setSelectedItems(
             inside.map((ap) => ({ id: ap.id, type: 'ap' })),
           )
+        },
+        isPlaceMode: () => {
+          const m = useEditorStore.getState().editorMode
+          return m === EDITOR_MODE.PLACE_AP
+              || m === EDITOR_MODE.PLACE_SWITCH
+              || m === EDITOR_MODE.PLACE_RISER
+        },
+        onPlaceModeClick: ({ x, y }) => {
+          const fid = useFloorStore.getState().activeFloorId
+          if (!fid) return
+          const editor = useEditorStore.getState()
+          const cable = useCableStore.getState()
+          if (editor.editorMode === EDITOR_MODE.PLACE_AP) {
+            const band = editor.placeApBand ?? 5
+            const channel = band === 2.4 ? 1 : band === 5 ? 36 : 1
+            const width = band === 2.4 ? 20 : 80
+            const ap = {
+              id: `ap-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+              name: useAPStore.getState().nextAPName(),
+              x, y, z: 2.4,
+              txPower: 20,
+              frequency: band,
+              channel, channelWidth: width,
+              antennaMode: 'omni', azimuth: 0, beamwidth: 60,
+              patternId: null, mountType: 'ceiling', modelId: null,
+              color: '#4fc3f7',
+            }
+            useAPStore.getState().addAP(fid, ap)
+            return
+          }
+          if (editor.editorMode === EDITOR_MODE.PLACE_SWITCH) {
+            const kind = editor.placeSwitchKind ?? 'switch'
+            cable.addSwitch(fid, {
+              id: `sw-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+              name: cable.nextSwitchName(kind),
+              x, y,
+              kind,
+              mountHeight: 0.5,
+              model: '',
+              portCount: 24,
+              poeBudget: kind === 'switch' ? 370 : 0,
+              uplinkTo: null,
+              cableType: 'auto',
+            })
+            return
+          }
+          if (editor.editorMode === EDITOR_MODE.PLACE_RISER) {
+            // Riser is global (cross-floor). For MVP just stash a single-
+            // floor entry on the active floor's id list.
+            cable.addRiser({
+              id: `riser-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+              name: typeof cable.nextRiserName === 'function' ? cable.nextRiserName() : `R-${Date.now() % 100}`,
+              x, y,
+              floorIds: [fid],
+              magnetDistance: 100,
+            })
+          }
         },
       })
       detachFloorImage = attachFloorImageLayer({
@@ -125,6 +184,10 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useCableStore,
         useEditorStore,
         useHoverStore,
+      })
+      detachLayerVisibility = bindLayerVisibility({
+        scene: s,
+        useEditorStore,
       })
       if (import.meta.env.DEV) {
         window.__pixiApp = s.app
@@ -193,6 +256,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     return () => {
       cancelled = true
       window.removeEventListener('keydown', onKeyDown)
+      if (detachLayerVisibility) detachLayerVisibility()
       if (detachHover) detachHover()
       if (detachSelection) detachSelection()
       if (detachHeatmap) detachHeatmap()

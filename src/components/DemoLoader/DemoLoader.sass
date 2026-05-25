@@ -1,7 +1,10 @@
 @use '@/styles/variables' as *
 
 .demo-loader
-  display: block
+  display: flex
+  align-items: center
+  justify-content: center
+  gap: 8px
   width: 100%
   padding: 8px 14px
   background: rgba(255, 255, 255, 0.06)
@@ -20,3 +23,15 @@
   &:disabled
     opacity: 0.5
     cursor: wait
+
+  &__spinner
+    width: 12px
+    height: 12px
+    border: 2px solid rgba(255, 255, 255, 0.2)
+    border-top-color: $text-primary
+    border-radius: 50%
+    animation: demo-loader-spin 0.7s linear infinite
+
+@keyframes demo-loader-spin
+  to
+    transform: rotate(360deg)

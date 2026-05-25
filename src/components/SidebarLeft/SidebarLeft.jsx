@@ -1,6 +1,7 @@
 import React from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
 import DemoLoader from '@/components/DemoLoader/DemoLoader'
+import StressLoader from '@/components/StressLoader/StressLoader'
 import './SidebarLeft.sass'
 
 // Slim Phase 25 sidebar: floor list + demo loader only.
@@ -45,6 +46,10 @@ function SidebarLeft() {
 
       <div className="sidebar-left__footer">
         <DemoLoader />
+        <div className="sidebar-left__stress-row">
+          <span className="sidebar-left__stress-label">Stress</span>
+          <StressLoader />
+        </div>
       </div>
     </aside>
   )

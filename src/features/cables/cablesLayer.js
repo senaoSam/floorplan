@@ -12,12 +12,15 @@ import { computeRoutes } from '@/features/cable/computeRoutes'
 // Mounted on scene.layers.cables which is set to eventMode='none' in
 // scene.js — cables stay purely visual.
 
-const COLOR_TRAY     = '#06b6d4'
-const COLOR_FALLBACK = '#9ca3af'
-const COLOR_UNROUTABLE = '#ef4444'
-const ROUTE_WIDTH = 1.6
-const DASH_ON  = 6
-const DASH_OFF = 4
+const COLOR_TRAY_COPPER  = '#06b6d4'  // solid cyan — AP-to-switch via tray, copper
+const COLOR_TRAY_FIBER   = '#f43f5e'  // dashed rose — fiber link via tray
+const COLOR_FALLBACK     = '#9ca3af'  // dashed pale grey — fallback Manhattan
+const COLOR_UNROUTABLE   = '#ef4444'
+const ROUTE_WIDTH        = 1.6
+const FALLBACK_DASH_ON   = 6
+const FALLBACK_DASH_OFF  = 4
+const FIBER_DASH_ON      = 12
+const FIBER_DASH_OFF     = 6
 
 function drawSolid(g, points, color, width) {
   if (!points || points.length < 2) return
@@ -99,9 +102,11 @@ export function attachCablesLayer({
       const poly = route.points
       if (!poly || poly.length < 2) continue
       if (route.routeStatus === 'fallback-manhattan') {
-        drawDashed(g, poly, COLOR_FALLBACK, ROUTE_WIDTH, DASH_ON, DASH_OFF)
+        drawDashed(g, poly, COLOR_FALLBACK, ROUTE_WIDTH, FALLBACK_DASH_ON, FALLBACK_DASH_OFF)
+      } else if (route.cableType === 'fiber') {
+        drawDashed(g, poly, COLOR_TRAY_FIBER, ROUTE_WIDTH, FIBER_DASH_ON, FIBER_DASH_OFF)
       } else {
-        drawSolid(g, poly, COLOR_TRAY, ROUTE_WIDTH)
+        drawSolid(g, poly, COLOR_TRAY_COPPER, ROUTE_WIDTH)
       }
     }
   }

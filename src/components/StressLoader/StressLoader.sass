@@ -1,0 +1,33 @@
+@use '@/styles/variables' as *
+
+// Inside SidebarLeft footer — laid out inline with the DemoLoader.
+.stress-loader
+  display: flex
+  flex: 1
+  gap: 4px
+
+  &--compact
+    flex-direction: column
+    gap: 4px
+
+.stress-loader__btn
+  flex: 1
+  height: 26px
+  padding: 0 6px
+  border: 1px solid $border-color
+  border-radius: 14px
+  background: rgba(255, 255, 255, 0.05)
+  color: $text-primary
+  font-family: inherit
+  font-size: 10px
+  cursor: pointer
+  white-space: nowrap
+  transition: border-color 0.2s, background 0.2s
+
+  &:hover:not(:disabled)
+    border-color: rgba(255, 255, 255, 0.4)
+    background: rgba(255, 255, 255, 0.10)
+
+  &:disabled
+    cursor: default
+    opacity: 0.4

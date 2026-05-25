@@ -4,13 +4,17 @@ import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
 
-// Cable tray adapter — per-tray Container with magnet halo + polyline body
-// + custom polyline hitArea. Click selects, drag moves the whole polyline
-// (vertex edit / channel border style still defer to 31-8).
+// Cable tray adapter — per-tray Container with magnet halo + channel
+// body + custom polyline hitArea. Phase 17-1 channel visual: two
+// parallel system-coloured border lines + dashed centreline + half-
+// transparent body fill between borders.
 
-const TRAY_LINE_WIDTH = 5
+const TRAY_CHANNEL_HALF_WIDTH = 3 // world-px from centreline to each border
+const TRAY_BORDER_WIDTH = 1.2
+const TRAY_CENTER_WIDTH = 0.8
+const TRAY_CENTER_DASH = [3, 3]
 const MAGNET_FILL = 'rgba(255, 255, 255, 0.06)'
-const HIT_TOLERANCE_PX = 8 // world-space; clicks within this of any segment hit
+const HIT_TOLERANCE_PX = 8
 const DRAG_COMMIT_THRESHOLD_PX = 1
 
 function drawPolylineStroke(g, points, opts) {
@@ -19,6 +23,78 @@ function drawPolylineStroke(g, points, opts) {
   for (let i = 1; i < points.length; i++) g.lineTo(points[i].x, points[i].y)
   g.stroke(opts)
 }
+
+// Per-segment perpendicular offset so we can draw two parallel border
+// polylines and a body fill that follows the tray's bends. Each segment
+// is drawn independently (corners not mitred — slight overlap at
+// vertices is fine at the chosen widths).
+function drawChannel(g, points, halfWidth, sysColor, fillColor) {
+  if (!points || points.length < 2) return
+  for (let i = 1; i < points.length; i++) {
+    const ax = points[i - 1].x
+    const ay = points[i - 1].y
+    const bx = points[i].x
+    const by = points[i].y
+    const dx = bx - ax
+    const dy = by - ay
+    const len = Math.hypot(dx, dy)
+    if (len <= 1e-9) continue
+    const nx = -dy / len
+    const ny = dx / len
+    const ox = nx * halfWidth
+    const oy = ny * halfWidth
+
+    // Body fill — quad between the two border lines.
+    g.poly([
+      ax + ox, ay + oy,
+      bx + ox, by + oy,
+      bx - ox, by - oy,
+      ax - ox, ay - oy,
+    ]).fill({ color: fillColor, alpha: 1 })
+
+    // Two parallel borders.
+    g.moveTo(ax + ox, ay + oy).lineTo(bx + ox, by + oy)
+      .stroke({ width: TRAY_BORDER_WIDTH, color: sysColor, alpha: 1, cap: 'round' })
+    g.moveTo(ax - ox, ay - oy).lineTo(bx - ox, by - oy)
+      .stroke({ width: TRAY_BORDER_WIDTH, color: sysColor, alpha: 1, cap: 'round' })
+  }
+}
+
+function drawDashedCenterline(g, points, dashOn, dashOff, width, color) {
+  if (!points || points.length < 2) return
+  let phaseOn = true
+  let remain = dashOn
+  let cx = points[0].x
+  let cy = points[0].y
+  for (let i = 1; i < points.length; i++) {
+    const tx = points[i].x
+    const ty = points[i].y
+    const len = Math.hypot(tx - cx, ty - cy)
+    if (len <= 1e-9) continue
+    const ux = (tx - cx) / len
+    const uy = (ty - cy) / len
+    let cursor = 0
+    while (cursor < len) {
+      const step = Math.min(len - cursor, remain)
+      const x1 = cx + ux * cursor
+      const y1 = cy + uy * cursor
+      const x2 = cx + ux * (cursor + step)
+      const y2 = cy + uy * (cursor + step)
+      if (phaseOn) {
+        g.moveTo(x1, y1).lineTo(x2, y2)
+          .stroke({ width, color, alpha: 1 })
+      }
+      cursor += step
+      remain -= step
+      if (remain <= 1e-9) {
+        phaseOn = !phaseOn
+        remain = phaseOn ? dashOn : dashOff
+      }
+    }
+    cx = tx; cy = ty
+  }
+}
+
 
 function pointToSegmentDistance(px, py, ax, ay, bx, by) {
   const dx = bx - ax
@@ -90,6 +166,7 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     const magnetPx = tray.magnetDistance ?? 100
     haloG.clear()
     bodyG.clear()
+
     drawPolylineStroke(haloG, tray.points, {
       width: magnetPx * 2,
       color: MAGNET_FILL,
@@ -97,13 +174,12 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
       cap: 'round',
       join: 'round',
     })
-    drawPolylineStroke(bodyG, tray.points, {
-      width: TRAY_LINE_WIDTH,
-      color: sys.color,
-      alpha: 1,
-      cap: 'round',
-      join: 'round',
-    })
+
+    // Channel — half-transparent body fill between two parallel borders
+    // plus a dashed centreline in the system colour (Phase 17-1).
+    drawChannel(bodyG, tray.points, TRAY_CHANNEL_HALF_WIDTH, sys.color, sys.fill)
+    drawDashedCenterline(bodyG, tray.points, TRAY_CENTER_DASH[0], TRAY_CENTER_DASH[1], TRAY_CENTER_WIDTH, sys.color)
+
     for (const p of tray.points) {
       bodyG.circle(p.x, p.y, 3).fill({ color: sys.color, alpha: 1 })
     }
