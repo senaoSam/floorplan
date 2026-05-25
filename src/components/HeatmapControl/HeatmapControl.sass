@@ -2,50 +2,119 @@
 
 .heatmap-control
   position: absolute
-  right: 12px
   bottom: 12px
-  z-index: 10
+  left: 12px
+  z-index: 400
   display: flex
   flex-direction: column
+  align-items: flex-start
   gap: 6px
-  padding: 10px 12px
-  background: rgba(15, 20, 25, 0.78)
-  border: 1px solid $border-color
-  border-radius: 6px
-  color: $text-primary
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif
-  font-size: 12px
-  user-select: none
+  pointer-events: auto
 
-.heatmap-control__row
-  display: flex
-  align-items: center
-  gap: 8px
+  &__row
+    display: flex
+    gap: 6px
+    align-items: center
 
-.heatmap-control__check
-  display: flex
-  align-items: center
-  gap: 6px
-  cursor: pointer
+  &__btn
+    display: flex
+    align-items: center
+    gap: 7px
+    height: 34px
+    padding: 0 14px
+    border: 1px solid rgba(255, 255, 255, 0.18)
+    border-radius: 17px
+    background: rgba(15, 52, 96, 0.85)
+    backdrop-filter: blur(6px)
+    color: $text-primary
+    font-size: 12px
+    cursor: pointer
+    white-space: nowrap
+    transition: border-color 0.2s, background 0.2s
 
-  input
+    &:hover
+      border-color: rgba(255, 255, 255, 0.4)
+      background: rgba(20, 65, 120, 0.9)
+
+    &--active
+      background: rgba(239, 68, 68, 0.85)
+      &:hover
+        background: rgba(220, 38, 38, 0.9)
+
+  &__dot
+    width: 8px
+    height: 8px
+    border-radius: 50%
+    background: conic-gradient(from 180deg, #ef4444, #f59e0b, #eab308, #84cc16, #22c55e, #ef4444)
+
+  &__more
+    height: 34px
+    padding: 0 10px
+    border: 1px solid rgba(255, 255, 255, 0.18)
+    border-radius: 17px
+    background: rgba(30, 41, 59, 0.85)
+    color: $text-primary
+    font-size: 11px
+    cursor: pointer
+    &:hover
+      background: rgba(51, 65, 85, 0.9)
+
+  &__mode
+    height: 34px
+    padding: 0 10px
+    border: 1px solid rgba(255, 255, 255, 0.18)
+    border-radius: 17px
+    background: rgba(30, 41, 59, 0.85)
+    color: $text-primary
+    font-size: 11px
+    font-weight: 600
+    cursor: pointer
+    outline: none
+    &:hover
+      background: rgba(51, 65, 85, 0.9)
+    option
+      background: #1e293b
+      color: $text-primary
+
+  &__panel
+    background: rgba(15, 23, 42, 0.95)
+    border: 1px solid rgba(255, 255, 255, 0.15)
+    border-radius: 10px
+    padding: 10px 12px
+    font-size: 11px
+    color: $text-primary
+    min-width: 240px
+    backdrop-filter: blur(6px)
+    display: flex
+    flex-direction: column
+    gap: 6px
+
+  &__line
+    display: flex
+    align-items: center
+    gap: 8px
+    color: #e2e8f0
+
+    span
+      flex-shrink: 0
+
+    input[type="range"]
+      flex: 1
+
+  &__select
+    flex: 1
+    padding: 4px 6px
+    background: rgba(255, 255, 255, 0.07)
+    border: 1px solid $border-color
+    border-radius: 5px
+    color: $text-primary
+    font-size: 12px
+    outline: none
     cursor: pointer
 
-.heatmap-control__label
-  min-width: 36px
-  color: $text-secondary
+    &:focus
+      border-color: $accent
 
-.heatmap-control__select
-  flex: 1
-  padding: 4px 6px
-  background: rgba(255, 255, 255, 0.06)
-  border: 1px solid $border-color
-  border-radius: 4px
-  color: $text-primary
-  font-family: inherit
-  font-size: 12px
-  cursor: pointer
-
-  &:disabled
-    opacity: 0.4
-    cursor: not-allowed
+    option
+      background: $bg-secondary
+      color: $text-primary

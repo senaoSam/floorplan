@@ -10,7 +10,6 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
-import ViewportHud from './ViewportHud'
 import './FloorplanSystem.sass'
 
 // Integration boundary the host product will mount. Owns the PIXI scene
@@ -88,7 +87,6 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
   return (
     <div className="floorplan-system">
       <div ref={containerRef} className="floorplan-system__canvas" />
-      {import.meta.env.DEV && <ViewportHud />}
     </div>
   )
 }
