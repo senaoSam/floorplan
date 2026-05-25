@@ -622,9 +622,9 @@ ship-able 妥協：解掉 SW+Tray+50AP 操作卡頓的臨床問題，cable 拖�
 
 | #     | 狀態 | Task | 估時 |
 |-------|------|------|------|
-| 31-0  | ⬜   | **預備動作** — `git mv src oldSrc`；新 `src/main.jsx` 最小 PixiJS app 骨架；安裝 `pixi.js@^8`；`.eslintignore` 加 `oldSrc/`；vitest config 排除 `oldSrc/**`；確認 `vite.config.js` `@` alias 仍指 `./src`；驗 dev server 起得來 | 1 天 |
-| 31-1  | ⬜   | **PIXI.Application + 八層 Container 階層 + viewport** — 對應 layer-architecture-spec.md §3.3 八層配置；viewport 處理 pan / zoom；DPR 設定；註冊 `WEBGL_lose_context` restore handler | 2 天 |
-| 31-2  | ⬜   | **Store wiring** — Zustand subscribe imperative 接到對應 Container；建立 layer-level update pattern（store 變動 → diff → mutate PixiJS object）；React 邊界明確 | 1 天 |
+| 31-0  | ✅   | **預備動作** — `src → oldSrc` 改名（user）；新 `src/main.jsx` React 17 mount → `<App>` → `<FloorplanSystem>`；安裝 `pixi.js@^8.18.1`；index.html / global sass 加 fullscreen reset。`.eslintignore` / vitest exclude 略過（repo 無這兩個 config）。Dev server boots clean、WebGPU renderer confirmed | 1 天 |
+| 31-1  | ✅   | **PIXI.Application + Container 階層 + viewport** — `src/render/scene.js` 12 named layer containers under single `world` Container（spec §3.3）；`src/render/viewport.js` wheel zoom + space/middle pan + cursor-anchor zoomAt + minScale/maxScale clamp；DPR + autoDensity；cables `eventMode='none'`。WEBGL_lose_context restore handler 留 31-4 shader 落地後一起做（裸 Container 沒 buffer 可丟） | 2 天 |
+| 31-2  | ✅   | **Store wiring** — `useViewportStore` 為 PIXI viewport 單一 source of truth；`useEditorStore` 帶 mode + selection 骨架（其他 slice 隨 layer 進場補回）；`bindViewport` imperative `store.subscribe(apply)` → mutate world.position/scale；React `<ViewportHud>` 同樣 subscribe 同 store 驗證雙端一致。Layer-level update pattern（store diff → mutate）留待 layer 進場時各自落地 | 1 天 |
 | 31-3  | ⬜   | **Heatmap 整合** — 既有 `heatmapGL.js` raw WebGL2 canvas 不動；新 `src/render/heatmapAdapter.js` 把 canvas 包成 `PIXI.Texture.from(canvas)` → PIXI.Sprite 掛 Layer 3；hover readout / colormap 行為保留 | 1 天 |
 | 31-4  | ⬜   | **Walls Mesh + line shader** — `src/render/shaders/wallLine.glsl.js`：vertex 展 quad、screen-space width + DPR、smoothstep AA、per-material color、`hoverWallId` uniform、`isSelected` per-vertex attribute；Opening 預切 sub-segments；drag-freeze + dragend commit；R-tree of wall AABBs for hit-test | 2-3 天 |
 | 31-5  | ⬜   | **Cables Mesh + dashed line shader** — `src/render/shaders/cableDashed.glsl.js`：基於 wall shader + dash pattern（screen-space distance）+ per-route color/dash semantics（沿用 CableLayer.jsx 各 route 類型）+ focus halo second pass；`eventMode='none'`（無 hit-test） | 2-3 天 |
