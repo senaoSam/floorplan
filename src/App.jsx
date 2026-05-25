@@ -1,8 +1,24 @@
 import React from 'react'
-import FloorplanSystem from '@/components/FloorplanSystem/FloorplanSystem'
+import TopBar from '@/components/TopBar/TopBar'
+import SidebarLeft from '@/components/SidebarLeft/SidebarLeft'
+import CanvasArea from '@/components/CanvasArea/CanvasArea'
+import PanelRight from '@/components/PanelRight/PanelRight'
+import '@/styles/App.sass'
 
+// Standalone-mode shell. The embeddable boundary is `<FloorplanSystem />`
+// (rendered inside CanvasArea); host integration replaces this shell with
+// the main product's own chrome.
 function App() {
-  return <FloorplanSystem />
+  return (
+    <div className="app">
+      <TopBar />
+      <div className="app__body">
+        <SidebarLeft />
+        <CanvasArea />
+        <PanelRight />
+      </div>
+    </div>
+  )
 }
 
 export default App

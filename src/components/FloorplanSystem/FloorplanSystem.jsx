@@ -11,12 +11,11 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import ViewportHud from './ViewportHud'
-import DemoLoader from '@/components/DemoLoader/DemoLoader'
-import HeatmapControl from '@/components/HeatmapControl/HeatmapControl'
 import './FloorplanSystem.sass'
 
-// Integration boundary the host product will mount. Props are accepted for
-// the future contract but not wired yet.
+// Integration boundary the host product will mount. Owns the PIXI scene
+// lifecycle + all layer adapters. External chrome (TopBar / SidebarLeft /
+// PanelRight / floating control panels) lives outside this component.
 function FloorplanSystem(/* { buildingData, onSave } */) {
   const containerRef = useRef(null)
 
@@ -89,9 +88,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
   return (
     <div className="floorplan-system">
       <div ref={containerRef} className="floorplan-system__canvas" />
-      <ViewportHud />
-      <DemoLoader />
-      <HeatmapControl />
+      {import.meta.env.DEV && <ViewportHud />}
     </div>
   )
 }

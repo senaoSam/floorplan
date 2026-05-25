@@ -1,0 +1,73 @@
+@use '@/styles/variables' as *
+
+.sidebar-left
+  width: $sidebar-width
+  height: 100%
+  background: $bg-secondary
+  border-right: 1px solid $border-color
+  display: flex
+  flex-direction: column
+  flex-shrink: 0
+  overflow-y: auto
+
+  &__section
+    padding: 8px 0
+    border-bottom: 1px solid $border-color
+
+  &__section-header
+    display: flex
+    align-items: center
+    justify-content: space-between
+    padding: 4px 12px 6px
+    font-size: 11px
+    font-weight: 600
+    color: $text-secondary
+    text-transform: uppercase
+    letter-spacing: 0.5px
+
+  &__section-count
+    color: rgba(255, 255, 255, 0.4)
+    font-weight: 500
+
+  &__empty
+    padding: 12px
+    color: rgba(255, 255, 255, 0.4)
+    font-size: 12px
+    text-align: center
+
+  &__floor-list
+    list-style: none
+    margin: 0
+    padding: 0
+
+  &__floor-row
+    width: 100%
+    display: flex
+    align-items: center
+    justify-content: space-between
+    padding: 8px 12px
+    border: none
+    background: transparent
+    color: $text-primary
+    font-family: inherit
+    font-size: 13px
+    cursor: pointer
+    transition: background 0.12s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.05)
+
+    &--active
+      background: rgba($accent, 0.18)
+      color: $accent
+
+  &__floor-name
+    font-weight: 600
+
+  &__floor-meta
+    color: $text-secondary
+    font-size: 11px
+
+  &__footer
+    margin-top: auto
+    padding: 12px
