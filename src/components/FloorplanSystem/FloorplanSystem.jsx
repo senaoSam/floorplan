@@ -7,6 +7,7 @@ import { attachAPsLayer } from '@/features/aps/apsLayer'
 import { attachSwitchesLayer } from '@/features/switches/switchesLayer'
 import { attachTraysLayer } from '@/features/trays/traysLayer'
 import { attachCablesLayer } from '@/features/cables/cablesLayer'
+import { attachSelectionOverlay } from '@/features/selection/selectionOverlayLayer'
 import { attachHeatmapLayer } from '@/render/heatmapAdapter'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useFloorStore } from '@/store/useFloorStore'
@@ -14,6 +15,8 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useCableStore } from '@/store/useCableStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
+import { useEditorStore } from '@/store/useEditorStore'
+import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import './FloorplanSystem.sass'
 
 // Integration boundary the host product will mount. Owns the PIXI scene
@@ -35,6 +38,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachTrays = null
     let detachCables = null
     let detachHeatmap = null
+    let detachSelection = null
     let cancelled = false
 
     initScene({ container: el }).then((s) => {
@@ -44,9 +48,11 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       }
       scene = s
       detachViewport = bindViewport({
+        app: s.app,
         canvas: s.app.canvas,
         world: s.world,
         store: useViewportStore,
+        onBackgroundClick: () => useEditorStore.getState().clearSelected(),
       })
       detachFloorImage = attachFloorImageLayer({
         scene: s,
@@ -86,14 +92,44 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useAPStore,
         useHeatmapStore,
       })
+      detachSelection = attachSelectionOverlay({
+        scene: s,
+        useFloorStore,
+        useAPStore,
+        useEditorStore,
+        useDragOverlayStore,
+      })
       if (import.meta.env.DEV) {
         window.__pixiApp = s.app
         window.__scene = s
       }
     })
 
+    const onKeyDown = (e) => {
+      // Don't fire while typing in inputs/textareas (e.g. AP name field).
+      const tag = e.target.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
+      if (e.key === 'Escape') {
+        useEditorStore.getState().clearSelected()
+        return
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const { selectedId, selectedType, clearSelected } = useEditorStore.getState()
+        if (!selectedId) return
+        const fid = useFloorStore.getState().activeFloorId
+        if (selectedType === 'ap' && fid) {
+          useAPStore.getState().removeAP(fid, selectedId)
+          clearSelected()
+        }
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+
     return () => {
       cancelled = true
+      window.removeEventListener('keydown', onKeyDown)
+      if (detachSelection) detachSelection()
       if (detachHeatmap) detachHeatmap()
       if (detachCables) detachCables()
       if (detachTrays) detachTrays()

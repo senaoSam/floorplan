@@ -1,31 +1,78 @@
-// Wires pointer + wheel events on the PIXI canvas to a viewport store, and
+// Wires pointer + wheel events on the PIXI scene to a viewport store, and
 // imperatively applies store updates back to the world Container transform.
 // Store is the single source of truth; events write through it.
 //
-// Bindings:
-//   wheel             → zoomAt(cursor, factor)
-//   middle-drag       → pan
-//   space + any drag  → pan
+// Pan / select responsibility split:
+//   * Pan triggers — middle-button on stage / left-button on stage with
+//     space held / middle-button anywhere on canvas.
+//   * Left-button on a child that calls e.stopPropagation() bypasses the
+//     stage handler entirely — that's how the AP markers (and later wall /
+//     switch / tray hit-areas) claim a click without panning.
+//   * Left-button on stage background → onBackgroundClick callback. The
+//     FloorplanSystem wires this to clearSelected.
 //
-// Returns a destroy() that detaches every listener.
+// Wheel + space keyboard stay on canvas/window because they aren't routed
+// through PIXI's federated event system.
 
 const ZOOM_PER_NOTCH = 1.1
 
-export function bindViewport({ canvas, world, store }) {
+export function bindViewport({ app, canvas, world, store, onBackgroundClick }) {
+  const stage = app.stage
+  stage.eventMode = 'static'
+  stage.hitArea = app.screen
+
   let spaceDown = false
   let panActive = false
   let panLastX = 0
   let panLastY = 0
-  let panPointerId = null
 
   const apply = (s) => {
     world.position.set(s.x, s.y)
     world.scale.set(s.scale, s.scale)
   }
   apply(store.getState())
-
   const unsubscribe = store.subscribe(apply)
 
+  // ── pointer (pan + background click) ─────────────────────────────────
+  const onStageDown = (e) => {
+    const isBackground = e.target === stage
+    const button = e.button ?? 0
+    const isMiddle = button === 1
+    const isLeftPan = button === 0 && spaceDown
+    const wantPan = isMiddle || isLeftPan
+    if (wantPan) {
+      panActive = true
+      panLastX = e.global.x
+      panLastY = e.global.y
+      stage.cursor = 'grabbing'
+      return
+    }
+    if (isBackground && button === 0 && typeof onBackgroundClick === 'function') {
+      onBackgroundClick()
+    }
+  }
+
+  const onStageMove = (e) => {
+    if (!panActive) return
+    const dx = e.global.x - panLastX
+    const dy = e.global.y - panLastY
+    panLastX = e.global.x
+    panLastY = e.global.y
+    store.getState().panBy(dx, dy)
+  }
+
+  const onStageUp = () => {
+    if (!panActive) return
+    panActive = false
+    stage.cursor = spaceDown ? 'grab' : ''
+  }
+
+  stage.on('pointerdown', onStageDown)
+  stage.on('pointermove', onStageMove)
+  stage.on('pointerup', onStageUp)
+  stage.on('pointerupoutside', onStageUp)
+
+  // ── wheel zoom (still on canvas — no federated wheel event) ──────────
   const onWheel = (e) => {
     e.preventDefault()
     const rect = canvas.getBoundingClientRect()
@@ -34,80 +81,36 @@ export function bindViewport({ canvas, world, store }) {
     const factor = e.deltaY < 0 ? ZOOM_PER_NOTCH : 1 / ZOOM_PER_NOTCH
     store.getState().zoomAt(sx, sy, factor)
   }
+  canvas.addEventListener('wheel', onWheel, { passive: false })
 
-  const startPan = (e) => {
-    panActive = true
-    panLastX = e.clientX
-    panLastY = e.clientY
-    panPointerId = e.pointerId
-    try { canvas.setPointerCapture(e.pointerId) } catch { /* noop */ }
-  }
-
-  const stopPan = (e) => {
-    if (!panActive) return
-    panActive = false
-    if (panPointerId != null) {
-      try { canvas.releasePointerCapture(panPointerId) } catch { /* noop */ }
-      panPointerId = null
-    }
-  }
-
-  const onPointerDown = (e) => {
-    const isMiddle = e.button === 1
-    const isSpacePan = spaceDown && (e.button === 0 || e.button === 1)
-    if (isMiddle || isSpacePan) {
-      e.preventDefault()
-      startPan(e)
-    }
-  }
-
-  const onPointerMove = (e) => {
-    if (!panActive) return
-    const dx = e.clientX - panLastX
-    const dy = e.clientY - panLastY
-    panLastX = e.clientX
-    panLastY = e.clientY
-    store.getState().panBy(dx, dy)
-  }
-
-  const onPointerUp = (e) => stopPan(e)
-  const onPointerCancel = (e) => stopPan(e)
-
+  // ── space-to-pan keyboard ────────────────────────────────────────────
   const onKeyDown = (e) => {
     if (e.code === 'Space' && !e.repeat) {
       spaceDown = true
-      canvas.style.cursor = 'grab'
+      stage.cursor = panActive ? 'grabbing' : 'grab'
     }
   }
   const onKeyUp = (e) => {
     if (e.code === 'Space') {
       spaceDown = false
-      canvas.style.cursor = ''
+      stage.cursor = panActive ? 'grabbing' : ''
     }
   }
-
-  const onContextMenu = (e) => {
-    // Middle-button pan is fine, but right-click should not open the browser
-    // menu inside the canvas.
-    e.preventDefault()
-  }
-
-  canvas.addEventListener('wheel', onWheel, { passive: false })
-  canvas.addEventListener('pointerdown', onPointerDown)
-  canvas.addEventListener('pointermove', onPointerMove)
-  canvas.addEventListener('pointerup', onPointerUp)
-  canvas.addEventListener('pointercancel', onPointerCancel)
-  canvas.addEventListener('contextmenu', onContextMenu)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
 
+  // Suppress browser context menu on canvas right-click (right-click is
+  // reserved for the object context menu, ported in a later bundle).
+  const onContextMenu = (e) => e.preventDefault()
+  canvas.addEventListener('contextmenu', onContextMenu)
+
   return () => {
     unsubscribe()
+    stage.off('pointerdown', onStageDown)
+    stage.off('pointermove', onStageMove)
+    stage.off('pointerup', onStageUp)
+    stage.off('pointerupoutside', onStageUp)
     canvas.removeEventListener('wheel', onWheel)
-    canvas.removeEventListener('pointerdown', onPointerDown)
-    canvas.removeEventListener('pointermove', onPointerMove)
-    canvas.removeEventListener('pointerup', onPointerUp)
-    canvas.removeEventListener('pointercancel', onPointerCancel)
     canvas.removeEventListener('contextmenu', onContextMenu)
     window.removeEventListener('keydown', onKeyDown)
     window.removeEventListener('keyup', onKeyUp)
