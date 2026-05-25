@@ -1,15 +1,15 @@
 import React, { useEffect, useRef } from 'react'
-import { Graphics } from 'pixi.js'
 import { initScene } from '@/render/scene'
 import { bindViewport } from '@/render/viewport'
+import { attachFloorImageLayer } from '@/features/floorImage/floorImageLayer'
 import { useViewportStore } from '@/store/useViewportStore'
-import { useEditorStore } from '@/store/useEditorStore'
+import { useFloorStore } from '@/store/useFloorStore'
 import ViewportHud from './ViewportHud'
+import DemoLoader from '@/components/DemoLoader/DemoLoader'
 import './FloorplanSystem.sass'
 
 // Integration boundary the host product will mount. Props are accepted for
-// the future contract but not wired yet — 31-1/31-2 just brings up the PIXI
-// scene + viewport + store wiring.
+// the future contract but not wired yet.
 function FloorplanSystem(/* { buildingData, onSave } */) {
   const containerRef = useRef(null)
 
@@ -19,6 +19,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
 
     let scene = null
     let detachViewport = null
+    let detachFloorImage = null
     let cancelled = false
 
     initScene({ container: el }).then((s) => {
@@ -32,7 +33,11 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         world: s.world,
         store: useViewportStore,
       })
-      addScaffoldGrid(s)
+      detachFloorImage = attachFloorImageLayer({
+        scene: s,
+        useFloorStore,
+        useViewportStore,
+      })
       if (import.meta.env.DEV) {
         window.__pixiApp = s.app
         window.__scene = s
@@ -41,6 +46,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
 
     return () => {
       cancelled = true
+      if (detachFloorImage) detachFloorImage()
       if (detachViewport) detachViewport()
       if (scene) scene.destroy()
       if (import.meta.env.DEV) {
@@ -54,31 +60,9 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     <div className="floorplan-system">
       <div ref={containerRef} className="floorplan-system__canvas" />
       <ViewportHud />
+      <DemoLoader />
     </div>
   )
-}
-
-// Temporary visual scaffold so 31-1/31-2 viewport pan/zoom is verifiable in
-// the browser. Removed once real layers (floor image, walls, …) populate.
-function addScaffoldGrid(scene) {
-  const g = new Graphics()
-  const step = 100
-  const extent = 2000
-
-  for (let i = -extent; i <= extent; i += step) {
-    g.moveTo(i, -extent).lineTo(i, extent)
-    g.moveTo(-extent, i).lineTo(extent, i)
-  }
-  g.stroke({ width: 1, color: 0x223040, alpha: 1 })
-
-  g.moveTo(-extent, 0).lineTo(extent, 0)
-  g.stroke({ width: 2, color: 0x4a5e75, alpha: 1 })
-  g.moveTo(0, -extent).lineTo(0, extent)
-  g.stroke({ width: 2, color: 0x4a5e75, alpha: 1 })
-
-  g.circle(0, 0, 6).fill(0xf39c12)
-
-  scene.layers.floorImage.addChild(g)
 }
 
 export default FloorplanSystem
