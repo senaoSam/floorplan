@@ -96,6 +96,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         scene: s,
         useFloorStore,
         useAPStore,
+        useWallStore,
+        useCableStore,
         useEditorStore,
         useDragOverlayStore,
       })
@@ -118,8 +120,18 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         const { selectedId, selectedType, clearSelected } = useEditorStore.getState()
         if (!selectedId) return
         const fid = useFloorStore.getState().activeFloorId
-        if (selectedType === 'ap' && fid) {
+        if (!fid) return
+        if (selectedType === 'ap') {
           useAPStore.getState().removeAP(fid, selectedId)
+          clearSelected()
+        } else if (selectedType === 'wall') {
+          useWallStore.getState().removeWall(fid, selectedId)
+          clearSelected()
+        } else if (selectedType === 'switch') {
+          useCableStore.getState().removeSwitch(fid, selectedId)
+          clearSelected()
+        } else if (selectedType === 'cable_tray') {
+          useCableStore.getState().removeTray(fid, selectedId)
           clearSelected()
         }
       }

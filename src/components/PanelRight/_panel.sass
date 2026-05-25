@@ -1,0 +1,82 @@
+@use '@/styles/variables' as *
+
+// Shared panel chrome for the object property panels (AP / Switch /
+// Tray / Wall …). New panels use these classes verbatim; APPanel kept
+// its own ap-panel-prefixed CSS for now until consolidated.
+
+.obj-panel
+  display: flex
+  flex-direction: column
+  height: 100%
+
+  &__header
+    display: flex
+    align-items: center
+    gap: 10px
+    padding: 12px 14px
+    border-bottom: 1px solid $border-color
+
+  &__title
+    flex: 1
+    font-size: 13px
+    font-weight: 700
+    color: $text-primary
+
+  &__delete
+    padding: 3px 10px
+    border: 1px solid rgba(231, 76, 60, 0.4)
+    border-radius: 4px
+    background: transparent
+    color: #e74c3c
+    font-size: 11px
+    cursor: pointer
+
+    &:hover
+      background: rgba(231, 76, 60, 0.12)
+
+  &__section
+    padding: 10px 14px
+    border-bottom: 1px solid $border-color
+    display: flex
+    flex-direction: column
+    gap: 6px
+
+  &__section-title
+    font-size: 11px
+    font-weight: 600
+    color: $text-secondary
+    text-transform: uppercase
+    letter-spacing: 0.4px
+    margin-bottom: 2px
+
+  &__field
+    display: flex
+    flex-direction: column
+    gap: 3px
+    color: $text-secondary
+    font-size: 11px
+
+    input, select, textarea
+      padding: 4px 6px
+      background: rgba(255, 255, 255, 0.06)
+      border: 1px solid $border-color
+      border-radius: 4px
+      color: $text-primary
+      font-family: inherit
+      font-size: 12px
+      outline: none
+
+      &:focus
+        border-color: $accent
+
+    &--readonly
+      input
+        opacity: 0.7
+        cursor: default
+
+  &__row
+    display: flex
+    gap: 8px
+
+    .obj-panel__field
+      flex: 1
