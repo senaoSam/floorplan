@@ -2,8 +2,12 @@ import React, { useEffect, useRef } from 'react'
 import { initScene } from '@/render/scene'
 import { bindViewport } from '@/render/viewport'
 import { attachFloorImageLayer } from '@/features/floorImage/floorImageLayer'
+import { attachWallsLayer } from '@/features/walls/wallsLayer'
+import { attachAPsLayer } from '@/features/aps/apsLayer'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useFloorStore } from '@/store/useFloorStore'
+import { useWallStore } from '@/store/useWallStore'
+import { useAPStore } from '@/store/useAPStore'
 import ViewportHud from './ViewportHud'
 import DemoLoader from '@/components/DemoLoader/DemoLoader'
 import './FloorplanSystem.sass'
@@ -20,6 +24,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let scene = null
     let detachViewport = null
     let detachFloorImage = null
+    let detachWalls = null
+    let detachAPs = null
     let cancelled = false
 
     initScene({ container: el }).then((s) => {
@@ -38,6 +44,16 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useFloorStore,
         useViewportStore,
       })
+      detachWalls = attachWallsLayer({
+        scene: s,
+        useFloorStore,
+        useWallStore,
+      })
+      detachAPs = attachAPsLayer({
+        scene: s,
+        useFloorStore,
+        useAPStore,
+      })
       if (import.meta.env.DEV) {
         window.__pixiApp = s.app
         window.__scene = s
@@ -46,6 +62,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
 
     return () => {
       cancelled = true
+      if (detachAPs) detachAPs()
+      if (detachWalls) detachWalls()
       if (detachFloorImage) detachFloorImage()
       if (detachViewport) detachViewport()
       if (scene) scene.destroy()
