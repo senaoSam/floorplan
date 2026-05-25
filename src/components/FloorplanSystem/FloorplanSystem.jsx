@@ -13,6 +13,7 @@ import { attachScopesLayer } from '@/features/scopes/scopesLayer'
 import { attachFloorHolesLayer } from '@/features/floorHoles/floorHolesLayer'
 import { bindLayerVisibility } from '@/render/layerVisibilityBinder'
 import { attachHeatmapLayer } from '@/render/heatmapAdapter'
+import { bindHeatmapHover } from '@/render/heatmapHoverBinder'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
@@ -24,6 +25,7 @@ import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
+import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
 import './FloorplanSystem.sass'
 
 // Integration boundary the host product will mount. Owns the PIXI scene
@@ -50,6 +52,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachLayerVisibility = null
     let detachScopes = null
     let detachFloorHoles = null
+    let detachHeatmapHover = null
     let cancelled = false
 
     initScene({ container: el }).then((s) => {
@@ -205,6 +208,14 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useFloorStore,
         useFloorHoleStore,
       })
+      detachHeatmapHover = bindHeatmapHover({
+        scene: s,
+        useFloorStore,
+        useWallStore,
+        useAPStore,
+        useHeatmapStore,
+        useHoverReadoutStore,
+      })
       if (import.meta.env.DEV) {
         window.__pixiApp = s.app
         window.__scene = s
@@ -220,6 +231,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           hover: useHoverStore,
           scope: useScopeStore,
           hole: useFloorHoleStore,
+          hoverReadout: useHoverReadoutStore,
         }
       }
     })
@@ -275,6 +287,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       cancelled = true
       window.removeEventListener('keydown', onKeyDown)
       if (detachLayerVisibility) detachLayerVisibility()
+      if (detachHeatmapHover) detachHeatmapHover()
       if (detachFloorHoles) detachFloorHoles()
       if (detachScopes) detachScopes()
       if (detachHover) detachHover()

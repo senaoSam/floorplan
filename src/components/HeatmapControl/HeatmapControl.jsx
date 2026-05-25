@@ -1,7 +1,22 @@
 import React, { useState } from 'react'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
+import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
 import { HEATMAP_MODE_LIST, getModeConfig } from '@/features/heatmap/modes'
+import HeatmapLegend from './HeatmapLegend'
 import './HeatmapControl.sass'
+
+function hoverValueForMode(hover, mode) {
+  if (!hover) return undefined
+  switch (mode) {
+    case 'sinr': return hover.sinrDb
+    case 'snr':  return hover.snrDb
+    case 'cci':  return hover.cciDbm
+    case 'rssi':
+    default:     return hover.rssiDbm
+  }
+}
+
+const formatReading = (v, unit) => isFinite(v) ? `${v.toFixed(1)} ${unit}` : '—'
 
 // Phase 25 port — same layout / positioning as oldSrc HeatmapControl (pill
 // row pinned bottom-left of the canvas area). Hover readout + HeatmapLegend
@@ -27,11 +42,38 @@ function HeatmapControl() {
   const dragMode     = useHeatmapStore((s) => s.dragMode)
   const setDragMode  = useHeatmapStore((s) => s.setDragMode)
 
+  const hover = useHoverReadoutStore((s) => s.reading)
+
   const [panelOpen, setPanelOpen] = useState(false)
   const activeCfg = getModeConfig(mode)
+  const hoverValue = hoverValueForMode(hover, mode)
 
   return (
     <div className="heatmap-control">
+      {enabled && hover && (
+        <div className="heatmap-control__readout">
+          <div className="heatmap-control__readout-row">
+            <b>RSSI</b> <span>{formatReading(hover.rssiDbm, 'dBm')}</span>
+          </div>
+          <div className="heatmap-control__readout-row">
+            <b>SINR</b> <span>{formatReading(hover.sinrDb, 'dB')}</span>
+          </div>
+          <div className="heatmap-control__readout-row">
+            <b>SNR</b> <span>{formatReading(hover.snrDb, 'dB')}</span>
+          </div>
+          <div className="heatmap-control__readout-row">
+            <b>CCI</b> <span>{formatReading(hover.cciDbm, 'dBm')}</span>
+          </div>
+          <div className="heatmap-control__readout-row heatmap-control__readout-pos">
+            ({hover.at.x.toFixed(2)}, {hover.at.y.toFixed(2)}) m
+          </div>
+        </div>
+      )}
+
+      {enabled && (
+        <HeatmapLegend mode={mode} hoverValue={hoverValue} />
+      )}
+
       <div className="heatmap-control__row">
         <button
           type="button"

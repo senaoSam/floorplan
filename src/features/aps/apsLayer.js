@@ -40,6 +40,15 @@ const BAND_TEXT_STYLE = new TextStyle({
   fontWeight: '700',
   align: 'center',
 })
+const INFO_TEXT_STYLE = new TextStyle({
+  fill: '#ffffff',
+  fontFamily: 'system-ui, sans-serif',
+  fontSize: 9,
+  align: 'center',
+  lineHeight: 11,
+  stroke: { color: '#0b0d12', width: 3, join: 'round' },
+})
+const FREQ_LABEL_LONG = { 2.4: '2.4G', 5: '5G', 6: '6G' }
 
 export function attachAPsLayer({ scene, useFloorStore, useAPStore }) {
   const layer = scene.layers.devicesAP
@@ -64,11 +73,17 @@ export function attachAPsLayer({ scene, useFloorStore, useAPStore }) {
       nameText.anchor.set(0.5, 0)
       nameText.y = AP_RADIUS + 5
       nameText.eventMode = 'none'
+      const infoText = new Text({ text: '', style: INFO_TEXT_STYLE })
+      infoText.anchor.set(0.5, 0)
+      infoText.y = AP_RADIUS + 18
+      infoText.eventMode = 'none'
+      infoText.visible = false
       c.addChild(g)
       c.addChild(bandText)
       c.addChild(nameText)
+      c.addChild(infoText)
       layer.addChild(c)
-      entry = { container: c, graphics: g, bandText, nameText, ap, floorId }
+      entry = { container: c, graphics: g, bandText, nameText, infoText, ap, floorId }
       containers.set(ap.id, entry)
       bindInteractions(entry)
     } else {
@@ -87,7 +102,7 @@ export function attachAPsLayer({ scene, useFloorStore, useAPStore }) {
   }
 
   const drawAP = (entry, overrideX, overrideY) => {
-    const { graphics, bandText, nameText, ap } = entry
+    const { graphics, bandText, nameText, infoText, ap } = entry
     const x = overrideX ?? ap.x
     const y = overrideY ?? ap.y
     entry.container.position.set(x, y)
@@ -115,10 +130,15 @@ export function attachAPsLayer({ scene, useFloorStore, useAPStore }) {
     bandText.text = bandLabelForAP(ap)
     nameText.text = ap.name ?? ''
 
-    // Per-band visibility filter (read fresh each draw so toggling in
-    // LayerToggle doesn't need its own subscription path).
-    const showAPBand = useEditorStore.getState().showAPBand
-    entry.container.visible = !!(showAPBand?.[ap.frequency] ?? true)
+    // Info pill — frequency band + channel/width + tx power. Visible
+    // only when showAPInfo is enabled.
+    const editorState = useEditorStore.getState()
+    const freqLabel = FREQ_LABEL_LONG[ap.frequency] ?? `${ap.frequency}G`
+    infoText.text = `${freqLabel} CH${ap.channel ?? '—'}/${ap.channelWidth ?? 20}\n${ap.txPower ?? '—'} dBm`
+    infoText.visible = !!editorState.showAPInfo
+
+    // Per-band visibility filter.
+    entry.container.visible = !!(editorState.showAPBand?.[ap.frequency] ?? true)
   }
 
   const bindInteractions = (entry) => {
@@ -218,15 +238,16 @@ export function attachAPsLayer({ scene, useFloorStore, useAPStore }) {
     }
   }
 
-  // Re-draw all when showAPBand changes so per-band visibility filter
-  // applies without restructuring the container tree. Tracked by ref so
+  // Re-draw all when showAPBand or showAPInfo changes. Tracked by ref so
   // unrelated editor-store changes (selection / mode / hover) don't pay
   // the full redraw cost on every set.
   let lastShowAPBand = useEditorStore.getState().showAPBand
+  let lastShowAPInfo = useEditorStore.getState().showAPInfo
   const redrawAll = () => {
-    const nextBand = useEditorStore.getState().showAPBand
-    if (nextBand === lastShowAPBand) return
-    lastShowAPBand = nextBand
+    const s = useEditorStore.getState()
+    if (s.showAPBand === lastShowAPBand && s.showAPInfo === lastShowAPInfo) return
+    lastShowAPBand = s.showAPBand
+    lastShowAPInfo = s.showAPInfo
     for (const entry of containers.values()) {
       const drag = useDragOverlayStore.getState().ap
       if (drag && drag.id === entry.ap.id) {
