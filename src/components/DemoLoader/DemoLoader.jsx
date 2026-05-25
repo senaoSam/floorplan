@@ -3,6 +3,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
+import { useCableStore, DEFAULT_TRAY } from '@/store/useCableStore'
 import { floorplanFromLines } from '@/utils/floorplanFromLines'
 import { generateId } from '@/utils/id'
 import './DemoLoader.sass'
@@ -21,6 +22,16 @@ const DEMO_AP_POSITIONS_NORM = [
   { x: 410 / 685, y: 400 / 511 }, // home theatre
   { x: 615 / 685, y: 400 / 511 }, // master suite
 ]
+
+// Cable seed (13-3 demo) — one horizontal tray cutting through the middle of
+// the house with a switch landed on top. All five AP centres sit inside the
+// tray's magnet capsule so every drop routes via the tray.
+const DEMO_TRAY_PTS_NORM = [
+  { x:  50 / 685, y: 320 / 511 },
+  { x: 640 / 685, y: 320 / 511 },
+]
+const DEMO_TRAY_MAGNET_PX = 150
+const DEMO_SWITCH_NORM = { x: 300 / 685, y: 320 / 511 }
 
 const loadImage = (src) =>
   new Promise((resolve, reject) => {
@@ -77,6 +88,10 @@ function DemoLoader() {
   const setWalls           = useWallStore((s) => s.setWalls)
   const setAPs             = useAPStore((s) => s.setAPs)
   const setHeatmapEnabled  = useHeatmapStore((s) => s.setEnabled)
+  const setSwitches        = useCableStore((s) => s.setSwitches)
+  const addTray            = useCableStore((s) => s.addTray)
+  const nextSwitchName     = useCableStore((s) => s.nextSwitchName)
+  const nextTrayName       = useCableStore((s) => s.nextTrayName)
   const [loading, setLoading] = useState(false)
 
   const handleLoad = async () => {
@@ -110,6 +125,29 @@ function DemoLoader() {
       const { walls } = floorplanFromLines(lines)
       setWalls(floor.id, walls)
       setAPs(floor.id, buildDemoAPs(img.naturalWidth, img.naturalHeight))
+
+      const W = img.naturalWidth, H = img.naturalHeight
+      addTray(floor.id, {
+        id: generateId('tray'),
+        name: nextTrayName({ floor }),
+        points: DEMO_TRAY_PTS_NORM.map((p) => ({ x: p.x * W, y: p.y * H })),
+        magnetDistance: DEMO_TRAY_MAGNET_PX,
+        ...DEFAULT_TRAY,
+      })
+      setSwitches(floor.id, [{
+        id: generateId('sw'),
+        name: nextSwitchName('switch'),
+        x: DEMO_SWITCH_NORM.x * W,
+        y: DEMO_SWITCH_NORM.y * H,
+        kind: 'switch',
+        mountHeight: 0.5,
+        model: 'POE-24-port',
+        portCount: 24,
+        poeBudget: 370,
+        uplinkTo: null,
+        cableType: 'auto',
+      }])
+
       setHeatmapEnabled(true)
     } catch (e) {
       console.error('[DemoLoader] load failed', e)

@@ -2,6 +2,7 @@ import React from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
 import FloorplanSystem from '@/components/FloorplanSystem/FloorplanSystem'
 import HeatmapControl from '@/components/HeatmapControl/HeatmapControl'
+import CableSummaryPanel from '@/components/CableSummaryPanel/CableSummaryPanel'
 import './CanvasArea.sass'
 
 // Standalone-mode canvas pane — wraps the embeddable FloorplanSystem
@@ -16,6 +17,7 @@ function CanvasArea() {
         <FloorplanSystem />
       </div>
       {hasFloor && <HeatmapControl />}
+      {hasFloor && <CableSummaryPanel />}
     </div>
   )
 }

@@ -4,11 +4,15 @@ import { bindViewport } from '@/render/viewport'
 import { attachFloorImageLayer } from '@/features/floorImage/floorImageLayer'
 import { attachWallsLayer } from '@/features/walls/wallsLayer'
 import { attachAPsLayer } from '@/features/aps/apsLayer'
+import { attachSwitchesLayer } from '@/features/switches/switchesLayer'
+import { attachTraysLayer } from '@/features/trays/traysLayer'
+import { attachCablesLayer } from '@/features/cables/cablesLayer'
 import { attachHeatmapLayer } from '@/render/heatmapAdapter'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
+import { useCableStore } from '@/store/useCableStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import './FloorplanSystem.sass'
 
@@ -27,6 +31,9 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachFloorImage = null
     let detachWalls = null
     let detachAPs = null
+    let detachSwitches = null
+    let detachTrays = null
+    let detachCables = null
     let detachHeatmap = null
     let cancelled = false
 
@@ -56,6 +63,22 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useFloorStore,
         useAPStore,
       })
+      detachSwitches = attachSwitchesLayer({
+        scene: s,
+        useFloorStore,
+        useCableStore,
+      })
+      detachTrays = attachTraysLayer({
+        scene: s,
+        useFloorStore,
+        useCableStore,
+      })
+      detachCables = attachCablesLayer({
+        scene: s,
+        useFloorStore,
+        useAPStore,
+        useCableStore,
+      })
       detachHeatmap = attachHeatmapLayer({
         scene: s,
         useFloorStore,
@@ -72,6 +95,9 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     return () => {
       cancelled = true
       if (detachHeatmap) detachHeatmap()
+      if (detachCables) detachCables()
+      if (detachTrays) detachTrays()
+      if (detachSwitches) detachSwitches()
       if (detachAPs) detachAPs()
       if (detachWalls) detachWalls()
       if (detachFloorImage) detachFloorImage()
