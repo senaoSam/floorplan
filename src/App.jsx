@@ -3,6 +3,7 @@ import TopBar from '@/components/TopBar/TopBar'
 import SidebarLeft from '@/components/SidebarLeft/SidebarLeft'
 import CanvasArea from '@/components/CanvasArea/CanvasArea'
 import PanelRight from '@/components/PanelRight/PanelRight'
+import ContextMenuMount from '@/components/ContextMenu/ContextMenuMount'
 import '@/styles/App.sass'
 
 // Standalone-mode shell. The embeddable boundary is `<FloorplanSystem />`
@@ -17,6 +18,7 @@ function App() {
         <CanvasArea />
         <PanelRight />
       </div>
+      <ContextMenuMount />
     </div>
   )
 }

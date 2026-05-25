@@ -2,6 +2,7 @@ import { Container, Graphics, Rectangle } from 'pixi.js'
 import { getSwitchKindColor } from '@/store/useCableStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { useHoverStore } from '@/store/useHoverStore'
 
 // Switch chassis adapter — per-switch interactive Container with click
 // select + body drag + drag overlay. MVP fidelity: no port row / label /
@@ -70,11 +71,23 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
   const bindInteractions = (entry) => {
     const { container } = entry
     container.on('pointerdown', (e) => {
+      if (e.button === 2) {
+        e.stopPropagation()
+        useEditorStore.getState().openContextMenu({
+          targetType: 'switch',
+          targetId: entry.sw.id,
+          screenX: e.originalEvent?.clientX ?? 0,
+          screenY: e.originalEvent?.clientY ?? 0,
+        })
+        return
+      }
       if ((e.button ?? 0) !== 0) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.sw.id, 'switch')
       beginDrag(entry, e)
     })
+    container.on('pointerover', () => useHoverStore.getState().setHover(entry.sw.id, 'switch'))
+    container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.sw.id))
   }
 
   const beginDrag = (entry, downEvent) => {

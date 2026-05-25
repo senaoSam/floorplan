@@ -1,5 +1,6 @@
 import { Container, Graphics } from 'pixi.js'
 import { useEditorStore } from '@/store/useEditorStore'
+import { useHoverStore } from '@/store/useHoverStore'
 
 // Walls adapter — per-wall Container with click hit-test (no drag yet —
 // wall edit needs endpoint handles which arrive with 31-4 / 31-8 spec).
@@ -93,10 +94,22 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
   const bindInteractions = (entry) => {
     const { container } = entry
     container.on('pointerdown', (e) => {
+      if (e.button === 2) {
+        e.stopPropagation()
+        useEditorStore.getState().openContextMenu({
+          targetType: 'wall',
+          targetId: entry.wall.id,
+          screenX: e.originalEvent?.clientX ?? 0,
+          screenY: e.originalEvent?.clientY ?? 0,
+        })
+        return
+      }
       if ((e.button ?? 0) !== 0) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.wall.id, 'wall')
     })
+    container.on('pointerover', () => useHoverStore.getState().setHover(entry.wall.id, 'wall'))
+    container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.wall.id))
   }
 
   let lastFloorId = undefined

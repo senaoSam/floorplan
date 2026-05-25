@@ -1,0 +1,142 @@
+@use '@/styles/variables' as *
+
+.tray-ctx-menu
+  position: fixed
+  z-index: 1100
+  min-width: 200px
+  background: $bg-secondary
+  border: 1px solid $border-color
+  border-radius: 8px
+  padding: 4px
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45)
+  font-size: 13px
+  color: $text-primary
+  user-select: none
+
+  &__header
+    padding: 6px 10px 4px
+    border-bottom: 1px solid $border-color
+    margin-bottom: 4px
+
+  &__title
+    font-size: 11px
+    font-weight: 600
+    color: $text-secondary
+    letter-spacing: 0.04em
+    text-transform: uppercase
+
+  &__item
+    display: flex
+    align-items: center
+    gap: 8px
+    width: 100%
+    padding: 7px 10px
+    background: transparent
+    border: none
+    color: $text-primary
+    font-size: 13px
+    text-align: left
+    cursor: pointer
+    border-radius: 4px
+
+    &:hover:not(&--disabled)
+      background: rgba(255, 255, 255, 0.08)
+
+    &--disabled
+      color: rgba(255, 255, 255, 0.3)
+      cursor: not-allowed
+
+    &--danger
+      color: #f87171
+
+      &:hover
+        background: rgba(248, 113, 113, 0.12)
+
+    &--has-sub
+      justify-content: space-between
+
+    &--sub
+      padding-left: 22px
+
+  &__label
+    flex: 1
+    display: inline-flex
+    align-items: baseline
+    gap: 6px
+
+  &__hint
+    color: $text-secondary
+    font-size: 11px
+
+  &__shortcut
+    color: $text-secondary
+    font-size: 11px
+    letter-spacing: 0.04em
+
+  &__caret
+    color: $text-secondary
+    font-size: 10px
+
+  &__divider
+    height: 1px
+    background: $border-color
+    margin: 4px 2px
+
+  &__sub
+    display: flex
+    flex-direction: column
+    border-left: 2px solid rgba(255, 255, 255, 0.06)
+    margin-left: 6px
+    padding-left: 2px
+
+  &__swatch
+    width: 10px
+    height: 10px
+    border-radius: 2px
+    display: inline-block
+
+  &__rename
+    display: flex
+    flex-direction: column
+    gap: 6px
+    padding: 6px
+
+  &__rename-input
+    width: 100%
+    box-sizing: border-box
+    padding: 6px 8px
+    background: rgba(0, 0, 0, 0.25)
+    border: 1px solid $border-color
+    border-radius: 4px
+    color: $text-primary
+    font-size: 13px
+    outline: none
+
+    &:focus
+      border-color: rgba(255, 255, 255, 0.3)
+
+  &__rename-actions
+    display: flex
+    gap: 6px
+    justify-content: flex-end
+
+  &__rename-btn
+    padding: 4px 12px
+    border: none
+    border-radius: 4px
+    font-size: 12px
+    cursor: pointer
+
+    &--cancel
+      background: rgba(255, 255, 255, 0.08)
+      color: $text-secondary
+
+      &:hover
+        background: rgba(255, 255, 255, 0.14)
+
+    &--confirm
+      background: $accent
+      color: #fff
+
+      &:hover
+        opacity: 0.85

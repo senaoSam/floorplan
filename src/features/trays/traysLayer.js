@@ -2,6 +2,7 @@ import { Container, Graphics } from 'pixi.js'
 import { getTraySystem } from '@/store/useCableStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { useHoverStore } from '@/store/useHoverStore'
 
 // Cable tray adapter — per-tray Container with magnet halo + polyline body
 // + custom polyline hitArea. Click selects, drag moves the whole polyline
@@ -112,11 +113,23 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
   const bindInteractions = (entry) => {
     const { container } = entry
     container.on('pointerdown', (e) => {
+      if (e.button === 2) {
+        e.stopPropagation()
+        useEditorStore.getState().openContextMenu({
+          targetType: 'cable_tray',
+          targetId: entry.tray.id,
+          screenX: e.originalEvent?.clientX ?? 0,
+          screenY: e.originalEvent?.clientY ?? 0,
+        })
+        return
+      }
       if ((e.button ?? 0) !== 0) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.tray.id, 'cable_tray')
       beginDrag(entry, e)
     })
+    container.on('pointerover', () => useHoverStore.getState().setHover(entry.tray.id, 'cable_tray'))
+    container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.tray.id))
   }
 
   const beginDrag = (entry, downEvent) => {

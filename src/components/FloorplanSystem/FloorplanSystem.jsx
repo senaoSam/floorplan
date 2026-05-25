@@ -8,6 +8,7 @@ import { attachSwitchesLayer } from '@/features/switches/switchesLayer'
 import { attachTraysLayer } from '@/features/trays/traysLayer'
 import { attachCablesLayer } from '@/features/cables/cablesLayer'
 import { attachSelectionOverlay } from '@/features/selection/selectionOverlayLayer'
+import { attachHoverOverlay } from '@/features/selection/hoverOverlayLayer'
 import { attachHeatmapLayer } from '@/render/heatmapAdapter'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useFloorStore } from '@/store/useFloorStore'
@@ -17,6 +18,7 @@ import { useCableStore } from '@/store/useCableStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
+import { useHoverStore } from '@/store/useHoverStore'
 import './FloorplanSystem.sass'
 
 // Integration boundary the host product will mount. Owns the PIXI scene
@@ -39,6 +41,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachCables = null
     let detachHeatmap = null
     let detachSelection = null
+    let detachHover = null
     let cancelled = false
 
     initScene({ container: el }).then((s) => {
@@ -50,9 +53,22 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       detachViewport = bindViewport({
         app: s.app,
         canvas: s.app.canvas,
+        scene: s,
         world: s.world,
         store: useViewportStore,
         onBackgroundClick: () => useEditorStore.getState().clearSelected(),
+        onMarqueeCommit: (rect) => {
+          const fid = useFloorStore.getState().activeFloorId
+          if (!fid) return
+          const aps = useAPStore.getState().apsByFloor[fid] ?? []
+          const inside = aps.filter((ap) =>
+            ap.x >= rect.minX && ap.x <= rect.maxX &&
+            ap.y >= rect.minY && ap.y <= rect.maxY,
+          )
+          useEditorStore.getState().setSelectedItems(
+            inside.map((ap) => ({ id: ap.id, type: 'ap' })),
+          )
+        },
       })
       detachFloorImage = attachFloorImageLayer({
         scene: s,
@@ -101,9 +117,29 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useEditorStore,
         useDragOverlayStore,
       })
+      detachHover = attachHoverOverlay({
+        scene: s,
+        useFloorStore,
+        useAPStore,
+        useWallStore,
+        useCableStore,
+        useEditorStore,
+        useHoverStore,
+      })
       if (import.meta.env.DEV) {
         window.__pixiApp = s.app
         window.__scene = s
+        window.__stores = {
+          editor: useEditorStore,
+          floor: useFloorStore,
+          ap: useAPStore,
+          wall: useWallStore,
+          cable: useCableStore,
+          heatmap: useHeatmapStore,
+          viewport: useViewportStore,
+          drag: useDragOverlayStore,
+          hover: useHoverStore,
+        }
       }
     })
 
@@ -113,26 +149,42 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
 
       if (e.key === 'Escape') {
-        useEditorStore.getState().clearSelected()
+        const s = useEditorStore.getState()
+        // Esc closes the context menu first if open, otherwise clears
+        // selection. Matches the ObjectContextMenu's own Esc handler.
+        if (s.contextMenu) {
+          s.closeContextMenu()
+        } else {
+          s.clearSelected()
+        }
         return
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        const { selectedId, selectedType, clearSelected } = useEditorStore.getState()
-        if (!selectedId) return
+        const s = useEditorStore.getState()
         const fid = useFloorStore.getState().activeFloorId
         if (!fid) return
-        if (selectedType === 'ap') {
-          useAPStore.getState().removeAP(fid, selectedId)
-          clearSelected()
-        } else if (selectedType === 'wall') {
-          useWallStore.getState().removeWall(fid, selectedId)
-          clearSelected()
-        } else if (selectedType === 'switch') {
-          useCableStore.getState().removeSwitch(fid, selectedId)
-          clearSelected()
-        } else if (selectedType === 'cable_tray') {
-          useCableStore.getState().removeTray(fid, selectedId)
-          clearSelected()
+
+        // Batch (marquee multi-select) takes priority over single selection.
+        if (s.selectedItems.length > 1) {
+          const apIds = s.selectedItems.filter((it) => it.type === 'ap').map((it) => it.id)
+          if (apIds.length > 0) useAPStore.getState().removeAPs(fid, apIds)
+          s.clearSelected()
+          return
+        }
+
+        if (!s.selectedId) return
+        if (s.selectedType === 'ap') {
+          useAPStore.getState().removeAP(fid, s.selectedId)
+          s.clearSelected()
+        } else if (s.selectedType === 'wall') {
+          useWallStore.getState().removeWall(fid, s.selectedId)
+          s.clearSelected()
+        } else if (s.selectedType === 'switch') {
+          useCableStore.getState().removeSwitch(fid, s.selectedId)
+          s.clearSelected()
+        } else if (s.selectedType === 'cable_tray') {
+          useCableStore.getState().removeTray(fid, s.selectedId)
+          s.clearSelected()
         }
       }
     }
@@ -141,6 +193,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     return () => {
       cancelled = true
       window.removeEventListener('keydown', onKeyDown)
+      if (detachHover) detachHover()
       if (detachSelection) detachSelection()
       if (detachHeatmap) detachHeatmap()
       if (detachCables) detachCables()

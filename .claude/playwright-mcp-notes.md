@@ -132,8 +132,14 @@ for (const f of [2.4, 5, 6]) {
 1. **改完 code 先 `browser_navigate` 重新載頁**（乾淨的一份 store）
 2. 或整場用 UI 點擊（不信任 store instance）
 3. 驗證優先用「純 JS 數值驗證」（第 7 節），不受 HMR 影響
+4. **PixiJS 版本（Phase 25+）優先用 `window.__stores`**：FloorplanSystem 在 DEV mode
+   把所有 store 引用都掛到 `window.__stores = { editor, floor, ap, wall, cable, ... }`，
+   讓 MCP eval 能讀到「應用實際使用的那個 instance」。`await import(...)` 可能拿到 HMR 後
+   的新 instance，跟掛在 callback closure 裡的舊 instance 不同 ——
+   會出現「callback 確實 setSelectedItems 了，但你 import 進來的 store getState() 看不到」的鬼故事。
+   `browser_navigate` 即使換了 `?nocache=1` 也不一定能根治；最穩的還是讀 window 暴露的同 instance。
 
-Stage 同理：改完 code 後先重跑 `Konva.stages[0]` 取最新。
+Stage 同理：改完 code 後先重跑 `Konva.stages[0]` 取最新；PIXI 用 `window.__pixiApp`。
 
 ## 10. Screenshot 路徑
 

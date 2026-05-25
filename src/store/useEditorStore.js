@@ -49,4 +49,12 @@ export const useEditorStore = create((set, get) => ({
     if (s.selectedId === id) return true
     return s.selectedItems.some((it) => it.id === id)
   },
+
+  // ── 23-2c Right-click object context menu ───────────────────────
+  // Centralised state so any Layer can request a menu and the same overlay
+  // component renders it. shape:
+  //   { targetType, targetId, screenX, screenY } | null
+  contextMenu: null,
+  openContextMenu: (payload) => set({ contextMenu: payload }),
+  closeContextMenu: () => set((s) => (s.contextMenu ? { contextMenu: null } : {})),
 }))

@@ -1,6 +1,7 @@
 import { Container, Graphics, Circle } from 'pixi.js'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { useHoverStore } from '@/store/useHoverStore'
 
 // AP markers adapter — Graphics circle per AP, interactive (pointer cursor
 // + click selects + drag moves). MVP fidelity: world-space radius (will
@@ -69,11 +70,23 @@ export function attachAPsLayer({ scene, useFloorStore, useAPStore }) {
   const bindInteractions = (entry) => {
     const { container } = entry
     container.on('pointerdown', (e) => {
+      if (e.button === 2) {
+        e.stopPropagation()
+        useEditorStore.getState().openContextMenu({
+          targetType: 'ap',
+          targetId: entry.ap.id,
+          screenX: e.originalEvent?.clientX ?? 0,
+          screenY: e.originalEvent?.clientY ?? 0,
+        })
+        return
+      }
       if ((e.button ?? 0) !== 0) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.ap.id, 'ap')
       beginDrag(entry, e)
     })
+    container.on('pointerover', () => useHoverStore.getState().setHover(entry.ap.id, 'ap'))
+    container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.ap.id))
   }
 
   const beginDrag = (entry, downEvent) => {
