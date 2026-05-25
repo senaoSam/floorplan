@@ -4,12 +4,15 @@ import { bindViewport } from '@/render/viewport'
 import { attachFloorImageLayer } from '@/features/floorImage/floorImageLayer'
 import { attachWallsLayer } from '@/features/walls/wallsLayer'
 import { attachAPsLayer } from '@/features/aps/apsLayer'
+import { attachHeatmapLayer } from '@/render/heatmapAdapter'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
+import { useHeatmapStore } from '@/store/useHeatmapStore'
 import ViewportHud from './ViewportHud'
 import DemoLoader from '@/components/DemoLoader/DemoLoader'
+import HeatmapControl from '@/components/HeatmapControl/HeatmapControl'
 import './FloorplanSystem.sass'
 
 // Integration boundary the host product will mount. Props are accepted for
@@ -26,6 +29,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachFloorImage = null
     let detachWalls = null
     let detachAPs = null
+    let detachHeatmap = null
     let cancelled = false
 
     initScene({ container: el }).then((s) => {
@@ -54,6 +58,13 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useFloorStore,
         useAPStore,
       })
+      detachHeatmap = attachHeatmapLayer({
+        scene: s,
+        useFloorStore,
+        useWallStore,
+        useAPStore,
+        useHeatmapStore,
+      })
       if (import.meta.env.DEV) {
         window.__pixiApp = s.app
         window.__scene = s
@@ -62,6 +73,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
 
     return () => {
       cancelled = true
+      if (detachHeatmap) detachHeatmap()
       if (detachAPs) detachAPs()
       if (detachWalls) detachWalls()
       if (detachFloorImage) detachFloorImage()
@@ -79,6 +91,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       <div ref={containerRef} className="floorplan-system__canvas" />
       <ViewportHud />
       <DemoLoader />
+      <HeatmapControl />
     </div>
   )
 }

@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
+import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { floorplanFromLines } from '@/utils/floorplanFromLines'
 import { generateId } from '@/utils/id'
 import './DemoLoader.sass'
@@ -75,6 +76,7 @@ function DemoLoader() {
   const importFloorFromUrl = useFloorStore((s) => s.importFloorFromUrl)
   const setWalls           = useWallStore((s) => s.setWalls)
   const setAPs             = useAPStore((s) => s.setAPs)
+  const setHeatmapEnabled  = useHeatmapStore((s) => s.setEnabled)
   const [loading, setLoading] = useState(false)
 
   const handleLoad = async () => {
@@ -108,6 +110,7 @@ function DemoLoader() {
       const { walls } = floorplanFromLines(lines)
       setWalls(floor.id, walls)
       setAPs(floor.id, buildDemoAPs(img.naturalWidth, img.naturalHeight))
+      setHeatmapEnabled(true)
     } catch (e) {
       console.error('[DemoLoader] load failed', e)
     } finally {
