@@ -1901,10 +1901,6 @@ function Editor2D() {
               />
             )}
 
-            {activeFloorId && showCables && (
-              <CableLayer floorId={activeFloorId} viewportScale={viewport.scale} />
-            )}
-
             {/* Selected-tray overlay — renders the selected tray (body +
                 interactive handles + segment hit-tests) ON TOP of every
                 other vector element so clicks on its vertices aren't
@@ -1945,6 +1941,20 @@ function Editor2D() {
             )}
 
           </Layer>
+
+          {/* Phase 24 step 1 — Cable lines on a dedicated listening=false Layer.
+              Pulled out of the main vector Layer because dragging any node on
+              that layer (AP / SW / Tray) forced a per-frame batchDraw that
+              repainted all 500+ cable sub-nodes at SW+Tray+50AP. Separate layer
+              keeps cable canvas cached during device drags. */}
+          {activeFloorId && showCables && (
+            <Layer
+              listening={false}
+              {...(isAlignMode && activeFloor ? alignLayerProps(activeFloor) : {})}
+            >
+              <CableLayer floorId={activeFloorId} viewportScale={viewport.scale} />
+            </Layer>
+          )}
 
           {/* 框選矩形 — 獨立 Layer + imperative 更新，避免 mousemove 打到 React */}
           <Layer ref={marqueeLayerRef} listening={false}>

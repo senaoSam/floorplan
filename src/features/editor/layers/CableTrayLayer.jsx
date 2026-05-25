@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Group, Line, Circle } from 'react-konva'
 import { useCableStore, getTraySystem, DEFAULT_TRAY } from '@/store/useCableStore'
 import { useFloorStore } from '@/store/useFloorStore'
+import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { generateId } from '@/utils/id'
 
 // Snap radius (screen px) when dragging an existing vertex onto another
@@ -242,7 +243,7 @@ function VertexHandle({
 //   'interactiveOnly' — handles + per-segment hit-tests + snap halos, no
 //                       body / magnet / body-drag. Used by the overlay so
 //                       handles + segments float above APs / switches.
-function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, startExt, endExt, onHover, onClick, inverseScale, setHoverCursor, isDrawingMode, dimmed, allowDrag, allowHover, allowCmdHover, allowAnyHover, allowClick, onVertexDragMove, onVertexDragEnd, onDeleteVertex, onSplitVertex, onInsertVertex, onSplitSegment, onTranslate }) {
+function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, startExt, endExt, onHover, onClick, inverseScale, setHoverCursor, isDrawingMode, dimmed, allowDrag, allowHover, allowCmdHover, allowAnyHover, allowClick, onVertexDragMove, onVertexDragEnd, onDeleteVertex, onSplitVertex, onInsertVertex, onSplitSegment, onTranslate, onTranslateEnd }) {
   const s = inverseScale
   const flat = tray.points.flatMap((p) => [p.x, p.y])
   const sys = getTraySystem(tray.system)
@@ -334,6 +335,8 @@ function TrayPolyline({ tray, mode = 'full', isSelected, isHovered, showMagnet, 
         bodyDragOrigAbsRef.current = null
         // Group was pinned at its original absolute position throughout the
         // drag — nothing to reset.
+        // Phase 24 step 2 — commit accumulated drag overlay to the store.
+        onTranslateEnd?.()
       }}
     >
       {/* Magnet halo — drawn first so the tray sits on top of it.
@@ -514,9 +517,36 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
   const batchSelectedIds = selectedItems.length > 1
     ? new Set(selectedItems.filter((it) => it.type === 'cable_tray').map((it) => it.id))
     : null
+
+  // Phase 24 step 2 — drag overlay subscriptions. Body drag accumulates a
+  // {dx,dy} offset; vertex drag pins one vertex to a new absolute xy. Both
+  // stay out of the canonical store until dragEnd, so CableLayer's expensive
+  // computeRoutes doesn't re-run per drag tick.
+  const trayBodyOverlay   = useDragOverlayStore((s) => s.tray)
+  const trayVertexOverlay = useDragOverlayStore((s) => s.trayVertex)
+  const hasOverlay = !!(trayBodyOverlay || trayVertexOverlay)
+  // Apply overlay to tray points so the visual follows the cursor without
+  // mutating the store. When no overlay is active, identity-return `trays`
+  // so neighborExts / downstream memos cache hit.
+  const displayedTrays = hasOverlay
+    ? trays.map((t) => {
+        let points = t.points
+        if (trayBodyOverlay?.id === t.id) {
+          points = points.map((p) => ({ x: p.x + trayBodyOverlay.dx, y: p.y + trayBodyOverlay.dy }))
+        }
+        if (trayVertexOverlay?.trayId === t.id) {
+          points = points.map((p, i) =>
+            i === trayVertexOverlay.vertexIdx
+              ? { x: trayVertexOverlay.x, y: trayVertexOverlay.y }
+              : p,
+          )
+        }
+        return points === t.points ? t : { ...t, points }
+      })
+    : trays
   // 17-1 follow-up: pre-compute per-tray junction info so each tray miters
   // cleanly into its neighbour where they share an exact endpoint.
-  const neighborExts = React.useMemo(() => computeTrayNeighborExts(trays), [trays])
+  const neighborExts = React.useMemo(() => computeTrayNeighborExts(displayedTrays), [displayedTrays])
 
   // Snap a vertex being dragged onto another tray's vertex (or another
   // vertex of the same tray) within VERTEX_SNAP_SCREEN_PX. Excludes the
@@ -567,7 +597,7 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
 
   return (
     <Group opacity={dimmed ? 0.2 : 1}>
-      {trays.map((tray, i) => {
+      {displayedTrays.map((tray, i) => {
         const isSel = tray.id === selectedTrayId || (batchSelectedIds?.has(tray.id) ?? false)
         const isHov = tray.id === hoveredId
         return (
@@ -599,25 +629,65 @@ function CableTrayLayer({ floorId, selectedTrayId, selectedItems = [], onTrayCli
             allowCmdHover={allowCmdHover}
             allowAnyHover={allowAnyHover}
             allowClick={allowClick}
-            onTranslate={(dx, dy) => {
-              // Read fresh store state each tick — Konva fires dragmove faster
-              // than React re-renders, so the `tray.points` closure here can be
-              // stale across consecutive ticks. Without fresh-read the second
-              // tick re-applies its delta to the same pre-drag points as the
-              // first, producing the visible "jump back" the user saw.
-              const cur = useCableStore.getState().traysByFloor[floorId]?.find((t) => t.id === tray.id)
-              if (!cur) return
-              const newPoints = cur.points.map((p) => ({ x: p.x + dx, y: p.y + dy }))
-              updateTray(floorId, tray.id, { points: newPoints })
+            onTranslate={(incDx, incDy) => {
+              // Phase 24 step 2 — accumulate into drag overlay instead of
+              // writing the canonical store every tick. CableLayer's
+              // computeRoutes (Dijkstra × 50 AP) re-runs on traysByFloor
+              // change; writing per-tick made tray body drag stutter.
+              // dragEnd commits the accumulated offset → see onTranslateEnd.
+              const cur = useDragOverlayStore.getState().tray
+              const baseDx = (cur?.id === tray.id) ? cur.dx : 0
+              const baseDy = (cur?.id === tray.id) ? cur.dy : 0
+              useDragOverlayStore.getState().setTray({
+                id: tray.id,
+                dx: baseDx + incDx,
+                dy: baseDy + incDy,
+              })
+            }}
+            onTranslateEnd={() => {
+              const cur = useDragOverlayStore.getState().tray
+              if (cur?.id === tray.id && (cur.dx !== 0 || cur.dy !== 0)) {
+                // Read fresh store points so the commit picks up any external
+                // mutations during the drag (rare but cheap to handle).
+                const fresh = useCableStore.getState().traysByFloor[floorId]?.find((t) => t.id === tray.id)
+                if (fresh) {
+                  const newPoints = fresh.points.map((p) => ({
+                    x: p.x + cur.dx,
+                    y: p.y + cur.dy,
+                  }))
+                  updateTray(floorId, tray.id, { points: newPoints })
+                }
+              }
+              useDragOverlayStore.getState().setTray(null)
             }}
             onVertexDragMove={(idx, raw) => {
+              // Phase 24 step 2 — write to overlay instead of store. snap
+              // logic still runs against fresh allTrays so target halo is
+              // accurate; commit happens in onVertexDragEnd.
               const { pos, target } = snapVertexDrag(tray.id, idx, raw)
               setDragSnapTarget(target)
-              const newPoints = tray.points.map((pt, j) => (j === idx ? pos : pt))
-              updateTray(floorId, tray.id, { points: newPoints })
+              useDragOverlayStore.getState().setTrayVertex({
+                trayId: tray.id,
+                vertexIdx: idx,
+                x: pos.x,
+                y: pos.y,
+              })
               return pos
             }}
-            onVertexDragEnd={() => { setDragSnapTarget(null) }}
+            onVertexDragEnd={(idx) => {
+              setDragSnapTarget(null)
+              const cur = useDragOverlayStore.getState().trayVertex
+              if (cur?.trayId === tray.id && cur.vertexIdx === idx) {
+                const fresh = useCableStore.getState().traysByFloor[floorId]?.find((t) => t.id === tray.id)
+                if (fresh) {
+                  const newPoints = fresh.points.map((pt, j) =>
+                    j === idx ? { x: cur.x, y: cur.y } : pt,
+                  )
+                  updateTray(floorId, tray.id, { points: newPoints })
+                }
+              }
+              useDragOverlayStore.getState().setTrayVertex(null)
+            }}
             onDeleteVertex={(idx) => {
               if (tray.points.length <= 2) return
               const newPoints = tray.points.filter((_, j) => j !== idx)
