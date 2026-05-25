@@ -9,6 +9,8 @@ import { attachTraysLayer } from '@/features/trays/traysLayer'
 import { attachCablesLayer } from '@/features/cables/cablesLayer'
 import { attachSelectionOverlay } from '@/features/selection/selectionOverlayLayer'
 import { attachHoverOverlay } from '@/features/selection/hoverOverlayLayer'
+import { attachScopesLayer } from '@/features/scopes/scopesLayer'
+import { attachFloorHolesLayer } from '@/features/floorHoles/floorHolesLayer'
 import { bindLayerVisibility } from '@/render/layerVisibilityBinder'
 import { attachHeatmapLayer } from '@/render/heatmapAdapter'
 import { useViewportStore } from '@/store/useViewportStore'
@@ -20,6 +22,8 @@ import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useHoverStore } from '@/store/useHoverStore'
+import { useScopeStore } from '@/store/useScopeStore'
+import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import './FloorplanSystem.sass'
 
 // Integration boundary the host product will mount. Owns the PIXI scene
@@ -44,6 +48,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachSelection = null
     let detachHover = null
     let detachLayerVisibility = null
+    let detachScopes = null
+    let detachFloorHoles = null
     let cancelled = false
 
     initScene({ container: el }).then((s) => {
@@ -189,6 +195,16 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         scene: s,
         useEditorStore,
       })
+      detachScopes = attachScopesLayer({
+        scene: s,
+        useFloorStore,
+        useScopeStore,
+      })
+      detachFloorHoles = attachFloorHolesLayer({
+        scene: s,
+        useFloorStore,
+        useFloorHoleStore,
+      })
       if (import.meta.env.DEV) {
         window.__pixiApp = s.app
         window.__scene = s
@@ -202,6 +218,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           viewport: useViewportStore,
           drag: useDragOverlayStore,
           hover: useHoverStore,
+          scope: useScopeStore,
+          hole: useFloorHoleStore,
         }
       }
     })
@@ -257,6 +275,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       cancelled = true
       window.removeEventListener('keydown', onKeyDown)
       if (detachLayerVisibility) detachLayerVisibility()
+      if (detachFloorHoles) detachFloorHoles()
+      if (detachScopes) detachScopes()
       if (detachHover) detachHover()
       if (detachSelection) detachSelection()
       if (detachHeatmap) detachHeatmap()

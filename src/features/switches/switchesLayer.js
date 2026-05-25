@@ -59,6 +59,10 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
     const y = overrideY ?? sw.y
     container.position.set(x, y)
     const kind = sw.kind ?? 'switch'
+
+    // Per-kind visibility filter from useEditorStore.showSwitchKind.
+    const showSwitchKind = useEditorStore.getState().showSwitchKind
+    container.visible = !!(showSwitchKind?.[kind] ?? true)
     const w = CHASSIS_WIDTH_BY_KIND[kind] ?? CHASSIS_WIDTH_BY_KIND.switch
     const h = CHASSIS_HEIGHT
     const color = getSwitchKindColor(kind)
@@ -195,15 +199,27 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
     }
   }
 
+  // Re-draw all when showSwitchKind changes so kind-filter takes effect
+  // without restructuring. Guarded by ref equality.
+  let lastShowSwitchKind = useEditorStore.getState().showSwitchKind
+  const redrawAll = () => {
+    const next = useEditorStore.getState().showSwitchKind
+    if (next === lastShowSwitchKind) return
+    lastShowSwitchKind = next
+    for (const entry of containers.values()) drawSwitch(entry)
+  }
+
   const unsubFloor = useFloorStore.subscribe(reconcile)
   const unsubCable = useCableStore.subscribe(reconcile)
   const unsubDrag = useDragOverlayStore.subscribe(applyDragOverlay)
+  const unsubEditor = useEditorStore.subscribe(redrawAll)
   reconcile()
 
   return () => {
     unsubFloor()
     unsubCable()
     unsubDrag()
+    unsubEditor()
     for (const id of Array.from(containers.keys())) removeContainer(id)
   }
 }

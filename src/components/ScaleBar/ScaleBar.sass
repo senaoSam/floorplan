@@ -1,0 +1,44 @@
+@use '@/styles/variables' as *
+
+.scale-bar
+  position: absolute
+  bottom: 12px
+  right: 12px
+  // Intentionally lower than PanelRight (z-index: 100) so the right-side
+  // properties panel covers the scale bar when open.
+  z-index: 50
+  display: flex
+  flex-direction: column
+  align-items: center
+  gap: 3px
+  background: rgba(15, 23, 42, 0.85)
+  border: 1px solid rgba(255, 255, 255, 0.15)
+  border-radius: 6px
+  padding: 5px 10px
+  color: $text-primary
+  font-size: 11px
+  font-variant-numeric: tabular-nums
+  pointer-events: auto
+  backdrop-filter: blur(6px)
+  user-select: none
+
+  &__label
+    line-height: 1
+    letter-spacing: 0.02em
+
+  &__bar
+    position: relative
+    height: 8px
+    border-bottom: 2px solid #fff
+    min-width: 24px
+
+  &__tick
+    position: absolute
+    bottom: -1px
+    width: 2px
+    height: 6px
+    background: #fff
+    &--left
+      left: 0
+    &--right
+      right: 0
