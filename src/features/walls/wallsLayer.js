@@ -7,22 +7,29 @@ import { generateId } from '@/utils/id'
 
 const DRAG_COMMIT_THRESHOLD_PX = 1
 
-// Walls adapter — per-wall Container with click hit-test (no drag yet —
-// wall edit needs endpoint handles which arrive with 31-4 / 31-8 spec).
-// Openings render on top in their material colour; clicking an opening
-// selects the parent wall.
-
-// Wall rendering — dual-stroke ports oldSrc WallLayer.jsx:
-//   * Outer black halo for contrast (alpha 0.4) — width 4 normal / 7 selected / 10 hovered
-//   * Inner colored stroke from wall.material.color — width 3 normal / 5 selected / 6 hovered
-// Hit area is 14 px wide along the segment so clicks register even on
-// thin segments at zoomed-out viewports.
+// Walls adapter — per-wall Container with click hit-test + body drag.
+// Visual ports oldSrc WallLayer.jsx (23-3f hover invert):
+//   * Hover invert beam (only when hovered + not selected): white stroke
+//     22 px alpha 0.45 — the wall "lights up" white under the cursor.
+//   * Black halo for contrast (alpha 0.4): width 4 normal / 7 selected / 10 hovered
+//   * Inner stroke: width 3 normal / 5 selected / 6 hovered.
+//     Colour: white on hover, else wall.material.color.
+//   * Openings render on top in OPENING_TYPES colour (door brown / window blue).
+//     Width 6 normal / 8 hovered / 6 selected.
+// Hit area is 14 screen-px wide along the segment so clicks register
+// even on thin segments at zoomed-out viewports.
 const WALL_HALO_WIDTH_NORMAL   = 4
 const WALL_HALO_WIDTH_SELECTED = 7
 const WALL_HALO_WIDTH_HOVERED  = 10
 const WALL_BODY_WIDTH_NORMAL   = 3
 const WALL_BODY_WIDTH_SELECTED = 5
 const WALL_BODY_WIDTH_HOVERED  = 6
+const WALL_HOVER_BEAM_WIDTH    = 22
+const WALL_HOVER_BEAM_COLOR    = '#ffffff'
+const WALL_HOVER_BEAM_ALPHA    = 0.45
+const OPENING_WIDTH_NORMAL     = 6
+const OPENING_WIDTH_HOVERED    = 8
+const OPENING_WIDTH_SELECTED   = 6
 // Hit envelope in SCREEN px (matches oldSrc Konva hitStrokeWidth=14). We
 // convert to world px by dividing by viewport.scale on every viewport
 // change — otherwise zooming out makes the wall hit area shrink to a few
@@ -114,24 +121,38 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
   }
 
   const drawWall = (entry) => {
-    const { graphics, container, wall } = entry
+    const { graphics, wall } = entry
     const editorState = useEditorStore.getState()
     const hoverState = useHoverStore.getState()
     const isSelected = editorState.selectedId === wall.id && editorState.selectedType === 'wall'
     const isHovered  = hoverState.id === wall.id && hoverState.type === 'wall'
-    const haloWidth = isSelected ? WALL_HALO_WIDTH_SELECTED : WALL_HALO_WIDTH_NORMAL
-    const bodyWidth = isSelected ? WALL_BODY_WIDTH_SELECTED : WALL_BODY_WIDTH_NORMAL
-    const bodyColor = wall.material.color
+    const hoverInvert = isHovered && !isSelected
+
+    const haloWidth = hoverInvert ? WALL_HALO_WIDTH_HOVERED
+                                  : isSelected ? WALL_HALO_WIDTH_SELECTED
+                                              : WALL_HALO_WIDTH_NORMAL
+    const bodyWidth = hoverInvert ? WALL_BODY_WIDTH_HOVERED
+                                  : isSelected ? WALL_BODY_WIDTH_SELECTED
+                                              : WALL_BODY_WIDTH_NORMAL
+    const bodyColor = hoverInvert ? '#ffffff' : wall.material.color
+    const openingWidth = hoverInvert ? OPENING_WIDTH_HOVERED
+                                     : isSelected ? OPENING_WIDTH_SELECTED
+                                                  : OPENING_WIDTH_NORMAL
 
     graphics.clear()
 
-    // (1) Hover glow — slim white outline (bodyWidth + 2 px) behind the
-    // body so the wall lights up under the cursor without engulfing
-    // adjacent walls.
-    if (isHovered && !isSelected) {
+    // (1) Hover invert beam — wide white stroke under the body so the
+    // wall lights up under the cursor. Skipped when wall is selected
+    // (red selection halo + thicker body already provide emphasis).
+    if (hoverInvert) {
       graphics
         .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
-        .stroke({ width: bodyWidth + 2, color: '#ffffff', alpha: 0.6, cap: 'round' })
+        .stroke({
+          width: WALL_HOVER_BEAM_WIDTH,
+          color: WALL_HOVER_BEAM_COLOR,
+          alpha: WALL_HOVER_BEAM_ALPHA,
+          cap: 'round',
+        })
     }
 
     // (2) Black outline halo for contrast.
@@ -139,12 +160,13 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
       .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
       .stroke({ width: haloWidth, color: '#000000', alpha: 0.4, cap: 'round' })
 
-    // (3) Colored wall body.
+    // (3) Wall body — white on hover, else material colour.
     graphics
       .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
       .stroke({ width: bodyWidth, color: bodyColor, alpha: 1, cap: 'round' })
 
-    // (3) Openings overlay the wall body in their own material colour.
+    // (4) Openings overlay the wall body in OPENING_TYPES colour
+    // (door brown / window blue — independent from the wall material).
     const openings = wall.openings ?? []
     if (openings.length > 0) {
       const dx = wall.endX - wall.startX
@@ -154,16 +176,13 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
         const sy = wall.startY + dy * op.startFrac
         const ex = wall.startX + dx * op.endFrac
         const ey = wall.startY + dy * op.endFrac
+        const ot = OPENING_TYPES[op.type === 'window' ? 'WINDOW' : 'DOOR']
         graphics
           .moveTo(sx, sy).lineTo(ex, ey)
-          .stroke({ width: bodyWidth, color: op.material.color, alpha: 1, cap: 'butt' })
+          .stroke({ width: openingWidth, color: ot.color, alpha: 1, cap: 'butt' })
       }
     }
 
-    // Hit area is kept in screen-space — see applyHitAreas below. drawWall
-    // only touches it if the wall's geometry changed (the reference must
-    // stay stable across hover / selection redraws or PIXI's event
-    // boundary loses the click that's in progress).
     refreshHitArea(entry)
   }
 

@@ -4,17 +4,14 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { computeFocusedDevices, FOCUS_HALO_COLOR, FOCUS_HALO_ALPHA, FOCUS_HALO_WIDTH } from '@/features/focus/focusedDevices'
+import { getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
 
 // AP markers adapter — per-AP interactive Container with click select,
 // drag, hover, right-click context menu, frequency-colored marker, and
-// name label underneath. Per-band visibility (showAPBand) + master
-// showAPs handled by the layer's container.visible (master) + per-AP
-// container.visible (band filter).
-//
-// 17-2 focus halo: when a Switch is selected, every AP routing through it
-// gets an indigo `#818cf8` ring drawn behind the marker so the wireless-
-// side of the connection is visible at a glance.
+// name label above. Visual constants ported 1:1 from
+// oldSrc/features/editor/layers/APLayer.jsx — see audit doc.
 
+// Mirrors oldSrc FREQ_COLOR / FREQ_LABEL.
 const FREQ_COLOR = {
   2.4: '#f39c12',
   5:   '#4fc3f7',
@@ -29,10 +26,18 @@ const FREQ_LABEL = {
 const FALLBACK_COLOR = '#9aa3ad'
 const colorForAP = (ap) => FREQ_COLOR[ap.frequency] ?? FALLBACK_COLOR
 
-const AP_RADIUS = 10
-const FOCUS_RING_RADIUS = AP_RADIUS + 1
-const DIR_INNER_R = 17
-const DIR_OUTER_R = 36
+// All sizes in canvas-px @ scale=1. Container is scaled 1/viewport.scale
+// so visuals stay at constant screen-px size.
+const AP_RADIUS       = 10   // body radius (oldSrc 10*s)
+const HIT_RADIUS      = 14   // hit circle (oldSrc 14*s)
+const FOCUS_RADIUS    = 15   // focus halo (oldSrc 15*s)
+const DIR_INNER_R     = 17
+const DIR_OUTER_R     = 36
+const DIR_RING_INNER  = 35   // selected ring inner (oldSrc 35*s)
+const PATTERN_OUTER_R = 34   // custom pattern outer radius (oldSrc 34*s)
+const PATTERN_MIN_DB  = -30  // oldSrc patternPolygonPoints default
+const AXIS_LEN        = 32
+
 const SELECT_STROKE = '#e74c3c'
 const BODY_STROKE_NORMAL = '#1e3a8a'
 const BODY_FILL_NORMAL   = '#ffffff'
@@ -50,17 +55,64 @@ const NAME_TEXT_STYLE = new TextStyle({
     alpha: 0.9,
   },
 })
+// oldSrc Text fontSize 11, fill #fff, align center, lineHeight 1.3 → 14.3.
 const INFO_TEXT_STYLE = new TextStyle({
   fill: '#ffffff',
   fontFamily: 'system-ui, sans-serif',
   fontSize: 11,
   align: 'center',
-  lineHeight: 14,
+  lineHeight: 14.3,
 })
 const FREQ_LABEL_LONG = { 2.4: '2.4G', 5: '5G', 6: '6G' }
-const INFO_PILL_W = 90
+// oldSrc Rect width:80 height:44 cornerRadius:4, Group offsetX:40 y:19.
+const INFO_PILL_W = 80
 const INFO_PILL_H = 44
 const INFO_PILL_BG = 'rgba(0, 0, 0, 0.75)'
+const INFO_PILL_Y = 19       // group y (oldSrc 19*s)
+const INFO_TEXT_Y = INFO_PILL_Y + 4
+
+// Convert a polar pattern (36 dB samples) to polygon points around origin,
+// matching oldSrc patternPolygonPoints(pattern, outerR, axisRad, -30).
+function patternPolygonPoints(pattern, outerR, axisRad, minDb = PATTERN_MIN_DB) {
+  const samples = pattern.samples
+  const n = samples.length
+  const pts = []
+  for (let i = 0; i < n; i++) {
+    const db = Math.max(samples[i], minDb)
+    const r = ((db - minDb) / -minDb) * outerR
+    const ang = axisRad + i * (2 * Math.PI / n)
+    pts.push(r * Math.cos(ang), r * Math.sin(ang))
+  }
+  return pts
+}
+
+// Manual dashed arc stroke — PIXI v8 Graphics has no native dash option,
+// so we walk the arc by arclength and lay alternating on/off segments.
+function strokeDashedArc(g, cx, cy, radius, startAngle, endAngle, dashOn, dashOff, opts) {
+  const totalAngle = endAngle - startAngle
+  const totalLen   = Math.abs(totalAngle) * radius
+  if (totalLen <= 1e-6) return
+  const dir = Math.sign(totalAngle) || 1
+  let cursor = 0
+  let phaseOn = true
+  let remain = dashOn
+  while (cursor < totalLen) {
+    const step = Math.min(totalLen - cursor, remain)
+    if (phaseOn) {
+      const a0 = startAngle + dir * (cursor / radius)
+      const a1 = startAngle + dir * ((cursor + step) / radius)
+      g.moveTo(cx + Math.cos(a0) * radius, cy + Math.sin(a0) * radius)
+       .arc(cx, cy, radius, a0, a1, dir < 0)
+       .stroke(opts)
+    }
+    cursor += step
+    remain -= step
+    if (remain <= 1e-9) {
+      phaseOn = !phaseOn
+      remain = phaseOn ? dashOn : dashOff
+    }
+  }
+}
 
 export function attachAPsLayer({
   scene,
@@ -83,22 +135,24 @@ export function attachAPsLayer({
       const c = new Container()
       c.eventMode = 'static'
       c.cursor = 'grab'
-      c.hitArea = new Circle(0, 0, AP_RADIUS + 4)
+      c.hitArea = new Circle(0, 0, HIT_RADIUS)
       const g = new Graphics()
       // Force PIXI to use the container hitArea (not Graphics's
       // per-pixel containsPoint) so clicking the AP body works at any
       // zoom level. See wallsLayer for the full explanation.
       g.eventMode = 'none'
+      // oldSrc nameLabel: offsetX:22, offsetY:25, width:44, align:center →
+      // text top is 25 px ABOVE origin, centered horizontally.
       const nameText = new Text({ text: '', style: NAME_TEXT_STYLE })
-      nameText.anchor.set(0.5, 0)
-      nameText.y = AP_RADIUS + 4
+      nameText.anchor.set(0.5, 1)
+      nameText.y = -14
       nameText.eventMode = 'none'
       const infoBg = new Graphics()
       infoBg.eventMode = 'none'
       infoBg.visible = false
       const infoText = new Text({ text: '', style: INFO_TEXT_STYLE })
       infoText.anchor.set(0.5, 0)
-      infoText.y = AP_RADIUS + 22
+      infoText.y = INFO_TEXT_Y
       infoText.eventMode = 'none'
       infoText.visible = false
       c.addChild(g)
@@ -138,20 +192,28 @@ export function attachAPsLayer({
     const isInvert   = isHovered && !isSelected
     const freqColor  = colorForAP(ap)
 
+    // oldSrc azimuth convention: 0° points +x (east), increases clockwise
+    // (axisRad = azimuth * π/180). No -90 offset.
+    const azimuthDeg = ((ap.azimuth ?? 0) % 360 + 360) % 360
+    const beamwidth  = Math.max(10, Math.min(180, ap.beamwidth ?? 60))
+    const axisRad    = azimuthDeg * Math.PI / 180
+    const isDirectional = ap.antennaMode === 'directional'
+    const isCustom      = ap.antennaMode === 'custom'
+    const isOriented    = isDirectional || isCustom
+
     graphics.clear()
 
-    // 17-2 focus halo — drawn first so the marker sits on top of it.
+    // 17-2 focus halo (drawn first so the marker sits on top).
     if (isFocused) {
-      graphics.circle(0, 0, FOCUS_RING_RADIUS)
+      graphics.circle(0, 0, FOCUS_RADIUS)
         .stroke({ width: FOCUS_HALO_WIDTH, color: FOCUS_HALO_COLOR, alpha: FOCUS_HALO_ALPHA })
     }
 
-    // Directional APs show an annular wedge in their broadcast direction.
-    if (ap.antennaMode === 'directional') {
-      const az = ((ap.azimuth ?? 0) - 90) * Math.PI / 180
-      const half = ((ap.beamwidth ?? 60) / 2) * Math.PI / 180
-      const a0 = az - half
-      const a1 = az + half
+    // Directional fan (Konva.Arc — annular wedge).
+    if (isDirectional) {
+      const halfBw = (beamwidth / 2) * Math.PI / 180
+      const a0 = axisRad - halfBw
+      const a1 = axisRad + halfBw
       const fanAlpha = isSelected ? 0.35 : (isHovered ? 0.28 : 0.18)
       graphics
         .moveTo(Math.cos(a0) * DIR_INNER_R, Math.sin(a0) * DIR_INNER_R)
@@ -159,24 +221,33 @@ export function attachAPsLayer({
         .arc(0, 0, DIR_OUTER_R, a1, a0, true)
         .closePath()
         .fill({ color: freqColor, alpha: fanAlpha })
+      // Directional selected ring — dashed [3,3] ring at radius ~35.5.
       if (isSelected) {
-        // Dashed outer rim for selection emphasis (rough approximation —
-        // PIXI v8 Graphics has no native dash, so we use a thin solid
-        // ring instead; the colour is still freq-specific so it reads
-        // as "this AP's beam".)
-        graphics
-          .arc(0, 0, DIR_OUTER_R, a0, a1, false)
-          .stroke({ width: 1, color: freqColor, alpha: 0.9 })
+        strokeDashedArc(
+          graphics, 0, 0, (DIR_RING_INNER + DIR_OUTER_R) / 2,
+          a0, a1, 3, 3,
+          { width: 1, color: freqColor, alpha: 1 },
+        )
       }
     }
 
-    // Orientation axis line for directional / custom.
-    if (ap.antennaMode === 'directional' || ap.antennaMode === 'custom') {
-      const axRad = ((ap.azimuth ?? 0) - 90) * Math.PI / 180
-      const axLen = 32
+    // Custom pattern polygon (closed line, freq color fill + stroke).
+    if (isCustom) {
+      const pattern = getPatternById(ap.patternId ?? DEFAULT_PATTERN_ID)
+      const pts = patternPolygonPoints(pattern, PATTERN_OUTER_R, axisRad)
+      if (pts.length >= 6) {
+        const polyAlpha = isSelected ? 0.35 : (isHovered ? 0.28 : 0.2)
+        graphics.poly(pts)
+          .fill({ color: freqColor, alpha: polyAlpha })
+          .stroke({ width: isSelected ? 1.2 : 0.8, color: freqColor, alpha: 1 })
+      }
+    }
+
+    // Orientation axis line — selected→red else freq color.
+    if (isOriented) {
       graphics
         .moveTo(0, 0)
-        .lineTo(Math.cos(axRad) * axLen, Math.sin(axRad) * axLen)
+        .lineTo(Math.cos(axisRad) * AXIS_LEN, Math.sin(axisRad) * AXIS_LEN)
         .stroke({
           width: isSelected ? 2 : 1.2,
           color: isSelected ? SELECT_STROKE : freqColor,
@@ -195,6 +266,29 @@ export function attachAPsLayer({
       .fill({ color: bodyFill, alpha: 1 })
       .stroke({ width: bodyWidth, color: bodyStroke, alpha: 1 })
 
+    // Orientation arrow (bar + tip) — for directional / custom only.
+    // oldSrc: Group{rotation: azimuth}, bar [-4,0]-[4,0] stroke 1.5,
+    // tip [7,0]-[3,-3]-[3,3] closed filled. Rotated manually here.
+    if (isOriented) {
+      const iconCol = isInvert ? '#ffffff' : '#1e3a8a'
+      const c = Math.cos(axisRad)
+      const s = Math.sin(axisRad)
+      const rot = (px, py) => [px * c - py * s, px * s + py * c]
+      // Bar
+      const [bx0, by0] = rot(-4, 0)
+      const [bx1, by1] = rot( 4, 0)
+      graphics
+        .moveTo(bx0, by0).lineTo(bx1, by1)
+        .stroke({ width: 1.5, color: iconCol, alpha: 1, cap: 'round' })
+      // Tip
+      const [tx0, ty0] = rot(7,  0)
+      const [tx1, ty1] = rot(3, -3)
+      const [tx2, ty2] = rot(3,  3)
+      graphics
+        .poly([tx0, ty0, tx1, ty1, tx2, ty2])
+        .fill({ color: iconCol, alpha: 1 })
+    }
+
     nameText.text = ap.name ?? ''
 
     // Info pill — dark rounded rect bg + 3-line text including name +
@@ -206,7 +300,7 @@ export function attachAPsLayer({
     infoBg.clear()
     if (showInfo) {
       infoBg
-        .roundRect(-INFO_PILL_W / 2, AP_RADIUS + 20, INFO_PILL_W, INFO_PILL_H, 4)
+        .roundRect(-INFO_PILL_W / 2, INFO_PILL_Y, INFO_PILL_W, INFO_PILL_H, 4)
         .fill({ color: INFO_PILL_BG, alpha: 1 })
       infoBg.visible = true
     } else {

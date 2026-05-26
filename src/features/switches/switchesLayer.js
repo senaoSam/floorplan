@@ -9,21 +9,23 @@ import { computeFocusedDevices, FOCUS_HALO_COLOR, FOCUS_HALO_ALPHA, FOCUS_HALO_W
 import { getChassisSize, getKindLabel, getPortDotCount } from './switchChassis'
 
 // Switch chassis adapter — per-switch interactive Container. Visual rules
-// ported from oldSrc SwitchLayer.jsx (29-6 + 17-2 + 17-4):
+// ported 1:1 from oldSrc SwitchLayer.jsx (29-6 + 17-2 + 17-4):
 //   * chassis size scales with portCount (widthMult) + isCore (+height)
-//   * fill #1f2937 dark slate; stroke = kind colour (selected → red)
-//   * status LED at top-left in kind colour
-//   * port-pip row along the bottom edge in **kind colour**
-//   * "SW" / "IDF" / "MDF" / "RTR" kind label centred inside the chassis
+//   * roundRect chassis (cornerRadius 3) — fill #1f2937 dark slate;
+//     stroke = kind colour (selected → red, hover invert → dark)
+//   * port-pip row (square dots) along the bottom edge in kind colour
+//   * PoE badge: thin yellow line at top-left when poeBudget > 0
+//   * "SW" / "IDF" / "MDF" / "RTR" kind label across the top of the chassis
 //   * decoration above chassis: IDF=1 bar, MDF=2 bars, Router=antenna mast
 //   * hover invert: hovered+non-selected → kind-colour chassis + dark stroke
-//   * 17-2 focus halo: indigo ring around chassis when this switch is
-//     related to the current AP / switch selection
+//   * 17-2 focus halo: indigo roundRect ring (cornerRadius 5) around chassis
 //   * 17-4 snap status: green top-right dot + dashed cyan foot-drops when
 //     within tray magnet; gray dot + red "!" warning otherwise
+//   * Name label sits ABOVE the chassis (oldSrc offsetY = h/2 + 14)
 
-const PORT_PIP_RADIUS = 1
+const PORT_DOT_SIZE = 2
 const SELECT_STROKE = '#e74c3c'
+const POE_BADGE_COLOR = '#facc15'
 const STATUS_SNAPPED_COLOR = '#22c55e'
 const STATUS_LOOSE_COLOR   = '#9ca3af'
 const STATUS_WARNING_COLOR = '#ef4444'
@@ -51,7 +53,7 @@ const NAME_STYLE = new TextStyle({
 const WARNING_STYLE = new TextStyle({
   fill: '#ffffff',
   fontFamily: 'system-ui, sans-serif',
-  fontSize: 8,
+  fontSize: 7,
   fontWeight: '700',
   align: 'center',
 })
@@ -81,11 +83,16 @@ export function attachSwitchesLayer({
       // otherwise clicks near the chassis but not exactly on a rendered
       // pixel fall through to the stage.
       g.eventMode = 'none'
+      // Kind label centred horizontally near the top of the chassis
+      // (oldSrc: y=-h/2+3*s with width=w, align center).
       const label = new Text({ text: '', style: LABEL_STYLE })
-      label.anchor.set(0.5, 0.5)
+      label.anchor.set(0.5, 0)
       label.eventMode = 'none'
+      // Name label sits ABOVE the chassis (oldSrc offsetY = h/2 + 14*s).
+      // anchor(0.5, 1) + y = -(h/2 + 14) makes bottom of text sit 14 px
+      // above the chassis top.
       const nameLabel = new Text({ text: '', style: NAME_STYLE })
-      nameLabel.anchor.set(0.5, 0)
+      nameLabel.anchor.set(0.5, 1)
       nameLabel.eventMode = 'none'
       const warning = new Text({ text: '!', style: WARNING_STYLE })
       warning.anchor.set(0.5, 0.5)
@@ -135,7 +142,7 @@ export function attachSwitchesLayer({
 
     const chassisFill   = isInvert ? color : 0x1f2937
     const strokeCol     = isSelected ? SELECT_STROKE : (isInvert ? 0x1f2937 : color)
-    const strokeWidth   = isSelected ? 2.5 : isHovered ? 2 : 1.4
+    const strokeWidth   = isSelected ? 2.5 : isHovered ? 2 : 1.5
     const portCol       = isInvert ? 0x1f2937 : color
     const labelCol      = isInvert ? '#1f2937' : '#ffffff'
     const snap = snapBySwitch.get(sw.id) ?? { snapped: false, drops: [] }
@@ -153,9 +160,10 @@ export function attachSwitchesLayer({
     }
 
     // 17-2 focus halo — indigo rounded-rect ring behind the chassis.
+    // oldSrc cornerRadius = 5 * s.
     if (isFocused) {
       graphics
-        .rect(-w / 2 - 4, -h / 2 - 4, w + 8, h + 8)
+        .roundRect(-w / 2 - 4, -h / 2 - 4, w + 8, h + 8, 5)
         .stroke({ width: FOCUS_HALO_WIDTH, color: FOCUS_HALO_COLOR, alpha: FOCUS_HALO_ALPHA })
     }
 
@@ -178,39 +186,50 @@ export function attachSwitchesLayer({
         .stroke({ width: 1, color: portCol, alpha: 1 })
     }
 
-    // Chassis body.
+    // Chassis body — roundRect, cornerRadius 3 (oldSrc 3*s).
     graphics
-      .rect(-w / 2, -h / 2, w, h)
-      .fill({ color: chassisFill, alpha: 0.95 })
+      .roundRect(-w / 2, -h / 2, w, h, 3)
+      .fill({ color: chassisFill, alpha: 1 })
       .stroke({ width: strokeWidth, color: strokeCol, alpha: 1 })
 
-    // Status LED — top-left corner in kind colour.
-    graphics.circle(-w / 2 + 3, -h / 2 + 3, 1.5).fill({ color, alpha: 1 })
-
     // Port-pip row along the bottom edge in kind colour.
+    // oldSrc: square dots (Rect 2*s × 2*s) at y=h/2-4*s, step=(w-6*s)/dotCount,
+    // x = -w/2 + 3*s + i*step.
     const dotCount = getPortDotCount(portCount)
     if (dotCount > 0) {
-      const inset = 3
-      const span = w - inset * 2
+      const span = w - 6
       const step = span / dotCount
-      const rowY = h / 2 - 3
+      const rowY = h / 2 - 4
       for (let i = 0; i < dotCount; i++) {
-        const px = -w / 2 + inset + step * (i + 0.5)
-        graphics.circle(px, rowY, PORT_PIP_RADIUS).fill({ color: portCol, alpha: 0.9 })
+        const px = -w / 2 + 3 + i * step
+        graphics
+          .rect(px, rowY, PORT_DOT_SIZE, PORT_DOT_SIZE)
+          .fill({ color: portCol, alpha: 1 })
       }
     }
 
-    // 17-4 snap-status dot — top-right corner (green = snapped, gray = loose).
+    // PoE badge — yellow line at chassis top-left when poeBudget > 0.
+    // oldSrc: from (-w/2+3, -h/2+4) to (-w/2+7, -h/2+4), width 1.5*s.
+    if ((sw.poeBudget ?? 0) > 0) {
+      graphics
+        .moveTo(-w / 2 + 3, -h / 2 + 4)
+        .lineTo(-w / 2 + 7, -h / 2 + 4)
+        .stroke({ width: 1.5, color: POE_BADGE_COLOR, alpha: 1 })
+    }
+
+    // 17-4 snap-status dot — top-right corner.
+    // oldSrc: radius 2.8 * s.
     const statusCol = snap.snapped ? STATUS_SNAPPED_COLOR : STATUS_LOOSE_COLOR
     graphics
-      .circle(w / 2 - 2, -h / 2 + 2, 2.4)
+      .circle(w / 2 - 2, -h / 2 + 2, 2.8)
       .fill({ color: statusCol, alpha: 1 })
       .stroke({ width: 0.8, color: 0x0b0d12, alpha: 1 })
 
     // 17-4 unconnected warning — red "!" at bottom-right when no snap target.
+    // oldSrc: Circle radius 5 * s + white stroke 0.8, Text "!" fontSize 7 * s.
     if (!snap.snapped) {
       graphics
-        .circle(w / 2 + 1, h / 2 - 1, 4.5)
+        .circle(w / 2 + 1, h / 2 - 1, 5)
         .fill({ color: STATUS_WARNING_COLOR, alpha: 1 })
         .stroke({ width: 0.8, color: 0xffffff, alpha: 1 })
       warning.visible = true
@@ -219,16 +238,16 @@ export function attachSwitchesLayer({
       warning.visible = false
     }
 
-    // Kind label centred inside the chassis.
+    // Kind label — top of chassis, horizontally centred (oldSrc
+    // x=-w/2, y=-h/2+3*s, width=w align center → text top at -h/2+3*s).
     label.text = getKindLabel(kind)
     label.style.fill = labelCol
-    label.position.set(0, 0)
+    label.position.set(0, -h / 2 + 3)
 
-    // Name label sits below the chassis (oldSrc convention — keeps the
-    // chassis itself compact while making the name unmistakable at a
-    // glance). Drop-shadow keeps it legible on light + dark backgrounds.
+    // Name label sits ABOVE the chassis (oldSrc offsetY = h/2 + 14*s).
+    // anchor(0.5, 1) + y = -(h/2 + 14) → text bottom 14 px above chassis top.
     nameLabel.text = sw.name ?? ''
-    nameLabel.position.set(0, h / 2 + 4)
+    nameLabel.position.set(0, -(h / 2 + 14))
   }
 
   const bindInteractions = (entry) => {
