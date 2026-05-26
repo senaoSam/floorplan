@@ -1,20 +1,48 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import { useCableStore, SWITCH_KINDS } from '@/store/useCableStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { useFloorStore } from '@/store/useFloorStore'
 import './_panel.sass'
 
-// Slim Phase 25 SwitchPanel — kind / name / position / model / port
-// count / PoE budget. uplinkTo / cableType / port-row detail / health
-// metrics return when their dependencies (per-tier classification UI,
-// dropdown showing all switches across floors) are reintroduced.
+const CABLE_TYPE_OPTIONS = [
+  { value: 'auto',   label: '自動 Auto' },
+  { value: 'copper', label: '銅纜 Copper' },
+  { value: 'fiber',  label: '光纖 Fiber' },
+]
+
+// Phase 25 SwitchPanel — identification, position, hardware, plus uplink
+// + cable-type controls (29-3). uplink dropdown lists every other switch
+// in the building so the user can wire the upstream tier manually.
 
 function SwitchPanel({ floorId, swId }) {
   const switches = useCableStore((s) => s.switchesByFloor[floorId] ?? [])
+  const switchesByFloor = useCableStore((s) => s.switchesByFloor)
+  const floors = useFloorStore((s) => s.floors)
   const updateSwitch = useCableStore((s) => s.updateSwitch)
   const removeSwitch = useCableStore((s) => s.removeSwitch)
   const clearSelected = useEditorStore((s) => s.clearSelected)
 
   const sw = switches.find((s) => s.id === swId)
+
+  // Uplink dropdown source — every switch in the building except self.
+  // Order: same floor first, then other floors. Each entry annotated with
+  // floor name so the user can disambiguate identical names across floors.
+  const uplinkCandidates = useMemo(() => {
+    if (!sw) return []
+    const out = []
+    const floorById = new Map(floors.map((f) => [f.id, f]))
+    const pushFromFloor = (fid) => {
+      for (const s of switchesByFloor[fid] ?? []) {
+        if (s.id === sw.id) continue
+        const f = floorById.get(fid)
+        out.push({ id: s.id, label: f ? `${s.name} (${f.name})` : s.name })
+      }
+    }
+    pushFromFloor(floorId)
+    for (const f of floors) if (f.id !== floorId) pushFromFloor(f.id)
+    return out
+  }, [floors, switchesByFloor, floorId, sw])
+
   if (!sw) return null
 
   const onPatch = (patch) => updateSwitch(floorId, swId, patch)
@@ -113,6 +141,53 @@ function SwitchPanel({ floorId, swId }) {
               step="10"
               value={sw.poeBudget ?? 0}
               onChange={(e) => onPatch({ poeBudget: parseFloat(e.target.value) || 0 })}
+            />
+          </label>
+        </div>
+      </section>
+
+      <section className="obj-panel__section">
+        <div className="obj-panel__section-title">上行 Uplink</div>
+        <label className="obj-panel__field">
+          <span>連到 (Uplink To)</span>
+          <select
+            value={sw.uplinkTo ?? ''}
+            onChange={(e) => onPatch({ uplinkTo: e.target.value || null })}
+          >
+            <option value="">— 無 —</option>
+            {uplinkCandidates.map((c) => (
+              <option key={c.id} value={c.id}>{c.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="obj-panel__field">
+          <span>線材 Cable Type</span>
+          <select
+            value={sw.cableType ?? 'auto'}
+            onChange={(e) => onPatch({ cableType: e.target.value })}
+          >
+            {CABLE_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
+        <div className="obj-panel__row">
+          <label className="obj-panel__field">
+            <span>Uplink Port</span>
+            <input
+              type="text"
+              value={sw.uplinkPortType ?? ''}
+              onChange={(e) => onPatch({ uplinkPortType: e.target.value })}
+            />
+          </label>
+          <label className="obj-panel__field">
+            <span>Uplink 數</span>
+            <input
+              type="number"
+              step="1"
+              min="0"
+              value={sw.uplinkCount ?? 0}
+              onChange={(e) => onPatch({ uplinkCount: parseInt(e.target.value, 10) || 0 })}
             />
           </label>
         </div>

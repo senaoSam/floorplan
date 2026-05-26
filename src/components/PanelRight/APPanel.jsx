@@ -9,9 +9,21 @@ const FREQ_OPTIONS = [
   { value: 6,   label: '6 GHz' },
 ]
 
-// Slim Phase 25 port — name + position + frequency / channel / txPower
-// editable. Antenna pattern / direction / mount type / model / etc. land
-// later when their dropdowns + pattern preview components return.
+const ANTENNA_MODE_OPTIONS = [
+  { value: 'omni',        label: '全向 Omni' },
+  { value: 'directional', label: '指向 Directional' },
+  { value: 'custom',      label: '自訂 Pattern' },
+]
+
+const MOUNT_TYPE_OPTIONS = [
+  { value: 'ceiling', label: '吸頂 Ceiling' },
+  { value: 'wall',    label: '壁掛 Wall' },
+  { value: 'floor',   label: '地面 Floor' },
+]
+
+// Phase 25 port — identification, position, wireless, antenna pattern, and
+// mount info. Pattern thumbnail + model picker (apModels list) stay
+// deferred until those constants get re-imported from oldSrc.
 function APPanel({ floorId, apId }) {
   const aps = useAPStore((s) => s.apsByFloor[floorId] ?? [])
   const updateAP = useAPStore((s) => s.updateAP)
@@ -119,6 +131,72 @@ function APPanel({ floorId, apId }) {
             step="1"
             value={ap.txPower ?? 20}
             onChange={(e) => onPatch({ txPower: parseFloat(e.target.value) || 0 })}
+          />
+        </label>
+      </section>
+
+      <section className="ap-panel__section">
+        <div className="ap-panel__section-title">天線</div>
+        <label className="ap-panel__field">
+          <span>模式</span>
+          <select
+            value={ap.antennaMode ?? 'omni'}
+            onChange={(e) => onPatch({ antennaMode: e.target.value })}
+          >
+            {ANTENNA_MODE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
+        {ap.antennaMode === 'directional' && (
+          <>
+            <label className="ap-panel__field">
+              <span>方位 Azimuth ({Math.round(ap.azimuth ?? 0)}°)</span>
+              <input
+                type="range"
+                min="0"
+                max="359"
+                step="1"
+                value={ap.azimuth ?? 0}
+                onChange={(e) => onPatch({ azimuth: parseFloat(e.target.value) })}
+              />
+            </label>
+            <label className="ap-panel__field">
+              <span>波束寬 Beamwidth ({Math.round(ap.beamwidth ?? 60)}°)</span>
+              <input
+                type="range"
+                min="10"
+                max="180"
+                step="1"
+                value={ap.beamwidth ?? 60}
+                onChange={(e) => onPatch({ beamwidth: parseFloat(e.target.value) })}
+              />
+            </label>
+          </>
+        )}
+      </section>
+
+      <section className="ap-panel__section">
+        <div className="ap-panel__section-title">安裝</div>
+        <label className="ap-panel__field">
+          <span>固定方式</span>
+          <select
+            value={ap.mountType ?? 'ceiling'}
+            onChange={(e) => onPatch({ mountType: e.target.value })}
+          >
+            {MOUNT_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="ap-panel__field">
+          <span>安裝高度 (m)</span>
+          <input
+            type="number"
+            step="0.1"
+            min="0"
+            value={ap.mountHeight ?? 2.4}
+            onChange={(e) => onPatch({ mountHeight: parseFloat(e.target.value) || 0 })}
           />
         </label>
       </section>

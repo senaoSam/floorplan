@@ -446,4 +446,23 @@ magic number (radius / strokeWidth / dash pattern / font size) / 內聯 const / 
 
 **MCP 視覺驗證**：選 SW 後，related AP 出現 indigo halo ring、cable 顯示 indigo highlight band 在線下、SW chassis 出現紅選取邊 + 綠 snap dot + green LED + green port pips + "SW" label。Directional AP 顯示 annular wedge fan（不是切片）。
 
-剩餘 audit 項目：第三波 panel 補欄位、第四波 Sidebar / FloorImage transform / Tray vertex menu。Perf shader（31-4 / 31-5 / 31-6）仍未動。
+---
+
+## 第三波 fix 進度（2026-05-26）
+
+| # | 內容 | 狀態 | 改動檔案 |
+|---|---|---|---|
+| W3-1 | **APPanel** 加 antenna 區（mode picker omni / directional / custom + azimuth slider + beamwidth slider）+ 安裝區（mountType picker ceiling / wall / floor + mountHeight） | ✅ | `APPanel.jsx` |
+| W3-2 | **SwitchPanel** 加 Uplink 區（uplinkTo dropdown 列建築全 switch + cableType picker auto / copper / fiber + uplinkPortType + uplinkCount） | ✅ | `SwitchPanel.jsx` |
+| W3-3 | **WallPanel** 加門窗 section：openings 列表（每 row 顯示 type 切換 chip + 材質 picker + startFrac/endFrac 數字輸入 + delete X）；"+ 門" / "+ 窗" 加按鈕；packing 用 `findFreeSlot` 找最大剩餘空隙置中（不會 overlap） | ✅ | `WallPanel.jsx`、`_panel.sass` 加 `obj-panel__btn` / `obj-panel__opening*` style |
+
+**MCP 視覺驗證**：
+- AP panel 顯示 azimuth 90° / beamwidth 90° slider，canvas 上 directional fan 即時跟著動。
+- Switch panel uplink dropdown 顯示 "— 無 —" + Cable Type 自動 Auto。
+- Wall panel 砍掉既有 opening 再連按 "+ 門" "+ 窗" → packing 排到 (43–57%) + (71–86%)，無 overlap。
+
+剩餘 audit 項目：
+- 第三波 **CableTrayPanel 補欄位**（19-x engineering — tray kind / widthMm / depthMm / capacity profile / fill ratio / AP list / Issues）
+- 第三波 **CableSummary BOM 細分**（22-1 / 22-2 export）
+- 第四波 Sidebar 互動 / FloorImage transform / Tray vertex menu / DOOR_WINDOW mode
+- Perf shader（31-4 / 31-5 / 31-6）仍未動 — 1000 AP 規格達標的硬骨頭
