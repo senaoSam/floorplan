@@ -7,11 +7,14 @@ import Toolbar from '@/components/Toolbar/Toolbar'
 import ActiveModeBadge from '@/components/Toolbar/ActiveModeBadge'
 import LayerToggle from '@/components/LayerToggle/LayerToggle'
 import RegulatorySelector from '@/components/RegulatorySelector/RegulatorySelector'
+import DevicePlanningPanel from '@/components/DevicePlanningPanel/DevicePlanningPanel'
 import ScaleBarMount from '@/components/ScaleBar/ScaleBarMount'
 import './CanvasArea.sass'
 
 // Standalone-mode canvas pane — wraps the embeddable FloorplanSystem
-// plus the floating overlay controls.
+// plus the floating overlay controls. Top-left stacks LayerToggle +
+// DevicePlanningPanel in one row (oldSrc layout) with the
+// RegulatorySelector dropdown below them.
 function CanvasArea() {
   const hasFloor = useFloorStore((s) => s.floors.length > 0)
   return (
@@ -22,7 +25,10 @@ function CanvasArea() {
       <Toolbar />
       <ActiveModeBadge />
       <div className="canvas-area__top-left">
-        <LayerToggle />
+        <div className="canvas-area__top-left-row">
+          <LayerToggle />
+          <DevicePlanningPanel />
+        </div>
         <RegulatorySelector />
       </div>
       {hasFloor && <HeatmapControl />}
