@@ -9,6 +9,64 @@
   flex-direction: column
   flex-shrink: 0
   overflow-y: auto
+  transition: width 0.18s ease
+
+  // Collapsed mode: narrow strip showing only the expand button + floor chips
+  &--collapsed
+    width: 36px
+    overflow: visible
+    align-items: center
+    padding-top: 6px
+    gap: 6px
+
+  &__collapse-btn
+    width: 26px
+    height: 26px
+    border: none
+    border-radius: 4px
+    background: transparent
+    color: $text-secondary
+    cursor: pointer
+    font-size: 18px
+    line-height: 1
+    display: flex
+    align-items: center
+    justify-content: center
+    flex-shrink: 0
+
+    &:hover
+      background: rgba(255, 255, 255, 0.08)
+      color: $text-primary
+
+  &__floor-list--collapsed
+    padding: 4px 0
+    display: flex
+    flex-direction: column
+    gap: 4px
+    width: 100%
+    align-items: center
+
+  &__floor-chip
+    width: 28px
+    height: 28px
+    display: flex
+    align-items: center
+    justify-content: center
+    border-radius: 6px
+    font-size: 11px
+    font-weight: 600
+    color: $text-secondary
+    cursor: pointer
+    user-select: none
+    transition: background 0.12s, color 0.12s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.08)
+      color: $text-primary
+
+    &--active
+      background: rgba($accent, 0.18)
+      color: $accent
 
   &__section
     padding: 8px 0
@@ -25,64 +83,228 @@
     text-transform: uppercase
     letter-spacing: 0.5px
 
-  &__section-count
-    color: rgba(255, 255, 255, 0.4)
-    font-weight: 500
-
-  &__empty
-    padding: 12px
-    color: rgba(255, 255, 255, 0.4)
-    font-size: 12px
-    text-align: center
-
-  &__floor-list
-    list-style: none
-    margin: 0
-    padding: 0
-
-  &__floor-row
-    width: 100%
+  &__icon-btn
+    width: 20px
+    height: 20px
+    border: none
+    border-radius: 4px
+    background: transparent
+    color: $text-secondary
+    cursor: pointer
+    font-size: 14px
+    line-height: 1
     display: flex
     align-items: center
-    justify-content: space-between
-    padding: 8px 12px
-    border: none
-    background: transparent
-    color: $text-primary
-    font-family: inherit
+    justify-content: center
+
+    &:hover
+      background: rgba(255, 255, 255, 0.08)
+      color: $text-primary
+
+    &:disabled
+      opacity: 0.4
+      cursor: not-allowed
+
+  &__loading-badge
+    margin-left: 8px
+    font-size: 10px
+    font-weight: 400
+    color: $accent
+    text-transform: none
+    letter-spacing: 0
+
+  &__floor-list,
+  &__layer-list
+    list-style: none
+    padding: 0 6px
+
+  &__empty
+    padding: 8px 6px
+    font-size: 12px
+    color: $text-secondary
+    text-align: center
+
+  &__floor-item
+    position: relative
+    display: flex
+    align-items: center
+    gap: 8px
+    padding: 6px 8px
+    border-radius: 6px
+    cursor: pointer
     font-size: 13px
+    color: $text-secondary
+    transition: background 0.12s, color 0.12s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.06)
+      color: $text-primary
+
+      .sidebar-left__floor-menu-btn
+        opacity: 1
+
+    &--active
+      background: rgba($accent, 0.12)
+      color: $text-primary
+
+    &--drop-target
+      box-shadow: inset 0 2px 0 $accent
+
+  &__floor-icon
+    font-size: 12px
+    opacity: 0.6
+
+  &__floor-name
+    flex: 1
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+
+  &__floor-rename
+    flex: 1
+    background: rgba(0, 0, 0, 0.3)
+    border: 1px solid $accent
+    border-radius: 4px
+    color: $text-primary
+    font-size: 13px
+    padding: 2px 6px
+    outline: none
+    min-width: 0
+
+  &__floor-menu-btn
+    width: 20px
+    height: 20px
+    border: none
+    border-radius: 4px
+    background: transparent
+    color: $text-secondary
+    cursor: pointer
+    font-size: 14px
+    line-height: 1
+    opacity: 0
+    flex-shrink: 0
+    display: flex
+    align-items: center
+    justify-content: center
+
+    &:hover
+      background: rgba(255, 255, 255, 0.12)
+      color: $text-primary
+
+  &__floor-menu
+    position: absolute
+    top: 100%
+    right: 4px
+    margin-top: 2px
+    min-width: 120px
+    background: $bg-secondary
+    border: 1px solid $border-color
+    border-radius: 6px
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35)
+    z-index: 20
+    padding: 4px 0
+    display: flex
+    flex-direction: column
+
+  &__menu-item
+    text-align: left
+    padding: 6px 12px
+    background: transparent
+    border: none
+    color: $text-primary
+    font-size: 12px
+    cursor: pointer
+
+    &:hover:not(:disabled)
+      background: rgba(255, 255, 255, 0.08)
+
+    &:disabled
+      color: rgba(255, 255, 255, 0.3)
+      cursor: not-allowed
+
+    &--danger
+      color: #ff6b6b
+
+  &__floor-props
+    list-style: none
+    padding: 2px 12px 6px 34px
+    background: rgba(59, 130, 246, 0.08)
+    border-left: 2px solid rgba(59, 130, 246, 0.6)
+    margin-bottom: 2px
+
+  &__floor-prop
+    display: flex
+    align-items: center
+    gap: 6px
+    font-size: 11px
+    color: #cbd5e1
+    margin-bottom: 3px
+
+    &:last-child
+      margin-bottom: 0
+
+    input
+      width: 60px
+      padding: 3px 6px
+      border: 1px solid $border-color
+      border-radius: 4px
+      background: $bg-primary
+      color: $text-primary
+      font-size: 11px
+
+      &:focus
+        outline: none
+        border-color: rgba(59, 130, 246, 0.6)
+
+      &:hover
+        background: rgba(255, 107, 107, 0.12)
+
+    select
+      flex: 1
+      padding: 3px 6px
+      border: 1px solid $border-color
+      border-radius: 4px
+      background: $bg-primary
+      color: $text-primary
+      font-size: 11px
+
+      &:focus
+        outline: none
+        border-color: rgba(59, 130, 246, 0.6)
+
+  &__floor-action
+    display: block
+    width: 100%
+    margin-top: 6px
+    padding: 5px 8px
+    background: rgba(233, 69, 96, 0.15)
+    border: 1px solid rgba(233, 69, 96, 0.45)
+    border-radius: 4px
+    color: $text-primary
+    font-size: 11px
     cursor: pointer
     transition: background 0.12s
 
     &:hover
-      background: rgba(255, 255, 255, 0.05)
+      background: rgba(233, 69, 96, 0.28)
 
-    &--active
-      background: rgba($accent, 0.18)
-      color: $accent
-
-  &__floor-name
-    font-weight: 600
-
-  &__floor-meta
-    color: $text-secondary
-    font-size: 11px
-
-  &__footer
-    margin-top: auto
-    padding: 12px
-    display: flex
-    flex-direction: column
-    gap: 8px
-
-  &__stress-row
+  &__layer-item
     display: flex
     align-items: center
     gap: 8px
-
-  &__stress-label
-    font-size: 10px
+    padding: 5px 8px
+    font-size: 12px
     color: $text-secondary
-    text-transform: uppercase
-    letter-spacing: 0.4px
-    min-width: 36px
+    border-radius: 6px
+    cursor: pointer
+    transition: opacity 0.15s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.04)
+
+    &--hidden
+      opacity: 0.35
+
+  &__layer-eye
+    font-size: 12px
+    cursor: pointer

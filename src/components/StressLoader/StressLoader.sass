@@ -1,32 +1,42 @@
 @use '@/styles/variables' as *
 
-// Inside SidebarLeft footer — laid out inline with the DemoLoader.
+// Sits directly above the DemoLoader pill (bottom: 60px, height: 34px,
+// padding gap ≈ 8px → bottom: 60 + 34 + 8 = 102px).
 .stress-loader
+  position: fixed
+  bottom: 102px
+  left: 16px
+  z-index: 500
   display: flex
-  flex: 1
-  gap: 4px
+  gap: 6px
 
+  // Compact: stack vertically, narrow buttons that fit beside the collapsed sidebar.
   &--compact
     flex-direction: column
     gap: 4px
+    bottom: 156px
+
+    .stress-loader__btn
+      width: 30px
+      padding: 0
+      font-size: 10px
 
 .stress-loader__btn
-  flex: 1
-  height: 26px
-  padding: 0 6px
-  border: 1px solid $border-color
+  height: 28px
+  padding: 0 12px
+  border: 1px solid rgba(255, 255, 255, 0.18)
   border-radius: 14px
-  background: rgba(255, 255, 255, 0.05)
+  background: rgba(15, 52, 96, 0.85)
+  backdrop-filter: blur(6px)
   color: $text-primary
-  font-family: inherit
-  font-size: 10px
+  font-size: 11px
   cursor: pointer
   white-space: nowrap
   transition: border-color 0.2s, background 0.2s
 
   &:hover:not(:disabled)
     border-color: rgba(255, 255, 255, 0.4)
-    background: rgba(255, 255, 255, 0.10)
+    background: rgba(20, 65, 120, 0.9)
 
   &:disabled
     cursor: default

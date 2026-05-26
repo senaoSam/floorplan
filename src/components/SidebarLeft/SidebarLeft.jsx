@@ -1,56 +1,388 @@
-import React from 'react'
-import { useFloorStore } from '@/store/useFloorStore'
-import DemoLoader from '@/components/DemoLoader/DemoLoader'
-import StressLoader from '@/components/StressLoader/StressLoader'
+import React, { useRef, useState, useEffect } from 'react'
+import { useFloorStore, DEFAULT_FLOOR_HEIGHT_M } from '@/store/useFloorStore'
+import {
+  MATERIAL_LIST,
+  FLOOR_SLAB_DEFAULT_DB,
+  DEFAULT_FLOOR_SLAB_MATERIAL_ID,
+  DEFAULT_FLOOR_SLAB_DB,
+} from '@/constants/materials'
+import { useWallStore } from '@/store/useWallStore'
+import { useAPStore } from '@/store/useAPStore'
+import { useScopeStore } from '@/store/useScopeStore'
+import { useFloorHoleStore } from '@/store/useFloorHoleStore'
+import { useCableStore } from '@/store/useCableStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
+import { useFloorImport } from '@/features/importer/useFloorImport'
+import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import './SidebarLeft.sass'
 
-// Slim Phase 25 sidebar: floor list + demo loader only.
-// Inline rename / per-floor menu / file import / align / crop / slab
-// material are deferred until the supporting stores (file import,
-// confirm dialog, scope / hole / cable, history) come back online.
-function SidebarLeft() {
-  const floors = useFloorStore((s) => s.floors)
-  const activeFloorId = useFloorStore((s) => s.activeFloorId)
-  const setActiveFloor = useFloorStore((s) => s.setActiveFloor)
+// Ported from oldSrc; trimmed against the PIXI port:
+//   * 匯出 PNG ↘ requires the Konva stage — not available now (the new
+//     renderer uses PIXI). Hidden until a PIXI exporter lands.
+//   * 自動規劃整層 AP 功率 ↘ requires AutoPowerModal (heatmap-driven
+//     greedy planner) — not ported yet. Button kept but stubs an alert.
+// Everything else (add / collapse / rename / align switch / inline floor
+// properties / reorder / remove) is identical to oldSrc.
 
-  return (
-    <aside className="sidebar-left">
-      <div className="sidebar-left__section">
-        <div className="sidebar-left__section-header">
-          <span>樓層</span>
-          <span className="sidebar-left__section-count">{floors.length}</span>
-        </div>
-        {floors.length === 0 && (
-          <div className="sidebar-left__empty">尚未載入樓層</div>
-        )}
-        <ul className="sidebar-left__floor-list">
-          {floors.map((f) => {
-            const active = f.id === activeFloorId
+function SidebarLeft() {
+  const floors          = useFloorStore((s) => s.floors)
+  const activeFloorId   = useFloorStore((s) => s.activeFloorId)
+  const setActiveFloor  = useFloorStore((s) => s.setActiveFloor)
+  const updateFloor     = useFloorStore((s) => s.updateFloor)
+  const removeFloor     = useFloorStore((s) => s.removeFloor)
+  const reorderFloors   = useFloorStore((s) => s.reorderFloors)
+  const clearWalls      = useWallStore((s) => s.clearFloor)
+  const clearAPs        = useAPStore((s) => s.clearFloor)
+  const clearScopes     = useScopeStore((s) => s.clearFloor)
+  const clearHoles      = useFloorHoleStore((s) => s.clearFloor)
+  const clearSwitches   = useCableStore((s) => s.clearFloor)
+  const setEditorMode   = useEditorStore((s) => s.setEditorMode)
+  const setSelected     = useEditorStore((s) => s.setSelected)
+
+  const { processFile, isLoading, loadingMsg } = useFloorImport()
+  const fileInputRef = useRef(null)
+
+  const [editingId, setEditingId]   = useState(null)
+  const [editingName, setEditingName] = useState('')
+  const editInputRef = useRef(null)
+
+  const [menuOpenId, setMenuOpenId] = useState(null)
+  const [pendingRemove, setPendingRemove] = useState(null)
+  const [pendingSwitch, setPendingSwitch] = useState(null)
+
+  const editorMode = useEditorStore((s) => s.editorMode)
+  const isAlignMode = editorMode === EDITOR_MODE.ALIGN_FLOOR
+
+  const sidebarCollapsed       = useEditorStore((s) => s.sidebarCollapsed)
+  const toggleSidebarCollapsed = useEditorStore((s) => s.toggleSidebarCollapsed)
+
+  const requestSetActive = (id) => {
+    if (id === activeFloorId) return
+    if (isAlignMode) { setPendingSwitch({ id, keepAlign: false }); return }
+    setActiveFloor(id)
+  }
+
+  const confirmSwitch = () => {
+    const s = pendingSwitch
+    setPendingSwitch(null)
+    if (!s) return
+    if (s.keepAlign) {
+      setActiveFloor(s.id)
+      setEditorMode(EDITOR_MODE.ALIGN_FLOOR)
+      setSelected(s.id, 'floor_align')
+    } else {
+      setEditorMode(EDITOR_MODE.SELECT)
+      setActiveFloor(s.id)
+    }
+  }
+
+  // Drag-and-drop reorder.
+  const [dragIndex, setDragIndex] = useState(null)
+  const [dropIndex, setDropIndex] = useState(null)
+
+  useEffect(() => {
+    if (editingId && editInputRef.current) {
+      editInputRef.current.select()
+    }
+  }, [editingId])
+
+  useEffect(() => {
+    if (!menuOpenId) return
+    const onDocClick = () => setMenuOpenId(null)
+    const t = setTimeout(() => document.addEventListener('click', onDocClick), 0)
+    return () => { clearTimeout(t); document.removeEventListener('click', onDocClick) }
+  }, [menuOpenId])
+
+  const handleAddClick = () => {
+    if (isLoading) return
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = (e) => {
+    processFile(e.target.files?.[0])
+    e.target.value = ''
+  }
+
+  const startRename = (floor) => {
+    setEditingId(floor.id)
+    setEditingName(floor.name)
+    setMenuOpenId(null)
+  }
+
+  const commitRename = () => {
+    const name = editingName.trim()
+    if (editingId && name) updateFloor(editingId, { name })
+    setEditingId(null)
+  }
+  const cancelRename = () => setEditingId(null)
+
+  const requestRemove = (floor) => {
+    setMenuOpenId(null)
+    setPendingRemove(floor)
+  }
+
+  const startAlign = (floor) => {
+    setMenuOpenId(null)
+    if (isAlignMode && floor.id !== activeFloorId) {
+      setPendingSwitch({ id: floor.id, keepAlign: true })
+      return
+    }
+    setActiveFloor(floor.id)
+    setEditorMode(EDITOR_MODE.ALIGN_FLOOR)
+    setSelected(floor.id, 'floor_align')
+  }
+
+  const confirmRemove = () => {
+    const floor = pendingRemove
+    if (!floor) return
+    if (floor.imageUrl?.startsWith('blob:')) {
+      try { URL.revokeObjectURL(floor.imageUrl) } catch { /* ignore */ }
+    }
+    clearWalls(floor.id)
+    clearAPs(floor.id)
+    clearScopes(floor.id)
+    clearHoles(floor.id)
+    clearSwitches(floor.id)
+    removeFloor(floor.id)
+    if (isAlignMode && floor.id === activeFloorId) {
+      setEditorMode(EDITOR_MODE.SELECT)
+    }
+    setPendingRemove(null)
+  }
+
+  const handleDragStart = (e, idx) => {
+    setDragIndex(idx)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(idx))
+  }
+  const handleDragOver = (e, idx) => {
+    if (dragIndex === null) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDropIndex(idx)
+  }
+  const handleDrop = (e, idx) => {
+    e.preventDefault()
+    if (dragIndex !== null && dragIndex !== idx) reorderFloors(dragIndex, idx)
+    setDragIndex(null); setDropIndex(null)
+  }
+  const handleDragEnd = () => { setDragIndex(null); setDropIndex(null) }
+
+  if (sidebarCollapsed) {
+    return (
+      <aside className="sidebar-left sidebar-left--collapsed">
+        <button
+          className="sidebar-left__collapse-btn"
+          title="展開樓層面板"
+          onClick={toggleSidebarCollapsed}
+        >
+          ›
+        </button>
+        <ul className="sidebar-left__floor-list sidebar-left__floor-list--collapsed">
+          {floors.map((floor) => {
+            const isActive = activeFloorId === floor.id
             return (
-              <li key={f.id}>
-                <button
-                  type="button"
-                  className={`sidebar-left__floor-row${active ? ' sidebar-left__floor-row--active' : ''}`}
-                  onClick={() => setActiveFloor(f.id)}
-                >
-                  <span className="sidebar-left__floor-name">{f.name}</span>
-                  <span className="sidebar-left__floor-meta">
-                    {f.imageWidth}×{f.imageHeight}
-                  </span>
-                </button>
+              <li
+                key={floor.id}
+                className={`sidebar-left__floor-chip${isActive ? ' sidebar-left__floor-chip--active' : ''}`}
+                title={floor.name}
+                onClick={() => requestSetActive(floor.id)}
+              >
+                {floor.name}
               </li>
             )
           })}
         </ul>
-      </div>
+      </aside>
+    )
+  }
 
-      <div className="sidebar-left__footer">
-        <DemoLoader />
-        <div className="sidebar-left__stress-row">
-          <span className="sidebar-left__stress-label">Stress</span>
-          <StressLoader />
+  return (
+    <aside className="sidebar-left">
+      <section className="sidebar-left__section">
+        <div className="sidebar-left__section-header">
+          <span>樓層{isLoading && <span className="sidebar-left__loading-badge">{loadingMsg}</span>}</span>
+          <button
+            className="sidebar-left__icon-btn"
+            title="新增樓層（匯入平面圖）"
+            onClick={handleAddClick}
+            disabled={isLoading}
+          >
+            ＋
+          </button>
+          <button
+            className="sidebar-left__icon-btn"
+            title="收合樓層面板"
+            onClick={toggleSidebarCollapsed}
+          >
+            ‹
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".png,.jpg,.jpeg,.pdf"
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+          />
         </div>
-      </div>
+
+        <ul className="sidebar-left__floor-list">
+          {floors.length === 0 && (
+            <li className="sidebar-left__empty">尚未匯入平面圖</li>
+          )}
+          {floors.map((floor, idx) => {
+            const isActive = activeFloorId === floor.id
+            const isEditing = editingId === floor.id
+            const isMenuOpen = menuOpenId === floor.id
+            const isDragOver = dropIndex === idx && dragIndex !== null && dragIndex !== idx
+            const floorHeight = floor.floorHeight ?? DEFAULT_FLOOR_HEIGHT_M
+            return (
+              <React.Fragment key={floor.id}>
+              <li
+                className={[
+                  'sidebar-left__floor-item',
+                  isActive ? 'sidebar-left__floor-item--active' : '',
+                  isDragOver ? 'sidebar-left__floor-item--drop-target' : '',
+                ].filter(Boolean).join(' ')}
+                onClick={() => !isEditing && requestSetActive(floor.id)}
+                draggable={!isEditing}
+                onDragStart={(e) => handleDragStart(e, idx)}
+                onDragOver={(e) => handleDragOver(e, idx)}
+                onDrop={(e) => handleDrop(e, idx)}
+                onDragEnd={handleDragEnd}
+              >
+                <span className="sidebar-left__floor-icon">▣</span>
+                {isEditing ? (
+                  <input
+                    ref={editInputRef}
+                    className="sidebar-left__floor-rename"
+                    value={editingName}
+                    onChange={(e) => setEditingName(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter')  commitRename()
+                      if (e.key === 'Escape') cancelRename()
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <span className="sidebar-left__floor-name">{floor.name}</span>
+                )}
+                {!isEditing && (
+                  <button
+                    className="sidebar-left__floor-menu-btn"
+                    title="選項"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setMenuOpenId(isMenuOpen ? null : floor.id)
+                    }}
+                  >
+                    ⋯
+                  </button>
+                )}
+                {isMenuOpen && (
+                  <div
+                    className="sidebar-left__floor-menu"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button className="sidebar-left__menu-item" onClick={() => startRename(floor)}>重新命名</button>
+                    <button className="sidebar-left__menu-item" onClick={() => startAlign(floor)}>對齊樓層</button>
+                    <button className="sidebar-left__menu-item sidebar-left__menu-item--danger" onClick={() => requestRemove(floor)}>刪除樓層</button>
+                  </div>
+                )}
+              </li>
+              {isActive && (
+                <li className="sidebar-left__floor-props">
+                  <label className="sidebar-left__floor-prop">
+                    <span>樓高</span>
+                    <input
+                      type="number"
+                      min="0.5"
+                      step="0.1"
+                      value={floorHeight}
+                      onChange={(e) => {
+                        const num = parseFloat(e.target.value)
+                        if (!isNaN(num) && num >= 0.5) updateFloor(floor.id, { floorHeight: num })
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <span>m</span>
+                  </label>
+                  <label className="sidebar-left__floor-prop">
+                    <span>樓板</span>
+                    <select
+                      value={floor.floorSlabMaterialId ?? DEFAULT_FLOOR_SLAB_MATERIAL_ID}
+                      onChange={(e) => {
+                        const matId = e.target.value
+                        updateFloor(floor.id, {
+                          floorSlabMaterialId: matId,
+                          floorSlabAttenuationDb: FLOOR_SLAB_DEFAULT_DB[matId] ?? DEFAULT_FLOOR_SLAB_DB,
+                        })
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {MATERIAL_LIST.map((m) => (
+                        <option key={m.id} value={m.id}>{m.label} ({m.dbLoss} dB)</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="sidebar-left__floor-prop">
+                    <span>衰減</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={floor.floorSlabAttenuationDb ?? DEFAULT_FLOOR_SLAB_DB}
+                      onChange={(e) => {
+                        const num = parseFloat(e.target.value)
+                        if (!isNaN(num) && num >= 0) updateFloor(floor.id, { floorSlabAttenuationDb: num })
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <span>dB</span>
+                  </label>
+                  <button
+                    className="sidebar-left__floor-action"
+                    disabled
+                    title="AutoPowerModal 尚未在 PIXI 版本上線；保留按鈕讓 chrome 對齊 oldSrc"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    ⚡ 自動規劃整層 AP 功率
+                  </button>
+                </li>
+              )}
+              </React.Fragment>
+            )
+          })}
+        </ul>
+      </section>
+
+      {pendingRemove && (
+        <ConfirmDialog
+          title="刪除樓層"
+          message={`確定要刪除「${pendingRemove.name}」？其上的牆體、AP、範圍等資料會一併移除，且此操作無法復原。`}
+          confirmLabel="刪除"
+          cancelLabel="取消"
+          danger
+          onConfirm={confirmRemove}
+          onCancel={() => setPendingRemove(null)}
+        />
+      )}
+
+      {pendingSwitch && (
+        <ConfirmDialog
+          title={pendingSwitch.keepAlign ? '切換對齊目標？' : '離開樓層對齊？'}
+          message={
+            pendingSwitch.keepAlign
+              ? '切換到另一個樓層繼續對齊。目前樓層已調整的偏移/縮放/旋轉會保留。要繼續嗎？'
+              : '你正在對齊樓層，切換到其他樓層會結束對齊模式（已調整的偏移/縮放/旋轉會保留）。確定要離開嗎？'
+          }
+          confirmLabel={pendingSwitch.keepAlign ? '切換' : '離開對齊'}
+          cancelLabel="繼續對齊"
+          onConfirm={confirmSwitch}
+          onCancel={() => setPendingSwitch(null)}
+        />
+      )}
     </aside>
   )
 }

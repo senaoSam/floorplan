@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { generateId } from '@/utils/id'
+import { DEFAULT_FLOOR_SLAB_MATERIAL_ID, DEFAULT_FLOOR_SLAB_DB } from '@/constants/materials'
 
 // Default inter-slab distance (meters). Equals the default wall topHeight so
 // a multi-storey 3D stack lines up.
@@ -62,6 +63,8 @@ export const useFloorStore = create((set, get) => ({
       opacity: 1, rotation: 0, scale: defaultScale, offsetX: 0, offsetY: 0,
       alignOffsetX: 0, alignOffsetY: 0, alignScale: 1, alignRotation: 0,
       cropX: null, cropY: null, cropWidth: null, cropHeight: null,
+      floorSlabMaterialId: DEFAULT_FLOOR_SLAB_MATERIAL_ID,
+      floorSlabAttenuationDb: DEFAULT_FLOOR_SLAB_DB,
       floorHeight: DEFAULT_FLOOR_HEIGHT_M,
     }
     set((state) => ({
@@ -69,5 +72,47 @@ export const useFloorStore = create((set, get) => ({
       activeFloorId: id,
     }))
     return floor
+  },
+
+  importImageFloor: (file, imageWidth, imageHeight) => {
+    const id = generateId('floor')
+    const imageUrl = URL.createObjectURL(file)
+    const name = `${get().floors.length + 1}F`
+    const floor = {
+      id, name, imageUrl, imageWidth, imageHeight,
+      opacity: 1, rotation: 0, scale: null, offsetX: 0, offsetY: 0,
+      alignOffsetX: 0, alignOffsetY: 0, alignScale: 1, alignRotation: 0,
+      cropX: null, cropY: null, cropWidth: null, cropHeight: null,
+      floorSlabMaterialId: DEFAULT_FLOOR_SLAB_MATERIAL_ID,
+      floorSlabAttenuationDb: DEFAULT_FLOOR_SLAB_DB,
+      floorHeight: DEFAULT_FLOOR_HEIGHT_M,
+    }
+    set((state) => ({
+      floors: [...state.floors, floor],
+      activeFloorId: id,
+    }))
+    return floor
+  },
+
+  importMultipleFloors: (pages) => {
+    const baseIndex = get().floors.length
+    const newFloors = pages.map((page, i) => ({
+      id: generateId('floor'),
+      name: `${baseIndex + i + 1}F`,
+      imageUrl: URL.createObjectURL(page.blob),
+      imageWidth: page.width,
+      imageHeight: page.height,
+      opacity: 1, rotation: 0, scale: null, offsetX: 0, offsetY: 0,
+      alignOffsetX: 0, alignOffsetY: 0, alignScale: 1, alignRotation: 0,
+      cropX: null, cropY: null, cropWidth: null, cropHeight: null,
+      floorSlabMaterialId: DEFAULT_FLOOR_SLAB_MATERIAL_ID,
+      floorSlabAttenuationDb: DEFAULT_FLOOR_SLAB_DB,
+      floorHeight: DEFAULT_FLOOR_HEIGHT_M,
+    }))
+    set((state) => ({
+      floors: [...state.floors, ...newFloors],
+      activeFloorId: newFloors[0].id,
+    }))
+    return newFloors
   },
 }))
