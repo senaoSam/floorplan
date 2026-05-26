@@ -779,3 +779,56 @@ pnpm dev:oldsrc   # oldSrc 在 5180 (URL: /floorplan-old/oldsrc.html)
 ```
 
 MCP 對拼或本地兩個 tab 並排看都行。oldSrc store 用 `await import('/floorplan-old/oldSrc/store/useXxxStore.js')` 動態載入後可直接 `getState()` 操作。
+
+---
+
+# Bundle 1–6 fix progress (2026-05-26)
+
+完成 6 個 bundle，全 commit ship 在 pixijs branch。
+
+| Bundle | Commit | 內容 | 涵蓋 audit 條目 |
+|---|---|---|---|
+| 1 | `0c4fba6` | Shared panel primitives (PanelShell / PanelHeader / PanelSection / PanelField / PanelControls) + 4 panels 港回 (APPanel / SwitchPanel / WallPanel / CableTrayPanel) | A1 / A2 / A3 / A4 / A5 / A6 全部 |
+| 2 | `efcad22` | Sidebar overhaul (add+collapse buttons / ▣ icon / ⋯ menu / inline expand 樓高樓板衰減 / drag-drop reorder / rename inline) + ProgressPanel 港 + StressLoader/DemoLoader/ProgressPanel 改回 oldSrc 浮動 fixed-position | C1 / C2 / C3（除 PNG 匯出依賴 Konva 暫緩） |
+| 3 | `3120254` | DevicePlanningPanel 港 + ActiveModeBadge 補 14 個 mode 完整中文 hint 字串 | D3 / D5 |
+| 4 | `2b95bdb` | AP marker white-fill / dark-blue-stroke + info pill bg rect + name shadow + 3-line text；SW chassis 加 name label；Tray + Scope in-layer hover invert | F2 / F3 / F5 / F6 |
+| 5 | `e1d1e6a` | PanelRight 加 scope / floor_hole / batch routes + 18×56 chevron collapse button | B1（scope/hole/batch）/ B2 |
+| 6 | `a407e18` | DOOR_WINDOW mode click handler in wallsLayer：兩點點擊 → 插入 opening；D / W 鍵切換 door / window；Esc 取消 | G — DOOR_WINDOW mode |
+
+**Audit 條目 vs 完成狀態**：
+
+| Tier 1C/2.1 條目 | 狀態 |
+|---|---|
+| A1 Shared primitives 缺失 | ✅ Bundle 1 |
+| A2 PanelHeader meta 副標 | ✅ Bundle 1 |
+| A3 APPanel pill / model picker / 支援頻段 / 狀態-連線 | ✅ Bundle 1 |
+| A4 SwitchPanel kind pill / progress / cable type pill / uplink hint | ✅ Bundle 1 |
+| A5 WallPanel material tile grid | ✅ Bundle 1 |
+| A6 CableTrayPanel 19-x | ✅ Bundle 1 |
+| B1 panel routes (scope/hole/batch) | ✅ Bundle 5 |
+| B1 panel routes (floor_image/floor_align/cable_riser) | ⏸️ 占位顯示「尚未在 PIXI 版本上線」— 對應 feature 還沒做 |
+| B2 panel collapse chevron | ✅ Bundle 5 |
+| C1 Sidebar header + / ‹ button | ✅ Bundle 2 |
+| C2 Floor row icon / ⋯ menu / inline expand | ✅ Bundle 2 |
+| C3 ProgressPanel | ✅ Bundle 2 |
+| D3 DevicePlanningPanel | ✅ Bundle 3 |
+| D5 ActiveModeBadge full hint | ✅ Bundle 3 |
+| E1 HeatmapLegend | 🟢 已對齊（前波） |
+| F2 AP info pill name+scale | ✅ Bundle 4 |
+| F3 SW name label | ✅ Bundle 4 |
+| F5 Tray hover invert | ✅ Bundle 4 |
+| F6 Scope hover invert | ✅ Bundle 4 |
+| F7 FloorImage transform | ⏸️ 仍未動（需要 PIXI 端 crop/rotation/opacity/align 渲染） |
+| G DOOR_WINDOW mode | ✅ Bundle 6 |
+| G floor rename / ⋯ menu | ✅ Bundle 2 |
+| G marquee 跨 layer type | ⏸️ 留 31-10 spatial index 一起做 |
+| G AutoPowerModal | ⏸️ Sidebar 自動規劃 button 留 disabled stub |
+| G 匯出 PNG | ⏸️ 需 PIXI 版本 exporter |
+
+**剩餘未做（非 Tier 1C audit 範圍）**：
+- Phase 25 perf shader（31-4 walls / 31-5 cables / 31-6 AP atlas）— 1000 AP 規格達標的硬骨頭
+- BatchPanel 完整版（637 LoC oldSrc — 需 per-store batch-mutation actions）
+- FloorImage / FloorAlign / CableRiser panels — 對應 features 還沒做
+- CableSummaryPanel BOM 細分 + export CSV/PDF
+
+**MCP 視覺驗證**（new on :5173 vs oldSrc on :5180 並排）：sidebar / panels / toolbar / heatmap pill row / canvas object visuals / mode badge hint 全部對齊。
