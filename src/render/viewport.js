@@ -30,6 +30,11 @@ export function bindViewport({
   onMarqueeCommit,
   onPlaceModeClick,
   isPlaceMode,
+  isDrawMode,
+  onDrawModeClick,
+  onDrawModeMove,
+  onDrawModeRightClick,
+  onDrawModeDoubleClick,
 }) {
   const stage = app.stage
   stage.eventMode = 'static'
@@ -89,11 +94,25 @@ export function bindViewport({
         }
         return
       }
+      // Draw modes (DRAW_WALL / DRAW_SCOPE / DRAW_FLOOR_HOLE /
+      // DRAW_CABLE_TRAY / DRAW_SCALE) add a draft point on click.
+      if (typeof isDrawMode === 'function' && isDrawMode()) {
+        const wp = world.toLocal(e.global)
+        if (typeof onDrawModeClick === 'function') {
+          onDrawModeClick({ x: wp.x, y: wp.y })
+        }
+        return
+      }
       pendingDrag = {
         startGlobal: { x: e.global.x, y: e.global.y },
         startWorld: { ...world.toLocal(e.global) },
       }
       marqueeActive = false
+    }
+    // Right-click on stage background while in a draw mode commits the
+    // open polyline / polygon (Enter alt path).
+    if (isBackground && button === 2 && typeof isDrawMode === 'function' && isDrawMode()) {
+      if (typeof onDrawModeRightClick === 'function') onDrawModeRightClick()
     }
   }
 
@@ -105,6 +124,14 @@ export function bindViewport({
       panLastY = e.global.y
       store.getState().panBy(dx, dy)
       return
+    }
+    // Draw-mode ghost cursor — feed the world position so the draft
+    // overlay can render the trailing edge to the current cursor.
+    if (typeof isDrawMode === 'function' && isDrawMode()) {
+      const wp = world.toLocal(e.global)
+      if (typeof onDrawModeMove === 'function') {
+        onDrawModeMove({ x: wp.x, y: wp.y })
+      }
     }
     if (pendingDrag) {
       const dist = Math.hypot(

@@ -14,6 +14,10 @@ import { attachFloorHolesLayer } from '@/features/floorHoles/floorHolesLayer'
 import { bindLayerVisibility } from '@/render/layerVisibilityBinder'
 import { attachHeatmapLayer } from '@/render/heatmapAdapter'
 import { bindHeatmapHover } from '@/render/heatmapHoverBinder'
+import { attachDraftOverlay } from '@/features/draft/draftOverlayLayer'
+import { attachHandlesLayer } from '@/features/handles/handlesLayer'
+import { createDraftModeController } from '@/render/draftModeController'
+import ScaleDialog from '@/components/ScaleDialog/ScaleDialog'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
@@ -26,6 +30,7 @@ import { useHoverStore } from '@/store/useHoverStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
+import { useDraftStore } from '@/store/useDraftStore'
 import './FloorplanSystem.sass'
 
 // Integration boundary the host product will mount. Owns the PIXI scene
@@ -33,6 +38,8 @@ import './FloorplanSystem.sass'
 // PanelRight / floating control panels) lives outside this component.
 function FloorplanSystem(/* { buildingData, onSave } */) {
   const containerRef = useRef(null)
+  const [scaleDialog, setScaleDialog] = React.useState(null)
+  // { p0, p1 } | null
 
   useEffect(() => {
     const el = containerRef.current
@@ -53,7 +60,20 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachScopes = null
     let detachFloorHoles = null
     let detachHeatmapHover = null
+    let detachDraftOverlay = null
+    let detachHandles = null
     let cancelled = false
+
+    const draftCtrl = createDraftModeController({
+      useEditorStore,
+      useFloorStore,
+      useWallStore,
+      useScopeStore,
+      useFloorHoleStore,
+      useCableStore,
+      useDraftStore,
+      onRequestScaleDialog: ({ p0, p1 }) => setScaleDialog({ p0, p1 }),
+    })
 
     initScene({ container: el }).then((s) => {
       if (cancelled) {
@@ -86,6 +106,11 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
               || m === EDITOR_MODE.PLACE_SWITCH
               || m === EDITOR_MODE.PLACE_RISER
         },
+        isDrawMode: draftCtrl.isDrawMode,
+        onDrawModeClick: draftCtrl.onDrawModeClick,
+        onDrawModeMove: draftCtrl.onDrawModeMove,
+        onDrawModeRightClick: draftCtrl.onDrawModeRightClick,
+        onDrawModeDoubleClick: draftCtrl.onDrawModeDoubleClick,
         onPlaceModeClick: ({ x, y }) => {
           const fid = useFloorStore.getState().activeFloorId
           if (!fid) return
@@ -216,6 +241,17 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useHeatmapStore,
         useHoverReadoutStore,
       })
+      detachDraftOverlay = attachDraftOverlay({
+        scene: s,
+        useDraftStore,
+      })
+      detachHandles = attachHandlesLayer({
+        scene: s,
+        useFloorStore,
+        useWallStore,
+        useCableStore,
+        useEditorStore,
+      })
       if (import.meta.env.DEV) {
         window.__pixiApp = s.app
         window.__scene = s
@@ -242,6 +278,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
 
       if (e.key === 'Escape') {
+        // Active draft in flight → cancel it first.
+        if (draftCtrl.handleKey('Escape')) return
         const s = useEditorStore.getState()
         // Esc closes the context menu first if open, otherwise clears
         // selection. Matches the ObjectContextMenu's own Esc handler.
@@ -251,6 +289,12 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           s.clearSelected()
         }
         return
+      }
+      if (e.key === 'Enter') {
+        if (draftCtrl.handleKey('Enter')) {
+          e.preventDefault()
+          return
+        }
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const s = useEditorStore.getState()
@@ -287,6 +331,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       cancelled = true
       window.removeEventListener('keydown', onKeyDown)
       if (detachLayerVisibility) detachLayerVisibility()
+      if (detachHandles) detachHandles()
+      if (detachDraftOverlay) detachDraftOverlay()
       if (detachHeatmapHover) detachHeatmapHover()
       if (detachFloorHoles) detachFloorHoles()
       if (detachScopes) detachScopes()
@@ -308,9 +354,25 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     }
   }, [])
 
+  const pxDist = scaleDialog
+    ? Math.hypot(scaleDialog.p1.x - scaleDialog.p0.x, scaleDialog.p1.y - scaleDialog.p0.y)
+    : 0
+
   return (
     <div className="floorplan-system">
       <div ref={containerRef} className="floorplan-system__canvas" />
+      {scaleDialog && (
+        <ScaleDialog
+          pixelDistance={pxDist}
+          onConfirm={(pxPerM) => {
+            const fid = useFloorStore.getState().activeFloorId
+            if (fid) useFloorStore.getState().setFloorScale(fid, pxPerM)
+            setScaleDialog(null)
+            useEditorStore.getState().setEditorMode(EDITOR_MODE.SELECT)
+          }}
+          onCancel={() => setScaleDialog(null)}
+        />
+      )}
     </div>
   )
 }

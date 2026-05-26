@@ -3,6 +3,7 @@ import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
 import { HEATMAP_MODE_LIST, getModeConfig } from '@/features/heatmap/modes'
 import HeatmapLegend from './HeatmapLegend'
+import FormulaNote from '@/components/FormulaNote/FormulaNote'
 import './HeatmapControl.sass'
 
 function hoverValueForMode(hover, mode) {
@@ -45,6 +46,7 @@ function HeatmapControl() {
   const hover = useHoverReadoutStore((s) => s.reading)
 
   const [panelOpen, setPanelOpen] = useState(false)
+  const [formulaOpen, setFormulaOpen] = useState(false)
   const activeCfg = getModeConfig(mode)
   const hoverValue = hoverValueForMode(hover, mode)
 
@@ -162,6 +164,14 @@ function HeatmapControl() {
             <input type="checkbox" checked={showContours} onChange={(e) => setShowContours(e.target.checked)} />
             <span>訊號等高線</span>
           </label>
+          <button
+            type="button"
+            className="heatmap-control__formula-btn"
+            onClick={() => setFormulaOpen((v) => !v)}
+          >
+            {formulaOpen ? '▾' : '▸'} 公式說明
+          </button>
+          {formulaOpen && <FormulaNote />}
         </div>
       )}
     </div>
