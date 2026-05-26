@@ -67,6 +67,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     let entry = containers.get(wall.id)
     if (!entry) {
       const c = new Container()
+      c.label = `wall:${wall.id}`
       c.eventMode = 'static'
       c.cursor = 'move'
       const g = new Graphics()
@@ -397,6 +398,26 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
   const unsubSelection = useEditorStore.subscribe(onSelectionChange)
   const unsubViewport = useViewportStore.subscribe(onViewportChange)
   reconcile()
+
+  // Diagnostic helper exposed on window so user can introspect wall hit
+  // geometry against the last failing click. Usage from DevTools console
+  // after a missed click:
+  //   __wallNearestTo(worldX, worldY)
+  // Returns the nearest wall id + the world-space distance + whether
+  // that distance is within current tolerance.
+  if (typeof window !== 'undefined') {
+    window.__wallNearestTo = (x, y) => {
+      const scale = useViewportStore.getState().scale || 1
+      const worldTol = HIT_TOLERANCE_SCREEN_PX / scale
+      let best = { id: null, d: Infinity }
+      for (const entry of containers.values()) {
+        const { wall } = entry
+        const d = pointToSegmentDistance(x, y, wall.startX, wall.startY, wall.endX, wall.endY)
+        if (d < best.d) best = { id: wall.id, d }
+      }
+      return { ...best, worldTol, withinTolerance: best.d <= worldTol, screenDistance: best.d * scale }
+    }
+  }
 
   return () => {
     unsubFloor()

@@ -81,7 +81,7 @@ export function bindViewport({
   const onStageDown = (e) => {
     const isBackground = e.target === stage
     const button = e.button ?? 0
-    vlog('pointerdown target=', e.target?.label ?? e.target?.constructor?.name, 'isBackground=', isBackground, 'button=', button)
+    vlog('pointerdown target=', e.target?.label ?? e.target?.constructor?.name, 'isBackground=', isBackground, 'button=', button, 'global=', `${e.global.x.toFixed(1)},${e.global.y.toFixed(1)}`)
     const isMiddle = button === 1
     const isLeftPan = button === 0 && spaceDown
     if (isMiddle || isLeftPan) {
@@ -172,7 +172,11 @@ export function bindViewport({
         }
         if (typeof onMarqueeCommit === 'function') onMarqueeCommit(rect)
       } else if (typeof onBackgroundClick === 'function') {
-        vlog('stage pointerup → onBackgroundClick (clearSelected)')
+        // Diagnostic: include click world position so a user reporting
+        // "click missed the wall" can confirm whether their cursor was
+        // actually on a wall or in the gap.
+        const wp = world.toLocal(e.global)
+        vlog('stage pointerup → onBackgroundClick (clearSelected)  world=', `${wp.x.toFixed(1)},${wp.y.toFixed(1)}`, '  scale=', store.getState().scale.toFixed(3))
         onBackgroundClick()
       }
       pendingDrag = null
