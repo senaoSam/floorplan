@@ -191,17 +191,8 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
         beginDrag(entry, e)
       }
     })
-    container.on('pointerover', () => {
-      dlog('pointerover wall=', entry.wall.id)
-      useHoverStore.getState().setHover(entry.wall.id, 'wall')
-    })
-    container.on('pointerout', () => {
-      dlog('pointerout wall=', entry.wall.id)
-      useHoverStore.getState().clearHoverIf(entry.wall.id)
-    })
-    container.on('pointerup', (e) => {
-      dlog('pointerup wall=', entry.wall.id, 'button=', e.button)
-    })
+    container.on('pointerover', () => useHoverStore.getState().setHover(entry.wall.id, 'wall'))
+    container.on('pointerout',  () => useHoverStore.getState().clearHoverIf(entry.wall.id))
   }
 
   // Wall-body drag — translate both endpoints by the same delta. Uses the
