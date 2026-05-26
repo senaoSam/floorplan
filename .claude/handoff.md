@@ -1,4 +1,4 @@
-# Session Handoff — 2026-05-26 (Phase 25 — Bundle 9+ shipped)
+# Session Handoff — 2026-05-26 (Phase 25 — Bundle 10 shipped)
 
 > 新 session **必讀**順序：
 > 1. `CLAUDE.md`（專案規則 + Session Start 流程）
@@ -31,10 +31,13 @@ User 多次強調 + 抓 bug 都是因為這條被破壞：
 
 ## 1. 現況一句話
 
-**Phase 25 PixiJS hybrid 重構 — chrome / panel / 互動 / 視覺 全套對齊 oldSrc。Perf shader (31-4/5/6) 全沒動。**
+**Phase 25 PixiJS hybrid 重構 — Bundle 10 完成全 Tier 1A 嚴格 oldSrc port (AP / Switch / Wall / Cable / Scope / Tray) + DRAW_CABLE_TRAY 繪製 UI + Scope/FloorHole/FloorImage 右鍵 menu。Perf shader (31-4/5/6) 全沒動。**
 
 commits（最新在上）：
 ```
+6dc9fd5  Bundle 10c — DRAW_CABLE_TRAY draft UI + scope/hole/image right-click
+ec36914  Bundle 10b — Strict oldSrc port: Cable / Scope / Tray
+4b73884  Bundle 10a — Strict oldSrc port: AP / Switch / Wall / endpoint handles
 98e4edc  Audit doc: strict refactor rule + remaining work backlog
 162de68  Bundle 9.5 — Drop double-paint AP/Wall hover in hoverOverlayLayer
 ef282ef  Bundle 9.4 — Quieter debug logs + slimmer halos
@@ -75,26 +78,31 @@ efcad22  Bundle 2 — Sidebar overhaul + ProgressPanel
 ✅ Tray magnet halo 條件顯示（SELECT 只 hover/selected / DRAW_CABLE_TRAY 全顯）
 ✅ Debug log infra (`window.__debugWallSelect = true`)
 
+### Bundle 10 新增 (2026-05-26, autonomous session)
+
+✅ **Tier 1A AP layer 嚴格 port**：focus halo radius 15 / azimuth 0=+x convention / dashed directional selected ring / `patternPolygonPoints` custom 天線 / orientation arrow group / name label 改 ABOVE body / info pill width 80 + y 19
+✅ **Tier 1A Switch layer 嚴格 port**：chassis roundRect / 刪自編 status LED / 補 PoE badge yellow line / port pip square Rect + 對齊公式 / status dot 2.8 / warning 5+'!'fs7 / kind label top of chassis / name label 改 ABOVE
+✅ **Tier 1A Wall layer 嚴格 port**：hover 白 beam 22px alpha 0.45 + black halo 10/7/4 by state + body 6/5/3 + opening color 改 OPENING_TYPES (door brown / window blue) + width 6/8/6
+✅ **Tier 1A Wall endpoint handles**：radius 7 / strokeWidth 2.5 / show on isSelected||isHovered / snap-to-endpoint during drag (SNAP_PX=12) / double-click extend → DRAW_WALL
+✅ **Tier 1A Cable layer 嚴格 port**：inverse-scale 全套 widths + dashes / S2S switch link 完整 (purple copper + rose fiber + node markers) / tray node markers (foot/riser-foot/riser@floor) / fallback elbow marker / unroutable badge 完整 (fill+!)+stroke
+✅ **Tier 1A Scope layer 嚴格 port**：per-scope Container w/ point-in-polygon hit-test / hover fill alpha 0.18→0.5 / 改成 interactive
+✅ **Tier 1A Tray layer 嚴格 port**：closed polygon w/ semicircle caps + miter joints (offsetPolyline + buildChannelPolygon) / 2-tray junction detect (computeTrayNeighborExts) / inverse-scale 全套 / 刪 always-on vertex dots / hover invert 完整
+✅ **DRAW_CABLE_TRAY 繪製 UI**：draftOverlayLayer 改 per-mode；tray draft 完整 port DraftTray（magnet halo 沿 committed + ghost / dashed ghost / vertex dots 白fill+colored stroke / 綠 snap halo on cursor at existing vertex）；wall draft 改 cyan dot + dashed cyan ghost；polygon draft (scope/hole) 改 dashed
+✅ **右鍵 context menu 覆蓋**：Scope / FloorHole / FloorImage 都接好 button===2；ContextMenuMount 新增 3 個 case；FloorImage 的 '移除底圖' 走 oldSrc 邏輯 (clear imageUrl + dimensions + crop)
+
 ---
 
-## 3. **未完成** backlog（user 已知，全列 `.claude/oldsrc-audit.md` 末段）
+## 3. **未完成** backlog
 
-### A. 右鍵 context menu 漏覆蓋 ⚠️
+### A. Tray 完整 hit-context menu (deferred)
 
-| 物件 | 狀態 |
-|---|---|
-| Scope (範圍多邊形) | ❌ scopesLayer 沒 per-object container、`button === 2` 沒接 |
-| Floor Hole (中庭) | ❌ 同上 |
-| Floor Image (底圖) | ❌ 沒接 — oldSrc 右鍵 → detach imageUrl |
-| Tray 完整 hit-context menu | ❌ 只 basic 3 項；缺 segment/endpoint/vertex 各自 menu (split/extend/merge/vertex ops)。完整邏輯在 **`oldSrc/features/editor/Editor2D.jsx` 2014-2156** + `oldSrc/components/ContextMenu/TrayContextMenu.sass` |
+❌ Tray 還只是 basic 3 項；缺 segment/endpoint/vertex 各自 menu (split/extend/merge/vertex ops)。完整邏輯在 **`oldSrc/features/editor/Editor2D.jsx` 2014-2156** + `oldSrc/components/ContextMenu/TrayContextMenu.sass`。
+Bundle 10 沒做 — vertex handles 已在 handlesLayer，下個 session 加 right-click 觸發即可。
 
-### B. DRAW_CABLE_TRAY 繪製 UI 跟原版有差 ⚠️ (user 抓到 2026-05-26)
+### B. DRAW_CABLE_TRAY 進階 snap (deferred)
 
-兩件事：
-1. **繪製中的 UI**：ghost line / snap halo / 起點 marker / parallel-wall lock 提示樣式 ≠ oldSrc
-2. **完成 tray 的 corner / endpoint 樣式** ≠ oldSrc
-
-對照來源：`oldSrc/features/editor/layers/CableTrayLayer.jsx`（`DraftTray` + `TrayPolyline` 段）+ `Editor2D.jsx` 對應 ghost line code。
+✅ Vertex snap halo (cursor on existing tray vertex) 已 port。
+❌ 還沒做：wallEndpoint 橘色圓 ring / wallSegment 橘色方 ring (oldSrc 20-3) / parallel-wall 紫色 guide。需要 snapHint state，新 src 沒這 plumbing。
 
 ### C. Audit polish
 
@@ -191,15 +199,18 @@ window.__wallNearestTo(worldX, worldY)
 
 ## 6. 建議下個 task
 
-依嚴重度 + 影響面排序：
+Bundle 10 完成後剩餘 backlog（依嚴重度 + 影響面排序）：
 
-1. **DRAW_CABLE_TRAY 繪製 UI 對齊**（user 剛抓到，記憶猶新）— 0.5-1 天
-2. **右鍵 menu 覆蓋全 7 type** + Tray 完整 context menu — 1-2 天
-3. **Bundle 1-9 漏單 polish**（A6 / D4 / E3 / F7 / 各 mode 文案 / unit suffix）— 1-2 天
-4. **Workflow gaps 中影響大的**：undo/redo 基礎 + marquee 跨層 + auto-channel on place — 3-5 天
-5. **Phase 25 perf shader 31-4 walls**（技術風險最高、早做早知道） — 2-3 天
+1. **Tray 完整 context menu**（segment / endpoint / vertex 各自 menu — split / extend / merge / vertex 刪除/插入/分段）— 1-2 天
+2. **Bundle 漏單 polish**（A6 / D4 / E3 / F7 / 各 mode 文案 / unit suffix）— 1-2 天
+3. **Workflow gaps**：undo/redo 基礎 + marquee 跨層 + auto-channel on place + AutoPowerModal + PNG export — 3-5 天
+4. **Cable Riser 整 feature**（risersLayer + PLACE_RISER + RiserPanel + 跨樓層 xy）— 2-3 天
+5. **Phase 25 perf shader 31-4 walls / 31-5 cables / 31-6 AP atlas** — 6-8 天
+6. **3D Viewer** — 5-7 天
 
 **永遠記住**：不要動 oldSrc / 不要重設計 / grep oldSrc 抓常數 / MCP 並排對照 / commit message 標 oldSrc 出處。
+
+Bundle 10 commit 範例可參考標的 — 每個視覺常數變更都標明 oldSrc 對應行號。
 
 ---
 
