@@ -176,7 +176,15 @@ export function bindViewport({
         // "click missed the wall" can confirm whether their cursor was
         // actually on a wall or in the gap.
         const wp = world.toLocal(e.global)
-        vlog('stage pointerup → onBackgroundClick (clearSelected)  world=', `${wp.x.toFixed(1)},${wp.y.toFixed(1)}`, '  scale=', store.getState().scale.toFixed(3))
+        const scale = store.getState().scale
+        vlog('stage pointerup → onBackgroundClick (clearSelected)  world=', `${wp.x.toFixed(1)},${wp.y.toFixed(1)}`, '  scale=', scale.toFixed(3))
+        // Auto-run the nearest-wall probe so the user doesn't need to
+        // copy-paste coords back into the console. Tells us at a glance
+        // whether the click was within tolerance of any wall.
+        if (typeof window !== 'undefined' && typeof window.__wallNearestTo === 'function' && window.__debugWallSelect) {
+          const probe = window.__wallNearestTo(wp.x, wp.y)
+          vlog('  nearest wall=', probe.id, '  worldDist=', probe.d.toFixed(2), '  worldTol=', probe.worldTol.toFixed(2), '  screenDist=', probe.screenDistance.toFixed(2), 'px  withinTol=', probe.withinTolerance)
+        }
         onBackgroundClick()
       }
       pendingDrag = null
