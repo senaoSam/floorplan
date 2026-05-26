@@ -466,3 +466,316 @@ magic number (radius / strokeWidth / dash pattern / font size) / 內聯 const / 
 - 第三波 **CableSummary BOM 細分**（22-1 / 22-2 export）
 - 第四波 Sidebar 互動 / FloorImage transform / Tray vertex menu / DOOR_WINDOW mode
 - Perf shader（31-4 / 31-5 / 31-6）仍未動 — 1000 AP 規格達標的硬骨頭
+
+---
+
+# Tier 1C / 2.1 — Pixel-level audit (2026-05-26)
+
+> User 抓到「panel / hover-selected / 左下 HeatmapLegend / ProgressPanel / StressLoader 都還有差」。
+> 前面 audit 是「我已知的 deviation list」，深度不均（layer 物件 OK，panel + chrome 只到 macro）。
+>
+> 這份 audit 用 **oldSrc resurrection**（vite.oldsrc.config.js + oldsrc.html + `pnpm dev:oldsrc`）並排兩個 dev server 跑（new:5173, oldSrc:5180）， MCP screenshot 對拼，逐畫面記錄 pixel-level diff。
+>
+> 預期讀者：直接照這份 list 一條一條開 fix ticket，每條都跟一張 screenshot 比對結果。
+
+## A. PanelRight chrome（panel-shell 抽象 / header / section / 控件樣式）
+
+### A1 — Shared primitives 完全缺失 🔴
+
+oldSrc 有 `components/PanelRight/_shared/`：
+- `PanelShell.jsx` — `<PanelShell accent="ap|wall|cable|measure|meta">` 主容器；CSS 透過 `--panel-accent` 切群組主色
+- `PanelHeader` — `title` + `meta`（小字副標如「AP 屬性」/「長度 109.2 px」）+ `onDelete` 統一「刪除」按鈕位置
+- `PanelSection` — `title` + 可選 `disabled` + 可選 `comingSoon`（"即將推出" 角標）
+- `PanelField` — `label` + 可選 `hint` + value slot 統一左右排版
+- `PanelEmpty` — 「未選取任何物件」
+- `PanelControls.jsx` — `TextInput` / `NumberInput`（含 `unit` 後綴 m / dB / dBm / W / port）/ `Select`（含 `swatch` 顏色點選項）/ `Checkbox` / `Button`（variant `primary / danger / ghost` + `block` 全寬）
+
+**new src 現況**：
+- 每個 panel 都自己寫 `<input>` `<select>` 標籤，靠 `_panel.sass` 的 `.obj-panel__*` 類包，**沒** group accent / 沒 unit suffix / 沒 swatch select / 沒 hint subtitle
+- APPanel 還用獨立的 `.ap-panel__*` 命名，跟其他 panel 不共用 sass（chrome 不一致）
+
+**Fix**：港 oldSrc 5 個 shared primitives → `src/components/PanelRight/_shared/`，所有 panel 改用。
+
+---
+
+### A2 — PanelHeader meta 副標 🟠
+
+oldSrc 每 panel header 第二行有 meta 小字：
+- APPanel: "AP 屬性"
+- SwitchPanel: "Switch 屬性" / "IDF 屬性" / "MDF 屬性" / "Router 屬性"（隨 kind）
+- WallPanel: "長度 109.2 px"
+- (待測) CableTrayPanel / ScopePanel 等
+
+new src 只有 title + delete，**完全沒 meta 行**。
+
+---
+
+### A3 — APPanel section / 控件樣式 🔴
+
+| Section / 控件 | oldSrc | new src | severity |
+|---|---|---|---|
+| **型號 (modelId)** | dropdown「Generic Wi-Fi 6 AP (Wi-Fi 6)」+ apModels constant | 完全缺 | 🟠 |
+| **支援頻段 chip** | "2.4 GHz / 5 GHz" 小灰字列（依 model 顯示） | 缺 | 🟠 |
+| **名稱** | TextInput | input | 🟢 樣式微差 |
+| **頻段選擇** | **pill row** 3 顆: 2.4 GHz / 5 GHz / 6 GHz，selected 填色，model 不支援時 disabled 灰掉 | dropdown `<select>` | 🔴 UI 概念錯 |
+| **通道** | "Ch 36" dropdown | `Channel 36` number input | 🔴 應該是 dropdown 列允許值 |
+| **頻寬** | **pill row** 4 顆: 20 / 40 / 80 / 160 MHz | number input `step=20` | 🔴 UI 概念錯 |
+| **頻段 helper text** | "Cisco 建議 2.4G 兩注 SS - 5G 兩多用 20/40 - 6G 可選" | 缺 | 🟡 helper 文字缺 |
+| **發射功率** | NumberInput 含 `dBm` 後綴 | input no suffix | 🟡 |
+| **安裝高度** | NumberInput 含 `m` 後綴 | input no suffix | 🟡 |
+| **安裝方式** | **pill row** 2 顆: 天花板 / 牆面 | dropdown 3 選 ceiling/wall/floor | 🔴 UI 概念錯（也少一個 floor 不應該有？查 oldSrc 是否真只 2 種） |
+| **天線模式** | **pill row** 3 顆: 全向 / 定向 / 自訂 | dropdown | 🔴 |
+| **方位 azimuth (定向時)** | slider 旋鈕 + 數值 + 度 | range slider | 🟢 |
+| **波束寬 beamwidth (定向時)** | slider + 數值 + 度 | range slider | 🟢 |
+| **狀態 / 連線 section** | 顯示 uplink switch name (e.g. "SW-01") 為唯讀 | 完全缺 | 🟠 |
+| **azimuth + beamwidth (自訂時)** | patternId picker + PatternPreview thumbnail | 完全缺 | 🟠 |
+
+---
+
+### A4 — SwitchPanel section / 控件樣式 🔴
+
+| Section / 控件 | oldSrc | new src | severity |
+|---|---|---|---|
+| **類型 kind** | **pill row** 4 顆: Switch / IDF / MDF / Router，selected 填色 | dropdown | 🔴 |
+| **kind 切換 helper text** | "切換 kind 會重設該類預設 (port 數 / PoE / uplink 介面)" | 缺 | 🟡 |
+| **識別 名稱** | TextInput | input | 🟢 |
+| **型號** | TextInput | input | 🟢 |
+| **Uplink 介面** | "SFP+ × 4" 一行格式化文字 | uplinkPortType + uplinkCount 拆兩 input | 🟡 |
+| **狀態 → Port 數** | "已用 5 / 24" 進度條 + ports 後綴 | number input only | 🟠 缺進度 |
+| **狀態 → PoE 容量** | "已用 75 W / 370 W" 進度條 + W 後綴 + helper "PoE 預算 = 0 → 此 Switch 無 PoE 供電" | number input only | 🟠 缺進度 + helper |
+| **安裝高度** | NumberInput + m 後綴 | input | 🟡 |
+| **上連 UPLINK dropdown** | "請選一個目標" + 群組化 list (列建築全 switch + 排除自己 + 同樓層先) + helper text 「會考量上行規範 - 列出上層級 (定 IDF 對應上層 MDF)」 | dropdown 同概念但缺 helper、缺群組化 | 🟡 |
+| **線材** | **pill row** 3 顆: Auto / Copper / Fiber + helper "Auto < 90m copper / 否則 fiber - Cat 6 銅纜 ..." | dropdown | 🔴 + helper |
+| **AP 連線數 vs portCount warning** | 紅色警告 row | 缺 | 🟠 |
+| **PoE 用量 vs budget warning** | 紅色警告 row | 缺 | 🟠 |
+| **17-4 snap-status display** | "已 snap 到 X 條 tray" / "未 snap" 一行 | 缺 | 🟠 |
+
+---
+
+### A5 — WallPanel section / 控件樣式 🔴
+
+| Section / 控件 | oldSrc | new src | severity |
+|---|---|---|---|
+| **header meta** | "長度 109.2 px" 副標 | 缺 | 🟠 |
+| **材質 picker** | **Visual tile grid** — 6 個 tile (玻璃/乾牆/木板/磚牆/混凝土/金屬)，每 tile 顯示「顏色 swatch + 名稱 + dB」，selected tile 有紅邊 | `<select>` dropdown | 🔴 UI 概念錯 |
+| **高度 頂部 / 底部** | NumberInput + m 後綴 | input | 🟡 |
+| **門窗 list — 每 row** | 紅 chip "門/窗"（點切換）+ 木板(4dB) dropdown + "13" + "~" + "87" + "%" + 紅方塊 ✕ delete | 我的版本接近，但 chip / 數字 / 刪除按鈕 sass 不同 | 🟡 樣式微差 |
+| **門窗 add btn** | oldSrc 只在已有 openings 時顯示 list — **沒有單獨「+ 門 / + 窗」按鈕**（從哪加？查 DRAW mode 應該是 DOOR_WINDOW mode 用 Toolbar 進） | 我加了「+ 門 / + 窗」按鈕 | ⚪ 我多做的（OK，更直覺；但跟 oldSrc 行為不同） |
+
+---
+
+### A6 — CableTrayPanel 完全缺欄位（未在這次 audit 詳測，留前面 audit）🟠
+
+跳過詳測，沿用前面 audit 列表。
+
+---
+
+## B. PanelRight 分頁 / 容器 chrome
+
+### B1 — PanelRight 開合 + scope/hole/floor_image/floor_align/cable_riser/batch panel 🟠
+
+oldSrc PanelRight 內部根據 `selectedType` 切換不同 panel：
+- ap / switch / wall / cable_tray ✅ 已有
+- **scope** / **floor_hole** / **floor_image** / **floor_align** / **cable_riser** / **batch (selectedItems > 1)** 全缺
+
+new src `PanelRight.jsx` 只 route 4 個 type。
+
+### B2 — PanelRight 收合 chevron 🟠
+
+oldSrc 邊緣有一個 ‹ chevron 可手動收合 panel；new src 沒有。
+
+---
+
+## C. Sidebar 左側
+
+### C1 — Sidebar header 🔴
+
+| 元素 | oldSrc | new src |
+|---|---|---|
+| 標題「樓層」 | 左 | 左 |
+| **+ 加新樓層按鈕** | 右側 + icon button | 缺 |
+| **‹ 收合按鈕** | + icon 右邊 ‹ 切到 compact mode | 缺 |
+| 計數 badge | 缺 | 右上 "1" |
+
+→ new src 只有 count badge，缺 add / collapse 兩個按鈕。
+
+### C2 — Floor row 🔴
+
+| 元素 | oldSrc | new src |
+|---|---|---|
+| 左端 floor icon ▣ | ✓ | 缺 |
+| 名稱 | "Demo" 紅字 | "Demo" 紅字 ✓ |
+| 名稱 inline rename | 點兩下進 edit mode | 缺 |
+| 右端 dimensions | ⋯ overflow menu (rename / 對齊 / 裁切 / 刪除 / 設定高度) | "685×511" dimensions readout |
+| **active floor card 展開**（被選 floor 內顯示 inline 控件）| 完整: 樓高 m / 樓板 (material dropdown w/ swatch) / 衰減 dB / 「⚡ 自動規劃整層 AP 功率」按鈕 | 完全缺 — 整個 inline expand 區塊不存在 |
+
+→ Sidebar floor row 在 new src 是 ultra-simplified bar，**沒有 properties 編輯能力**。
+
+### C3 — Sidebar footer 🔴
+
+| 元素 | oldSrc | new src |
+|---|---|---|
+| StressLoader pills | 50 AP / 150 AP / 300 AP | 同（多了 "STRESS" prefix label） |
+| DemoLoader | 🚀 火箭 icon + "載入 Demo 平面圖" | aiWalls SVG icon + "載入 Demo 平面圖" |
+| **ProgressPanel** | 📋 icon + "進度 182/185" pill (Phase 進度) | **完全缺** |
+
+→ ProgressPanel 整個元件不存在於 new src。
+
+---
+
+## D. 頂部 floating widgets
+
+### D1 — 圖層 LayerToggle 🟢
+位置 / 樣式接近。`<Icon name="layers">` ＋「圖層 ›」chip。
+
+### D2 — RegulatorySelector 🟢
+「國家頻段 / 台灣 ▾」port 過來，樣式 OK。
+
+### D3 — 設備規劃 DevicePlanningPanel 🟠
+oldSrc top-center 有 "設備規劃" pill（觸發 auto-channel / auto-power planning modal）— **new src 完全缺**。
+
+### D4 — Toolbar 🟡
+- oldSrc 跟 new 都是 floating dark pill，5 個 icon group + 2 個 round button (undo / redo)
+- oldSrc 5 個 icon 是: 指標 / 牆+結構 / AP / 線+布線 / 量測，**多一個** 設備按鈕？ — 待逐 icon 對
+- new src 5 個 icon: 指標 / 牆 / AP+wifi / 網路 / 量測 — 順序 + icon 細節可能微差
+
+### D5 — ActiveModeBadge 🔴
+| 元素 | oldSrc | new src |
+|---|---|---|
+| 標題 | "操作 / 選取模式" | "指標 / 選取" |
+| 副標 hint | "左鍵選取、拖曳；右鍵物件開選單"（每 mode 完整中文 hint） | **完全缺**，只有 mode 名稱 |
+| 樣式 | dark pill | dark pill ✓ |
+
+→ ActiveModeBadge 缺 mode hint 文案（spec.task.md 1602 行附近列了每 mode 完整 hint 字串）。
+
+---
+
+## E. 底部 floating widgets
+
+### E1 — HeatmapControl pill row 🟡
+| 元素 | oldSrc | new src |
+|---|---|---|
+| 已開啟/關閉 pill | ✓ | ✓ |
+| Mode dropdown (RSSI/SINR/SNR/CCI) | ✓ | ✓ |
+| 設定 button | ✓ | ✓ |
+| **HeatmapLegend** colour bar | "RSSI (dBm)" 標題 + 色條 + ≤-75 -65 -55 -45 ≥-35 數值 | "RSSI (dBm)" 標題 + 色條 + 同數值 | 🟢 看起來一致 |
+| **hover readout 顯示** | "據量值線 71.3 m"（米 unit + 即時距離） | 同 | 🟢 |
+| **hover readout** 滑鼠進熱圖時還顯示什麼？ | TBD — 待測 | TBD | ⏸️ |
+| 公式 popover (FormulaNote) | 設定 panel 內有「ℹ 公式說明」連結 | 有 ✓ | 🟢 |
+
+### E2 — ScaleBar 🟢
+「5 m」+ bar tick — 兩邊都有。
+
+### E3 — CableSummaryPanel 🟠
+spec 599 LoC oldSrc — copper/fiber 拆 / 長度級距 / Per-IDF / 匯出 — new src 是 slim 版。沿用前面 audit。
+
+---
+
+## F. Canvas 物件視覺（hover / selected 細節）
+
+### F1 — AP marker selected 🟡
+- oldSrc: selected → 紅 stroke 圈 (`#e74c3c`) + 整個 AP container fade 鄰近
+- new src: 同 ✓（wave 1 已 fix）
+
+### F2 — AP info pill 🟠
+| 元素 | oldSrc | new src |
+|---|---|---|
+| 背景 | 深灰半透明 rounded rect | 文字 stroke halo (no bg rect) |
+| 內容 | `AP-01\n5G CH36/40\n20 dBm` (3 lines) | `5G CH36/80\n20 dBm` (2 lines) | 🟡 缺 name |
+| 字級 | 11 px × inverseScale (隨 zoom 縮放) | 9 px 固定 | 🟡 字體不會跟 zoom |
+| Stroke / shadow | shadow blur on text | text stroke (黑 halo) | 🟡 風格不同 |
+
+### F3 — SW chassis selected 🟢
+- 紅 stroke wave 1 已 fix
+- 但 SW name label 位置 / 字級可能差（oldSrc 上方獨立 dark pill 顯示完整 "SW-01"；new src 內 chassis 中央 "SW" 短 kind label）→ 🟠 **name label 缺**
+
+### F4 — Wall hover / selected 🟡
+- oldSrc: hover → 較粗 outline + shadow
+- new src: hover → 白 thin outline（hoverOverlayLayer）
+- 差別: oldSrc shadow blur / 較粗 / outline 顏色用 material 色
+
+### F5 — Tray hover invert 🟠
+- oldSrc: hover → body fill 變 sys.color, border 變 dark, centerline 變白
+- new src: hover → 統一 white outline (centralised hover overlay)
+- wave 1 audit 雖把 hoverOverlay 拆掉，但 tray hover invert **沒在 in-layer 實作**，目前 tray hover 沒任何視覺反饋
+
+### F6 — Scope hover 🟠
+- oldSrc: hover → 白 stroke + shadow blur 8
+- new src: 完全沒 hover 視覺
+- wave 1 audit 同上
+
+### F7 — FloorImage 🟠
+- crop / rotation / opacity / align transform 全缺（沿用前面 audit）
+
+---
+
+## G. Workflow / 互動行為（非單一畫面）
+
+| 行為 | oldSrc | new src |
+|---|---|---|
+| 點 floor row → 切 active | ✓ | ✓ |
+| 點 floor row 第二下 → 展開 inline 編輯 | ✓ | ✗ (沒展開) |
+| 點 floor name doubleclick → rename | ✓ | ✗ |
+| Floor ⋯ menu → rename/align/crop/delete/setHeight | ✓ | ✗ |
+| DRAG-DROP 平面圖到 canvas | ✓ (empty state 有 drop zone hint) | ✗ |
+| DRAG-DROP 平面圖到 sidebar list | ✓ | ✗ |
+| DRAW_WALL Esc cancel | ✓ | ✓ |
+| DRAW_SCOPE Esc cancel | ✓ | ✓ |
+| DOOR_WINDOW mode (toolbar 進) | ✓ 完整 host wall hit-test + opening insertion | ✗ 模式沒做 |
+| 多選 marquee 跨 layer type | ✓ AP/Wall/Switch/Tray/Scope 全可 | ✗ 只 AP |
+
+---
+
+## 影響面 summary
+
+| 類別 | 數量 | 工時估 |
+|---|---|---|
+| 🔴 概念錯（pill vs dropdown / material tile vs select / hover concept 等）| 12 | 1-2 天 |
+| 🟠 缺整個 section / sub-component (model picker / ProgressPanel / scope+hole+floor_image+floor_align+riser+batch panel route / Sidebar inline expand / 自動規劃 button / DevicePlanningPanel) | 25+ | 3-5 天 |
+| 🟡 樣式微差 (unit suffix / helper text / shadow blur / font size scaling / icon) | 15+ | 1-2 天 |
+
+**做完真正視覺對齊：5-8 天工程**
+
+---
+
+## 建議的後續 fix 排序
+
+優先做 🔴 概念錯 (影響 user 視覺認知最大)：
+1. 港 `_shared/` PanelShell/PanelHeader/PanelSection/PanelField/PanelControls (TextInput/NumberInput/Select/Pill component) — 後續所有 panel 都用同抽象
+2. 替每 panel 用 pill row 取代 dropdown（band / width / mountType / antennaMode / switchKind / cableType）
+3. WallPanel material 改 visual tile grid
+4. ActiveModeBadge 補完整 hint 文案
+
+再來 🟠 缺 section：
+5. APPanel: 型號 picker + 支援頻段 chip + 狀態/連線 section
+6. SwitchPanel: 進度條 (Port 用量 / PoE 用量) + warning rows + snap-status
+7. ProgressPanel 整個 port 過來
+8. PanelRight 多 type route (scope / floor_hole / floor_image / floor_align / cable_riser / batch)
+9. Sidebar inline floor expand (樓高/樓板/衰減/自動規劃)
+10. DevicePlanningPanel pill
+11. DOOR_WINDOW mode + tray vertex menu + marquee 跨 layer
+
+再來 🟡 micro fix：
+12. NumberInput unit suffix 套到全 panel
+13. font size scale with zoom (canvas labels)
+14. helper text / hint 文案補齊
+15. ProgressPanel / StressLoader icon 一致化
+
+---
+
+## oldSrc resurrection 機制
+
+為了讓未來 audit / 視覺驗證可以重來，這份 audit 用的 oldSrc parallel dev setup 已固化到 repo：
+
+- `vite.oldsrc.config.js` — 把 `@` alias 切到 `./oldSrc`，base path `/floorplan-old/`，server port 5180
+- `oldsrc.html` — 入口 HTML，mount `oldSrc/main.jsx`
+- `package.json` 加 script `"dev:oldsrc": "vite --config vite.oldsrc.config.js"`
+
+**怎麼用**：
+
+```bash
+pnpm dev          # 新 src 在 5173
+pnpm dev:oldsrc   # oldSrc 在 5180 (URL: /floorplan-old/oldsrc.html)
+```
+
+MCP 對拼或本地兩個 tab 並排看都行。oldSrc store 用 `await import('/floorplan-old/oldSrc/store/useXxxStore.js')` 動態載入後可直接 `getState()` 操作。

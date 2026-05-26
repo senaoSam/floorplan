@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:oldsrc": "vite --config vite.oldsrc.config.js",
     "build": "vite build",
     "preview": "vite preview",
     "heatmap:golden": "node src/features/heatmap/__fixtures__/build-golden.mjs",
