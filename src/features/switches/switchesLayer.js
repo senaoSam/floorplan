@@ -76,6 +76,11 @@ export function attachSwitchesLayer({
       c.eventMode = 'static'
       c.cursor = 'grab'
       const g = new Graphics()
+      // Force PIXI to use the container hitArea (not Graphics's
+      // per-pixel containsPoint). Same fix as wallsLayer / apsLayer —
+      // otherwise clicks near the chassis but not exactly on a rendered
+      // pixel fall through to the stage.
+      g.eventMode = 'none'
       const label = new Text({ text: '', style: LABEL_STYLE })
       label.anchor.set(0.5, 0.5)
       label.eventMode = 'none'

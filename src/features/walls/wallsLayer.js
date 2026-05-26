@@ -71,6 +71,17 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
       c.eventMode = 'static'
       c.cursor = 'move'
       const g = new Graphics()
+      // Critical: Graphics participates in hit-test by default and its
+      // containsPoint() is based on the actual drawn pixels — for a thin
+      // stroke that's only ~3 world px wide, so clicks near the wall but
+      // not exactly on the rendered stroke return FALSE on Graphics,
+      // and PIXI never falls back to the container's hitArea (parent
+      // hitArea is consulted BEFORE descending into children, but the
+      // child's negative result still wins because the descent finished
+      // without claiming the container). Setting eventMode='none' on the
+      // Graphics removes it from hit-test entirely, so the container's
+      // 14-screen-px hitArea is the only thing that matters.
+      g.eventMode = 'none'
       c.addChild(g)
       layer.addChild(c)
       entry = { container: c, graphics: g, wall, floorId }

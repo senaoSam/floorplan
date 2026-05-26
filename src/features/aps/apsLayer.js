@@ -85,6 +85,10 @@ export function attachAPsLayer({
       c.cursor = 'grab'
       c.hitArea = new Circle(0, 0, AP_RADIUS + 4)
       const g = new Graphics()
+      // Force PIXI to use the container hitArea (not Graphics's
+      // per-pixel containsPoint) so clicking the AP body works at any
+      // zoom level. See wallsLayer for the full explanation.
+      g.eventMode = 'none'
       const nameText = new Text({ text: '', style: NAME_TEXT_STYLE })
       nameText.anchor.set(0.5, 0)
       nameText.y = AP_RADIUS + 4

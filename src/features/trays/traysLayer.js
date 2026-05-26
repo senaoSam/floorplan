@@ -141,6 +141,12 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
       c.cursor = 'grab'
       const haloG = new Graphics()
       const bodyG = new Graphics()
+      // Force PIXI to use the container's custom polyline hitArea
+      // (not Graphics's per-pixel containsPoint). Same fix as
+      // wallsLayer / apsLayer — without this, tray clicks would miss
+      // unless the cursor was exactly on a rendered stroke pixel.
+      haloG.eventMode = 'none'
+      bodyG.eventMode = 'none'
       c.addChild(haloG)
       c.addChild(bodyG)
       layer.addChild(c)
