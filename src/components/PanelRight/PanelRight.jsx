@@ -5,47 +5,70 @@ import APPanel from './APPanel'
 import SwitchPanel from './SwitchPanel'
 import CableTrayPanel from './CableTrayPanel'
 import WallPanel from './WallPanel'
+import ScopePanel from './ScopePanel'
+import FloorHolePanel from './FloorHolePanel'
+import BatchPanel from './BatchPanel'
 import './PanelRight.sass'
 
-function PanelRight() {
-  const selectedId = useEditorStore((s) => s.selectedId)
-  const selectedType = useEditorStore((s) => s.selectedType)
-  const selectedItems = useEditorStore((s) => s.selectedItems)
-  const activeFloorId = useFloorStore((s) => s.activeFloorId)
+// Right-panel router — keyed off selectedType / batch count. Adds the
+// scope / floor_hole / batch routes that were missing; the panel-collapse
+// chevron (‹ / ›) sits outside the aside so the user can fold the whole
+// panel without losing their selection (oldSrc convention).
 
-  const isBatch = selectedItems.length > 1
+function PanelRight() {
+  const selectedId           = useEditorStore((s) => s.selectedId)
+  const selectedType         = useEditorStore((s) => s.selectedType)
+  const selectedItems        = useEditorStore((s) => s.selectedItems)
+  const panelCollapsed       = useEditorStore((s) => s.panelCollapsed)
+  const togglePanelCollapsed = useEditorStore((s) => s.togglePanelCollapsed)
+  const activeFloorId        = useFloorStore((s) => s.activeFloorId)
+
+  const isBatch      = selectedItems.length > 1
   const hasSelection = !!selectedId || isBatch
-  const isOpen = hasSelection
+  const isOpen       = hasSelection && !panelCollapsed
 
   let body = null
-  if (!isBatch && activeFloorId) {
+  if (isBatch && activeFloorId) {
+    body = <BatchPanel />
+  } else if (!isBatch && activeFloorId) {
     switch (selectedType) {
-      case 'ap':
-        body = <APPanel floorId={activeFloorId} apId={selectedId} />; break
-      case 'switch':
-        body = <SwitchPanel floorId={activeFloorId} swId={selectedId} />; break
-      case 'cable_tray':
-        body = <CableTrayPanel floorId={activeFloorId} trayId={selectedId} />; break
-      case 'wall':
-        body = <WallPanel floorId={activeFloorId} wallId={selectedId} />; break
-      default: body = null
+      case 'ap':         body = <APPanel       floorId={activeFloorId} apId={selectedId} />;   break
+      case 'switch':     body = <SwitchPanel   floorId={activeFloorId} swId={selectedId} />;   break
+      case 'cable_tray': body = <CableTrayPanel floorId={activeFloorId} trayId={selectedId} />; break
+      case 'wall':       body = <WallPanel     floorId={activeFloorId} wallId={selectedId} />; break
+      case 'scope':      body = <ScopePanel    floorId={activeFloorId} zoneId={selectedId} />; break
+      case 'floor_hole': body = <FloorHolePanel floorId={activeFloorId} holeId={selectedId} />; break
+      default:           body = null
     }
   }
 
   return (
-    <aside className={`panel-right${isOpen ? ' panel-right--open' : ''}`}>
-      {body}
-      {!body && hasSelection && (
-        <div className="panel-right__placeholder">
-          <div className="panel-right__placeholder-title">
-            {isBatch ? '批次選取' : selectedType}
+    <>
+      <aside className={`panel-right${isOpen ? ' panel-right--open' : ''}`}>
+        {body}
+        {!body && hasSelection && (
+          <div className="panel-right__placeholder">
+            <div className="panel-right__placeholder-title">
+              {selectedType}
+            </div>
+            <div className="panel-right__placeholder-hint">
+              此類型的屬性面板尚未在 PIXI 版本上線
+            </div>
           </div>
-          <div className="panel-right__placeholder-hint">
-            屬性面板將在 Phase 25 後段隨各 Layer 互動補回
-          </div>
-        </div>
+        )}
+      </aside>
+      {hasSelection && (
+        <button
+          type="button"
+          className={`panel-right__toggle${panelCollapsed ? ' panel-right__toggle--collapsed' : ''}`}
+          onClick={togglePanelCollapsed}
+          title={panelCollapsed ? '展開面板' : '收合面板'}
+          aria-label={panelCollapsed ? '展開面板' : '收合面板'}
+        >
+          {panelCollapsed ? '‹' : '›'}
+        </button>
       )}
-    </aside>
+    </>
   )
 }
 

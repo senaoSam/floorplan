@@ -17,17 +17,65 @@
   &--open
     transform: translateX(0)
 
-  &__placeholder
-    padding: 16px
-    color: $text-secondary
-    font-size: 12px
+  &__toggle
+    position: absolute
+    top: 50%
+    right: $panel-width
+    transform: translateY(-50%)
+    width: 18px
+    height: 56px
+    padding: 0
+    border: 1px solid $border-color
+    border-right: none
+    border-radius: 4px 0 0 4px
+    background: $bg-secondary
+    color: rgba(255, 255, 255, 0.7)
+    font-size: 16px
+    line-height: 1
+    cursor: pointer
+    z-index: 100
+    display: flex
+    align-items: center
+    justify-content: center
+    transition: right 0.2s ease, background 0.15s, color 0.15s
 
-  &__placeholder-title
-    margin-bottom: 8px
-    color: $text-primary
+    &:hover
+      background: rgba(255, 255, 255, 0.08)
+      color: #fff
+
+    &--collapsed
+      right: 0
+
+// 各面板 header 共用的刪除按鈕樣式
+.panel-delete-btn
+  margin-left: auto
+  padding: 3px 10px
+  border: 1px solid rgba(231, 76, 60, 0.4)
+  border-radius: 4px
+  background: transparent
+  color: #e74c3c
+  font-size: 11px
+  cursor: pointer
+  transition: background 0.15s
+
+  &:hover
+    background: rgba(231, 76, 60, 0.12)
+
+// Placeholder body for selection types whose dedicated panel hasn't
+// been ported yet (e.g. cable_riser, floor_image, floor_align until
+// those features ship).
+.panel-right__placeholder
+  padding: 32px 16px
+  text-align: center
+  color: $text-secondary
+
+  &-title
     font-size: 13px
     font-weight: 600
+    color: $text-primary
+    margin-bottom: 8px
+    text-transform: capitalize
 
-  &__placeholder-hint
-    line-height: 1.5
-    opacity: 0.7
+  &-hint
+    font-size: 11px
+    line-height: 1.4
