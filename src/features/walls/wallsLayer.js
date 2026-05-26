@@ -1,6 +1,8 @@
 import { Container, Graphics } from 'pixi.js'
-import { useEditorStore } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
+import { OPENING_TYPES, getMaterialById } from '@/constants/materials'
+import { generateId } from '@/utils/id'
 
 // Walls adapter — per-wall Container with click hit-test (no drag yet —
 // wall edit needs endpoint handles which arrive with 31-4 / 31-8 spec).
@@ -36,6 +38,11 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
   layer.eventMode = 'passive'
 
   const containers = new Map()
+  // DOOR_WINDOW mode state — first click records (wallId, frac), the next
+  // click on the SAME wall inserts an opening over [min, max]. Click on a
+  // different wall resets to that wall. Esc / right-click clear via the
+  // shared keyboard / context-menu paths (cleared on mode exit).
+  const dw = { wallId: null, startFrac: null, openingKind: 'door' }
 
   const ensureContainer = (wall, floorId) => {
     let entry = containers.get(wall.id)
@@ -106,11 +113,85 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
       }
       if ((e.button ?? 0) !== 0) return
       e.stopPropagation()
-      useEditorStore.getState().setSelected(entry.wall.id, 'wall')
+      const editor = useEditorStore.getState()
+      if (editor.editorMode === EDITOR_MODE.DOOR_WINDOW) {
+        handleDoorWindowClick(entry, e)
+        return
+      }
+      editor.setSelected(entry.wall.id, 'wall')
     })
     container.on('pointerover', () => useHoverStore.getState().setHover(entry.wall.id, 'wall'))
     container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.wall.id))
   }
+
+  const handleDoorWindowClick = (entry, e) => {
+    const { wall } = entry
+    const local = scene.world.toLocal(e.global)
+    const frac = projectToWallFrac(wall, local.x, local.y)
+    if (frac < 0 || frac > 1) return
+    if (dw.wallId !== wall.id) {
+      dw.wallId = wall.id
+      dw.startFrac = frac
+      return
+    }
+    const f1 = Math.min(dw.startFrac, frac)
+    const f2 = Math.max(dw.startFrac, frac)
+    if (f2 - f1 > 0.01) {
+      const existing = wall.openings ?? []
+      const overlaps = existing.some((o) => f1 < o.endFrac && f2 > o.startFrac)
+      if (!overlaps) {
+        const ot = dw.openingKind === 'window' ? OPENING_TYPES.WINDOW : OPENING_TYPES.DOOR
+        const defaultMat = getMaterialById(ot.defaultMaterial)
+        useWallStore.getState().addOpening(entry.floorId, wall.id, {
+          id: generateId('opening'),
+          type: dw.openingKind,
+          startFrac: f1,
+          endFrac: f2,
+          material: defaultMat,
+          topHeight: 2.1,
+          bottomHeight: 0,
+        })
+      }
+    }
+    dw.wallId = null
+    dw.startFrac = null
+  }
+
+  // Project a point onto the wall's segment, returning the fraction
+  // along (start → end). Values outside [0, 1] indicate the point sits
+  // off the segment endpoints — caller rejects those.
+  const projectToWallFrac = (wall, px, py) => {
+    const dx = wall.endX - wall.startX
+    const dy = wall.endY - wall.startY
+    const len2 = dx * dx + dy * dy
+    if (len2 <= 1e-9) return -1
+    return ((px - wall.startX) * dx + (py - wall.startY) * dy) / len2
+  }
+
+  // Reset DOOR_WINDOW state when the user leaves the mode (Esc, mode pick,
+  // selection in another layer). D / W keys still flip the openingKind
+  // *while* in the mode — wired in a keydown listener below.
+  const onKeyDown = (e) => {
+    const tag = e.target?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    if (useEditorStore.getState().editorMode !== EDITOR_MODE.DOOR_WINDOW) return
+    if (e.key === 'd' || e.key === 'D') dw.openingKind = 'door'
+    else if (e.key === 'w' || e.key === 'W') dw.openingKind = 'window'
+    else if (e.key === 'Escape') { dw.wallId = null; dw.startFrac = null }
+  }
+  window.addEventListener('keydown', onKeyDown)
+
+  let lastEditorMode = useEditorStore.getState().editorMode
+  const unsubEditor = useEditorStore.subscribe(() => {
+    const mode = useEditorStore.getState().editorMode
+    if (mode !== lastEditorMode) {
+      lastEditorMode = mode
+      if (mode !== EDITOR_MODE.DOOR_WINDOW) {
+        dw.wallId = null
+        dw.startFrac = null
+      }
+    }
+  })
 
   let lastFloorId = undefined
   let lastWalls = undefined
@@ -138,6 +219,8 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
   return () => {
     unsubFloor()
     unsubWall()
+    unsubEditor()
+    window.removeEventListener('keydown', onKeyDown)
     for (const id of Array.from(containers.keys())) removeContainer(id)
   }
 }
