@@ -1,0 +1,107 @@
+@use '@/styles/variables' as *
+
+// 24-3 SwitchPanel-specific styles. Layout / form primitives live in
+// _shared/shared.sass. Only the kind-button row, the connected-AP list,
+// and small hint text live here.
+
+.switch-panel
+  // Kind toggle row (Switch / IDF / MDF / Router) + cable-type row reuse
+  // the same compact pill style. Active state colour is set inline on the
+  // button so each kind keeps its own brand colour.
+  &__kind-row
+    display: flex
+    gap: 4px
+    flex-wrap: wrap
+
+  &__kind-btn
+    flex: 1
+    min-width: 60px
+    padding: 5px 8px
+    border: 1px solid $border-color
+    border-radius: 6px
+    background: transparent
+    color: $text-secondary
+    font-size: 12px
+    cursor: pointer
+    transition: background 0.12s, border-color 0.12s, color 0.12s
+
+    &:hover
+      background: rgba(255, 255, 255, 0.06)
+      color: $text-primary
+
+    &--active
+      background: rgba(255, 255, 255, 0.05)
+      // borderColor + color are set inline per-kind so the active button
+      // matches the marker colour on canvas.
+
+  // Sub-line in capacity section ("AP 5 + Uplink 1 + Downlink 0").
+  &__breakdown
+    font-size: 11px
+    color: $text-secondary
+    margin-top: -2px
+
+  &__hint
+    font-size: 11px
+    color: $text-secondary
+    line-height: 1.4
+
+    &--warn
+      color: #f59e0b
+
+  // Read-only display chip (e.g. "SFP+ × 4", "3 個 switch / IDF"). Looks
+  // distinct from editable NumberInput so the user knows not to click it.
+  &__readonly-chip
+    display: inline-block
+    padding: 3px 8px
+    border-radius: 4px
+    background: rgba(255, 255, 255, 0.06)
+    color: $text-primary
+    font-size: 12px
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace
+
+  // Inline text-link button used inside hint messages (e.g. "or [清除上連]").
+  // Borderless underline so it reads as a link, not a primary action.
+  &__inline-btn
+    background: none
+    border: none
+    padding: 0 2px
+    color: #60a5fa
+    font: inherit
+    text-decoration: underline
+    cursor: pointer
+    &:hover
+      color: #93c5fd
+
+  // Connected-AP list: name on the left, wattage on the right.
+  &__conn-list
+    display: flex
+    flex-direction: column
+    gap: 4px
+    margin: 0
+    padding: 0
+    list-style: none
+
+  &__conn-item
+    display: flex
+    align-items: center
+    justify-content: space-between
+    gap: 8px
+    padding: 4px 8px
+    border-radius: 4px
+    background: rgba(255, 255, 255, 0.04)
+    font-size: 12px
+
+  &__conn-name
+    flex: 1
+    min-width: 0
+    color: $text-primary
+
+  &__conn-floor
+    color: $text-secondary
+    font-size: 11px
+    margin-left: 4px
+
+  &__conn-wattage
+    color: $text-secondary
+    font-size: 11px
+    flex-shrink: 0

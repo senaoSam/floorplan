@@ -1,0 +1,108 @@
+@use '@/styles/variables' as *
+
+// 24-3 Slimmed WallPanel-specific styles. Layout (header / section / field /
+// button) lives in _shared/shared.sass. This file keeps only the bits with
+// no shared equivalent: the material picker list and the opening row.
+
+.wall-panel
+  // 材質清單 — vertical list of colour-swatch buttons. Active state uses
+  // the panel's accent (var(--panel-accent) set on .pnl by group).
+  &__materials
+    display: flex
+    flex-direction: column
+    gap: 4px
+
+  &__mat-btn
+    display: flex
+    align-items: center
+    gap: 8px
+    width: 100%
+    padding: 6px 8px
+    border: 1px solid transparent
+    border-radius: 6px
+    background: transparent
+    cursor: pointer
+    transition: background 0.12s, border-color 0.12s
+    text-align: left
+
+    &:hover
+      background: rgba(255, 255, 255, 0.06)
+
+    &--active
+      background: var(--panel-accent-soft, rgba(148, 163, 184, 0.15))
+      border-color: var(--panel-accent, $accent)
+
+  &__mat-color
+    width: 14px
+    height: 14px
+    border-radius: 3px
+    flex-shrink: 0
+    border: 1px solid rgba(255, 255, 255, 0.15)
+
+  &__mat-name
+    flex: 1
+    font-size: 12px
+    color: $text-primary
+
+  &__mat-db
+    font-size: 11px
+    color: $text-secondary
+
+  // 門窗 — dense single-row item (type badge + material select + start~end %
+  // inputs + delete). Not worth modelling as <PanelField> since it has too
+  // many controls per row.
+  &__openings
+    display: flex
+    flex-direction: column
+    gap: 4px
+
+  &__opening-item
+    display: flex
+    flex-wrap: wrap
+    align-items: center
+    gap: 4px 6px
+    padding: 6px 6px
+    border-radius: 4px
+    background: rgba(255, 255, 255, 0.04)
+
+  &__opening-type-btn
+    border: none
+    border-radius: 4px
+    color: #fff
+    font-size: 11px
+    font-weight: 600
+    padding: 2px 8px
+    cursor: pointer
+    flex-shrink: 0
+    opacity: 0.85
+    transition: opacity 0.12s
+
+    &:hover
+      opacity: 1
+
+  &__opening-mat-select
+    flex: 1
+    min-width: 0
+
+  &__opening-inputs
+    display: flex
+    align-items: center
+    gap: 4px
+    flex: 1
+    justify-content: flex-end
+
+  &__opening-sep,
+  &__opening-pct
+    font-size: 11px
+    color: $text-secondary
+
+  &__opening-del
+    width: 22px
+    height: 22px
+    padding: 0
+    font-size: 14px
+    line-height: 1
+
+    &:hover
+      background: rgba(231, 76, 60, 0.18)
+      color: #f87171

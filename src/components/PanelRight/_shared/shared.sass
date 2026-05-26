@@ -1,0 +1,284 @@
+@use '@/styles/variables' as *
+
+// 24-3 Canonical right-panel layout. All per-type panels (Wall / AP / Switch /
+// Tray / Riser / Scope / FloorHole / FloorImage / Batch) should compose from
+// <PanelShell> + helpers in PanelShell.jsx — never re-implement header /
+// section / field markup.
+//
+// Accent colours (24-5) are CSS variables scoped to .pnl. Each group sets
+// --panel-accent on its root via the .pnl--{group} modifier. Sub-elements
+// read var(--panel-accent) so retuning is one-place.
+
+.pnl
+  // Defaults to a neutral slate accent so a panel without an explicit accent
+  // still has a working colour for focus rings + delete hover etc.
+  --panel-accent: #94a3b8
+  --panel-accent-soft: rgba(148, 163, 184, 0.12)
+
+  display: flex
+  flex-direction: column
+  height: 100%
+
+  // 24-5 group themes — keep in sync with toolbar groups (Toolbar.jsx GROUPS):
+  //   structure (wall / scope / floor_hole)  → slate
+  //   wireless  (ap)                         → cyan
+  //   cable     (switch / tray / riser)      → violet
+  //   measure   (scale)                      → amber
+  //   meta      (floor_image / align / batch) → gray
+  &--wall, &--scope, &--floor_hole
+    --panel-accent: #94a3b8
+    --panel-accent-soft: rgba(148, 163, 184, 0.15)
+
+  &--ap
+    --panel-accent: #4fc3f7
+    --panel-accent-soft: rgba(79, 195, 247, 0.15)
+
+  &--switch, &--cable_tray, &--cable_riser
+    --panel-accent: #a78bfa
+    --panel-accent-soft: rgba(167, 139, 250, 0.15)
+
+  &--measure
+    --panel-accent: #f1c40f
+    --panel-accent-soft: rgba(241, 196, 15, 0.15)
+
+  &--meta, &--floor_image, &--floor_align, &--batch
+    --panel-accent: #9ca3af
+    --panel-accent-soft: rgba(156, 163, 175, 0.15)
+
+  // ── Header ─────────────────────────────────────────────────────
+  &__header
+    display: flex
+    align-items: flex-start
+    justify-content: space-between
+    gap: 10px
+    padding: 12px 14px 10px
+    border-bottom: 1px solid $border-color
+    // Coloured strip at the very top so the user can spot which group's panel
+    // they're looking at without reading the title.
+    border-top: 3px solid var(--panel-accent)
+
+  &__header-text
+    display: flex
+    flex-direction: column
+    gap: 2px
+    min-width: 0  // allow truncation of long titles
+
+  &__title
+    font-size: 13px
+    font-weight: 600
+    color: $text-primary
+    line-height: 1.2
+    word-break: break-all
+
+  &__meta
+    font-size: 11px
+    color: $text-secondary
+    line-height: 1.3
+
+  &__delete
+    flex-shrink: 0
+    padding: 3px 10px
+    border: 1px solid rgba(231, 76, 60, 0.4)
+    border-radius: 4px
+    background: transparent
+    color: #e74c3c
+    font-size: 11px
+    cursor: pointer
+    transition: background 0.15s
+    align-self: center
+
+    &:hover
+      background: rgba(231, 76, 60, 0.12)
+
+  // ── Section ────────────────────────────────────────────────────
+  &__section
+    padding: 12px 14px
+    border-bottom: 1px solid $border-color
+
+    &--disabled
+      opacity: 0.4
+      pointer-events: none
+
+    &:last-child
+      border-bottom: none
+
+  &__section-title
+    display: flex
+    align-items: center
+    gap: 6px
+    margin: 0 0 8px
+    font-size: 11px
+    font-weight: 600
+    color: $text-secondary
+    text-transform: uppercase
+    letter-spacing: 0.4px
+
+  &__section-body
+    display: flex
+    flex-direction: column
+    gap: 8px
+
+  &__coming
+    font-size: 10px
+    font-weight: 400
+    color: $text-secondary
+    background: rgba(255, 255, 255, 0.08)
+    padding: 1px 6px
+    border-radius: 4px
+    text-transform: none
+    letter-spacing: 0
+
+  // ── Field ──────────────────────────────────────────────────────
+  &__field
+    display: flex
+    flex-direction: column
+    gap: 4px
+
+  &__field-label
+    display: flex
+    align-items: baseline
+    gap: 6px
+    font-size: 11px
+    font-weight: 500
+    color: $text-secondary
+
+  &__field-hint
+    font-size: 10px
+    color: $text-secondary
+    opacity: 0.7
+
+  &__field-value
+    display: flex
+    align-items: center
+    gap: 6px
+    min-height: 22px
+    color: $text-primary
+
+  // ── Empty state ────────────────────────────────────────────────
+  &__empty
+    padding: 24px 14px
+    color: $text-secondary
+    font-size: 12px
+    text-align: center
+
+// ── Form primitives ─────────────────────────────────────────────────────
+// These live outside .pnl so they can also be used in floating dialogs / the
+// PanelRight toggle area without inheriting `.pnl` layout context. They DO
+// pick up var(--panel-accent) when nested inside .pnl so focus rings match.
+
+.pnl-input,
+.pnl-number__input,
+.pnl-select
+  background: rgba(255, 255, 255, 0.07)
+  border: 1px solid $border-color
+  border-radius: 6px
+  color: $text-primary
+  font-size: 13px
+  padding: 5px 8px
+  outline: none
+  min-width: 0
+  // currentColor for the accent — set on .pnl so each panel themes itself.
+  &:focus
+    border-color: var(--panel-accent, $accent)
+
+.pnl-input
+  width: 100%
+
+.pnl-number
+  display: inline-flex
+  align-items: center
+  gap: 4px
+
+  &__input
+    // Hide native spinner — panels almost always want a clean rectangle.
+    -moz-appearance: textfield
+    text-align: right
+
+    &::-webkit-outer-spin-button,
+    &::-webkit-inner-spin-button
+      -webkit-appearance: none
+      margin: 0
+
+  &__unit
+    font-size: 11px
+    color: $text-secondary
+    flex-shrink: 0
+
+.pnl-select
+  cursor: pointer
+  width: 100%
+
+  option
+    background: $bg-secondary
+    color: $text-primary
+
+.pnl-check
+  display: inline-flex
+  align-items: center
+  gap: 6px
+  font-size: 12px
+  color: $text-primary
+  cursor: pointer
+  user-select: none
+
+  input
+    accent-color: var(--panel-accent, $accent)
+    cursor: pointer
+
+  &--disabled
+    color: $text-secondary
+    cursor: not-allowed
+
+    input
+      cursor: not-allowed
+
+.pnl-btn
+  display: inline-flex
+  align-items: center
+  justify-content: center
+  gap: 6px
+  padding: 5px 12px
+  border-radius: 6px
+  border: 1px solid transparent
+  background: transparent
+  color: $text-primary
+  font-size: 12px
+  font-weight: 500
+  cursor: pointer
+  transition: background 0.12s, border-color 0.12s, color 0.12s
+
+  &:disabled
+    opacity: 0.4
+    cursor: not-allowed
+
+  &--block
+    display: flex
+    width: 100%
+
+  &--default
+    background: rgba(255, 255, 255, 0.06)
+    border-color: $border-color
+
+    &:hover:not(:disabled)
+      background: rgba(255, 255, 255, 0.1)
+
+  &--primary
+    background: var(--panel-accent, $accent)
+    color: #0f172a
+
+    &:hover:not(:disabled)
+      filter: brightness(1.08)
+
+  &--danger
+    color: #f87171
+    border-color: rgba(248, 113, 113, 0.4)
+
+    &:hover:not(:disabled)
+      background: rgba(248, 113, 113, 0.12)
+
+  &--ghost
+    color: $text-secondary
+
+    &:hover:not(:disabled)
+      background: rgba(255, 255, 255, 0.06)
+      color: $text-primary

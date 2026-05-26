@@ -1,73 +1,59 @@
 @use '@/styles/variables' as *
 
+// 24-3 Slimmed APPanel-specific styles. Layout / form primitives live in
+// _shared/shared.sass. Only the pill button row, the hint text, and the
+// custom antenna pattern preview survive here.
+//
+// CableTrayPanel still imports this file (and will be migrated last in
+// C-3d) — so the tray-* class block at the bottom stays until then.
+
 .ap-panel
-  display: flex
-  flex-direction: column
-  height: 100%
-
-  &__header
+  // Pill button row (頻段 / 頻寬 / 安裝方式 / 天線模式)
+  &__pill-row
     display: flex
-    align-items: center
-    gap: 10px
-    padding: 12px 14px
-    border-bottom: 1px solid $border-color
+    gap: 4px
+    flex-wrap: wrap
 
-  &__title
+  &__pill
     flex: 1
-    font-size: 13px
-    font-weight: 700
-    color: $text-primary
-
-  &__delete
-    padding: 3px 10px
-    border: 1px solid rgba(231, 76, 60, 0.4)
-    border-radius: 4px
+    min-width: 40px
+    padding: 5px 8px
+    border: 1px solid $border-color
+    border-radius: 6px
     background: transparent
-    color: #e74c3c
-    font-size: 11px
+    color: $text-secondary
+    font-size: 12px
     cursor: pointer
+    transition: background 0.12s, border-color 0.12s, color 0.12s
 
-    &:hover
-      background: rgba(231, 76, 60, 0.12)
-
-  &__section
-    padding: 10px 14px
-    border-bottom: 1px solid $border-color
-    display: flex
-    flex-direction: column
-    gap: 6px
-
-  &__section-title
-    font-size: 11px
-    font-weight: 600
-    color: $text-secondary
-    text-transform: uppercase
-    letter-spacing: 0.4px
-    margin-bottom: 2px
-
-  &__field
-    display: flex
-    flex-direction: column
-    gap: 3px
-    color: $text-secondary
-    font-size: 11px
-
-    input, select
-      padding: 4px 6px
+    &:hover:not(:disabled)
       background: rgba(255, 255, 255, 0.06)
-      border: 1px solid $border-color
-      border-radius: 4px
       color: $text-primary
-      font-family: inherit
-      font-size: 12px
-      outline: none
 
-      &:focus
-        border-color: $accent
+    &--active
+      background: var(--panel-accent-soft, rgba(79, 195, 247, 0.15))
+      border-color: var(--panel-accent, $accent)
+      color: $text-primary
 
-  &__row
+    &--disabled,
+    &:disabled
+      opacity: 0.35
+      cursor: not-allowed
+
+  // Section-internal hint (one-liner under controls)
+  &__hint
+    font-size: 11px
+    color: $text-secondary
+    line-height: 1.4
+
+  // Pattern preview SVG box (custom antenna)
+  &__pattern-preview
     display: flex
-    gap: 8px
+    justify-content: center
+    margin-top: 8px
+    padding: 6px
+    background: rgba(0, 0, 0, 0.25)
+    border-radius: 6px
 
-    .ap-panel__field
-      flex: 1
+  &__pattern-svg
+    display: block
