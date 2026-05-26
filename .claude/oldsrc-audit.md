@@ -832,3 +832,112 @@ MCP 對拼或本地兩個 tab 並排看都行。oldSrc store 用 `await import('
 - CableSummaryPanel BOM 細分 + export CSV/PDF
 
 **MCP 視覺驗證**（new on :5173 vs oldSrc on :5180 並排）：sidebar / panels / toolbar / heatmap pill row / canvas object visuals / mode badge hint 全部對齊。
+
+---
+
+# 🚨 嚴格規則（2026-05-26 由 user 明訂）
+
+**這是「重構」不是「改寫 / 重設計」**。執行任何 layer / component / chrome 任務時：
+
+- 一切 **顏色 / 大小 / 角度 / 寬度 / alpha / dash pattern / hover 位置 / cursor / 文案 / spacing / padding / radius / icon / 字級 / shadow** 嚴格照 oldSrc
+- **絕對不要** 自行設計、調整、優化、推測「更好」的視覺
+- 任何 magic number 都先 grep oldSrc 對應檔，找不到再問 user
+- 不確定就 MCP 並排（`pnpm dev:oldsrc` on 5180）對照 + 讀 oldSrc 原始檔，不要憑印象
+- 寫 commit message 時，標明每個數值 / 顏色的 oldSrc 出處（哪個檔哪行）
+
+歷史教訓：Bundle 7 之前我自選顏色 / 自編 switch decoration / 自設 hit tolerance / 自加 hover ring 都被 user 抓出來。**不要重複**。
+
+---
+
+# Bundle 7+ 漏單（2026-05-26 後段）
+
+User 互動測試發現 + 提出，**未做**的：
+
+## 右鍵 context menu 漏覆蓋
+
+| 物件 | 狀態 | 細節 |
+|---|---|---|
+| AP / Switch / Wall / Cable Tray (基本) | ✅ 選取 / 刪除 / inline rename | Bundle 7 前已做 |
+| **Scope (範圍多邊形)** | ❌ scopesLayer 是整片 Graphics、沒 per-object container、`button === 2` handler 沒接 | port 一份 per-scope hit container 加 right-click |
+| **Floor Hole (中庭)** | ❌ 同上 | 同上 |
+| **Floor Image (底圖)** | ❌ 整個沒接 | oldSrc 右鍵 → 刪除底圖（detach `imageUrl`，floor record 保留）|
+| **Tray 完整 context menu** | ❌ 只 basic 3 項；缺 hit-context-aware menu | oldSrc 依右鍵位置 (segment / endpoint / vertex) menu 不同：split / extend / merge / vertex delete/insert/split。完整 logic 在 `oldSrc/features/editor/Editor2D.jsx` 2014-2156 行 + `oldSrc/components/ContextMenu/TrayContextMenu.sass` |
+
+## DRAW_CABLE_TRAY 線槽繪製 UI 差異（user 抓到，**未修**）
+
+- **繪製中的 UI**（拖曳新增 vertex 時的 ghost 線、snap halo、起點 marker、parallel-wall lock 提示）— 跟原版有差異
+- **繪製完成的 tray 角落 / endpoint 樣式** — 跟原版有差異
+- 需逐一對照 oldSrc `CableTrayLayer.jsx`（DraftTray + TrayPolyline 段）+ Editor2D.jsx 對應 ghost line code
+
+## Cable Riser 整個 feature 沒做
+
+- 沒 `risersLayer.js`、`PLACE_RISER` 模式沒接、`RiserPanel` 沒做
+- oldSrc 有 `RiserLayer.jsx` + 跨樓層共用 xy 邏輯（cable-spec §12-3）
+- 估 2-3 天
+
+## 其他 audit 未完成項目（沿用前面整理）
+
+### Audit 細節 polish
+- **A6** `CableTrayPanel` 19-x 詳細欄位（已基本 cp 但可能有差）
+- **B1** `floor_image` / `floor_align` / `cable_riser` panel route（占位中）
+- **D4** Toolbar 細部 icon group / undo-redo
+- **E3** CableSummaryPanel BOM 分類 / Per-IDF / Tier 細分 / CSV-PDF export
+- **F7** FloorImage crop / rotation / opacity / align transform
+
+### Workflow gaps
+- AutoPowerModal（disabled stub）
+- Marquee 跨 layer type（只 AP，wall/switch/tray/scope 沒）
+- PNG 匯出（Sidebar floor menu 沒此項）
+- AI walls modal（從底圖辨識牆）
+- Snap helpers (DRAW_CABLE_TRAY) - 20-3
+- Auto-channel on place（store 有，沒接 placement）
+- Tray vertex context menu（同上：split / extend / merge / delete-insert）
+- History (Undo/Redo) — `useHistoryStore` 還是 stub
+- DRAW_SCALE mode dialog wiring（components ported, 流程沒測）
+- Crop image mode
+
+### Phase 25 perf shader（**全沒動**，是 1000 AP 規格達標關鍵）
+| Layer | 內容 | 估時 |
+|---|---|---|
+| 31-4 | Walls Mesh + line shader (quad expand / screen-space width / AA / per-material color / hoverWallId uniform / opening sub-segments / R-tree spatial index) | 2-3 天 |
+| 31-5 | Cables Mesh + dashed line shader (dash pattern screen-space distance / focus halo second pass) | 2-3 天 |
+| 31-6 | AP markers texture atlas (1 draw call for 1000 APs / uniform grid spatial index) | 2 天 |
+| 31-9 | Scopes/FloorHoles R-tree of AABBs for hit-test | 1 天 |
+| 31-10 | Stage-level event router + R-tree + uniform grid + marquee spatial query | 2 天 |
+| 31-11 | SDF/MSDF text atlas + ticker animation (focus pulse / hover transition) | 2-3 天 |
+| 31-12 | Validation：1000 AP 壓力測試 + context-loss test + 8 場景 diff | 2 天 |
+| 31-13 | 刪除 `oldSrc/` 收尾 | 0.5 天 |
+
+合計 ~15 天。
+
+### Phase 26
+- 32-0 量測 `computeRoutes` 在 1000 AP 不同 tray 數的 wall-clock 基線
+- 32-C 增量 routing（graph topology cache / per-AP single-source Dijkstra / 拖 tray vertex 邊更新 / heatmap tile-based AP culling）
+
+### 3D Viewer（**完全沒做**）
+TopBar 2D/3D toggle 的 3D 按鈕 disabled。oldSrc 有完整 `Viewer3D` 用 `@react-three/fiber 7.0.29`（依賴還在 `package.json`）。
+- Viewer3D scene mount
+- Walls 3D extrude / AP 3D markers + range sphere / Switches / Cable Tray 3D / Floor stack（多樓層 elevation）/ 3D camera controls
+
+估 5-7 天。
+
+---
+
+# Bundle 7-9+ 進度（接 Bundle 1-6 之後）
+
+| Commit | 內容 |
+|---|---|
+| `66968b9` | Bundle 7 — 7 user-reported issues + missing CSS + inverseScale + AP/SW/handles 改 screen-space scale |
+| `51dcf1b` | Bundle 8 — Tray magnet visibility（mode-aware）+ wall hit area stable + wall body drag |
+| `3e74a7b` | Bundle 9 — hover effect parity（AP/SW/Tray cursor='grab' / wall hover glow）+ 加 console-debug log gated by `window.__debugWallSelect` |
+| `9b0bbb0` | Quiet wall hover logs |
+| `278160a` | Wall hit tolerance 改 screen-px (依 viewport scale 換算) |
+| `2b0a373` | Debug logs 多印 wall label + world coords + `__wallNearestTo` helper |
+| `bc3bf31` | Auto-probe nearest wall on background-click |
+| `e170afb` | (失敗 attempt) Graphics eventMode='none' 在 wall/AP/SW/tray's own Graphics |
+| `9b92c09` | Instrument wall hitArea.contains() — `__wallHitTrace` |
+| **`d63b1b7`** | **真正 fix** — 把所有「純視覺」Graphics/Sprite (floorImage / heatmap / scopes / floorHoles / cables / hoverOverlay / draftOverlay / selectionOverlay / marquee) 全設 `eventMode='none'`，讓 PIXI 只 test interactive 物件的 hitArea |
+| `ef282ef` | quieter debug logs + slimmer wall hover halo (bodyWidth+2) + AP focus halo (`AP_RADIUS+1`) |
+| `162de68` | Drop double-paint AP/Wall hover in hoverOverlayLayer（in-layer 已處理）|
+
+**Debug 機制保留**：`window.__debugWallSelect = true` 開啟後，[stage] 背景點會自動印 nearest wall + hitArea.contains() 呼叫次數，三種狀態自動秀根因。
