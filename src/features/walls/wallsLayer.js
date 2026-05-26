@@ -1,6 +1,7 @@
 import { Container, Graphics } from 'pixi.js'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
+import { useViewportStore } from '@/store/useViewportStore'
 import { OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 
@@ -22,7 +23,13 @@ const WALL_HALO_WIDTH_HOVERED  = 10
 const WALL_BODY_WIDTH_NORMAL   = 3
 const WALL_BODY_WIDTH_SELECTED = 5
 const WALL_BODY_WIDTH_HOVERED  = 6
-const HIT_TOLERANCE_PX = 14 // bigger hit envelope (matches oldSrc hitStrokeWidth=14)
+// Hit envelope in SCREEN px (matches oldSrc Konva hitStrokeWidth=14). We
+// convert to world px by dividing by viewport.scale on every viewport
+// change — otherwise zooming out makes the wall hit area shrink to a few
+// screen px and clicks "near" the wall miss → stage receives the click →
+// clearSelected fires and the panel closes. That was the root cause of
+// the recurring "wall select sometimes fails / panel closes" bug.
+const HIT_TOLERANCE_SCREEN_PX = 14
 
 function pointToSegmentDistance(px, py, ax, ay, bx, by) {
   const dx = bx - ax
@@ -129,24 +136,34 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
       }
     }
 
-    // Hit area only needs to track geometry, not selection state. Replacing
-    // it during a click-in-progress is the root cause of "sometimes can't
-    // select" — PIXI's event boundary captures the hitArea reference at
-    // pointerdown and a redraw mid-click swaps it out for an identical
-    // copy. Keep the existing hitArea if the segment endpoints haven't
-    // moved.
+    // Hit area is kept in screen-space — see applyHitAreas below. drawWall
+    // only touches it if the wall's geometry changed (the reference must
+    // stay stable across hover / selection redraws or PIXI's event
+    // boundary loses the click that's in progress).
+    refreshHitArea(entry)
+  }
+
+  // Build a hitArea using current viewport scale so tolerance stays at
+  // HIT_TOLERANCE_SCREEN_PX screen pixels regardless of zoom. Only
+  // replaces the hitArea object when either geometry or scale changed.
+  const refreshHitArea = (entry) => {
+    const { container, wall } = entry
+    const scale = useViewportStore.getState().scale || 1
+    const worldTol = HIT_TOLERANCE_SCREEN_PX / scale
     const lastGeom = entry._hitGeom
     if (!lastGeom ||
         lastGeom.startX !== wall.startX || lastGeom.startY !== wall.startY ||
-        lastGeom.endX   !== wall.endX   || lastGeom.endY   !== wall.endY) {
+        lastGeom.endX   !== wall.endX   || lastGeom.endY   !== wall.endY ||
+        lastGeom.tol    !== worldTol) {
       container.hitArea = makeSegmentHitArea(
         wall.startX, wall.startY,
         wall.endX, wall.endY,
-        HIT_TOLERANCE_PX,
+        worldTol,
       )
       entry._hitGeom = {
         startX: wall.startX, startY: wall.startY,
         endX:   wall.endX,   endY:   wall.endY,
+        tol: worldTol,
       }
     }
   }
@@ -363,10 +380,22 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     }
   }
 
+  // Viewport scale → refresh every wall's hitArea so tolerance stays
+  // in screen pixels (otherwise zooming out shrinks the click target
+  // and the user starts missing thin walls).
+  let lastScale = useViewportStore.getState().scale
+  const onViewportChange = () => {
+    const s = useViewportStore.getState().scale
+    if (s === lastScale) return
+    lastScale = s
+    for (const entry of containers.values()) refreshHitArea(entry)
+  }
+
   const unsubFloor = useFloorStore.subscribe(reconcile)
   const unsubWall = useWallStore.subscribe(reconcile)
   const unsubHover = useHoverStore.subscribe(onHoverChange)
   const unsubSelection = useEditorStore.subscribe(onSelectionChange)
+  const unsubViewport = useViewportStore.subscribe(onViewportChange)
   reconcile()
 
   return () => {
@@ -374,6 +403,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     unsubWall()
     unsubHover()
     unsubSelection()
+    unsubViewport()
     unsubEditor()
     window.removeEventListener('keydown', onKeyDown)
     for (const id of Array.from(containers.keys())) removeContainer(id)
