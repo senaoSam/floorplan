@@ -60,6 +60,7 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore }
 
       clearSprite()
       const sprite = new Sprite(texture)
+      sprite.eventMode = 'none' // floor image is pure backdrop; never intercept clicks
       sprite.x = 0
       sprite.y = 0
       sprite.width = floor.imageWidth

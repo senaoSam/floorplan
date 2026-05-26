@@ -13,6 +13,7 @@ const HOLE_STROKE_WIDTH = 2
 export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore }) {
   const layer = scene.layers.scopes
   const g = new Graphics()
+  g.eventMode = 'none' // pure visual — never intercept clicks
   layer.addChild(g)
 
   let lastFloorId = undefined

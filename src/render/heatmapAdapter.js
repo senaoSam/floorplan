@@ -42,6 +42,7 @@ export function attachHeatmapLayer({
     }
     texture = Texture.from(gl.canvas)
     sprite = new Sprite(texture)
+    sprite.eventMode = 'none' // heatmap is pure visual overlay; never intercept clicks
     sprite.x = 0
     sprite.y = 0
     sprite.visible = false

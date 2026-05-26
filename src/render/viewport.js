@@ -43,6 +43,7 @@ export function bindViewport({
   // Marquee rectangle Graphics on the overlays world-space layer (scales
   // with viewport — acceptable since the rect is short-lived).
   const marqueeG = new Graphics()
+  marqueeG.eventMode = 'none' // pure visual — never intercept clicks
   scene.layers.overlays.addChild(marqueeG)
 
   let spaceDown = false

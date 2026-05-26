@@ -20,6 +20,7 @@ import { Graphics } from 'pixi.js'
 export function attachSelectionOverlay({ scene }) {
   const layer = scene.layers.overlays
   const g = new Graphics()
+  g.eventMode = 'none' // pure visual — never intercept clicks
   layer.addChild(g)
   return () => {
     layer.removeChild(g)

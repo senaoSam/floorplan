@@ -37,6 +37,7 @@ function drawSegment(g, ax, ay, bx, by, color, width, alpha = 1) {
 export function attachDraftOverlay({ scene, useDraftStore }) {
   const layer = scene.layers.overlays
   const g = new Graphics()
+  g.eventMode = 'none' // pure visual — never intercept clicks
   layer.addChild(g)
 
   const redraw = () => {

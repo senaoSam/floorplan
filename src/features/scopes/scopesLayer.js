@@ -56,6 +56,7 @@ function drawDashedPolygon(g, flat, dashOn, dashOff, opts) {
 export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
   const layer = scene.layers.scopes
   const g = new Graphics()
+  g.eventMode = 'none' // pure visual — never intercept clicks
   layer.addChild(g)
 
   const rebuild = () => {

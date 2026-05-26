@@ -70,6 +70,7 @@ export function attachCablesLayer({
 }) {
   const layer = scene.layers.cables
   const g = new Graphics()
+  g.eventMode = 'none' // pure visual — never intercept clicks
   layer.addChild(g)
 
   const rebuild = () => {

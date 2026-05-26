@@ -25,6 +25,7 @@ export function attachHoverOverlay({
 }) {
   const layer = scene.layers.overlays
   const g = new Graphics()
+  g.eventMode = 'none' // pure visual — never intercept clicks
   layer.addChild(g)
 
   const redraw = () => {
