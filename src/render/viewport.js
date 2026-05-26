@@ -81,6 +81,11 @@ export function bindViewport({
   const onStageDown = (e) => {
     const isBackground = e.target === stage
     const button = e.button ?? 0
+    // Clear the trace so we only capture contains() calls between this
+    // pointerdown and the matching pointerup.
+    if (typeof window !== 'undefined' && window.__debugWallSelect) {
+      window.__wallHitTrace = []
+    }
     vlog('pointerdown target=', e.target?.label ?? e.target?.constructor?.name, 'isBackground=', isBackground, 'button=', button, 'global=', `${e.global.x.toFixed(1)},${e.global.y.toFixed(1)}`)
     const isMiddle = button === 1
     const isLeftPan = button === 0 && spaceDown
@@ -184,6 +189,17 @@ export function bindViewport({
         if (typeof window !== 'undefined' && typeof window.__wallNearestTo === 'function' && window.__debugWallSelect) {
           const probe = window.__wallNearestTo(wp.x, wp.y)
           vlog('  nearest wall=', probe.id, '  worldDist=', probe.d.toFixed(2), '  worldTol=', probe.worldTol.toFixed(2), '  screenDist=', probe.screenDistance.toFixed(2), 'px  withinTol=', probe.withinTolerance)
+        }
+        // Did PIXI actually call any wall's hitArea.contains() during this
+        // pointer cycle? If __wallHitTrace is empty → PIXI's hit-test
+        // didn't descend to the walls layer at all → upstream layer (a
+        // sibling above walls in z-order) is claiming the click. If
+        // entries exist but all `ok:false` → tolerance issue. If an
+        // `ok:true` entry exists yet we still landed in stage → PIXI
+        // returned the hit but didn't dispatch it (event-mode bug).
+        if (typeof window !== 'undefined' && window.__debugWallSelect && window.__wallHitTrace) {
+          vlog('  wall hitArea.contains() calls during this pointer cycle:', window.__wallHitTrace.length, 'total —', window.__wallHitTrace.slice(-5))
+          window.__wallHitTrace = []
         }
         onBackgroundClick()
       }

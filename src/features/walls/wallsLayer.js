@@ -44,12 +44,23 @@ function pointToSegmentDistance(px, py, ax, ay, bx, by) {
   return Math.hypot(px - qx, py - qy)
 }
 
-function makeSegmentHitArea(ax, ay, bx, by, tolerance) {
-  return {
+function makeSegmentHitArea(ax, ay, bx, by, tolerance, wallId) {
+  const obj = {
     contains(x, y) {
-      return pointToSegmentDistance(x, y, ax, ay, bx, by) <= tolerance
+      const d = pointToSegmentDistance(x, y, ax, ay, bx, by)
+      const ok = d <= tolerance
+      // Track ANY contains() call so we can confirm PIXI is actually
+      // routing the click through this wall during hit-test. Stored on
+      // window so the next pointerdown trace can include it.
+      if (typeof window !== 'undefined' && window.__debugWallSelect && wallId) {
+        if (!window.__wallHitTrace) window.__wallHitTrace = []
+        window.__wallHitTrace.push({ wallId, x, y, d: +d.toFixed(2), tol: +tolerance.toFixed(2), ok })
+        if (window.__wallHitTrace.length > 200) window.__wallHitTrace.shift()
+      }
+      return ok
     },
   }
+  return obj
 }
 
 export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
@@ -171,6 +182,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
         wall.startX, wall.startY,
         wall.endX, wall.endY,
         worldTol,
+        wall.id,
       )
       entry._hitGeom = {
         startX: wall.startX, startY: wall.startY,
