@@ -82,7 +82,7 @@ export function attachAPsLayer({
     if (!entry) {
       const c = new Container()
       c.eventMode = 'static'
-      c.cursor = 'pointer'
+      c.cursor = 'grab'
       c.hitArea = new Circle(0, 0, AP_RADIUS + 4)
       const g = new Graphics()
       const nameText = new Text({ text: '', style: NAME_TEXT_STYLE })

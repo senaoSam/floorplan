@@ -138,7 +138,7 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     if (!entry) {
       const c = new Container()
       c.eventMode = 'static'
-      c.cursor = 'pointer'
+      c.cursor = 'grab'
       const haloG = new Graphics()
       const bodyG = new Graphics()
       c.addChild(haloG)

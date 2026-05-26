@@ -69,8 +69,20 @@ export const useEditorStore = create((set, get) => ({
     selectedItems: [],
   }),
   setViewMode: (mode) => set({ viewMode: mode }),
-  setSelected: (id, type) => set({ selectedId: id, selectedType: type, selectedItems: [], panelCollapsed: false }),
-  clearSelected: () => set({ selectedId: null, selectedType: null, selectedItems: [] }),
+  setSelected: (id, type) => {
+    if (typeof window !== 'undefined' && window.__debugWallSelect) {
+      console.log('[editor]', 'setSelected(', id, type, ')  trace:')
+      console.trace()
+    }
+    set({ selectedId: id, selectedType: type, selectedItems: [], panelCollapsed: false })
+  },
+  clearSelected: () => {
+    if (typeof window !== 'undefined' && window.__debugWallSelect) {
+      console.log('[editor]', 'clearSelected()  trace:')
+      console.trace()
+    }
+    set({ selectedId: null, selectedType: null, selectedItems: [] })
+  },
 
   setSelectedItems: (items) => set({
     selectedItems: items,

@@ -74,7 +74,7 @@ export function attachSwitchesLayer({
     if (!entry) {
       const c = new Container()
       c.eventMode = 'static'
-      c.cursor = 'pointer'
+      c.cursor = 'grab'
       const g = new Graphics()
       const label = new Text({ text: '', style: LABEL_STYLE })
       label.anchor.set(0.5, 0.5)

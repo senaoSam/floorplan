@@ -72,9 +72,16 @@ export function bindViewport({
   }
   const clearMarqueeGraphics = () => marqueeG.clear()
 
+  const vlog = (...args) => {
+    if (typeof window !== 'undefined' && window.__debugWallSelect) {
+      console.log('[stage]', ...args)
+    }
+  }
+
   const onStageDown = (e) => {
     const isBackground = e.target === stage
     const button = e.button ?? 0
+    vlog('pointerdown target=', e.target?.label ?? e.target?.constructor?.name, 'isBackground=', isBackground, 'button=', button)
     const isMiddle = button === 1
     const isLeftPan = button === 0 && spaceDown
     if (isMiddle || isLeftPan) {
@@ -165,6 +172,7 @@ export function bindViewport({
         }
         if (typeof onMarqueeCommit === 'function') onMarqueeCommit(rect)
       } else if (typeof onBackgroundClick === 'function') {
+        vlog('stage pointerup → onBackgroundClick (clearSelected)')
         onBackgroundClick()
       }
       pendingDrag = null

@@ -89,18 +89,26 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     const hoverState = useHoverStore.getState()
     const isSelected = editorState.selectedId === wall.id && editorState.selectedType === 'wall'
     const isHovered  = hoverState.id === wall.id && hoverState.type === 'wall'
-    const haloWidth = isHovered ? WALL_HALO_WIDTH_HOVERED : isSelected ? WALL_HALO_WIDTH_SELECTED : WALL_HALO_WIDTH_NORMAL
-    const bodyWidth = isHovered ? WALL_BODY_WIDTH_HOVERED : isSelected ? WALL_BODY_WIDTH_SELECTED : WALL_BODY_WIDTH_NORMAL
-    const bodyColor = isHovered ? '#ffffff' : wall.material.color
+    const haloWidth = isSelected ? WALL_HALO_WIDTH_SELECTED : WALL_HALO_WIDTH_NORMAL
+    const bodyWidth = isSelected ? WALL_BODY_WIDTH_SELECTED : WALL_BODY_WIDTH_NORMAL
+    const bodyColor = wall.material.color
 
     graphics.clear()
 
-    // (1) Black outline halo for contrast.
+    // (1) Hover glow — wide white beam (22 px @ 0.45 alpha) behind the
+    // body so the wall lights up under the cursor (oldSrc 23-3f convention).
+    if (isHovered && !isSelected) {
+      graphics
+        .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
+        .stroke({ width: 22, color: '#ffffff', alpha: 0.45, cap: 'round' })
+    }
+
+    // (2) Black outline halo for contrast.
     graphics
       .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
       .stroke({ width: haloWidth, color: '#000000', alpha: 0.4, cap: 'round' })
 
-    // (2) Colored wall body.
+    // (3) Colored wall body.
     graphics
       .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
       .stroke({ width: bodyWidth, color: bodyColor, alpha: 1, cap: 'round' })
@@ -143,9 +151,19 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     }
   }
 
+  // Toggle in DevTools console: window.__debugWallSelect = true
+  // Logs every wall pointer event + selection change so we can pinpoint
+  // "click sometimes doesn't select" bugs.
+  const dlog = (...args) => {
+    if (typeof window !== 'undefined' && window.__debugWallSelect) {
+      console.log('[wall]', ...args)
+    }
+  }
+
   const bindInteractions = (entry) => {
     const { container } = entry
     container.on('pointerdown', (e) => {
+      dlog('pointerdown wall=', entry.wall.id, 'button=', e.button, 'mode=', useEditorStore.getState().editorMode, 'target===container?', e.target === container)
       if (e.button === 2) {
         e.stopPropagation()
         useEditorStore.getState().openContextMenu({
@@ -167,13 +185,23 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
       // pointer doesn't move > DRAG_COMMIT_THRESHOLD_PX before release we
       // treat the gesture as a click (selection only); otherwise we commit
       // a translation of both endpoints by the same delta.
+      dlog('  → setSelected', entry.wall.id)
       editor.setSelected(entry.wall.id, 'wall')
       if (editor.editorMode === EDITOR_MODE.SELECT) {
         beginDrag(entry, e)
       }
     })
-    container.on('pointerover', () => useHoverStore.getState().setHover(entry.wall.id, 'wall'))
-    container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.wall.id))
+    container.on('pointerover', () => {
+      dlog('pointerover wall=', entry.wall.id)
+      useHoverStore.getState().setHover(entry.wall.id, 'wall')
+    })
+    container.on('pointerout', () => {
+      dlog('pointerout wall=', entry.wall.id)
+      useHoverStore.getState().clearHoverIf(entry.wall.id)
+    })
+    container.on('pointerup', (e) => {
+      dlog('pointerup wall=', entry.wall.id, 'button=', e.button)
+    })
   }
 
   // Wall-body drag — translate both endpoints by the same delta. Uses the
@@ -190,6 +218,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     const stage = scene.app.stage
     let dx = 0
     let dy = 0
+    dlog('  beginDrag wall=', entry.wall.id, 'startWorld=', startWorld)
 
     const onMove = (e) => {
       const wp = scene.world.toLocal(e.global)
@@ -203,6 +232,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
       stage.off('pointermove', onMove)
       stage.off('pointerup', onUp)
       stage.off('pointerupoutside', onUp)
+      dlog('  drag onUp wall=', entry.wall.id, 'dx=', dx, 'dy=', dy)
       // Reset transient transform; the store update below will redraw at
       // the new world coords.
       entry.container.position.set(0, 0)
@@ -331,6 +361,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     const prevType = lastSelectedType
     lastSelectedId = s.selectedId
     lastSelectedType = s.selectedType
+    dlog('selection changed:', prevType, prevId, '→', s.selectedType, s.selectedId)
     if (prevType === 'wall' && prevId) {
       const e = containers.get(prevId)
       if (e) drawWall(e)
