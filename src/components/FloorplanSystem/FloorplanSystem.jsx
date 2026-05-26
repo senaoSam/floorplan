@@ -177,11 +177,13 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         scene: s,
         useFloorStore,
         useAPStore,
+        useCableStore,
       })
       detachSwitches = attachSwitchesLayer({
         scene: s,
         useFloorStore,
         useCableStore,
+        useAPStore,
       })
       detachTrays = attachTraysLayer({
         scene: s,

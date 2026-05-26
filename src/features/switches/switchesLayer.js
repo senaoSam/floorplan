@@ -3,21 +3,30 @@ import { getSwitchKindColor } from '@/store/useCableStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
+import { computeSwitchSnaps } from '@/features/cable/switchSnapStatus'
+import { computeFocusedDevices, FOCUS_HALO_COLOR, FOCUS_HALO_ALPHA, FOCUS_HALO_WIDTH } from '@/features/focus/focusedDevices'
 import { getChassisSize, getKindLabel, getPortDotCount } from './switchChassis'
 
 // Switch chassis adapter — per-switch interactive Container. Visual rules
-// ported from oldSrc SwitchLayer.jsx (29-6):
+// ported from oldSrc SwitchLayer.jsx (29-6 + 17-2 + 17-4):
 //   * chassis size scales with portCount (widthMult) + isCore (+height)
 //   * fill #1f2937 dark slate; stroke = kind colour (selected → red)
 //   * status LED at top-left in kind colour
-//   * port-pip row along the bottom edge in **kind colour** (not yellow)
+//   * port-pip row along the bottom edge in **kind colour**
 //   * "SW" / "IDF" / "MDF" / "RTR" kind label centred inside the chassis
 //   * decoration above chassis: IDF=1 bar, MDF=2 bars, Router=antenna mast
-//   * hover invert: hovered+non-selected → chassis fill kind colour,
-//     stroke dark, ports dark, label dark
+//   * hover invert: hovered+non-selected → kind-colour chassis + dark stroke
+//   * 17-2 focus halo: indigo ring around chassis when this switch is
+//     related to the current AP / switch selection
+//   * 17-4 snap status: green top-right dot + dashed cyan foot-drops when
+//     within tray magnet; gray dot + red "!" warning otherwise
 
 const PORT_PIP_RADIUS = 1
 const SELECT_STROKE = '#e74c3c'
+const STATUS_SNAPPED_COLOR = '#22c55e'
+const STATUS_LOOSE_COLOR   = '#9ca3af'
+const STATUS_WARNING_COLOR = '#ef4444'
+const SNAP_FOOT_COLOR      = 'rgba(34, 211, 238, 0.55)'
 const DRAG_COMMIT_THRESHOLD_PX = 1
 const LABEL_STYLE = new TextStyle({
   fill: '#ffffff',
@@ -26,12 +35,26 @@ const LABEL_STYLE = new TextStyle({
   fontWeight: '700',
   align: 'center',
 })
+const WARNING_STYLE = new TextStyle({
+  fill: '#ffffff',
+  fontFamily: 'system-ui, sans-serif',
+  fontSize: 8,
+  fontWeight: '700',
+  align: 'center',
+})
 
-export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
+export function attachSwitchesLayer({
+  scene,
+  useFloorStore,
+  useCableStore,
+  useAPStore,
+}) {
   const layer = scene.layers.devicesSW
   layer.eventMode = 'passive'
 
   const containers = new Map()
+  let focusedSwitchIds = new Set()
+  let snapBySwitch = new Map()
 
   const ensureContainer = (sw, floorId) => {
     let entry = containers.get(sw.id)
@@ -43,10 +66,15 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
       const label = new Text({ text: '', style: LABEL_STYLE })
       label.anchor.set(0.5, 0.5)
       label.eventMode = 'none'
+      const warning = new Text({ text: '!', style: WARNING_STYLE })
+      warning.anchor.set(0.5, 0.5)
+      warning.eventMode = 'none'
+      warning.visible = false
       c.addChild(g)
       c.addChild(label)
+      c.addChild(warning)
       layer.addChild(c)
-      entry = { container: c, graphics: g, label, sw, floorId }
+      entry = { container: c, graphics: g, label, warning, sw, floorId }
       containers.set(sw.id, entry)
       bindInteractions(entry)
     } else {
@@ -65,22 +93,22 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
   }
 
   const drawSwitch = (entry, overrideX, overrideY) => {
-    const { graphics, label, container, sw } = entry
+    const { graphics, label, warning, container, sw } = entry
     const x = overrideX ?? sw.x
     const y = overrideY ?? sw.y
     container.position.set(x, y)
 
-    // Per-kind visibility filter from useEditorStore.showSwitchKind.
     const editorState = useEditorStore.getState()
     const hoverState = useHoverStore.getState()
     const showSwitchKind = editorState.showSwitchKind
     const { w, h, kind, portCount } = getChassisSize(sw)
     container.visible = !!(showSwitchKind?.[kind] ?? true)
     const color = getSwitchKindColor(kind)
-    container.hitArea = new Rectangle(-w / 2 - 2, -h / 2 - 2, w + 4, h + 4)
+    container.hitArea = new Rectangle(-w / 2 - 6, -h / 2 - 10, w + 12, h + 16)
 
     const isSelected = editorState.selectedId === sw.id && editorState.selectedType === 'switch'
     const isHovered  = hoverState.id === sw.id && hoverState.type === 'switch'
+    const isFocused  = focusedSwitchIds.has(sw.id) && !isSelected
     const isInvert   = isHovered && !isSelected
 
     const chassisFill   = isInvert ? color : 0x1f2937
@@ -88,8 +116,26 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
     const strokeWidth   = isSelected ? 2.5 : isHovered ? 2 : 1.4
     const portCol       = isInvert ? 0x1f2937 : color
     const labelCol      = isInvert ? '#1f2937' : '#ffffff'
+    const snap = snapBySwitch.get(sw.id) ?? { snapped: false, drops: [] }
 
     graphics.clear()
+
+    // 17-4 snap foot-drops — dashed lines from chassis to every tray foot
+    // within magnet range. Drawn first so the chassis covers the entry point.
+    if (snap.drops && snap.drops.length > 0) {
+      for (const d of snap.drops) {
+        const dx = d.footXy.x - sw.x
+        const dy = d.footXy.y - sw.y
+        drawDashedLine(graphics, 0, 0, dx, dy, SNAP_FOOT_COLOR, 1.1, 5, 4)
+      }
+    }
+
+    // 17-2 focus halo — indigo rounded-rect ring behind the chassis.
+    if (isFocused) {
+      graphics
+        .rect(-w / 2 - 4, -h / 2 - 4, w + 8, h + 8)
+        .stroke({ width: FOCUS_HALO_WIDTH, color: FOCUS_HALO_COLOR, alpha: FOCUS_HALO_ALPHA })
+    }
 
     // Kind-specific decoration above the chassis (oldSrc 29-6).
     if (kind === 'idf') {
@@ -119,8 +165,7 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
     // Status LED — top-left corner in kind colour.
     graphics.circle(-w / 2 + 3, -h / 2 + 3, 1.5).fill({ color, alpha: 1 })
 
-    // Port-pip row along the bottom edge — dot count proxies real port
-    // density (12 → 6 dots, 24 → 8 dots, 48 → 12 dots, ≤8 → 4 dots).
+    // Port-pip row along the bottom edge in kind colour.
     const dotCount = getPortDotCount(portCount)
     if (dotCount > 0) {
       const inset = 3
@@ -131,6 +176,25 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
         const px = -w / 2 + inset + step * (i + 0.5)
         graphics.circle(px, rowY, PORT_PIP_RADIUS).fill({ color: portCol, alpha: 0.9 })
       }
+    }
+
+    // 17-4 snap-status dot — top-right corner (green = snapped, gray = loose).
+    const statusCol = snap.snapped ? STATUS_SNAPPED_COLOR : STATUS_LOOSE_COLOR
+    graphics
+      .circle(w / 2 - 2, -h / 2 + 2, 2.4)
+      .fill({ color: statusCol, alpha: 1 })
+      .stroke({ width: 0.8, color: 0x0b0d12, alpha: 1 })
+
+    // 17-4 unconnected warning — red "!" at bottom-right when no snap target.
+    if (!snap.snapped) {
+      graphics
+        .circle(w / 2 + 1, h / 2 - 1, 4.5)
+        .fill({ color: STATUS_WARNING_COLOR, alpha: 1 })
+        .stroke({ width: 0.8, color: 0xffffff, alpha: 1 })
+      warning.visible = true
+      warning.position.set(w / 2 + 1, h / 2 - 1)
+    } else {
+      warning.visible = false
     }
 
     // Kind label centred inside the chassis.
@@ -194,18 +258,52 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
     stage.on('pointerupoutside', onUp)
   }
 
+  // ── Reconcile + focus / snap recompute ─────────────────────────────────
   let lastFloorId = undefined
   let lastSwitches = undefined
+  let lastTrays = undefined
+
+  const recomputeSnap = () => {
+    const activeFloorId = useFloorStore.getState().activeFloorId
+    const switches = useCableStore.getState().switchesByFloor[activeFloorId] ?? []
+    const trays = useCableStore.getState().traysByFloor[activeFloorId] ?? []
+    snapBySwitch = computeSwitchSnaps(switches, trays)
+  }
+
+  const recomputeFocus = () => {
+    const e = useEditorStore.getState()
+    const next = computeFocusedDevices({
+      selectedId: e.selectedId,
+      selectedType: e.selectedType,
+      floors: useFloorStore.getState().floors,
+      apsByFloor: useAPStore.getState().apsByFloor,
+      switchesByFloor: useCableStore.getState().switchesByFloor,
+      traysByFloor: useCableStore.getState().traysByFloor,
+      risers: useCableStore.getState().risers,
+    }).switches
+    let changed = next.size !== focusedSwitchIds.size
+    if (!changed) {
+      for (const id of next) if (!focusedSwitchIds.has(id)) { changed = true; break }
+    }
+    if (!changed) return false
+    focusedSwitchIds = next
+    return true
+  }
 
   const reconcile = () => {
     const activeFloorId = useFloorStore.getState().activeFloorId
     const switches = useCableStore.getState().switchesByFloor[activeFloorId] ?? []
-    if (activeFloorId === lastFloorId && switches === lastSwitches) {
+    const trays = useCableStore.getState().traysByFloor[activeFloorId] ?? []
+    const structChanged = activeFloorId !== lastFloorId || switches !== lastSwitches || trays !== lastTrays
+    if (!structChanged) {
       applyDragOverlay()
       return
     }
     lastFloorId = activeFloorId
     lastSwitches = switches
+    lastTrays = trays
+    recomputeSnap()
+    recomputeFocus()
     const next = new Set(switches.map((s) => s.id))
     for (const id of Array.from(containers.keys())) {
       if (!next.has(id)) removeContainer(id)
@@ -231,21 +329,19 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
     }
   }
 
-  // Re-draw on showSwitchKind / selection / hover change. Guarded by ref
-  // equality so unrelated store mutations don't trigger a full redraw.
+  // Re-draw on showSwitchKind / selection change.
   let lastShowSwitchKind = useEditorStore.getState().showSwitchKind
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
   const onEditorChange = () => {
     const s = useEditorStore.getState()
-    if (
-      s.showSwitchKind === lastShowSwitchKind &&
-      s.selectedId === lastSelectedId &&
-      s.selectedType === lastSelectedType
-    ) return
+    const filterChanged = s.showSwitchKind !== lastShowSwitchKind
+    const selectionChanged = s.selectedId !== lastSelectedId || s.selectedType !== lastSelectedType
+    if (!filterChanged && !selectionChanged) return
     lastShowSwitchKind = s.showSwitchKind
     lastSelectedId = s.selectedId
     lastSelectedType = s.selectedType
+    if (selectionChanged) recomputeFocus()
     for (const entry of containers.values()) drawSwitch(entry)
   }
 
@@ -263,6 +359,13 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
 
   const unsubFloor = useFloorStore.subscribe(reconcile)
   const unsubCable = useCableStore.subscribe(reconcile)
+  const unsubAP = useAPStore.subscribe(() => {
+    // AP changes don't affect chassis geometry but do affect focus set
+    // (which APs route through this switch).
+    if (recomputeFocus()) {
+      for (const entry of containers.values()) drawSwitch(entry)
+    }
+  })
   const unsubDrag = useDragOverlayStore.subscribe(applyDragOverlay)
   const unsubEditor = useEditorStore.subscribe(onEditorChange)
   const unsubHover = useHoverStore.subscribe(onHoverChange)
@@ -271,9 +374,34 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
   return () => {
     unsubFloor()
     unsubCable()
+    unsubAP()
     unsubDrag()
     unsubEditor()
     unsubHover()
     for (const id of Array.from(containers.keys())) removeContainer(id)
+  }
+}
+
+function drawDashedLine(g, ax, ay, bx, by, color, width, dashOn, dashOff) {
+  const len = Math.hypot(bx - ax, by - ay)
+  if (len <= 1e-9) return
+  const ux = (bx - ax) / len
+  const uy = (by - ay) / len
+  let cursor = 0
+  let phaseOn = true
+  let remain = dashOn
+  while (cursor < len) {
+    const step = Math.min(len - cursor, remain)
+    const x1 = ax + ux * cursor
+    const y1 = ay + uy * cursor
+    const x2 = ax + ux * (cursor + step)
+    const y2 = ay + uy * (cursor + step)
+    if (phaseOn) g.moveTo(x1, y1).lineTo(x2, y2).stroke({ width, color, alpha: 1 })
+    cursor += step
+    remain -= step
+    if (remain <= 1e-9) {
+      phaseOn = !phaseOn
+      remain = phaseOn ? dashOn : dashOff
+    }
   }
 }

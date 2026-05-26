@@ -431,4 +431,19 @@ magic number (radius / strokeWidth / dash pattern / font size) / 內聯 const / 
 - AP route cyan 主幹 + dashed drop-leg ✓
 - DRAW_SCOPE / DRAW_FLOOR_HOLE draft 個別顯示綠 / 紫 + 第一頂點 halo ring ✓
 
-剩餘 audit 項目：第二波 focus halo / snap status / directional fan、第三波 panel 補欄位、第四波 Sidebar / FloorImage transform / Tray vertex menu。Perf shader（31-4 / 31-5 / 31-6）仍未動。
+---
+
+## 第二波 fix 進度（2026-05-26）
+
+| # | 內容 | 狀態 | 改動檔案 |
+|---|---|---|---|
+| W2-1 | **17-2 AP focus halo** — 選 SW 時，每顆 routing 到該 SW 的 AP 出現 indigo `#818cf8` ring | ✅ | `apsLayer.js`、新增 `focus/focusedDevices.js` 共用 util |
+| W2-2 | **AP directional fan 改 annular wedge** — inner radius `AP_RADIUS+2` outer `+18`，不再從原點切片 | ✅ | `apsLayer.js` |
+| W2-3 | **17-2 Switch focus halo** — 選 AP 時 destination SW 出現 indigo rounded-rect ring | ✅ | `switchesLayer.js` |
+| W2-4 | **17-4 Switch snap status** — snapped 綠 `#22c55e` 角落圓 dot + dashed cyan foot-drop 到每條 magnet 內 tray；loose 灰 dot + 紅 `#ef4444` ! warning | ✅ | `switchesLayer.js`（用既有 `computeSwitchSnaps`）|
+| W2-5 | **17-2 Cable focus dim + indigo highlight band** — 沒選 → 全 1.0；選 AP / SW → 不相關 route opacity 0.18；focus 的 route 底下加 indigo `rgba(129, 140, 248, 0.55)` 寬 band（HIGHLIGHT_WIDTH 10） | ✅ | `cablesLayer.js` |
+| - | **FloorplanSystem injection 補 `useCableStore` 給 APsLayer、`useAPStore` 給 SwitchesLayer** | ✅ | `FloorplanSystem.jsx` |
+
+**MCP 視覺驗證**：選 SW 後，related AP 出現 indigo halo ring、cable 顯示 indigo highlight band 在線下、SW chassis 出現紅選取邊 + 綠 snap dot + green LED + green port pips + "SW" label。Directional AP 顯示 annular wedge fan（不是切片）。
+
+剩餘 audit 項目：第三波 panel 補欄位、第四波 Sidebar / FloorImage transform / Tray vertex menu。Perf shader（31-4 / 31-5 / 31-6）仍未動。
