@@ -14,19 +14,24 @@ import { Container, Graphics, Circle } from 'pixi.js'
 
 const HANDLE_RADIUS = 5
 const HANDLE_HIT_PAD = 2
-const HANDLE_FILL = '#fbbf24'
-const HANDLE_STROKE = '#0b0d12'
+// Wall endpoint handle (oldSrc convention): white fill + red stroke.
+// Tray vertex handle: white fill + system-cyan stroke (lighter so it
+// doesn't compete with the white tray-selected border).
+const WALL_HANDLE_FILL = '#ffffff'
+const WALL_HANDLE_STROKE = '#e74c3c'
+const TRAY_HANDLE_FILL = '#ffffff'
+const TRAY_HANDLE_STROKE = '#0e7490'
 
-function makeHandleDot(x, y) {
+function makeHandleDot(x, y, fill, stroke) {
   const c = new Container()
   c.eventMode = 'static'
-  c.cursor = 'move'
+  c.cursor = 'crosshair'
   c.hitArea = new Circle(0, 0, HANDLE_RADIUS + HANDLE_HIT_PAD)
   c.position.set(x, y)
   const g = new Graphics()
   g.circle(0, 0, HANDLE_RADIUS)
-    .fill({ color: HANDLE_FILL, alpha: 1 })
-    .stroke({ width: 1.4, color: HANDLE_STROKE, alpha: 0.9 })
+    .fill({ color: fill, alpha: 1 })
+    .stroke({ width: 1.8, color: stroke, alpha: 1 })
   c.addChild(g)
   return c
 }
@@ -60,8 +65,8 @@ export function attachHandlesLayer({
     if (selectedType === 'wall') {
       const wall = (useWallStore.getState().wallsByFloor[fid] ?? []).find((w) => w.id === selectedId)
       if (!wall) return
-      const startHandle = makeHandleDot(wall.startX, wall.startY)
-      const endHandle = makeHandleDot(wall.endX, wall.endY)
+      const startHandle = makeHandleDot(wall.startX, wall.startY, WALL_HANDLE_FILL, WALL_HANDLE_STROKE)
+      const endHandle = makeHandleDot(wall.endX, wall.endY, WALL_HANDLE_FILL, WALL_HANDLE_STROKE)
       bindWallEndpointDrag(startHandle, wall, 'start')
       bindWallEndpointDrag(endHandle, wall, 'end')
       root.addChild(startHandle)
@@ -73,7 +78,7 @@ export function attachHandlesLayer({
       const tray = (useCableStore.getState().traysByFloor[fid] ?? []).find((t) => t.id === selectedId)
       if (!tray) return
       tray.points.forEach((p, idx) => {
-        const h = makeHandleDot(p.x, p.y)
+        const h = makeHandleDot(p.x, p.y, TRAY_HANDLE_FILL, TRAY_HANDLE_STROKE)
         bindTrayVertexDrag(h, tray, idx)
         root.addChild(h)
       })

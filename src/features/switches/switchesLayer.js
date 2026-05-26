@@ -1,24 +1,31 @@
-import { Container, Graphics, Rectangle } from 'pixi.js'
+import { Container, Graphics, Rectangle, Text, TextStyle } from 'pixi.js'
 import { getSwitchKindColor } from '@/store/useCableStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
+import { getChassisSize, getKindLabel, getPortDotCount } from './switchChassis'
 
-// Switch chassis adapter — per-switch interactive Container. Renders the
-// dark chassis with kind-coloured border, an LED corner dot, a row of
-// port pips along the bottom edge, and kind-specific decoration on the
-// top edge (IDF: one bar; MDF: two bars; Router: a short antenna mast).
+// Switch chassis adapter — per-switch interactive Container. Visual rules
+// ported from oldSrc SwitchLayer.jsx (29-6):
+//   * chassis size scales with portCount (widthMult) + isCore (+height)
+//   * fill #1f2937 dark slate; stroke = kind colour (selected → red)
+//   * status LED at top-left in kind colour
+//   * port-pip row along the bottom edge in **kind colour** (not yellow)
+//   * "SW" / "IDF" / "MDF" / "RTR" kind label centred inside the chassis
+//   * decoration above chassis: IDF=1 bar, MDF=2 bars, Router=antenna mast
+//   * hover invert: hovered+non-selected → chassis fill kind colour,
+//     stroke dark, ports dark, label dark
 
-const CHASSIS_HEIGHT = 14
-const CHASSIS_WIDTH_BY_KIND = {
-  switch: 26,
-  idf:    32,
-  mdf:    44,
-  router: 30,
-}
-const PORT_PIP_RADIUS = 0.85
-const MAX_PORT_PIPS = 24
+const PORT_PIP_RADIUS = 1
+const SELECT_STROKE = '#e74c3c'
 const DRAG_COMMIT_THRESHOLD_PX = 1
+const LABEL_STYLE = new TextStyle({
+  fill: '#ffffff',
+  fontFamily: 'system-ui, sans-serif',
+  fontSize: 9,
+  fontWeight: '700',
+  align: 'center',
+})
 
 export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
   const layer = scene.layers.devicesSW
@@ -33,9 +40,13 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
       c.eventMode = 'static'
       c.cursor = 'pointer'
       const g = new Graphics()
+      const label = new Text({ text: '', style: LABEL_STYLE })
+      label.anchor.set(0.5, 0.5)
+      label.eventMode = 'none'
       c.addChild(g)
+      c.addChild(label)
       layer.addChild(c)
-      entry = { container: c, graphics: g, sw, floorId }
+      entry = { container: c, graphics: g, label, sw, floorId }
       containers.set(sw.id, entry)
       bindInteractions(entry)
     } else {
@@ -54,57 +65,78 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
   }
 
   const drawSwitch = (entry, overrideX, overrideY) => {
-    const { graphics, container, sw } = entry
+    const { graphics, label, container, sw } = entry
     const x = overrideX ?? sw.x
     const y = overrideY ?? sw.y
     container.position.set(x, y)
-    const kind = sw.kind ?? 'switch'
 
     // Per-kind visibility filter from useEditorStore.showSwitchKind.
-    const showSwitchKind = useEditorStore.getState().showSwitchKind
+    const editorState = useEditorStore.getState()
+    const hoverState = useHoverStore.getState()
+    const showSwitchKind = editorState.showSwitchKind
+    const { w, h, kind, portCount } = getChassisSize(sw)
     container.visible = !!(showSwitchKind?.[kind] ?? true)
-    const w = CHASSIS_WIDTH_BY_KIND[kind] ?? CHASSIS_WIDTH_BY_KIND.switch
-    const h = CHASSIS_HEIGHT
     const color = getSwitchKindColor(kind)
     container.hitArea = new Rectangle(-w / 2 - 2, -h / 2 - 2, w + 4, h + 4)
 
+    const isSelected = editorState.selectedId === sw.id && editorState.selectedType === 'switch'
+    const isHovered  = hoverState.id === sw.id && hoverState.type === 'switch'
+    const isInvert   = isHovered && !isSelected
+
+    const chassisFill   = isInvert ? color : 0x1f2937
+    const strokeCol     = isSelected ? SELECT_STROKE : (isInvert ? 0x1f2937 : color)
+    const strokeWidth   = isSelected ? 2.5 : isHovered ? 2 : 1.4
+    const portCol       = isInvert ? 0x1f2937 : color
+    const labelCol      = isInvert ? '#1f2937' : '#ffffff'
+
     graphics.clear()
 
-    // Kind-specific decoration above the chassis: IDF=1 bar, MDF=2 bars,
-    // Router=a short antenna mast. Switch=nothing.
+    // Kind-specific decoration above the chassis (oldSrc 29-6).
     if (kind === 'idf') {
-      graphics.rect(-w / 2 + 3, -h / 2 - 3, w - 6, 1.5).fill({ color, alpha: 1 })
+      graphics.moveTo(-w / 4, -h / 2 - 3).lineTo(w / 4, -h / 2 - 3)
+        .stroke({ width: 1.5, color: portCol, alpha: 1 })
     } else if (kind === 'mdf') {
-      graphics.rect(-w / 2 + 3, -h / 2 - 5, w - 6, 1.5).fill({ color, alpha: 1 })
-      graphics.rect(-w / 2 + 3, -h / 2 - 2.5, w - 6, 1.5).fill({ color, alpha: 1 })
+      graphics.moveTo(-w / 3, -h / 2 - 3).lineTo(w / 3, -h / 2 - 3)
+        .stroke({ width: 1.5, color: portCol, alpha: 1 })
+      graphics.moveTo(-w / 4, -h / 2 - 6).lineTo(w / 4, -h / 2 - 6)
+        .stroke({ width: 1.5, color: portCol, alpha: 1 })
     } else if (kind === 'router') {
-      graphics.moveTo(0, -h / 2).lineTo(0, -h / 2 - 5)
-        .stroke({ width: 1.2, color, alpha: 1 })
-      graphics.circle(0, -h / 2 - 5.5, 1.4).fill({ color, alpha: 1 })
+      graphics.moveTo(0, -h / 2 - 3).lineTo(0, -h / 2 - 9)
+        .stroke({ width: 1.4, color: portCol, alpha: 1 })
+      graphics.circle(0, -h / 2 - 10, 1.6).fill({ color: portCol, alpha: 1 })
+      graphics.moveTo(-3, -h / 2 - 7).lineTo(-5, -h / 2 - 5)
+        .stroke({ width: 1, color: portCol, alpha: 1 })
+      graphics.moveTo(3, -h / 2 - 7).lineTo(5, -h / 2 - 5)
+        .stroke({ width: 1, color: portCol, alpha: 1 })
     }
 
     // Chassis body.
     graphics
       .rect(-w / 2, -h / 2, w, h)
-      .fill({ color: 0x1f2937, alpha: 0.95 })
-      .stroke({ width: 1.4, color, alpha: 1 })
+      .fill({ color: chassisFill, alpha: 0.95 })
+      .stroke({ width: strokeWidth, color: strokeCol, alpha: 1 })
 
-    // Status LED — top-left corner.
+    // Status LED — top-left corner in kind colour.
     graphics.circle(-w / 2 + 3, -h / 2 + 3, 1.5).fill({ color, alpha: 1 })
 
-    // Port pip row along the bottom edge.
-    const portCount = Math.min(sw.portCount ?? 8, MAX_PORT_PIPS)
-    if (portCount > 0) {
-      const inset = 3.5
-      const rowY = h / 2 - 3
+    // Port-pip row along the bottom edge — dot count proxies real port
+    // density (12 → 6 dots, 24 → 8 dots, 48 → 12 dots, ≤8 → 4 dots).
+    const dotCount = getPortDotCount(portCount)
+    if (dotCount > 0) {
+      const inset = 3
       const span = w - inset * 2
-      const gap = portCount > 1 ? span / (portCount - 1) : 0
-      const startX = -w / 2 + inset
-      for (let i = 0; i < portCount; i++) {
-        const px = portCount > 1 ? startX + gap * i : 0
-        graphics.circle(px, rowY, PORT_PIP_RADIUS).fill({ color: 0xfacc15, alpha: 0.85 })
+      const step = span / dotCount
+      const rowY = h / 2 - 3
+      for (let i = 0; i < dotCount; i++) {
+        const px = -w / 2 + inset + step * (i + 0.5)
+        graphics.circle(px, rowY, PORT_PIP_RADIUS).fill({ color: portCol, alpha: 0.9 })
       }
     }
+
+    // Kind label centred inside the chassis.
+    label.text = getKindLabel(kind)
+    label.style.fill = labelCol
+    label.position.set(0, 0)
   }
 
   const bindInteractions = (entry) => {
@@ -199,20 +231,41 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
     }
   }
 
-  // Re-draw all when showSwitchKind changes so kind-filter takes effect
-  // without restructuring. Guarded by ref equality.
+  // Re-draw on showSwitchKind / selection / hover change. Guarded by ref
+  // equality so unrelated store mutations don't trigger a full redraw.
   let lastShowSwitchKind = useEditorStore.getState().showSwitchKind
-  const redrawAll = () => {
-    const next = useEditorStore.getState().showSwitchKind
-    if (next === lastShowSwitchKind) return
-    lastShowSwitchKind = next
+  let lastSelectedId = useEditorStore.getState().selectedId
+  let lastSelectedType = useEditorStore.getState().selectedType
+  const onEditorChange = () => {
+    const s = useEditorStore.getState()
+    if (
+      s.showSwitchKind === lastShowSwitchKind &&
+      s.selectedId === lastSelectedId &&
+      s.selectedType === lastSelectedType
+    ) return
+    lastShowSwitchKind = s.showSwitchKind
+    lastSelectedId = s.selectedId
+    lastSelectedType = s.selectedType
     for (const entry of containers.values()) drawSwitch(entry)
+  }
+
+  let lastHoverId = useHoverStore.getState().id
+  const onHoverChange = () => {
+    const s = useHoverStore.getState()
+    if (s.id === lastHoverId) return
+    const prevId = lastHoverId
+    lastHoverId = s.id
+    const prev = prevId ? containers.get(prevId) : null
+    const next = s.id ? containers.get(s.id) : null
+    if (prev) drawSwitch(prev)
+    if (next && next !== prev) drawSwitch(next)
   }
 
   const unsubFloor = useFloorStore.subscribe(reconcile)
   const unsubCable = useCableStore.subscribe(reconcile)
   const unsubDrag = useDragOverlayStore.subscribe(applyDragOverlay)
-  const unsubEditor = useEditorStore.subscribe(redrawAll)
+  const unsubEditor = useEditorStore.subscribe(onEditorChange)
+  const unsubHover = useHoverStore.subscribe(onHoverChange)
   reconcile()
 
   return () => {
@@ -220,6 +273,7 @@ export function attachSwitchesLayer({ scene, useFloorStore, useCableStore }) {
     unsubCable()
     unsubDrag()
     unsubEditor()
+    unsubHover()
     for (const id of Array.from(containers.keys())) removeContainer(id)
   }
 }

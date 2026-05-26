@@ -407,3 +407,28 @@ magic number (radius / strokeWidth / dash pattern / font size) / 內聯 const / 
 5. 之後做 perf shader（31-4 / 31-5 / 31-6）
 
 第一波 + 第二波就讓視覺 100% 對齊。第三 + 第四波是功能對齊。
+
+---
+
+## 第一波 fix 進度（2026-05-26）
+
+| # | 內容 | 狀態 | 改動檔案 |
+|---|---|---|---|
+| C1 | 選取色全 layer 統一改紅 `#e74c3c`，tray 改白 `#ffffff` | ✅ | `selectionOverlayLayer.js`、`handlesLayer.js`、`switchesLayer.js` |
+| C2 | Switch chassis 改 portCount 公式 + isCore 高度 + kind 色 port pip + KIND_LABEL | ✅ | `switchesLayer.js`、新增 `switchChassis.js` 共用 util |
+| C3 | Cable 移除 fiber rose 顏色；AP route 一律 cyan `#22d3ee`，drop-leg 端點 dashed | ✅ | `cablesLayer.js` |
+| C4 | Tray magnet halo 改 indigo `rgba(129, 140, 248, 0.12)` | ✅ | `traysLayer.js` |
+| C5 | Scope in 綠 / out 紅 dashed；FloorHole 改 purple 實線 | ✅ | `scopesLayer.js`、`floorHolesLayer.js` |
+| C6 | Draft preview 改 per-mode 顏色（wall cyan / scope 綠 / hole 紫 / tray cyan / scale 黃）+ 黑 halo | ✅ | `draftOverlayLayer.js` |
+| C7 | DemoLoader icon emoji → SVG | ✅ 早已 done（用 `<Icon name="aiWalls">`）| — |
+| C8 | Hover overlay 拆 in-layer：switch 在 layer 自做 invert，hoverOverlay 只剩 AP + Wall | ✅ | `switchesLayer.js`、`hoverOverlayLayer.js` |
+
+**MCP 視覺驗證**：dev server 5175 + DemoLoader 載入 + 注入 scope / hole / select switch，screenshot 顯示：
+- 選中 SW 出現紅外框 ✓
+- 綠 / 紅 dashed scope polygon ✓
+- 紫 floor hole 實線 ✓
+- Tray 周圍淡 indigo magnet ✓
+- AP route cyan 主幹 + dashed drop-leg ✓
+- DRAW_SCOPE / DRAW_FLOOR_HOLE draft 個別顯示綠 / 紫 + 第一頂點 halo ring ✓
+
+剩餘 audit 項目：第二波 focus halo / snap status / directional fan、第三波 panel 補欄位、第四波 Sidebar / FloorImage transform / Tray vertex menu。Perf shader（31-4 / 31-5 / 31-6）仍未動。

@@ -268,6 +268,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           scope: useScopeStore,
           hole: useFloorHoleStore,
           hoverReadout: useHoverReadoutStore,
+          draft: useDraftStore,
         }
       }
     })

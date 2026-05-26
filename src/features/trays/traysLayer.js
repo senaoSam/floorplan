@@ -13,7 +13,7 @@ const TRAY_CHANNEL_HALF_WIDTH = 3 // world-px from centreline to each border
 const TRAY_BORDER_WIDTH = 1.2
 const TRAY_CENTER_WIDTH = 0.8
 const TRAY_CENTER_DASH = [3, 3]
-const MAGNET_FILL = 'rgba(255, 255, 255, 0.06)'
+const MAGNET_FILL = 'rgba(129, 140, 248, 0.12)' // indigo-400 @ 12% (oldSrc)
 const HIT_TOLERANCE_PX = 8
 const DRAG_COMMIT_THRESHOLD_PX = 1
 

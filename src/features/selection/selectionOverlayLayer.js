@@ -3,20 +3,17 @@ import { Graphics } from 'pixi.js'
 // Selection visual — subscribes to editor selection + all four object
 // stores + drag overlay and draws a highlight at the selected object's
 // current (possibly drag-override) position. Lives on scene.layers.overlays.
+//
+// Colours match oldSrc unified convention:
+//   AP / Switch / Wall / Scope / Hole  → red `#e74c3c`
+//   Tray (border-style)                → white `#ffffff`
 
 const AP_RING_RADIUS = 14
-const SWITCH_CHASSIS_HEIGHT = 14
-const SWITCH_CHASSIS_WIDTH_BY_KIND = {
-  switch: 26,
-  idf:    32,
-  mdf:    44,
-  router: 30,
-}
 const TRAY_HIGHLIGHT_WIDTH = 9
 const WALL_HIGHLIGHT_WIDTH = 7
 
-const RING_COLOR_INNER = '#fbbf24'
-const RING_COLOR_OUTER = '#000000'
+const SELECT_RED = '#e74c3c'
+const TRAY_SELECTED_BORDER = '#ffffff'
 
 export function attachSelectionOverlay({
   scene,
@@ -44,23 +41,13 @@ export function attachSelectionOverlay({
       if (!ap) return
       const dx = drag.ap && drag.ap.id === selectedId ? drag.ap.x : ap.x
       const dy = drag.ap && drag.ap.id === selectedId ? drag.ap.y : ap.y
-      g.circle(dx, dy, AP_RING_RADIUS + 1).stroke({ width: 4, color: RING_COLOR_OUTER, alpha: 0.55 })
-      g.circle(dx, dy, AP_RING_RADIUS).stroke({ width: 2, color: RING_COLOR_INNER, alpha: 1 })
+      g.circle(dx, dy, AP_RING_RADIUS).stroke({ width: 2.5, color: SELECT_RED, alpha: 1 })
       return
     }
 
     if (selectedType === 'switch') {
-      const sw = (useCableStore.getState().switchesByFloor[fid] ?? []).find((s) => s.id === selectedId)
-      if (!sw) return
-      const x = drag.sw && drag.sw.id === selectedId ? drag.sw.x : sw.x
-      const y = drag.sw && drag.sw.id === selectedId ? drag.sw.y : sw.y
-      const kind = sw.kind ?? 'switch'
-      const w = SWITCH_CHASSIS_WIDTH_BY_KIND[kind] ?? SWITCH_CHASSIS_WIDTH_BY_KIND.switch
-      const h = SWITCH_CHASSIS_HEIGHT
-      g.rect(x - w / 2 - 4, y - h / 2 - 4, w + 8, h + 8)
-        .stroke({ width: 4, color: RING_COLOR_OUTER, alpha: 0.55 })
-      g.rect(x - w / 2 - 3, y - h / 2 - 3, w + 6, h + 6)
-        .stroke({ width: 2, color: RING_COLOR_INNER, alpha: 1 })
+      // Switch selection ring is drawn by the chassis itself (red stroke
+      // via switchesLayer) — no additional overlay needed.
       return
     }
 
@@ -74,20 +61,9 @@ export function attachSelectionOverlay({
         g.lineTo(tray.points[i].x + dx, tray.points[i].y + dy)
       }
       g.stroke({
-        width: TRAY_HIGHLIGHT_WIDTH + 4,
-        color: RING_COLOR_OUTER,
-        alpha: 0.55,
-        cap: 'round',
-        join: 'round',
-      })
-      g.moveTo(tray.points[0].x + dx, tray.points[0].y + dy)
-      for (let i = 1; i < tray.points.length; i++) {
-        g.lineTo(tray.points[i].x + dx, tray.points[i].y + dy)
-      }
-      g.stroke({
         width: TRAY_HIGHLIGHT_WIDTH,
-        color: RING_COLOR_INNER,
-        alpha: 0.7,
+        color: TRAY_SELECTED_BORDER,
+        alpha: 0.95,
         cap: 'round',
         join: 'round',
       })
@@ -99,16 +75,9 @@ export function attachSelectionOverlay({
       if (!wall) return
       g.moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
       g.stroke({
-        width: WALL_HIGHLIGHT_WIDTH + 4,
-        color: RING_COLOR_OUTER,
-        alpha: 0.55,
-        cap: 'round',
-      })
-      g.moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
-      g.stroke({
         width: WALL_HIGHLIGHT_WIDTH,
-        color: RING_COLOR_INNER,
-        alpha: 0.7,
+        color: SELECT_RED,
+        alpha: 0.85,
         cap: 'round',
       })
       return

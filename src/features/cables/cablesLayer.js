@@ -3,62 +3,53 @@ import { computeRoutes } from '@/features/cable/computeRoutes'
 
 // Cable adapter — runs computeRoutes against the full building data on
 // every change to floor / AP / wall / cable stores, then draws the routes
-// landing on the active floor:
-//   * tray              — solid cyan
-//   * fallback-manhattan — dashed grey (manual dash helper since PIXI
-//                          v8 Graphics has no native lineDash)
-//   * unroutable        — small red ring around the AP
+// landing on the active floor. Visual rules ported from oldSrc CableLayer.jsx:
+//
+//   tray (AP → switch via tray) — solid cyan main run + dashed cyan drop
+//     legs at endpoints (segments touching an 'endpoint' point.kind)
+//   fallback-manhattan          — long-dash pale grey (no drop-leg split)
+//   unroutable                  — small red ring at the AP
 //
 // Mounted on scene.layers.cables which is set to eventMode='none' in
-// scene.js — cables stay purely visual.
+// scene.js — cables stay purely visual. Fiber/copper distinction is only
+// rendered for switch-to-switch trunks (TODO 14-2, not in MVP).
 
-const COLOR_TRAY_COPPER  = '#06b6d4'  // solid cyan — AP-to-switch via tray, copper
-const COLOR_TRAY_FIBER   = '#f43f5e'  // dashed rose — fiber link via tray
-const COLOR_FALLBACK     = '#9ca3af'  // dashed pale grey — fallback Manhattan
-const COLOR_UNROUTABLE   = '#ef4444'
-const ROUTE_WIDTH        = 1.6
-const FALLBACK_DASH_ON   = 6
-const FALLBACK_DASH_OFF  = 4
-const FIBER_DASH_ON      = 12
-const FIBER_DASH_OFF     = 6
+const TRAY_COPPER_COLOR  = '#22d3ee'  // cyan-400 — AP-to-switch tray run
+const FALLBACK_COLOR     = '#9ca3af'  // gray-400 — fallback Manhattan dash
+const UNROUTABLE_COLOR   = '#ef4444'
+const TRAY_WIDTH_MAIN    = 1.6
+const TRAY_WIDTH_DROP    = 1.4
+const FALLBACK_WIDTH     = 1.2
+const DROP_DASH_ON       = 6
+const DROP_DASH_OFF      = 4
+const FALLBACK_DASH_ON   = 14
+const FALLBACK_DASH_OFF  = 10
 
-function drawSolid(g, points, color, width) {
-  if (!points || points.length < 2) return
-  g.moveTo(points[0].x, points[0].y)
-  for (let i = 1; i < points.length; i++) g.lineTo(points[i].x, points[i].y)
-  g.stroke({ width, color, alpha: 1 })
+function drawSolidSegment(g, ax, ay, bx, by, color, width) {
+  g.moveTo(ax, ay).lineTo(bx, by).stroke({ width, color, alpha: 0.95 })
 }
 
-function drawDashed(g, points, color, width, dashOn, dashOff) {
-  if (!points || points.length < 2) return
+function drawDashedSegment(g, ax, ay, bx, by, color, width, dashOn, dashOff) {
+  const len = Math.hypot(bx - ax, by - ay)
+  if (len <= 1e-9) return
+  const ux = (bx - ax) / len
+  const uy = (by - ay) / len
+  let cursor = 0
   let phaseOn = true
   let remain = dashOn
-  let cx = points[0].x, cy = points[0].y
-  for (let i = 1; i < points.length; i++) {
-    const tx = points[i].x, ty = points[i].y
-    const len = Math.hypot(tx - cx, ty - cy)
-    if (len <= 1e-9) continue
-    const ux = (tx - cx) / len
-    const uy = (ty - cy) / len
-    let cursor = 0
-    while (cursor < len) {
-      const step = Math.min(len - cursor, remain)
-      const x1 = cx + ux * cursor
-      const y1 = cy + uy * cursor
-      const x2 = cx + ux * (cursor + step)
-      const y2 = cy + uy * (cursor + step)
-      if (phaseOn) {
-        g.moveTo(x1, y1).lineTo(x2, y2)
-        g.stroke({ width, color, alpha: 1 })
-      }
-      cursor += step
-      remain -= step
-      if (remain <= 1e-9) {
-        phaseOn = !phaseOn
-        remain = phaseOn ? dashOn : dashOff
-      }
+  while (cursor < len) {
+    const step = Math.min(len - cursor, remain)
+    const x1 = ax + ux * cursor
+    const y1 = ay + uy * cursor
+    const x2 = ax + ux * (cursor + step)
+    const y2 = ay + uy * (cursor + step)
+    if (phaseOn) g.moveTo(x1, y1).lineTo(x2, y2).stroke({ width, color, alpha: 0.85 })
+    cursor += step
+    remain -= step
+    if (remain <= 1e-9) {
+      phaseOn = !phaseOn
+      remain = phaseOn ? dashOn : dashOff
     }
-    cx = tx; cy = ty
   }
 }
 
@@ -96,17 +87,32 @@ export function attachCablesLayer({
       if (!route) continue
       if (route.routeStatus === 'unroutable') {
         g.circle(ap.x, ap.y, 14)
-          .stroke({ width: 2, color: COLOR_UNROUTABLE, alpha: 0.9 })
+          .stroke({ width: 2, color: UNROUTABLE_COLOR, alpha: 0.9 })
         continue
       }
-      const poly = route.points
-      if (!poly || poly.length < 2) continue
+      const pts = route.points
+      if (!pts || pts.length < 2) continue
+
       if (route.routeStatus === 'fallback-manhattan') {
-        drawDashed(g, poly, COLOR_FALLBACK, ROUTE_WIDTH, FALLBACK_DASH_ON, FALLBACK_DASH_OFF)
-      } else if (route.cableType === 'fiber') {
-        drawDashed(g, poly, COLOR_TRAY_FIBER, ROUTE_WIDTH, FIBER_DASH_ON, FIBER_DASH_OFF)
-      } else {
-        drawSolid(g, poly, COLOR_TRAY_COPPER, ROUTE_WIDTH)
+        // Whole polyline drawn with one long-dash pattern, no endpoint split.
+        for (let i = 1; i < pts.length; i++) {
+          const a = pts[i - 1], b = pts[i]
+          if (a.floorId !== activeFloorId || b.floorId !== activeFloorId) continue
+          drawDashedSegment(g, a.x, a.y, b.x, b.y, FALLBACK_COLOR, FALLBACK_WIDTH, FALLBACK_DASH_ON, FALLBACK_DASH_OFF)
+        }
+        continue
+      }
+
+      // tray route — per-segment: dashed drop legs at endpoints, solid mid.
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1], b = pts[i]
+        if (a.floorId !== activeFloorId || b.floorId !== activeFloorId) continue
+        const isDrop = a.kind === 'endpoint' || b.kind === 'endpoint'
+        if (isDrop) {
+          drawDashedSegment(g, a.x, a.y, b.x, b.y, TRAY_COPPER_COLOR, TRAY_WIDTH_DROP, DROP_DASH_ON, DROP_DASH_OFF)
+        } else {
+          drawSolidSegment(g, a.x, a.y, b.x, b.y, TRAY_COPPER_COLOR, TRAY_WIDTH_MAIN)
+        }
       }
     }
   }
