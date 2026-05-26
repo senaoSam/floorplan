@@ -4,6 +4,8 @@ import { useHoverStore } from '@/store/useHoverStore'
 import { OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 
+const DRAG_COMMIT_THRESHOLD_PX = 1
+
 // Walls adapter — per-wall Container with click hit-test (no drag yet —
 // wall edit needs endpoint handles which arrive with 31-4 / 31-8 spec).
 // Openings render on top in their material colour; clicking an opening
@@ -59,7 +61,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     if (!entry) {
       const c = new Container()
       c.eventMode = 'static'
-      c.cursor = 'pointer'
+      c.cursor = 'move'
       const g = new Graphics()
       c.addChild(g)
       layer.addChild(c)
@@ -119,11 +121,26 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
       }
     }
 
-    container.hitArea = makeSegmentHitArea(
-      wall.startX, wall.startY,
-      wall.endX, wall.endY,
-      HIT_TOLERANCE_PX,
-    )
+    // Hit area only needs to track geometry, not selection state. Replacing
+    // it during a click-in-progress is the root cause of "sometimes can't
+    // select" — PIXI's event boundary captures the hitArea reference at
+    // pointerdown and a redraw mid-click swaps it out for an identical
+    // copy. Keep the existing hitArea if the segment endpoints haven't
+    // moved.
+    const lastGeom = entry._hitGeom
+    if (!lastGeom ||
+        lastGeom.startX !== wall.startX || lastGeom.startY !== wall.startY ||
+        lastGeom.endX   !== wall.endX   || lastGeom.endY   !== wall.endY) {
+      container.hitArea = makeSegmentHitArea(
+        wall.startX, wall.startY,
+        wall.endX, wall.endY,
+        HIT_TOLERANCE_PX,
+      )
+      entry._hitGeom = {
+        startX: wall.startX, startY: wall.startY,
+        endX:   wall.endX,   endY:   wall.endY,
+      }
+    }
   }
 
   const bindInteractions = (entry) => {
@@ -146,10 +163,61 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
         handleDoorWindowClick(entry, e)
         return
       }
+      // SELECT mode: select the wall and start a potential drag. If the
+      // pointer doesn't move > DRAG_COMMIT_THRESHOLD_PX before release we
+      // treat the gesture as a click (selection only); otherwise we commit
+      // a translation of both endpoints by the same delta.
       editor.setSelected(entry.wall.id, 'wall')
+      if (editor.editorMode === EDITOR_MODE.SELECT) {
+        beginDrag(entry, e)
+      }
     })
     container.on('pointerover', () => useHoverStore.getState().setHover(entry.wall.id, 'wall'))
     container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.wall.id))
+  }
+
+  // Wall-body drag — translate both endpoints by the same delta. Uses the
+  // dragOverlay store so the wall geometry isn't rewritten on every move
+  // (cable routing + heatmap recompute happen only on dragend).
+  const beginDrag = (entry, downEvent) => {
+    const startWorld = scene.world.toLocal(downEvent.global)
+    const startWall = {
+      startX: entry.wall.startX,
+      startY: entry.wall.startY,
+      endX:   entry.wall.endX,
+      endY:   entry.wall.endY,
+    }
+    const stage = scene.app.stage
+    let dx = 0
+    let dy = 0
+
+    const onMove = (e) => {
+      const wp = scene.world.toLocal(e.global)
+      dx = wp.x - startWorld.x
+      dy = wp.y - startWorld.y
+      // Live preview: temporarily shift the wall container so the line
+      // moves with the cursor without committing to the store yet.
+      entry.container.position.set(dx, dy)
+    }
+    const onUp = () => {
+      stage.off('pointermove', onMove)
+      stage.off('pointerup', onUp)
+      stage.off('pointerupoutside', onUp)
+      // Reset transient transform; the store update below will redraw at
+      // the new world coords.
+      entry.container.position.set(0, 0)
+      if (Math.hypot(dx, dy) > DRAG_COMMIT_THRESHOLD_PX) {
+        useWallStore.getState().updateWall(entry.floorId, entry.wall.id, {
+          startX: startWall.startX + dx,
+          startY: startWall.startY + dy,
+          endX:   startWall.endX   + dx,
+          endY:   startWall.endY   + dy,
+        })
+      }
+    }
+    stage.on('pointermove', onMove)
+    stage.on('pointerup', onUp)
+    stage.on('pointerupoutside', onUp)
   }
 
   const handleDoorWindowClick = (entry, e) => {

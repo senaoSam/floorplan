@@ -1,7 +1,7 @@
 import { Container, Graphics } from 'pixi.js'
 import { getTraySystem } from '@/store/useCableStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
-import { useEditorStore } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
 
 // Cable tray adapter — per-tray Container with magnet halo + channel
@@ -173,16 +173,31 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     const isHovered  = hoverState.id === tray.id && hoverState.type === 'cable_tray'
     const isInvert   = isHovered && !isSelected
 
+    // Magnet halo visibility (oldSrc capability `showMagnet`):
+    //   * SELECT mode → only when this tray is selected or hovered
+    //   * DRAW_CABLE_TRAY / PLACE_SWITCH / PLACE_RISER → always (snap planning)
+    //   * other modes → never
+    const mode = editorState.editorMode
+    const showAllMagnets =
+      mode === EDITOR_MODE.DRAW_CABLE_TRAY ||
+      mode === EDITOR_MODE.PLACE_SWITCH ||
+      mode === EDITOR_MODE.PLACE_RISER
+    const showMagnet =
+      showAllMagnets ||
+      (mode === EDITOR_MODE.SELECT && (isSelected || isHovered))
+
     haloG.clear()
     bodyG.clear()
 
-    drawPolylineStroke(haloG, tray.points, {
-      width: magnetPx * 2,
-      color: MAGNET_FILL,
-      alpha: 1,
-      cap: 'round',
-      join: 'round',
-    })
+    if (showMagnet) {
+      drawPolylineStroke(haloG, tray.points, {
+        width: magnetPx * 2,
+        color: MAGNET_FILL,
+        alpha: 1,
+        cap: 'round',
+        join: 'round',
+      })
+    }
 
     // Selection border — rendered IN-LAYER (Bundle 7) so the white stroke
     // sits BELOW devicesSW (z-index 7b > trays 6 > overlays 8). When this
@@ -325,13 +340,22 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
 
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
+  let lastEditorMode = useEditorStore.getState().editorMode
   const onEditorChange = () => {
     const s = useEditorStore.getState()
-    if (s.selectedId === lastSelectedId && s.selectedType === lastSelectedType) return
+    const modeChanged = s.editorMode !== lastEditorMode
+    const selectionChanged = s.selectedId !== lastSelectedId || s.selectedType !== lastSelectedType
+    if (!modeChanged && !selectionChanged) return
     const prevId = lastSelectedId
     const prevType = lastSelectedType
     lastSelectedId = s.selectedId
     lastSelectedType = s.selectedType
+    lastEditorMode = s.editorMode
+    if (modeChanged) {
+      // Magnet visibility depends on the active mode — redraw every tray.
+      for (const entry of containers.values()) drawTray(entry)
+      return
+    }
     if (prevType === 'cable_tray' && prevId) {
       const e = containers.get(prevId)
       if (e) drawTray(e)
