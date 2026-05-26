@@ -1,24 +1,25 @@
-import { Graphics } from 'pixi.js'
+import { Container, Graphics } from 'pixi.js'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
 
-// Scope adapter — fills + outlines polygon scopes on scene.layers.scopes.
-// Colours match oldSrc:
+// Scope adapter — per-scope interactive Container with click-select,
+// right-click context menu, and hover invert. Visual rules ported from
+// oldSrc ScopeLayer.jsx:
 //   in-scope  (type='in')  → green fill + solid green stroke
 //   out-scope (type='out') → red fill + dashed red stroke
-//
-// Selection + hover invert handled in-layer per oldSrc concept:
 //   selected → red stroke 5 px
-//   hovered  → white stroke 5 px (mimics 23-3f hover invert)
+//   hovered  → white stroke 5 px + brighter fill (alpha 0.18 → 0.5)
 
-const COLOR_IN_FILL    = 'rgba(46, 213, 115, 0.18)'
-const COLOR_IN_STROKE  = '#2ed573'
-const COLOR_OUT_FILL   = 'rgba(255, 71, 87, 0.18)'
-const COLOR_OUT_STROKE = '#ff4757'
-const SELECT_STROKE    = '#e74c3c'
-const HOVER_STROKE     = '#ffffff'
-const STROKE_WIDTH     = 3
-const STROKE_WIDTH_EMPHASIS = 5
+const COLOR_IN_FILL          = 'rgba(46, 213, 115, 0.18)'
+const COLOR_IN_FILL_HOVER    = 'rgba(46, 213, 115, 0.5)'
+const COLOR_IN_STROKE        = '#2ed573'
+const COLOR_OUT_FILL         = 'rgba(255, 71, 87, 0.18)'
+const COLOR_OUT_FILL_HOVER   = 'rgba(255, 71, 87, 0.5)'
+const COLOR_OUT_STROKE       = '#ff4757'
+const SELECT_STROKE          = '#e74c3c'
+const HOVER_STROKE           = '#ffffff'
+const STROKE_WIDTH           = 3
+const STROKE_WIDTH_EMPHASIS  = 5
 const DASH_ON  = 8
 const DASH_OFF = 4
 
@@ -53,56 +54,176 @@ function drawDashedPolygon(g, flat, dashOn, dashOff, opts) {
   }
 }
 
+// Even-odd point-in-polygon hit-test for the scope's flat [x,y,x,y,...]
+// vertex array. Used as the Container's hitArea so right-click + click +
+// hover all register anywhere inside the polygon (not just on the stroke).
+function makePolygonHitArea(flat) {
+  return {
+    contains(px, py) {
+      if (!flat || flat.length < 6) return false
+      const n = flat.length / 2
+      let inside = false
+      for (let i = 0, j = n - 1; i < n; j = i++) {
+        const xi = flat[i * 2],     yi = flat[i * 2 + 1]
+        const xj = flat[j * 2],     yj = flat[j * 2 + 1]
+        const intersect = ((yi > py) !== (yj > py)) &&
+          (px < (xj - xi) * (py - yi) / ((yj - yi) || 1e-9) + xi)
+        if (intersect) inside = !inside
+      }
+      return inside
+    },
+  }
+}
+
 export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
   const layer = scene.layers.scopes
-  const g = new Graphics()
-  g.eventMode = 'none' // pure visual — never intercept clicks
-  layer.addChild(g)
+  layer.eventMode = 'passive'
 
-  const rebuild = () => {
-    const activeFloorId = useFloorStore.getState().activeFloorId
-    const scopes = useScopeStore.getState().scopesByFloor[activeFloorId] ?? []
+  const containers = new Map()
+
+  const ensureContainer = (scope, floorId) => {
+    let entry = containers.get(scope.id)
+    if (!entry) {
+      const c = new Container()
+      c.eventMode = 'static'
+      c.cursor = 'pointer'
+      const g = new Graphics()
+      g.eventMode = 'none'
+      c.addChild(g)
+      layer.addChild(c)
+      entry = { container: c, graphics: g, scope, floorId }
+      containers.set(scope.id, entry)
+      bindInteractions(entry)
+    } else {
+      entry.scope = scope
+      entry.floorId = floorId
+    }
+    return entry
+  }
+
+  const removeContainer = (id) => {
+    const entry = containers.get(id)
+    if (!entry) return
+    layer.removeChild(entry.container)
+    entry.container.destroy({ children: true })
+    containers.delete(id)
+  }
+
+  const drawScope = (entry) => {
+    const { graphics, container, scope } = entry
+    const flat = scope.points?.slice() ?? []
+    if (flat.length < 6) return
+    const isOut = scope.type === 'out'
     const editorState = useEditorStore.getState()
     const hoverState = useHoverStore.getState()
-    g.clear()
-    for (const scope of scopes) {
-      if (!scope.points || scope.points.length < 4) continue
-      const flat = scope.points.slice()
-      const isOut = scope.type === 'out'
-      const isSelected = editorState.selectedId === scope.id && editorState.selectedType === 'scope'
-      const isHovered  = hoverState.id === scope.id && hoverState.type === 'scope'
-      g.poly(flat).fill({
-        color: isOut ? COLOR_OUT_FILL : COLOR_IN_FILL,
-        alpha: 1,
-      })
-      const baseStroke = isOut ? COLOR_OUT_STROKE : COLOR_IN_STROKE
-      let stroke = baseStroke
-      let width = STROKE_WIDTH
-      if (isSelected) { stroke = SELECT_STROKE; width = STROKE_WIDTH_EMPHASIS }
-      else if (isHovered) { stroke = HOVER_STROKE; width = STROKE_WIDTH_EMPHASIS }
-      // Hover / selected always renders solid; only the unstyled out-scope
-      // uses the dashed pattern — when the user is actively hovering it the
-      // solid emphasis reads better and matches oldSrc.
-      if (isOut && !isSelected && !isHovered) {
-        drawDashedPolygon(g, flat, DASH_ON, DASH_OFF, { width, color: stroke, alpha: 1 })
-      } else {
-        g.poly(flat).stroke({ width, color: stroke, alpha: 1 })
+    const isSelected = editorState.selectedId === scope.id && editorState.selectedType === 'scope'
+    const isHovered  = hoverState.id === scope.id && hoverState.type === 'scope'
+    const isInvert   = isHovered && !isSelected
+
+    graphics.clear()
+    const fillColor = isInvert
+      ? (isOut ? COLOR_OUT_FILL_HOVER : COLOR_IN_FILL_HOVER)
+      : (isOut ? COLOR_OUT_FILL       : COLOR_IN_FILL)
+    graphics.poly(flat).fill({ color: fillColor, alpha: 1 })
+
+    const baseStroke = isOut ? COLOR_OUT_STROKE : COLOR_IN_STROKE
+    let stroke = baseStroke
+    let width = STROKE_WIDTH
+    if (isSelected) { stroke = SELECT_STROKE; width = STROKE_WIDTH_EMPHASIS }
+    else if (isInvert) { stroke = HOVER_STROKE; width = STROKE_WIDTH_EMPHASIS }
+
+    if (isOut && !isSelected && !isInvert) {
+      drawDashedPolygon(graphics, flat, DASH_ON, DASH_OFF, { width, color: stroke, alpha: 1 })
+    } else {
+      graphics.poly(flat).stroke({ width, color: stroke, alpha: 1 })
+    }
+
+    container.hitArea = makePolygonHitArea(flat)
+  }
+
+  const bindInteractions = (entry) => {
+    const { container } = entry
+    container.on('pointerdown', (e) => {
+      if (e.button === 2) {
+        e.stopPropagation()
+        useEditorStore.getState().openContextMenu({
+          targetType: 'scope',
+          targetId: entry.scope.id,
+          screenX: e.originalEvent?.clientX ?? 0,
+          screenY: e.originalEvent?.clientY ?? 0,
+        })
+        return
       }
+      if ((e.button ?? 0) !== 0) return
+      e.stopPropagation()
+      useEditorStore.getState().setSelected(entry.scope.id, 'scope')
+    })
+    container.on('pointerover', () => useHoverStore.getState().setHover(entry.scope.id, 'scope'))
+    container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.scope.id))
+  }
+
+  let lastFloorId = undefined
+  let lastScopes = undefined
+
+  const reconcile = () => {
+    const activeFloorId = useFloorStore.getState().activeFloorId
+    const scopes = useScopeStore.getState().scopesByFloor[activeFloorId] ?? []
+    if (activeFloorId === lastFloorId && scopes === lastScopes) return
+    lastFloorId = activeFloorId
+    lastScopes = scopes
+    const next = new Set(scopes.map((s) => s.id))
+    for (const id of Array.from(containers.keys())) {
+      if (!next.has(id)) removeContainer(id)
+    }
+    for (const scope of scopes) {
+      const entry = ensureContainer(scope, activeFloorId)
+      drawScope(entry)
     }
   }
 
-  const unsubFloor = useFloorStore.subscribe(rebuild)
-  const unsubScope = useScopeStore.subscribe(rebuild)
-  const unsubEditor = useEditorStore.subscribe(rebuild)
-  const unsubHover = useHoverStore.subscribe(rebuild)
-  rebuild()
+  // Hover / selection redraws — only redraw affected scopes.
+  let lastHoverId = useHoverStore.getState().id
+  const onHoverChange = () => {
+    const s = useHoverStore.getState()
+    if (s.id === lastHoverId) return
+    const prevId = lastHoverId
+    lastHoverId = s.id
+    const prev = prevId ? containers.get(prevId) : null
+    const next = s.id ? containers.get(s.id) : null
+    if (prev) drawScope(prev)
+    if (next && next !== prev) drawScope(next)
+  }
+
+  let lastSelectedId = useEditorStore.getState().selectedId
+  let lastSelectedType = useEditorStore.getState().selectedType
+  const onEditorChange = () => {
+    const s = useEditorStore.getState()
+    if (s.selectedId === lastSelectedId && s.selectedType === lastSelectedType) return
+    const prevId = lastSelectedId
+    const prevType = lastSelectedType
+    lastSelectedId = s.selectedId
+    lastSelectedType = s.selectedType
+    if (prevType === 'scope' && prevId) {
+      const e = containers.get(prevId)
+      if (e) drawScope(e)
+    }
+    if (s.selectedType === 'scope' && s.selectedId) {
+      const e = containers.get(s.selectedId)
+      if (e) drawScope(e)
+    }
+  }
+
+  const unsubFloor = useFloorStore.subscribe(reconcile)
+  const unsubScope = useScopeStore.subscribe(reconcile)
+  const unsubEditor = useEditorStore.subscribe(onEditorChange)
+  const unsubHover = useHoverStore.subscribe(onHoverChange)
+  reconcile()
 
   return () => {
     unsubFloor()
     unsubScope()
     unsubEditor()
     unsubHover()
-    layer.removeChild(g)
-    g.destroy()
+    for (const id of Array.from(containers.keys())) removeContainer(id)
   }
 }
