@@ -2,10 +2,11 @@ import React, { useState } from 'react'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
 import { HEATMAP_MODE_LIST, getModeConfig } from '@/features/heatmap/modes'
-import HeatmapLegend from './HeatmapLegend'
 import FormulaNote from '@/components/FormulaNote/FormulaNote'
+import HeatmapLegend from './HeatmapLegend'
 import './HeatmapControl.sass'
 
+// Pick the hover value that corresponds to the active visualisation mode.
 function hoverValueForMode(hover, mode) {
   if (!hover) return undefined
   switch (mode) {
@@ -17,12 +18,6 @@ function hoverValueForMode(hover, mode) {
   }
 }
 
-const formatReading = (v, unit) => isFinite(v) ? `${v.toFixed(1)} ${unit}` : '—'
-
-// Phase 25 port — same layout / positioning as oldSrc HeatmapControl (pill
-// row pinned bottom-left of the canvas area). Hover readout + HeatmapLegend
-// + FormulaNote are deferred until useHoverReadoutStore / those components
-// come back. Everything else (engine / drag-mode / sliders) is restored.
 function HeatmapControl() {
   const enabled      = useHeatmapStore((s) => s.enabled)
   const setEnabled   = useHeatmapStore((s) => s.setEnabled)
@@ -42,16 +37,20 @@ function HeatmapControl() {
   const setEngine    = useHeatmapStore((s) => s.setEngine)
   const dragMode     = useHeatmapStore((s) => s.dragMode)
   const setDragMode  = useHeatmapStore((s) => s.setDragMode)
-
-  const hover = useHoverReadoutStore((s) => s.reading)
+  const hover        = useHoverReadoutStore((s) => s.reading)
 
   const [panelOpen, setPanelOpen] = useState(false)
   const [formulaOpen, setFormulaOpen] = useState(false)
-  const activeCfg = getModeConfig(mode)
+
   const hoverValue = hoverValueForMode(hover, mode)
+  const activeCfg  = getModeConfig(mode)
+
+  const formatReading = (v, unit) => isFinite(v) ? `${v.toFixed(1)} ${unit}` : '—'
 
   return (
     <div className="heatmap-control">
+      {/* Readout — stacked above the button. Shows all four metrics so the
+          user can compare without flipping modes. */}
       {enabled && hover && (
         <div className="heatmap-control__readout">
           <div className="heatmap-control__readout-row">
@@ -69,9 +68,29 @@ function HeatmapControl() {
           <div className="heatmap-control__readout-row heatmap-control__readout-pos">
             ({hover.at.x.toFixed(2)}, {hover.at.y.toFixed(2)}) m
           </div>
+          {(() => {
+            let best = -1
+            let bestVal = -Infinity
+            for (let i = 0; i < hover.perAp.length; i++) {
+              const v = hover.perAp[i]
+              if (isFinite(v) && v > bestVal) { bestVal = v; best = i }
+            }
+            if (best < 0) return null
+            const ap = hover.apList[best]
+            return (
+              <div className="heatmap-control__readout-row">
+                <b>{ap?.name ?? `AP-${best + 1}`}</b>
+                <span>
+                  {bestVal.toFixed(1)} dBm · ch {ap?.channel ?? '—'} · {ap?.channelWidth ? `${ap.channelWidth} MHz` : '—'}
+                </span>
+              </div>
+            )
+          })()}
         </div>
       )}
 
+      {/* Color legend — only while heatmap is enabled; pointer follows hover
+          value for the active mode. */}
       {enabled && (
         <HeatmapLegend mode={mode} hoverValue={hoverValue} />
       )}
@@ -118,7 +137,7 @@ function HeatmapControl() {
               className="heatmap-control__select"
               value={engine}
               onChange={(e) => setEngine(e.target.value)}
-              title="JS = 完整物理；Shader = WebGL2 加速"
+              title="JS = 完整物理 (full parity); Shader = WebGL2 加速 (HM-F5a, 暫無反射/繞射/多頻點)"
             >
               <option value="js">JS (full parity)</option>
               <option value="shader">Shader (F5a, fast)</option>
@@ -130,7 +149,7 @@ function HeatmapControl() {
               className="heatmap-control__select"
               value={dragMode}
               onChange={(e) => setDragMode(e.target.value)}
-              title="Live = 拖曳即時重算（降畫質）；Solo = 拖 AP 只重算被拖那一顆"
+              title="Live = 拖曳即時重算（降畫質）；Solo = 拖 AP 只重算被拖那一顆，拖牆/Scope 凍結（Hamina 風格）"
             >
               <option value="live">Live (即時重算)</option>
               <option value="solo">Solo (單 AP / 凍結)</option>
@@ -138,11 +157,11 @@ function HeatmapControl() {
           </label>
           <label className="heatmap-control__line">
             <input type="checkbox" checked={reflections} onChange={(e) => setReflections(e.target.checked)} />
-            <span>反射 (1st-order)</span>
+            <span>反射 (1st-order, image source)</span>
           </label>
           <label className="heatmap-control__line">
             <input type="checkbox" checked={diffraction} onChange={(e) => setDiffraction(e.target.checked)} />
-            <span>繞射 (UTD)</span>
+            <span>繞射 (UTD / knife edge)</span>
           </label>
           <label className="heatmap-control__line">
             <span>網格精度: {gridStepM.toFixed(2)} m</span>
@@ -153,7 +172,7 @@ function HeatmapControl() {
             />
           </label>
           <label className="heatmap-control__line">
-            <span>平滑: {blur} px</span>
+            <span>平滑 (blur): {blur} px</span>
             <input
               type="range" min="0" max="24" step="1"
               value={blur}

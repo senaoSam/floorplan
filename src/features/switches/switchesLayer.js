@@ -3,6 +3,7 @@ import { getSwitchKindColor } from '@/store/useCableStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
+import { useViewportStore } from '@/store/useViewportStore'
 import { computeSwitchSnaps } from '@/features/cable/switchSnapStatus'
 import { computeFocusedDevices, FOCUS_HALO_COLOR, FOCUS_HALO_ALPHA, FOCUS_HALO_WIDTH } from '@/features/focus/focusedDevices'
 import { getChassisSize, getKindLabel, getPortDotCount } from './switchChassis'
@@ -379,8 +380,20 @@ export function attachSwitchesLayer({
     if (next && next !== prev) drawSwitch(next)
   }
 
-  const unsubFloor = useFloorStore.subscribe(reconcile)
-  const unsubCable = useCableStore.subscribe(reconcile)
+  // Screen-space chassis sizing — same trick as apsLayer. The chassis
+  // geometry is defined in world units (e.g. 30 px wide for a 24-port
+  // switch); container.scale flips it to constant on-screen size so the
+  // chassis doesn't shrink to nothing when zoomed out across a floor plan.
+  const applyInverseScale = () => {
+    const vp = useViewportStore.getState()
+    const inv = 1 / (vp.scale || 1)
+    for (const entry of containers.values()) {
+      entry.container.scale.set(inv)
+    }
+  }
+
+  const unsubFloor = useFloorStore.subscribe(() => { reconcile(); applyInverseScale() })
+  const unsubCable = useCableStore.subscribe(() => { reconcile(); applyInverseScale() })
   const unsubAP = useAPStore.subscribe(() => {
     // AP changes don't affect chassis geometry but do affect focus set
     // (which APs route through this switch).
@@ -391,7 +404,9 @@ export function attachSwitchesLayer({
   const unsubDrag = useDragOverlayStore.subscribe(applyDragOverlay)
   const unsubEditor = useEditorStore.subscribe(onEditorChange)
   const unsubHover = useHoverStore.subscribe(onHoverChange)
+  const unsubViewport = useViewportStore.subscribe(applyInverseScale)
   reconcile()
+  applyInverseScale()
 
   return () => {
     unsubFloor()
@@ -400,6 +415,7 @@ export function attachSwitchesLayer({
     unsubDrag()
     unsubEditor()
     unsubHover()
+    unsubViewport()
     for (const id of Array.from(containers.keys())) removeContainer(id)
   }
 }

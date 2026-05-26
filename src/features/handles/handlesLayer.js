@@ -1,4 +1,5 @@
 import { Container, Graphics, Circle } from 'pixi.js'
+import { useViewportStore } from '@/store/useViewportStore'
 
 // Edit handles for the selected wall / tray. Rendered on
 // scene.layers.handles so they sit above the object layers but below
@@ -145,17 +146,28 @@ export function attachHandlesLayer({
     })
   }
 
-  const unsubEditor = useEditorStore.subscribe(rebuild)
-  const unsubFloor = useFloorStore.subscribe(rebuild)
-  const unsubWall = useWallStore.subscribe(rebuild)
-  const unsubCable = useCableStore.subscribe(rebuild)
+  // Screen-space handle sizing — each handle is a separate Container; we
+  // set every child's scale to 1 / viewport.scale so they don't shrink to
+  // nothing when zoomed out.
+  const applyInverseScale = () => {
+    const inv = 1 / (useViewportStore.getState().scale || 1)
+    for (const child of root.children) child.scale.set(inv)
+  }
+
+  const unsubEditor = useEditorStore.subscribe(() => { rebuild(); applyInverseScale() })
+  const unsubFloor = useFloorStore.subscribe(() => { rebuild(); applyInverseScale() })
+  const unsubWall = useWallStore.subscribe(() => { rebuild(); applyInverseScale() })
+  const unsubCable = useCableStore.subscribe(() => { rebuild(); applyInverseScale() })
+  const unsubViewport = useViewportStore.subscribe(applyInverseScale)
   rebuild()
+  applyInverseScale()
 
   return () => {
     unsubEditor()
     unsubFloor()
     unsubWall()
     unsubCable()
+    unsubViewport()
     layer.removeChild(root)
     root.destroy({ children: true })
   }

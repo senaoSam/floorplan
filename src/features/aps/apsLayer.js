@@ -2,6 +2,7 @@ import { Container, Graphics, Circle, Text, TextStyle } from 'pixi.js'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
+import { useViewportStore } from '@/store/useViewportStore'
 import { computeFocusedDevices, FOCUS_HALO_COLOR, FOCUS_HALO_ALPHA, FOCUS_HALO_WIDTH } from '@/features/focus/focusedDevices'
 
 // AP markers adapter — per-AP interactive Container with click select,
@@ -388,14 +389,27 @@ export function attachAPsLayer({
     if (next && next !== prev) drawAP(next)
   }
 
-  const unsubFloor = useFloorStore.subscribe(() => { reconcile(); recomputeFocus() })
-  const unsubAP = useAPStore.subscribe(() => { reconcile(); recomputeFocus() })
+  // Screen-space marker sizing (oldSrc convention): container.scale =
+  // 1 / viewport.scale so the AP body + name label + info pill render at
+  // a constant on-screen size regardless of zoom. Position remains world.
+  const applyInverseScale = () => {
+    const vp = useViewportStore.getState()
+    const inv = 1 / (vp.scale || 1)
+    for (const entry of containers.values()) {
+      entry.container.scale.set(inv)
+    }
+  }
+
+  const unsubFloor = useFloorStore.subscribe(() => { reconcile(); recomputeFocus(); applyInverseScale() })
+  const unsubAP = useAPStore.subscribe(() => { reconcile(); recomputeFocus(); applyInverseScale() })
   const unsubCable = useCableStore.subscribe(recomputeFocus)
   const unsubDrag = useDragOverlayStore.subscribe(applyDragOverlay)
   const unsubEditor = useEditorStore.subscribe(onEditorChange)
   const unsubHover = useHoverStore.subscribe(onHoverChange)
+  const unsubViewport = useViewportStore.subscribe(applyInverseScale)
   reconcile()
   recomputeFocus()
+  applyInverseScale()
 
   return () => {
     unsubFloor()
@@ -404,6 +418,7 @@ export function attachAPsLayer({
     unsubDrag()
     unsubEditor()
     unsubHover()
+    unsubViewport()
     for (const id of Array.from(containers.keys())) removeContainer(id)
   }
 }

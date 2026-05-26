@@ -14,6 +14,8 @@ const TRAY_BORDER_WIDTH = 1.2
 const TRAY_CENTER_WIDTH = 0.8
 const TRAY_CENTER_DASH = [3, 3]
 const MAGNET_FILL = 'rgba(129, 140, 248, 0.12)' // indigo-400 @ 12% (oldSrc)
+const TRAY_SELECTED_BORDER = '#ffffff'           // oldSrc TRAY_SELECTED_BORDER
+const TRAY_SELECTED_BORDER_WIDTH = 9
 const HIT_TOLERANCE_PX = 8
 const DRAG_COMMIT_THRESHOLD_PX = 1
 
@@ -181,6 +183,19 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
       cap: 'round',
       join: 'round',
     })
+
+    // Selection border — rendered IN-LAYER (Bundle 7) so the white stroke
+    // sits BELOW devicesSW (z-index 7b > trays 6 > overlays 8). When this
+    // ran on the overlay layer it covered the SW chassis under the tray.
+    if (isSelected) {
+      drawPolylineStroke(haloG, tray.points, {
+        width: TRAY_SELECTED_BORDER_WIDTH,
+        color: TRAY_SELECTED_BORDER,
+        alpha: 0.95,
+        cap: 'round',
+        join: 'round',
+      })
+    }
 
     // Channel — half-transparent body fill between two parallel borders
     // plus a dashed centreline in the system colour (Phase 17-1).

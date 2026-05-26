@@ -9,8 +9,18 @@ import { generateId } from '@/utils/id'
 // Openings render on top in their material colour; clicking an opening
 // selects the parent wall.
 
-const WALL_STROKE_WIDTH = 4
-const HIT_TOLERANCE_PX = 5
+// Wall rendering — dual-stroke ports oldSrc WallLayer.jsx:
+//   * Outer black halo for contrast (alpha 0.4) — width 4 normal / 7 selected / 10 hovered
+//   * Inner colored stroke from wall.material.color — width 3 normal / 5 selected / 6 hovered
+// Hit area is 14 px wide along the segment so clicks register even on
+// thin segments at zoomed-out viewports.
+const WALL_HALO_WIDTH_NORMAL   = 4
+const WALL_HALO_WIDTH_SELECTED = 7
+const WALL_HALO_WIDTH_HOVERED  = 10
+const WALL_BODY_WIDTH_NORMAL   = 3
+const WALL_BODY_WIDTH_SELECTED = 5
+const WALL_BODY_WIDTH_HOVERED  = 6
+const HIT_TOLERANCE_PX = 14 // bigger hit envelope (matches oldSrc hitStrokeWidth=14)
 
 function pointToSegmentDistance(px, py, ax, ay, bx, by) {
   const dx = bx - ax
@@ -73,10 +83,27 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
 
   const drawWall = (entry) => {
     const { graphics, container, wall } = entry
-    graphics.clear()
-    graphics.moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
-    graphics.stroke({ width: WALL_STROKE_WIDTH, color: wall.material.color, alpha: 1 })
+    const editorState = useEditorStore.getState()
+    const hoverState = useHoverStore.getState()
+    const isSelected = editorState.selectedId === wall.id && editorState.selectedType === 'wall'
+    const isHovered  = hoverState.id === wall.id && hoverState.type === 'wall'
+    const haloWidth = isHovered ? WALL_HALO_WIDTH_HOVERED : isSelected ? WALL_HALO_WIDTH_SELECTED : WALL_HALO_WIDTH_NORMAL
+    const bodyWidth = isHovered ? WALL_BODY_WIDTH_HOVERED : isSelected ? WALL_BODY_WIDTH_SELECTED : WALL_BODY_WIDTH_NORMAL
+    const bodyColor = isHovered ? '#ffffff' : wall.material.color
 
+    graphics.clear()
+
+    // (1) Black outline halo for contrast.
+    graphics
+      .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
+      .stroke({ width: haloWidth, color: '#000000', alpha: 0.4, cap: 'round' })
+
+    // (2) Colored wall body.
+    graphics
+      .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
+      .stroke({ width: bodyWidth, color: bodyColor, alpha: 1, cap: 'round' })
+
+    // (3) Openings overlay the wall body in their own material colour.
     const openings = wall.openings ?? []
     if (openings.length > 0) {
       const dx = wall.endX - wall.startX
@@ -86,8 +113,9 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
         const sy = wall.startY + dy * op.startFrac
         const ex = wall.startX + dx * op.endFrac
         const ey = wall.startY + dy * op.endFrac
-        graphics.moveTo(sx, sy).lineTo(ex, ey)
-        graphics.stroke({ width: WALL_STROKE_WIDTH, color: op.material.color, alpha: 1 })
+        graphics
+          .moveTo(sx, sy).lineTo(ex, ey)
+          .stroke({ width: bodyWidth, color: op.material.color, alpha: 1, cap: 'butt' })
       }
     }
 
@@ -212,13 +240,50 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     }
   }
 
+  // Hover + selection redraws — repaint only the two walls that changed
+  // state so the halo + body widths flip without rebuilding all containers.
+  let lastHoverId = useHoverStore.getState().id
+  const onHoverChange = () => {
+    const s = useHoverStore.getState()
+    if (s.id === lastHoverId) return
+    const prevId = lastHoverId
+    lastHoverId = s.id
+    const prev = prevId ? containers.get(prevId) : null
+    const next = s.id ? containers.get(s.id) : null
+    if (prev) drawWall(prev)
+    if (next && next !== prev) drawWall(next)
+  }
+
+  let lastSelectedId = useEditorStore.getState().selectedId
+  let lastSelectedType = useEditorStore.getState().selectedType
+  const onSelectionChange = () => {
+    const s = useEditorStore.getState()
+    if (s.selectedId === lastSelectedId && s.selectedType === lastSelectedType) return
+    const prevId = lastSelectedId
+    const prevType = lastSelectedType
+    lastSelectedId = s.selectedId
+    lastSelectedType = s.selectedType
+    if (prevType === 'wall' && prevId) {
+      const e = containers.get(prevId)
+      if (e) drawWall(e)
+    }
+    if (s.selectedType === 'wall' && s.selectedId) {
+      const e = containers.get(s.selectedId)
+      if (e) drawWall(e)
+    }
+  }
+
   const unsubFloor = useFloorStore.subscribe(reconcile)
   const unsubWall = useWallStore.subscribe(reconcile)
+  const unsubHover = useHoverStore.subscribe(onHoverChange)
+  const unsubSelection = useEditorStore.subscribe(onSelectionChange)
   reconcile()
 
   return () => {
     unsubFloor()
     unsubWall()
+    unsubHover()
+    unsubSelection()
     unsubEditor()
     window.removeEventListener('keydown', onKeyDown)
     for (const id of Array.from(containers.keys())) removeContainer(id)

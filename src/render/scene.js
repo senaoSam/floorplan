@@ -32,7 +32,7 @@ const LAYER_KEYS = [
   'labels',
 ]
 
-export async function initScene({ container, background = '#0f1419' }) {
+export async function initScene({ container, background = '#1e1e2e' }) {
   const app = new Application()
   await app.init({
     resizeTo: container,
