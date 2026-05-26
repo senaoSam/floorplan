@@ -27,36 +27,39 @@ const FREQ_LABEL = {
 
 const FALLBACK_COLOR = '#9aa3ad'
 const colorForAP = (ap) => FREQ_COLOR[ap.frequency] ?? FALLBACK_COLOR
-const bandLabelForAP = (ap) => FREQ_LABEL[ap.frequency] ?? ''
 
-const AP_RADIUS = 9
-const FOCUS_RING_RADIUS = AP_RADIUS + 4
-const DIR_INNER_R = AP_RADIUS + 2
-const DIR_OUTER_R = AP_RADIUS + 18
+const AP_RADIUS = 10
+const FOCUS_RING_RADIUS = AP_RADIUS + 5
+const DIR_INNER_R = 17
+const DIR_OUTER_R = 36
+const SELECT_STROKE = '#e74c3c'
+const BODY_STROKE_NORMAL = '#1e3a8a'
+const BODY_FILL_NORMAL   = '#ffffff'
 const DRAG_COMMIT_THRESHOLD_PX = 1
+
 const NAME_TEXT_STYLE = new TextStyle({
   fill: '#ffffff',
   fontFamily: 'system-ui, sans-serif',
   fontSize: 11,
   align: 'center',
-  stroke: { color: '#0b0d12', width: 3, join: 'round' },
-})
-const BAND_TEXT_STYLE = new TextStyle({
-  fill: '#0b0d12',
-  fontFamily: 'system-ui, sans-serif',
-  fontSize: 8,
-  fontWeight: '700',
-  align: 'center',
+  dropShadow: {
+    color: '#000000',
+    blur: 4,
+    distance: 0,
+    alpha: 0.9,
+  },
 })
 const INFO_TEXT_STYLE = new TextStyle({
   fill: '#ffffff',
   fontFamily: 'system-ui, sans-serif',
-  fontSize: 9,
+  fontSize: 11,
   align: 'center',
-  lineHeight: 11,
-  stroke: { color: '#0b0d12', width: 3, join: 'round' },
+  lineHeight: 14,
 })
 const FREQ_LABEL_LONG = { 2.4: '2.4G', 5: '5G', 6: '6G' }
+const INFO_PILL_W = 90
+const INFO_PILL_H = 44
+const INFO_PILL_BG = 'rgba(0, 0, 0, 0.75)'
 
 export function attachAPsLayer({
   scene,
@@ -81,24 +84,24 @@ export function attachAPsLayer({
       c.cursor = 'pointer'
       c.hitArea = new Circle(0, 0, AP_RADIUS + 4)
       const g = new Graphics()
-      const bandText = new Text({ text: '', style: BAND_TEXT_STYLE })
-      bandText.anchor.set(0.5)
-      bandText.eventMode = 'none'
       const nameText = new Text({ text: '', style: NAME_TEXT_STYLE })
       nameText.anchor.set(0.5, 0)
-      nameText.y = AP_RADIUS + 5
+      nameText.y = AP_RADIUS + 4
       nameText.eventMode = 'none'
+      const infoBg = new Graphics()
+      infoBg.eventMode = 'none'
+      infoBg.visible = false
       const infoText = new Text({ text: '', style: INFO_TEXT_STYLE })
       infoText.anchor.set(0.5, 0)
-      infoText.y = AP_RADIUS + 18
+      infoText.y = AP_RADIUS + 22
       infoText.eventMode = 'none'
       infoText.visible = false
       c.addChild(g)
-      c.addChild(bandText)
+      c.addChild(infoBg)
       c.addChild(nameText)
       c.addChild(infoText)
       layer.addChild(c)
-      entry = { container: c, graphics: g, bandText, nameText, infoText, ap, floorId }
+      entry = { container: c, graphics: g, infoBg, nameText, infoText, ap, floorId }
       containers.set(ap.id, entry)
       bindInteractions(entry)
     } else {
@@ -117,53 +120,93 @@ export function attachAPsLayer({
   }
 
   const drawAP = (entry, overrideX, overrideY) => {
-    const { graphics, bandText, nameText, infoText, ap } = entry
+    const { graphics, infoBg, nameText, infoText, ap } = entry
     const x = overrideX ?? ap.x
     const y = overrideY ?? ap.y
     entry.container.position.set(x, y)
 
+    const editorState = useEditorStore.getState()
+    const hoverState = useHoverStore.getState()
+    const isSelected = editorState.selectedId === ap.id && editorState.selectedType === 'ap'
+    const isHovered  = hoverState.id === ap.id && hoverState.type === 'ap'
+    const isFocused  = focusedAPIds.has(ap.id) && !isSelected
+    const isInvert   = isHovered && !isSelected
+    const freqColor  = colorForAP(ap)
+
     graphics.clear()
 
-    // 17-2 focus halo — drawn first so the AP marker sits on top of it.
-    if (focusedAPIds.has(ap.id)) {
+    // 17-2 focus halo — drawn first so the marker sits on top of it.
+    if (isFocused) {
       graphics.circle(0, 0, FOCUS_RING_RADIUS)
         .stroke({ width: FOCUS_HALO_WIDTH, color: FOCUS_HALO_COLOR, alpha: FOCUS_HALO_ALPHA })
     }
 
-    // Directional APs show an annular wedge in their broadcast direction
-    // (inner radius DIR_INNER_R, outer DIR_OUTER_R) so the AP marker stays
-    // legible inside the wedge. Omni / custom skipped — omni doesn't need a
-    // direction hint and custom patterns need a per-pattern preview.
+    // Directional APs show an annular wedge in their broadcast direction.
     if (ap.antennaMode === 'directional') {
       const az = ((ap.azimuth ?? 0) - 90) * Math.PI / 180
       const half = ((ap.beamwidth ?? 60) / 2) * Math.PI / 180
-      const color = colorForAP(ap)
       const a0 = az - half
       const a1 = az + half
+      const fanAlpha = isSelected ? 0.35 : (isHovered ? 0.28 : 0.18)
       graphics
         .moveTo(Math.cos(a0) * DIR_INNER_R, Math.sin(a0) * DIR_INNER_R)
         .arc(0, 0, DIR_INNER_R, a0, a1, false)
         .arc(0, 0, DIR_OUTER_R, a1, a0, true)
         .closePath()
-        .fill({ color, alpha: 0.18 })
-        .stroke({ width: 1, color, alpha: 0.5 })
+        .fill({ color: freqColor, alpha: fanAlpha })
+      if (isSelected) {
+        // Dashed outer rim for selection emphasis (rough approximation —
+        // PIXI v8 Graphics has no native dash, so we use a thin solid
+        // ring instead; the colour is still freq-specific so it reads
+        // as "this AP's beam".)
+        graphics
+          .arc(0, 0, DIR_OUTER_R, a0, a1, false)
+          .stroke({ width: 1, color: freqColor, alpha: 0.9 })
+      }
     }
 
-    // Marker.
+    // Orientation axis line for directional / custom.
+    if (ap.antennaMode === 'directional' || ap.antennaMode === 'custom') {
+      const axRad = ((ap.azimuth ?? 0) - 90) * Math.PI / 180
+      const axLen = 32
+      graphics
+        .moveTo(0, 0)
+        .lineTo(Math.cos(axRad) * axLen, Math.sin(axRad) * axLen)
+        .stroke({
+          width: isSelected ? 2 : 1.2,
+          color: isSelected ? SELECT_STROKE : freqColor,
+          alpha: 0.85,
+        })
+    }
+
+    // Marker body — oldSrc convention: white fill / dark-blue stroke;
+    // hovered + non-selected inverts to dark fill / white stroke;
+    // selected → red stroke.
+    const bodyFill   = isInvert ? BODY_STROKE_NORMAL : BODY_FILL_NORMAL
+    const bodyStroke = isSelected ? SELECT_STROKE : (isInvert ? BODY_FILL_NORMAL : BODY_STROKE_NORMAL)
+    const bodyWidth  = isSelected ? 3 : (isHovered ? 2.5 : 2)
     graphics
       .circle(0, 0, AP_RADIUS)
-      .fill({ color: colorForAP(ap), alpha: 0.95 })
-      .stroke({ width: 2, color: 0xffffff, alpha: 0.9 })
+      .fill({ color: bodyFill, alpha: 1 })
+      .stroke({ width: bodyWidth, color: bodyStroke, alpha: 1 })
 
-    bandText.text = bandLabelForAP(ap)
     nameText.text = ap.name ?? ''
 
-    // Info pill — frequency band + channel/width + tx power. Visible
-    // only when showAPInfo is enabled.
-    const editorState = useEditorStore.getState()
+    // Info pill — dark rounded rect bg + 3-line text including name +
+    // freq/channel/width + tx power. Visible only when showAPInfo is on.
     const freqLabel = FREQ_LABEL_LONG[ap.frequency] ?? `${ap.frequency}G`
-    infoText.text = `${freqLabel} CH${ap.channel ?? '—'}/${ap.channelWidth ?? 20}\n${ap.txPower ?? '—'} dBm`
-    infoText.visible = !!editorState.showAPInfo
+    infoText.text = `${ap.name ?? ''}\n${freqLabel} CH${ap.channel ?? '—'}/${ap.channelWidth ?? 20}\n${ap.txPower ?? '—'} dBm`
+    const showInfo = !!editorState.showAPInfo
+    infoText.visible = showInfo
+    infoBg.clear()
+    if (showInfo) {
+      infoBg
+        .roundRect(-INFO_PILL_W / 2, AP_RADIUS + 20, INFO_PILL_W, INFO_PILL_H, 4)
+        .fill({ color: INFO_PILL_BG, alpha: 1 })
+      infoBg.visible = true
+    } else {
+      infoBg.visible = false
+    }
 
     // Per-band visibility filter.
     entry.container.visible = !!(editorState.showAPBand?.[ap.frequency] ?? true)
@@ -312,10 +355,37 @@ export function attachAPsLayer({
       }
     }
     if (s.selectedId !== lastSelectedId || s.selectedType !== lastSelectedType) {
+      const prevId = lastSelectedId
+      const prevType = lastSelectedType
       lastSelectedId = s.selectedId
       lastSelectedType = s.selectedType
+      // Redraw previously-selected and newly-selected AP markers so the
+      // red stroke + fan-selected emphasis paints / clears correctly.
+      if (prevType === 'ap' && prevId) {
+        const e = containers.get(prevId)
+        if (e) drawAP(e)
+      }
+      if (s.selectedType === 'ap' && s.selectedId) {
+        const e = containers.get(s.selectedId)
+        if (e) drawAP(e)
+      }
       recomputeFocus()
     }
+  }
+
+  // Hover invert (oldSrc Phase 23-3f): hovered + non-selected AP swaps the
+  // body fill / stroke (dark fill, white stroke). Tracked separately so we
+  // only redraw the two affected markers.
+  let lastHoverId = useHoverStore.getState().id
+  const onHoverChange = () => {
+    const s = useHoverStore.getState()
+    if (s.id === lastHoverId) return
+    const prevId = lastHoverId
+    lastHoverId = s.id
+    const prev = prevId ? containers.get(prevId) : null
+    const next = s.id ? containers.get(s.id) : null
+    if (prev) drawAP(prev)
+    if (next && next !== prev) drawAP(next)
   }
 
   const unsubFloor = useFloorStore.subscribe(() => { reconcile(); recomputeFocus() })
@@ -323,6 +393,7 @@ export function attachAPsLayer({
   const unsubCable = useCableStore.subscribe(recomputeFocus)
   const unsubDrag = useDragOverlayStore.subscribe(applyDragOverlay)
   const unsubEditor = useEditorStore.subscribe(onEditorChange)
+  const unsubHover = useHoverStore.subscribe(onHoverChange)
   reconcile()
   recomputeFocus()
 
@@ -332,6 +403,7 @@ export function attachAPsLayer({
     unsubCable()
     unsubDrag()
     unsubEditor()
+    unsubHover()
     for (const id of Array.from(containers.keys())) removeContainer(id)
   }
 }

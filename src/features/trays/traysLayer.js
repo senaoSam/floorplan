@@ -164,6 +164,13 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     const { haloG, bodyG, container, tray } = entry
     const sys = getTraySystem(tray.system)
     const magnetPx = tray.magnetDistance ?? 100
+
+    const editorState = useEditorStore.getState()
+    const hoverState = useHoverStore.getState()
+    const isSelected = editorState.selectedId === tray.id && editorState.selectedType === 'cable_tray'
+    const isHovered  = hoverState.id === tray.id && hoverState.type === 'cable_tray'
+    const isInvert   = isHovered && !isSelected
+
     haloG.clear()
     bodyG.clear()
 
@@ -177,11 +184,19 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
 
     // Channel — half-transparent body fill between two parallel borders
     // plus a dashed centreline in the system colour (Phase 17-1).
-    drawChannel(bodyG, tray.points, TRAY_CHANNEL_HALF_WIDTH, sys.color, sys.fill)
-    drawDashedCenterline(bodyG, tray.points, TRAY_CENTER_DASH[0], TRAY_CENTER_DASH[1], TRAY_CENTER_WIDTH, sys.color)
+    //
+    // Hover invert (oldSrc 23-3f): hovered + non-selected tray flips
+    // the body fill → sys.color, border → sys.fill (lighter), and the
+    // centreline goes white so the tray "lights up" without breaking
+    // its colour identity.
+    const channelColor = isInvert ? sys.fill : sys.color
+    const channelFill  = isInvert ? sys.color : sys.fill
+    drawChannel(bodyG, tray.points, TRAY_CHANNEL_HALF_WIDTH, channelColor, channelFill)
+    const centerCol = isInvert ? '#ffffff' : sys.color
+    drawDashedCenterline(bodyG, tray.points, TRAY_CENTER_DASH[0], TRAY_CENTER_DASH[1], TRAY_CENTER_WIDTH, centerCol)
 
     for (const p of tray.points) {
-      bodyG.circle(p.x, p.y, 3).fill({ color: sys.color, alpha: 1 })
+      bodyG.circle(p.x, p.y, 3).fill({ color: channelColor, alpha: 1 })
     }
     container.hitArea = makePolylineHitArea(tray.points, HIT_TOLERANCE_PX)
   }
@@ -280,15 +295,51 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     }
   }
 
+  // Hover invert + selection redraw — redraw only the affected tray(s).
+  let lastHoverId = useHoverStore.getState().id
+  const onHoverChange = () => {
+    const s = useHoverStore.getState()
+    if (s.id === lastHoverId) return
+    const prevId = lastHoverId
+    lastHoverId = s.id
+    const prev = prevId ? containers.get(prevId) : null
+    const next = s.id ? containers.get(s.id) : null
+    if (prev) drawTray(prev)
+    if (next && next !== prev) drawTray(next)
+  }
+
+  let lastSelectedId = useEditorStore.getState().selectedId
+  let lastSelectedType = useEditorStore.getState().selectedType
+  const onEditorChange = () => {
+    const s = useEditorStore.getState()
+    if (s.selectedId === lastSelectedId && s.selectedType === lastSelectedType) return
+    const prevId = lastSelectedId
+    const prevType = lastSelectedType
+    lastSelectedId = s.selectedId
+    lastSelectedType = s.selectedType
+    if (prevType === 'cable_tray' && prevId) {
+      const e = containers.get(prevId)
+      if (e) drawTray(e)
+    }
+    if (s.selectedType === 'cable_tray' && s.selectedId) {
+      const e = containers.get(s.selectedId)
+      if (e) drawTray(e)
+    }
+  }
+
   const unsubFloor = useFloorStore.subscribe(reconcile)
   const unsubCable = useCableStore.subscribe(reconcile)
   const unsubDrag = useDragOverlayStore.subscribe(applyDragOverlay)
+  const unsubHover = useHoverStore.subscribe(onHoverChange)
+  const unsubEditor = useEditorStore.subscribe(onEditorChange)
   reconcile()
 
   return () => {
     unsubFloor()
     unsubCable()
     unsubDrag()
+    unsubHover()
+    unsubEditor()
     for (const id of Array.from(containers.keys())) removeContainer(id)
   }
 }

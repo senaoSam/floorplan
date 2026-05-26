@@ -35,6 +35,18 @@ const LABEL_STYLE = new TextStyle({
   fontWeight: '700',
   align: 'center',
 })
+const NAME_STYLE = new TextStyle({
+  fill: '#ffffff',
+  fontFamily: 'system-ui, sans-serif',
+  fontSize: 11,
+  align: 'center',
+  dropShadow: {
+    color: '#000000',
+    blur: 4,
+    distance: 0,
+    alpha: 0.9,
+  },
+})
 const WARNING_STYLE = new TextStyle({
   fill: '#ffffff',
   fontFamily: 'system-ui, sans-serif',
@@ -66,15 +78,19 @@ export function attachSwitchesLayer({
       const label = new Text({ text: '', style: LABEL_STYLE })
       label.anchor.set(0.5, 0.5)
       label.eventMode = 'none'
+      const nameLabel = new Text({ text: '', style: NAME_STYLE })
+      nameLabel.anchor.set(0.5, 0)
+      nameLabel.eventMode = 'none'
       const warning = new Text({ text: '!', style: WARNING_STYLE })
       warning.anchor.set(0.5, 0.5)
       warning.eventMode = 'none'
       warning.visible = false
       c.addChild(g)
       c.addChild(label)
+      c.addChild(nameLabel)
       c.addChild(warning)
       layer.addChild(c)
-      entry = { container: c, graphics: g, label, warning, sw, floorId }
+      entry = { container: c, graphics: g, label, nameLabel, warning, sw, floorId }
       containers.set(sw.id, entry)
       bindInteractions(entry)
     } else {
@@ -93,7 +109,7 @@ export function attachSwitchesLayer({
   }
 
   const drawSwitch = (entry, overrideX, overrideY) => {
-    const { graphics, label, warning, container, sw } = entry
+    const { graphics, label, nameLabel, warning, container, sw } = entry
     const x = overrideX ?? sw.x
     const y = overrideY ?? sw.y
     container.position.set(x, y)
@@ -201,6 +217,12 @@ export function attachSwitchesLayer({
     label.text = getKindLabel(kind)
     label.style.fill = labelCol
     label.position.set(0, 0)
+
+    // Name label sits below the chassis (oldSrc convention — keeps the
+    // chassis itself compact while making the name unmistakable at a
+    // glance). Drop-shadow keeps it legible on light + dark backgrounds.
+    nameLabel.text = sw.name ?? ''
+    nameLabel.position.set(0, h / 2 + 4)
   }
 
   const bindInteractions = (entry) => {
