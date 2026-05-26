@@ -4,6 +4,8 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useCableStore } from '@/store/useCableStore'
+import { useScopeStore } from '@/store/useScopeStore'
+import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import ObjectContextMenu from './ObjectContextMenu'
 
 // Bridge between the store-driven contextMenu state and the generic
@@ -20,12 +22,15 @@ function ContextMenuMount() {
   const clearSelected = useEditorStore((s) => s.clearSelected)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
 
-  // Subscribe to all four stores so the menu re-renders if the target object
+  // Subscribe to all stores so the menu re-renders if the target object
   // gets mutated underneath (e.g. rename via another path).
   const apsByFloor = useAPStore((s) => s.apsByFloor)
   const wallsByFloor = useWallStore((s) => s.wallsByFloor)
   const switchesByFloor = useCableStore((s) => s.switchesByFloor)
   const traysByFloor = useCableStore((s) => s.traysByFloor)
+  const scopesByFloor = useScopeStore((s) => s.scopesByFloor)
+  const floorHolesByFloor = useFloorHoleStore((s) => s.floorHolesByFloor)
+  const floors = useFloorStore((s) => s.floors)
 
   if (!ctx || !activeFloorId) return null
 
@@ -35,6 +40,7 @@ function ContextMenuMount() {
   let title = ''
   let onRename = null
   let onDelete = null
+  let deleteLabel = '刪除'
 
   if (targetType === 'ap') {
     target = (apsByFloor[activeFloorId] ?? []).find((a) => a.id === targetId)
@@ -68,6 +74,42 @@ function ContextMenuMount() {
       useWallStore.getState().removeWall(activeFloorId, targetId)
       clearSelected()
     }
+  } else if (targetType === 'scope') {
+    target = (scopesByFloor[activeFloorId] ?? []).find((s) => s.id === targetId)
+    title = target?.name ?? targetId
+    onRename = (name) => useScopeStore.getState().updateScope(activeFloorId, targetId, { name })
+    onDelete = () => {
+      useScopeStore.getState().removeScope(activeFloorId, targetId)
+      clearSelected()
+    }
+  } else if (targetType === 'floor_hole') {
+    target = (floorHolesByFloor[activeFloorId] ?? []).find((h) => h.id === targetId)
+    title = target?.name ?? targetId
+    onRename = (name) => useFloorHoleStore.getState().updateFloorHole(activeFloorId, targetId, { name })
+    onDelete = () => {
+      useFloorHoleStore.getState().removeFloorHole(activeFloorId, targetId)
+      clearSelected()
+    }
+  } else if (targetType === 'floor_image') {
+    // Floor image has no name and no native "delete" — `刪除` here means
+    // detach the imageUrl from the floor record (oldSrc Editor2D.jsx).
+    const f = floors.find((x) => x.id === targetId)
+    target = f ? { id: targetId, name: f.name } : null
+    title = f ? `${f.name} 底圖` : `${targetId} 底圖`
+    onRename = null
+    deleteLabel = '移除底圖'
+    onDelete = () => {
+      useFloorStore.getState().updateFloor(targetId, {
+        imageUrl: null,
+        imageWidth: undefined,
+        imageHeight: undefined,
+        cropX: null,
+        cropY: null,
+        cropWidth: null,
+        cropHeight: null,
+      })
+      clearSelected()
+    }
   }
 
   if (!target) {
@@ -89,7 +131,7 @@ function ContextMenuMount() {
   }
   items.push({
     id: 'delete',
-    label: '刪除',
+    label: deleteLabel,
     danger: true,
     shortcut: 'Del',
     onClick: onDelete,

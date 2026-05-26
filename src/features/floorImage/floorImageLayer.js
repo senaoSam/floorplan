@@ -4,9 +4,9 @@ import { Assets, Sprite } from 'pixi.js'
 // floor's image as a PIXI.Sprite into scene.layers.floorImage. On floor swap
 // the previous sprite is removed and the new one fitted into the viewport.
 //
-// Demonstrates the canonical store-subscribe → diff → mutate-PixiJS pattern
-// each layer will follow.
-export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore }) {
+// Right-click context menu (oldSrc): "Delete" detaches the imageUrl from
+// the floor record (image disappears, floor stays).
+export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, useEditorStore }) {
   const layer = scene.layers.floorImage
   let currentSprite = null
   let currentFloorId = null
@@ -60,11 +60,25 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore }
 
       clearSprite()
       const sprite = new Sprite(texture)
-      sprite.eventMode = 'none' // floor image is pure backdrop; never intercept clicks
+      // Right-click on the floor image opens its context menu (Delete →
+      // detach imageUrl). Left-click should fall through to whatever
+      // editor mode is active, so only react to RMB.
+      sprite.eventMode = 'static'
       sprite.x = 0
       sprite.y = 0
       sprite.width = floor.imageWidth
       sprite.height = floor.imageHeight
+      sprite.on('pointerdown', (e) => {
+        if (e.button !== 2) return  // RMB only — let LMB pass through
+        if (!useEditorStore) return
+        e.stopPropagation()
+        useEditorStore.getState().openContextMenu({
+          targetType: 'floor_image',
+          targetId: floor.id,
+          screenX: e.originalEvent?.clientX ?? 0,
+          screenY: e.originalEvent?.clientY ?? 0,
+        })
+      })
       layer.addChild(sprite)
       currentSprite = sprite
       currentFloorId = floor.id

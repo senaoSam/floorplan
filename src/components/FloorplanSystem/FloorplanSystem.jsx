@@ -167,6 +167,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         scene: s,
         useFloorStore,
         useViewportStore,
+        useEditorStore,
       })
       detachWalls = attachWallsLayer({
         scene: s,
@@ -246,6 +247,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       detachDraftOverlay = attachDraftOverlay({
         scene: s,
         useDraftStore,
+        useCableStore,
+        useFloorStore,
       })
       detachHandles = attachHandlesLayer({
         scene: s,
