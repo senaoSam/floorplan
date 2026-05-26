@@ -125,12 +125,13 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
 
     graphics.clear()
 
-    // (1) Hover glow — wide white beam (22 px @ 0.45 alpha) behind the
-    // body so the wall lights up under the cursor (oldSrc 23-3f convention).
+    // (1) Hover glow — slim white outline (bodyWidth + 2 px) behind the
+    // body so the wall lights up under the cursor without engulfing
+    // adjacent walls.
     if (isHovered && !isSelected) {
       graphics
         .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
-        .stroke({ width: 22, color: '#ffffff', alpha: 0.45, cap: 'round' })
+        .stroke({ width: bodyWidth + 2, color: '#ffffff', alpha: 0.6, cap: 'round' })
     }
 
     // (2) Black outline halo for contrast.

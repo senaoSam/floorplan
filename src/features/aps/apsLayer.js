@@ -30,7 +30,7 @@ const FALLBACK_COLOR = '#9aa3ad'
 const colorForAP = (ap) => FREQ_COLOR[ap.frequency] ?? FALLBACK_COLOR
 
 const AP_RADIUS = 10
-const FOCUS_RING_RADIUS = AP_RADIUS + 5
+const FOCUS_RING_RADIUS = AP_RADIUS + 1
 const DIR_INNER_R = 17
 const DIR_OUTER_R = 36
 const SELECT_STROKE = '#e74c3c'

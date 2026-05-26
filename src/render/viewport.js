@@ -87,7 +87,12 @@ export function bindViewport({
     if (typeof window !== 'undefined' && window.__debugWallSelect) {
       window.__wallHitTrace = []
     }
-    vlog('pointerdown target=', e.target?.label ?? e.target?.constructor?.name, 'isBackground=', isBackground, 'button=', button, 'global=', `${e.global.x.toFixed(1)},${e.global.y.toFixed(1)}`)
+    // Only log background clicks — object clicks bubble through the stage
+    // too but the per-layer logs (`[wall] pointerdown ...`, etc.) already
+    // cover those. Logging both made every successful click double-print.
+    if (isBackground) {
+      vlog('pointerdown target=', e.target?.label ?? e.target?.constructor?.name, 'isBackground=', isBackground, 'button=', button, 'global=', `${e.global.x.toFixed(1)},${e.global.y.toFixed(1)}`)
+    }
     const isMiddle = button === 1
     const isLeftPan = button === 0 && spaceDown
     if (isMiddle || isLeftPan) {
