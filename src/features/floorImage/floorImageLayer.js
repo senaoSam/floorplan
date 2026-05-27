@@ -69,6 +69,9 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, 
       sprite.width = floor.imageWidth
       sprite.height = floor.imageHeight
       sprite.on('pointerdown', (e) => {
+        if (typeof window !== 'undefined' && window.__debugRMB !== false) {
+          console.log('[RMB floor_image] pointerdown id=', floor.id, 'btn=', e.button)
+        }
         if (e.button !== 2) return  // RMB only — let LMB pass through
         if (!useEditorStore) return
         e.stopPropagation()

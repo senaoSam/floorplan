@@ -32,6 +32,9 @@ function ContextMenuMount() {
   const floorHolesByFloor = useFloorHoleStore((s) => s.floorHolesByFloor)
   const floors = useFloorStore((s) => s.floors)
 
+  if (typeof window !== 'undefined' && window.__debugRMB !== false) {
+    console.log('[RMB ContextMenuMount] render ctx=', ctx, 'activeFloorId=', activeFloorId)
+  }
   if (!ctx || !activeFloorId) return null
 
   const { targetType, targetId, screenX, screenY } = ctx

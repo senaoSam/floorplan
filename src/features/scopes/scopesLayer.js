@@ -144,6 +144,9 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
   const bindInteractions = (entry) => {
     const { container } = entry
     container.on('pointerdown', (e) => {
+      if (typeof window !== 'undefined' && window.__debugRMB !== false) {
+        console.log('[RMB scope] pointerdown id=', entry.scope.id, 'btn=', e.button)
+      }
       if (e.button === 2) {
         e.stopPropagation()
         useEditorStore.getState().openContextMenu({

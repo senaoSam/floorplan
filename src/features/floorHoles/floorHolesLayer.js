@@ -90,6 +90,9 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
   const bindInteractions = (entry) => {
     const { container } = entry
     container.on('pointerdown', (e) => {
+      if (typeof window !== 'undefined' && window.__debugRMB !== false) {
+        console.log('[RMB hole] pointerdown id=', entry.hole.id, 'btn=', e.button)
+      }
       if (e.button === 2) {
         e.stopPropagation()
         useEditorStore.getState().openContextMenu({
