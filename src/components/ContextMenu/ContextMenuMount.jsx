@@ -32,7 +32,6 @@ function ContextMenuMount() {
   const traysByFloor = useCableStore((s) => s.traysByFloor)
   const scopesByFloor = useScopeStore((s) => s.scopesByFloor)
   const floorHolesByFloor = useFloorHoleStore((s) => s.floorHolesByFloor)
-  const floors = useFloorStore((s) => s.floors)
 
   if (typeof window !== 'undefined' && window.__debugRMB === true) {
     console.log('[RMB ContextMenuMount] render ctx=', ctx, 'activeFloorId=', activeFloorId)
@@ -95,27 +94,10 @@ function ContextMenuMount() {
       useFloorHoleStore.getState().removeFloorHole(activeFloorId, targetId)
       clearSelected()
     }
-  } else if (targetType === 'floor_image') {
-    // Floor image has no name and no native "delete" — `刪除` here means
-    // detach the imageUrl from the floor record (oldSrc Editor2D.jsx).
-    const f = floors.find((x) => x.id === targetId)
-    target = f ? { id: targetId, name: f.name } : null
-    title = f ? `${f.name} 底圖` : `${targetId} 底圖`
-    onRename = null
-    deleteLabel = '移除底圖'
-    onDelete = () => {
-      useFloorStore.getState().updateFloor(targetId, {
-        imageUrl: null,
-        imageWidth: undefined,
-        imageHeight: undefined,
-        cropX: null,
-        cropY: null,
-        cropWidth: null,
-        cropHeight: null,
-      })
-      clearSelected()
-    }
   }
+  // (Floor image is intentionally non-interactive — pure backdrop. No
+  // right-click menu, no delete from canvas; deletion would happen via
+  // floor record management in the sidebar / panels.)
 
   if (!target) {
     // Target was removed underneath; close menu silently.

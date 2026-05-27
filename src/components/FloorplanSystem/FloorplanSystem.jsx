@@ -167,7 +167,6 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         scene: s,
         useFloorStore,
         useViewportStore,
-        useEditorStore,
       })
       detachWalls = attachWallsLayer({
         scene: s,

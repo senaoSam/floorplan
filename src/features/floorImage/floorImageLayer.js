@@ -4,9 +4,12 @@ import { Assets, Sprite } from 'pixi.js'
 // floor's image as a PIXI.Sprite into scene.layers.floorImage. On floor swap
 // the previous sprite is removed and the new one fitted into the viewport.
 //
-// Right-click context menu (oldSrc): "Delete" detaches the imageUrl from
-// the floor record (image disappears, floor stays).
-export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, useEditorStore }) {
+// The sprite is `eventMode='none'` (pure visual backdrop) — it must not
+// claim pointer events, otherwise PIXI's hit-test stops here and draw
+// modes (DRAW_SCOPE / DRAW_CABLE_TRAY / etc.) can't get their background
+// click to the stage handler. No right-click menu either — floor image
+// is not deletable from canvas; the floor record's other panels own that.
+export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore }) {
   const layer = scene.layers.floorImage
   let currentSprite = null
   let currentFloorId = null
@@ -60,28 +63,11 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, 
 
       clearSprite()
       const sprite = new Sprite(texture)
-      // Right-click on the floor image opens its context menu (Delete →
-      // detach imageUrl). Left-click should fall through to whatever
-      // editor mode is active, so only react to RMB.
-      sprite.eventMode = 'static'
+      sprite.eventMode = 'none' // floor image is pure backdrop; never intercept clicks
       sprite.x = 0
       sprite.y = 0
       sprite.width = floor.imageWidth
       sprite.height = floor.imageHeight
-      sprite.on('pointerdown', (e) => {
-        if (typeof window !== 'undefined' && window.__debugRMB === true) {
-          console.log('[RMB floor_image] pointerdown id=', floor.id, 'btn=', e.button)
-        }
-        if (e.button !== 2) return  // RMB only — let LMB pass through
-        if (!useEditorStore) return
-        e.stopPropagation()
-        useEditorStore.getState().openContextMenu({
-          targetType: 'floor_image',
-          targetId: floor.id,
-          screenX: e.originalEvent?.clientX ?? 0,
-          screenY: e.originalEvent?.clientY ?? 0,
-        })
-      })
       layer.addChild(sprite)
       currentSprite = sprite
       currentFloorId = floor.id
