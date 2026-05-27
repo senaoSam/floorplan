@@ -1,4 +1,4 @@
-import { Assets, Sprite } from 'pixi.js'
+import { Assets, Sprite, Graphics } from 'pixi.js'
 
 // Floor image adapter — subscribes to useFloorStore and mounts the active
 // floor's image as a PIXI.Sprite into scene.layers.floorImage. On floor swap
@@ -12,17 +12,51 @@ import { Assets, Sprite } from 'pixi.js'
 export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore }) {
   const layer = scene.layers.floorImage
   let currentSprite = null
+  let currentMask = null   // Graphics rect used as sprite.mask when floor has cropX/Y/W/H
   let currentFloorId = null
   let currentImageUrl = null
   let pendingLoadKey = null
 
+  const clearMask = () => {
+    if (!currentMask) return
+    layer.removeChild(currentMask)
+    currentMask.destroy()
+    currentMask = null
+    if (currentSprite) currentSprite.mask = null
+  }
+
   const clearSprite = () => {
+    clearMask()
     if (!currentSprite) return
     layer.removeChild(currentSprite)
     currentSprite.destroy({ children: true, texture: false })
     currentSprite = null
     currentFloorId = null
     currentImageUrl = null
+  }
+
+  // Refresh the crop mask from the floor record. Called whenever the
+  // floor's cropX/Y/W/H change (via useFloorStore.subscribe) so the
+  // sprite reflects the new crop without rebuilding.
+  const applyCrop = (floor) => {
+    if (!currentSprite || !floor) return
+    const hasCrop =
+      floor.cropX != null && floor.cropY != null &&
+      floor.cropWidth != null && floor.cropHeight != null &&
+      floor.cropWidth > 0 && floor.cropHeight > 0
+    if (!hasCrop) {
+      clearMask()
+      return
+    }
+    if (!currentMask) {
+      currentMask = new Graphics()
+      currentMask.eventMode = 'none'
+      layer.addChild(currentMask)
+      currentSprite.mask = currentMask
+    }
+    currentMask.clear()
+    currentMask.rect(floor.cropX, floor.cropY, floor.cropWidth, floor.cropHeight)
+      .fill({ color: 0xffffff, alpha: 1 })
   }
 
   const fitViewportTo = (imageWidth, imageHeight) => {
@@ -50,6 +84,8 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore }
     }
 
     if (floor.id === currentFloorId && floor.imageUrl === currentImageUrl) {
+      // Same floor, same texture — only crop may have changed.
+      applyCrop(floor)
       return
     }
 
@@ -73,6 +109,7 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore }
       currentFloorId = floor.id
       currentImageUrl = floor.imageUrl
 
+      applyCrop(floor)
       fitViewportTo(floor.imageWidth, floor.imageHeight)
     } catch (err) {
       console.error('[floorImageLayer] failed to load', floor.imageUrl, err)

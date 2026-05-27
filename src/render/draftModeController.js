@@ -14,6 +14,7 @@ const DRAW_MODES = new Set([
   EDITOR_MODE.DRAW_FLOOR_HOLE,
   EDITOR_MODE.DRAW_CABLE_TRAY,
   EDITOR_MODE.DRAW_SCALE,
+  EDITOR_MODE.CROP_IMAGE,
 ])
 
 export function createDraftModeController({
@@ -129,6 +130,26 @@ export function createDraftModeController({
         onRequestScaleDialog({ p0: draft.points[0], p1: snapped })
       }
       useDraftStore.getState().clearDraft()
+      return
+    }
+    if (mode === EDITOR_MODE.CROP_IMAGE) {
+      // Second click → commit crop rect to the floor record + return to
+      // SELECT mode and select the floor image (oldSrc Editor2D 1279-1296).
+      // Floor image sprite sits at world (0,0) so world coords == image
+      // coords; no toImagePos conversion needed.
+      const p0 = draft.points[0]
+      const p1 = snapped
+      const x = Math.min(p0.x, p1.x)
+      const y = Math.min(p0.y, p1.y)
+      const w = Math.abs(p1.x - p0.x)
+      const h = Math.abs(p1.y - p0.y)
+      const fid = useFloorStore.getState().activeFloorId
+      if (w > 2 && h > 2 && fid) {
+        useFloorStore.getState().updateFloor(fid, { cropX: x, cropY: y, cropWidth: w, cropHeight: h })
+      }
+      useDraftStore.getState().clearDraft()
+      useEditorStore.getState().setEditorMode(EDITOR_MODE.SELECT)
+      if (fid) useEditorStore.getState().setSelected(fid, 'floor_image')
       return
     }
     useDraftStore.getState().addPoint(snapped)

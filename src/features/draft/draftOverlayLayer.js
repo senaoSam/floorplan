@@ -103,7 +103,40 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
       drawWallDraft(g, points, cursor)
       return
     }
+    if (mode === EDITOR_MODE.CROP_IMAGE) {
+      drawCropDraft(g, points, cursor)
+      return
+    }
     drawPolyDraft(g, mode, points, cursor)
+  }
+
+  // CROP_IMAGE draft preview (oldSrc CropLayer): dashed cyan rect from
+  // click1 to cursor + dark mask outside the rect (so the user can see
+  // what part of the image they'll keep). The actual crop is committed
+  // to floor.cropX/Y/Width/Height on the 2nd click — draftModeController
+  // owns that. We only handle the visual preview here.
+  function drawCropDraft(g, points, cursor) {
+    if (!cursor || points.length === 0) return
+    const vpScale = useViewportStore.getState().scale || 1
+    const s = 1 / vpScale
+    const p0 = points[0]
+    const x = Math.min(p0.x, cursor.x)
+    const y = Math.min(p0.y, cursor.y)
+    const w = Math.abs(cursor.x - p0.x)
+    const h = Math.abs(cursor.y - p0.y)
+    if (w < 1 || h < 1) return
+    // Dashed cyan border (oldSrc BORDER_COLOR #00e5ff, dash [8, 4] * 1/scale).
+    drawDashedSegment(g, x,     y,     x + w, y,     '#00e5ff', 2 * s, 8 * s, 4 * s, 1)
+    drawDashedSegment(g, x + w, y,     x + w, y + h, '#00e5ff', 2 * s, 8 * s, 4 * s, 1)
+    drawDashedSegment(g, x + w, y + h, x,     y + h, '#00e5ff', 2 * s, 8 * s, 4 * s, 1)
+    drawDashedSegment(g, x,     y + h, x,     y,     '#00e5ff', 2 * s, 8 * s, 4 * s, 1)
+    // Rule-of-thirds guides — faint vertical / horizontal lines.
+    for (const frac of [1 / 3, 2 / 3]) {
+      g.moveTo(x + w * frac, y).lineTo(x + w * frac, y + h)
+        .stroke({ width: 0.5 * s, color: '#00e5ff', alpha: 0.4 })
+      g.moveTo(x, y + h * frac).lineTo(x + w, y + h * frac)
+        .stroke({ width: 0.5 * s, color: '#00e5ff', alpha: 0.4 })
+    }
   }
 
   // Wall: dashed cyan ghost + cyan endpoint marker at the draft start
