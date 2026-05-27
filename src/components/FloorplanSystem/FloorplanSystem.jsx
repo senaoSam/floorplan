@@ -4,6 +4,7 @@ import { bindViewport } from '@/render/viewport'
 import { attachModeAdapter } from '@/render/modeAdapter'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { collectMarqueeHits } from '@/features/marquee/marqueeHits'
+import { greedyChannelAssign } from '@/utils/autoChannelPlan'
 import { attachFloorImageLayer } from '@/features/floorImage/floorImageLayer'
 import { attachWallsLayer } from '@/features/walls/wallsLayer'
 import { attachAPsLayer } from '@/features/aps/apsLayer'
@@ -140,10 +141,21 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           const cable = useCableStore.getState()
           if (editor.editorMode === EDITOR_MODE.PLACE_AP) {
             const band = editor.placeApBand ?? 5
-            const channel = band === 2.4 ? 1 : band === 5 ? 36 : 1
+            const defaultChannel = band === 2.4 ? 1 : band === 5 ? 36 : 1
             const width = band === 2.4 ? 20 : 80
+            const newId = `ap-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
+            // Auto-channel-on-place (oldSrc Editor2D 1164-1170): probe greedy
+            // assignment including the new AP, take its assignment if any.
+            let channel = defaultChannel
+            if (editor.autoChannelOnPlace) {
+              const existing = useAPStore.getState().apsByFloor[fid] ?? []
+              const probe = [...existing, { id: newId, x, y, frequency: band }]
+              const assignments = greedyChannelAssign(probe, editor.regulatoryDomain)
+              const picked = assignments.get(newId)
+              if (picked) channel = picked.channel
+            }
             const ap = {
-              id: `ap-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+              id: newId,
               name: useAPStore.getState().nextAPName(),
               x, y, z: 2.4,
               txPower: 20,
