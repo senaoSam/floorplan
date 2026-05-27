@@ -1,4 +1,4 @@
-# Session Handoff — 2026-05-27 (Phase 25 — Bundles 10–24 shipped)
+# Session Handoff — 2026-05-27 (Phase 25 — Bundles 10–26 shipped)
 
 > 新 session **必讀**順序：
 > 1. `CLAUDE.md`（專案規則 + Session Start 流程）
@@ -31,10 +31,12 @@ User 多次強調 + 抓 bug 都是因為這條被破壞：
 
 ## 1. 現況一句話
 
-**Phase 25 PixiJS hybrid 重構 — Bundles 10-24 完成全 Tier 1A oldSrc port + capability matrix + undo/redo + marquee 跨層 + tray snap + cable riser + PNG export + AutoPowerModal + AI walls modal。剩 perf shader (31-4/5/6) 跟 3D viewer 沒做。**
+**Phase 25 PixiJS hybrid 重構 — Bundles 10-26 完成 Tier 1A oldSrc port + capability matrix + undo/redo + marquee 跨層 + tray snap + cable riser + PNG export + AutoPowerModal + AI walls + CableSummaryPanel BOM + auto-channel-on-place。剩 perf shader (31-4/5/6) / 3D viewer / FloorImage transform / crop image mode 沒做。**
 
 commits（最新在上）：
 ```
+c04b598  Bundle 26 — Auto-channel-on-place wired into PLACE_AP
+37f8b79  Bundle 25 — CableSummaryPanel full BOM port + CSV/PDF export
 d325864  Bundle 24 — AI walls modal (Gemini + OpenCV HoughLinesP)
 e8e39b6  Bundle 23 — AutoPowerModal (heatmap-driven AP power planner)
 83c6cdb  Bundle 22 — PNG export (oldSrc workflow, PIXI v8 extract)
@@ -150,13 +152,13 @@ efcad22  Bundle 2 — Sidebar overhaul + ProgressPanel
 - ✅ ~~AutoPowerModal~~ — Bundle 23
 - ✅ ~~PNG 匯出~~ — Bundle 22
 - ✅ ~~AI walls modal~~ — Bundle 24
-- Crop image mode（沒做）
-- DRAW_SCALE → ScaleDialog wiring 沒完整測（用 prompt() 取代 dialog）
-- Auto-channel on place（已 port `autoChannelPlan.js` + apModels，沒接 placement）
+- ✅ ~~Auto-channel on place~~ — Bundle 26
+- ✅ ~~DRAW_SCALE ScaleDialog~~ — 一直都在，沒問題（不是用 prompt）
+- Crop image mode（CROP_IMAGE 模式 enum 有，沒實作 click 流程）
 
-### Audit polish (小, 大多是 feature 沒做不是 polish)
+### Audit polish (小)
 
-- E3 CableSummaryPanel BOM 細分 + CSV/PDF export — 從 119 → 598 LoC
+- ✅ ~~E3 CableSummaryPanel BOM~~ — Bundle 25
 - F7 FloorImage crop / rotation / opacity / align transform — full feature
 - B1 `floor_image` / `floor_align` panel route（占位中）
 
