@@ -61,6 +61,13 @@ export function attachHandlesLayer({
   const root = new Container()
   layer.addChild(root)
 
+  // True while a handle drag is in flight. While true, rebuild() bails
+  // so the dragged Container isn't destroyed by an unrelated store
+  // change (hover hopping onto a wall, AP / SW drag overlay updates,
+  // viewport zoom, etc.). On dragend we explicitly rebuild() so the
+  // handles re-render at the committed positions.
+  let isDragging = false
+
   const targetWall = () => {
     const editor = useEditorStore.getState()
     const hover = useHoverStore.getState()
@@ -84,6 +91,7 @@ export function attachHandlesLayer({
   }
 
   const rebuild = () => {
+    if (isDragging) return
     while (root.children.length > 0) {
       const c = root.children[0]
       root.removeChild(c)
@@ -153,6 +161,7 @@ export function attachHandlesLayer({
       if ((e.button ?? 0) !== 0) return
       e.stopPropagation()
       dragMoved = false
+      isDragging = true
       const stage = scene.app.stage
       const startWorld = scene.world.toLocal(e.global)
       const original = { x: wall[end + 'X'], y: wall[end + 'Y'] }
@@ -181,6 +190,9 @@ export function attachHandlesLayer({
         stage.off('pointermove', onMove)
         stage.off('pointerup', onUp)
         stage.off('pointerupoutside', onUp)
+        isDragging = false
+        rebuild()
+        applyInverseScale()
       }
       stage.on('pointermove', onMove)
       stage.on('pointerup', onUp)
@@ -212,6 +224,7 @@ export function attachHandlesLayer({
     handle.on('pointerdown', (e) => {
       if ((e.button ?? 0) !== 0) return
       e.stopPropagation()
+      isDragging = true
       const stage = scene.app.stage
       const startWorld = scene.world.toLocal(e.global)
       const original = { x: tray.points[vertexIdx].x, y: tray.points[vertexIdx].y }
@@ -254,6 +267,12 @@ export function attachHandlesLayer({
           }
         }
         useDragOverlayStore.getState().setTrayVertex(null)
+        isDragging = false
+        // Rebuild now so the handle dots re-render at the committed
+        // canonical positions (and any pending hover-driven swap to
+        // wall handles takes effect if applicable).
+        rebuild()
+        applyInverseScale()
       }
       stage.on('pointermove', onMove)
       stage.on('pointerup', onUp)
