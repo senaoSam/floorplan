@@ -350,11 +350,14 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
       }
       if (e.button === 2) {
         e.stopPropagation()
+        const { hitContext, mergeCandidate } = computeTrayRmbContext(entry, e)
         useEditorStore.getState().openContextMenu({
           targetType: 'cable_tray',
           targetId: entry.tray.id,
           screenX: e.originalEvent?.clientX ?? 0,
           screenY: e.originalEvent?.clientY ?? 0,
+          hitContext,
+          mergeCandidate,
         })
         return
       }
@@ -365,6 +368,61 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     })
     container.on('pointerover', () => useHoverStore.getState().setHover(entry.tray.id, 'cable_tray'))
     container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.tray.id))
+  }
+
+  // Ports oldSrc Editor2D.jsx `handleTrayContextMenu` (lines 1380-1443):
+  // identify whether the cursor is on a tray segment or near an endpoint,
+  // and for endpoint clicks look up a single 2-tray merge candidate
+  // (another tray whose endpoint xy exactly matches — graph builder
+  // coincidence-merge rule, cable-spec §10 / 12-2d).
+  const computeTrayRmbContext = (entry, e) => {
+    const vpScale = useViewportStore.getState().scale || 1
+    const threshSegPx = 14 / vpScale
+    const threshEndpointPx = 18 / vpScale
+    const world = scene.world.toLocal(e.global)
+    const pts = entry.tray.points
+    // Best segment foot.
+    let bestSegIdx = -1, bestFoot = null, bestDist = threshSegPx
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1]
+      const dx = b.x - a.x, dy = b.y - a.y
+      const lenSq = dx * dx + dy * dy
+      if (lenSq < 1e-6) continue
+      const tt = Math.max(0, Math.min(1, ((world.x - a.x) * dx + (world.y - a.y) * dy) / lenSq))
+      const fx = a.x + tt * dx, fy = a.y + tt * dy
+      const d = Math.hypot(world.x - fx, world.y - fy)
+      if (d < bestDist) { bestDist = d; bestSegIdx = i; bestFoot = { x: fx, y: fy } }
+    }
+    // Endpoint test against this tray only.
+    const distStart = Math.hypot(world.x - pts[0].x, world.y - pts[0].y)
+    const distEnd   = Math.hypot(world.x - pts[pts.length - 1].x, world.y - pts[pts.length - 1].y)
+    const endpointIdx = distStart <= distEnd ? 0 : pts.length - 1
+    const endpointDist = Math.min(distStart, distEnd)
+    let hitContext
+    if (endpointDist <= threshEndpointPx) {
+      hitContext = { kind: 'endpoint', endpointIdx }
+    } else if (bestSegIdx >= 0) {
+      hitContext = { kind: 'segment', segIdx: bestSegIdx, foot: bestFoot }
+    } else {
+      hitContext = { kind: 'body' }
+    }
+    // Merge candidate (endpoint hit only). Exact xy match (no epsilon)
+    // — matches the graph builder. Ambiguous > 1 → null.
+    let mergeCandidate = null
+    if (hitContext.kind === 'endpoint') {
+      const ep = pts[endpointIdx]
+      const allTrays = useCableStore.getState().traysByFloor[entry.floorId] ?? []
+      const matches = []
+      for (const t of allTrays) {
+        if (t.id === entry.tray.id) continue
+        const sp = t.points[0]
+        const epp = t.points[t.points.length - 1]
+        if (sp.x === ep.x && sp.y === ep.y) matches.push({ trayId: t.id, side: 'start' })
+        else if (epp.x === ep.x && epp.y === ep.y) matches.push({ trayId: t.id, side: 'end' })
+      }
+      if (matches.length === 1) mergeCandidate = matches[0]
+    }
+    return { hitContext, mergeCandidate }
   }
 
   const beginDrag = (entry, downEvent) => {

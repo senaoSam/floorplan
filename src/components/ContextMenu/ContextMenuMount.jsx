@@ -1,11 +1,13 @@
 import React from 'react'
-import { useEditorStore } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useWallStore } from '@/store/useWallStore'
-import { useCableStore } from '@/store/useCableStore'
+import { useCableStore, TRAY_SYSTEMS } from '@/store/useCableStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
+import { useDraftStore } from '@/store/useDraftStore'
+import { generateId } from '@/utils/id'
 import ObjectContextMenu from './ObjectContextMenu'
 
 // Bridge between the store-driven contextMenu state and the generic
@@ -128,20 +130,24 @@ function ContextMenuMount() {
   const isSelected = selectedId === targetId
 
   const items = []
-  if (!isSelected) {
+  if (targetType === 'cable_tray') {
+    buildTrayItems(items, ctx, target, activeFloorId, traysByFloor, setSelected, isSelected, onDelete)
+  } else {
+    if (!isSelected) {
+      items.push({
+        id: 'select',
+        label: '選取',
+        onClick: () => setSelected(targetId, targetType),
+      })
+    }
     items.push({
-      id: 'select',
-      label: '選取',
-      onClick: () => setSelected(targetId, targetType),
+      id: 'delete',
+      label: deleteLabel,
+      danger: true,
+      shortcut: 'Del',
+      onClick: onDelete,
     })
   }
-  items.push({
-    id: 'delete',
-    label: deleteLabel,
-    danger: true,
-    shortcut: 'Del',
-    onClick: onDelete,
-  })
 
   // `key` includes targetType + targetId + screen xy so that EVERY new
   // openContextMenu (different object OR same object at a different click
@@ -164,6 +170,119 @@ function ContextMenuMount() {
       onClose={closeContextMenu}
     />
   )
+}
+
+// Build the rich tray context-menu items list (oldSrc Editor2D.jsx
+// 2014-2140). Surfaces 選取 / 在此切割 / 從此端延伸 / 合併相鄰 tray /
+// 轉換系統 (submenu w/ color swatches) / 刪除.
+//
+// hitContext is what the tray layer computed at right-click time:
+//   { kind: 'segment', segIdx, foot }   ← clicked mid-segment
+//   { kind: 'endpoint', endpointIdx }   ← clicked near an endpoint
+//   { kind: 'body' }                    ← clicked but outside seg/endpoint thresholds
+// mergeCandidate (endpoint hits only): { trayId, side } | null
+function buildTrayItems(items, ctx, tray, floorId, traysByFloor, setSelected, isSelected, onDelete) {
+  const { hitContext, mergeCandidate } = ctx
+  const canSelect = !isSelected
+  const canSplit  = hitContext?.kind === 'segment'
+  const canEndpoint = hitContext?.kind === 'endpoint'
+  const canMerge  = canEndpoint && !!mergeCandidate
+  const mergeTarget = mergeCandidate
+    ? (traysByFloor[floorId] ?? []).find((t) => t.id === mergeCandidate.trayId)
+    : null
+
+  if (canSelect) {
+    items.push({ id: 'select', label: '選取', onClick: () => setSelected(tray.id, 'cable_tray') })
+    items.push({ id: 'div-after-select', kind: 'divider' })
+  }
+
+  // Split: replace the tray with two new trays meeting at the perpendicular
+  // foot of the right-click. Both share the foot xy so the graph builder's
+  // coincidence-merge (cable-spec §10 / 12-2d) treats them as one node.
+  items.push({
+    id: 'split',
+    label: '在此切割',
+    disabled: !canSplit,
+    hint: canSplit ? '在點擊處將 tray 切成兩段（共用 vertex）' : '在線段中段點右鍵才能切割',
+    onClick: canSplit ? () => {
+      const { segIdx, foot } = hitContext
+      const ptsA = [...tray.points.slice(0, segIdx + 1), foot]
+      const ptsB = [foot, ...tray.points.slice(segIdx + 1)]
+      const floor = useFloorStore.getState().floors.find((f) => f.id === floorId)
+      useCableStore.getState().removeTray(floorId, tray.id)
+      const nameA = useCableStore.getState().nextTrayName({ floor })
+      useCableStore.getState().addTray(floorId, { ...tray, id: generateId('tray'), name: nameA, points: ptsA })
+      const nameB = useCableStore.getState().nextTrayName({ floor })
+      useCableStore.getState().addTray(floorId, { ...tray, id: generateId('tray'), name: nameB, points: ptsB })
+    } : undefined,
+  })
+
+  // Extend: enter DRAW_CABLE_TRAY with the draft seeded at this endpoint.
+  // The user's next clicks append vertices; finishing creates a NEW tray
+  // that meets the original at exact xy (graph stays connected).
+  items.push({
+    id: 'extend',
+    label: '從此端延伸',
+    disabled: !canEndpoint,
+    hint: canEndpoint ? '從這個端點開始畫一條延伸的新 tray（共用端點 xy）' : '在端點附近右鍵才能延伸',
+    onClick: canEndpoint ? () => {
+      const ep = tray.points[hitContext.endpointIdx]
+      useEditorStore.getState().setEditorMode(EDITOR_MODE.DRAW_CABLE_TRAY)
+      useDraftStore.getState().beginDraft(EDITOR_MODE.DRAW_CABLE_TRAY, ep)
+    } : undefined,
+  })
+
+  // Merge: combine the picked tray with the unique adjacent tray that
+  // shares this endpoint xy. Result inherits the picked tray's metadata.
+  items.push({
+    id: 'merge',
+    label: '合併相鄰 tray',
+    hintInline: canMerge && mergeTarget ? `→ ${mergeTarget.name ?? mergeTarget.id}` : undefined,
+    disabled: !canMerge,
+    hint: canMerge && mergeTarget
+      ? `合併到 ${mergeTarget.name ?? mergeTarget.id}（共用端點）`
+      : canEndpoint ? '此端點沒有恰好一條 tray 可合併' : '在端點附近右鍵才能合併',
+    onClick: canMerge && mergeTarget ? () => {
+      const otherSide = mergeCandidate.side
+      const aPoints = hitContext.endpointIdx === 0
+        ? [...tray.points].reverse()
+        : [...tray.points]
+      const otherPoints = otherSide === 'start'
+        ? mergeTarget.points
+        : [...mergeTarget.points].reverse()
+      const merged = [...aPoints, ...otherPoints.slice(1)]
+      const floor = useFloorStore.getState().floors.find((f) => f.id === floorId)
+      useCableStore.getState().removeTray(floorId, tray.id)
+      useCableStore.getState().removeTray(floorId, mergeTarget.id)
+      const name = useCableStore.getState().nextTrayName({ floor })
+      const newId = generateId('tray')
+      useCableStore.getState().addTray(floorId, { ...tray, id: newId, name, points: merged })
+      setSelected(newId, 'cable_tray')
+    } : undefined,
+  })
+
+  items.push({ id: 'div-after-edit', kind: 'divider' })
+
+  // Convert tray's discipline / system colour.
+  items.push({
+    id: 'convert',
+    label: '轉換系統',
+    submenu: TRAY_SYSTEMS.map((sys) => ({
+      id: `convert-${sys.value}`,
+      label: sys.label,
+      swatch: sys.color,
+      onClick: () => useCableStore.getState().updateTray(floorId, tray.id, { system: sys.value }),
+    })),
+  })
+
+  items.push({ id: 'div-before-delete', kind: 'divider' })
+  items.push({
+    id: 'delete',
+    label: '刪除',
+    danger: true,
+    shortcut: 'Del',
+    onClick: onDelete,
+  })
 }
 
 export default ContextMenuMount
