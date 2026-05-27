@@ -5,6 +5,7 @@ import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { computeFocusedDevices, FOCUS_HALO_COLOR, FOCUS_HALO_ALPHA, FOCUS_HALO_WIDTH } from '@/features/focus/focusedDevices'
 import { getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
+import { getModeCapability } from '@/render/modeCapabilities'
 
 // AP markers adapter — per-AP interactive Container with click select,
 // drag, hover, right-click context menu, frequency-colored marker, and
@@ -328,15 +329,24 @@ export function attachAPsLayer({
         return
       }
       if ((e.button ?? 0) !== 0) return
-      // Select + drag are only valid in SELECT mode. In draw / place
-      // modes the user clicking an existing object should fall through
-      // to the stage handler (add draft point / drop a new device).
-      if (useEditorStore.getState().editorMode !== 'select') return
+      // Select + drag are gated by allowSelectClick from the capability
+      // matrix (oldSrc modeCapabilities). In draw / place modes the
+      // user clicking an existing object should fall through to the
+      // stage handler (add draft point / drop a new device).
+      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      if (!cap.allowSelectClick.wireless) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.ap.id, 'ap')
       beginDrag(entry, e)
     })
-    container.on('pointerover', () => useHoverStore.getState().setHover(entry.ap.id, 'ap'))
+    // Hover invert is gated by allowSelectHover OR allowCommandHover
+    // (oldSrc allowAnyHover). Non-SELECT modes still want a faint
+    // affordance so the user knows what right-click would target.
+    container.on('pointerover', () => {
+      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      if (!cap.allowSelectHover.wireless && !cap.allowCommandHover.wireless) return
+      useHoverStore.getState().setHover(entry.ap.id, 'ap')
+    })
     container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.ap.id))
   }
 

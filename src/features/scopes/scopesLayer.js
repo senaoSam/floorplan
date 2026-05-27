@@ -1,6 +1,7 @@
 import { Container, Graphics } from 'pixi.js'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
+import { getModeCapability } from '@/render/modeCapabilities'
 
 // Scope adapter — per-scope interactive Container with click-select,
 // right-click context menu, and hover invert. Visual rules ported from
@@ -158,11 +159,16 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
         return
       }
       if ((e.button ?? 0) !== 0) return
-      if (useEditorStore.getState().editorMode !== 'select') return
+      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      if (!cap.allowSelectClick.struct) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.scope.id, 'scope')
     })
-    container.on('pointerover', () => useHoverStore.getState().setHover(entry.scope.id, 'scope'))
+    container.on('pointerover', () => {
+      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      if (!cap.allowSelectHover.struct && !cap.allowCommandHover.struct) return
+      useHoverStore.getState().setHover(entry.scope.id, 'scope')
+    })
     container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.scope.id))
   }
 

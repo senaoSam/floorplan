@@ -1,6 +1,7 @@
 import { Container, Graphics } from 'pixi.js'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
+import { getModeCapability } from '@/render/modeCapabilities'
 
 // Floor-hole adapter — per-hole interactive Container with click-select +
 // right-click context menu. Per spec §3.3 the scopes / floorHoles / refWall
@@ -104,11 +105,16 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
         return
       }
       if ((e.button ?? 0) !== 0) return
-      if (useEditorStore.getState().editorMode !== 'select') return
+      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      if (!cap.allowSelectClick.struct) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.hole.id, 'floor_hole')
     })
-    container.on('pointerover', () => useHoverStore.getState().setHover(entry.hole.id, 'floor_hole'))
+    container.on('pointerover', () => {
+      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      if (!cap.allowSelectHover.struct && !cap.allowCommandHover.struct) return
+      useHoverStore.getState().setHover(entry.hole.id, 'floor_hole')
+    })
     container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.hole.id))
   }
 

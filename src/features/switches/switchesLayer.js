@@ -7,6 +7,7 @@ import { useViewportStore } from '@/store/useViewportStore'
 import { computeSwitchSnaps } from '@/features/cable/switchSnapStatus'
 import { computeFocusedDevices, FOCUS_HALO_COLOR, FOCUS_HALO_ALPHA, FOCUS_HALO_WIDTH } from '@/features/focus/focusedDevices'
 import { getChassisSize, getKindLabel, getPortDotCount } from './switchChassis'
+import { getModeCapability } from '@/render/modeCapabilities'
 
 // Switch chassis adapter — per-switch interactive Container. Visual rules
 // ported 1:1 from oldSrc SwitchLayer.jsx (29-6 + 17-2 + 17-4):
@@ -267,13 +268,17 @@ export function attachSwitchesLayer({
         return
       }
       if ((e.button ?? 0) !== 0) return
-      // Select + drag only in SELECT mode — see apsLayer for rationale.
-      if (useEditorStore.getState().editorMode !== 'select') return
+      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      if (!cap.allowSelectClick.cable) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.sw.id, 'switch')
       beginDrag(entry, e)
     })
-    container.on('pointerover', () => useHoverStore.getState().setHover(entry.sw.id, 'switch'))
+    container.on('pointerover', () => {
+      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      if (!cap.allowSelectHover.cable && !cap.allowCommandHover.cable) return
+      useHoverStore.getState().setHover(entry.sw.id, 'switch')
+    })
     container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.sw.id))
   }
 

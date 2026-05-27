@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import { initScene } from '@/render/scene'
 import { bindViewport } from '@/render/viewport'
+import { attachModeAdapter } from '@/render/modeAdapter'
 import { attachFloorImageLayer } from '@/features/floorImage/floorImageLayer'
 import { attachWallsLayer } from '@/features/walls/wallsLayer'
 import { attachAPsLayer } from '@/features/aps/apsLayer'
@@ -47,6 +48,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
 
     let scene = null
     let detachViewport = null
+    let detachModeAdapter = null
     let detachFloorImage = null
     let detachWalls = null
     let detachAPs = null
@@ -162,6 +164,11 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
             })
           }
         },
+      })
+      detachModeAdapter = attachModeAdapter({
+        scene: s,
+        canvas: s.app.canvas,
+        useEditorStore,
       })
       detachFloorImage = attachFloorImageLayer({
         scene: s,
@@ -362,6 +369,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (detachAPs) detachAPs()
       if (detachWalls) detachWalls()
       if (detachFloorImage) detachFloorImage()
+      if (detachModeAdapter) detachModeAdapter()
       if (detachViewport) detachViewport()
       if (scene) scene.destroy()
       if (import.meta.env.DEV) {

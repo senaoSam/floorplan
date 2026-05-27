@@ -4,6 +4,7 @@ import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { generateId } from '@/utils/id'
+import { getModeCapability } from '@/render/modeCapabilities'
 
 const DRAG_COMMIT_THRESHOLD_PX = 1
 
@@ -241,22 +242,26 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
       if ((e.button ?? 0) !== 0) return
       const editor = useEditorStore.getState()
       // DOOR_WINDOW mode keeps its own click semantics (insert opening
-      // at click foot on the wall under cursor).
+      // at click foot on the wall under cursor) — capability says
+      // allowSelectClick.struct = true but the layer handles it
+      // differently for this mode only.
       if (editor.editorMode === EDITOR_MODE.DOOR_WINDOW) {
         e.stopPropagation()
         handleDoorWindowClick(entry, e)
         return
       }
-      // In any other non-SELECT mode (draw / place), clicking on a wall
-      // should fall through to the stage handler — the user wants their
-      // draw / place action, not to select the wall.
-      if (editor.editorMode !== EDITOR_MODE.SELECT) return
+      const cap = getModeCapability(editor.editorMode)
+      if (!cap.allowSelectClick.struct) return
       e.stopPropagation()
       dlog('  → setSelected', entry.wall.id)
       editor.setSelected(entry.wall.id, 'wall')
       beginDrag(entry, e)
     })
-    container.on('pointerover', () => useHoverStore.getState().setHover(entry.wall.id, 'wall'))
+    container.on('pointerover', () => {
+      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      if (!cap.allowSelectHover.struct && !cap.allowCommandHover.struct) return
+      useHoverStore.getState().setHover(entry.wall.id, 'wall')
+    })
     container.on('pointerout',  () => useHoverStore.getState().clearHoverIf(entry.wall.id))
   }
 

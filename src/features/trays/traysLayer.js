@@ -4,6 +4,7 @@ import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
+import { getModeCapability } from '@/render/modeCapabilities'
 
 // Cable tray adapter — per-tray Container with magnet halo + channel
 // body + custom polyline hitArea. Visuals ported 1:1 from oldSrc
@@ -283,14 +284,17 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     const isHovered  = hoverState.id === tray.id && hoverState.type === 'cable_tray'
     const isInvert   = isHovered && !isSelected
 
-    const mode = editorState.editorMode
-    const showAllMagnets =
-      mode === EDITOR_MODE.DRAW_CABLE_TRAY ||
-      mode === EDITOR_MODE.PLACE_SWITCH ||
-      mode === EDITOR_MODE.PLACE_RISER
+    // Magnet visibility from capability matrix (oldSrc showMagnet.tray):
+    //   'all'          → every tray's halo on (DRAW_CABLE_TRAY / PLACE_SWITCH)
+    //   'selectedOnly' → only when this tray is selected or hovered (SELECT)
+    //   'never'        → hidden (everything else, incl. PLACE_RISER which
+    //                    wants riser halos only — not tray)
+    const cap = getModeCapability(editorState.editorMode)
+    const magnetPolicy = cap.showMagnet?.tray ?? 'never'
     const showMagnet =
-      showAllMagnets ||
-      (mode === EDITOR_MODE.SELECT && (isSelected || isHovered))
+      magnetPolicy === 'all' ? true :
+      magnetPolicy === 'selectedOnly' ? (isSelected || isHovered) :
+      false
 
     haloG.clear()
     bodyG.clear()
@@ -374,15 +378,17 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
         return
       }
       if ((e.button ?? 0) !== 0) return
-      // Select + drag only in SELECT mode — non-SELECT modes need the
-      // click to fall through to the stage handler (e.g. DRAW_CABLE_TRAY
-      // adds a draft vertex; PLACE_SWITCH drops a switch).
-      if (useEditorStore.getState().editorMode !== EDITOR_MODE.SELECT) return
+      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      if (!cap.allowSelectClick.cable) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.tray.id, 'cable_tray')
       beginDrag(entry, e)
     })
-    container.on('pointerover', () => useHoverStore.getState().setHover(entry.tray.id, 'cable_tray'))
+    container.on('pointerover', () => {
+      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      if (!cap.allowSelectHover.cable && !cap.allowCommandHover.cable) return
+      useHoverStore.getState().setHover(entry.tray.id, 'cable_tray')
+    })
     container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.tray.id))
   }
 
