@@ -15,6 +15,7 @@ import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorImport } from '@/features/importer/useFloorImport'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import { capturePlanPng, triggerImageDownload } from '@/features/exportPng/exportPlanView'
+import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
 import './SidebarLeft.sass'
 
 // Ported from oldSrc; trimmed against the PIXI port:
@@ -48,6 +49,7 @@ function SidebarLeft() {
 
   const [menuOpenId, setMenuOpenId] = useState(null)
   const [pendingRemove, setPendingRemove] = useState(null)
+  const [autoPowerOpen, setAutoPowerOpen] = useState(false)
   const [pendingSwitch, setPendingSwitch] = useState(null)
 
   const editorMode = useEditorStore((s) => s.editorMode)
@@ -387,9 +389,8 @@ function SidebarLeft() {
                   </label>
                   <button
                     className="sidebar-left__floor-action"
-                    disabled
-                    title="AutoPowerModal 尚未在 PIXI 版本上線；保留按鈕讓 chrome 對齊 oldSrc"
-                    onClick={(e) => e.stopPropagation()}
+                    title="跑 greedy multi-start 搜索，自動調整 AP txPower 達成目標 RSSI"
+                    onClick={(e) => { e.stopPropagation(); setAutoPowerOpen(true) }}
                   >
                     ⚡ 自動規劃整層 AP 功率
                   </button>
@@ -427,6 +428,11 @@ function SidebarLeft() {
           onCancel={() => setPendingSwitch(null)}
         />
       )}
+      <AutoPowerModal
+        open={autoPowerOpen}
+        apIds={[]}
+        onClose={() => setAutoPowerOpen(false)}
+      />
     </aside>
   )
 }
