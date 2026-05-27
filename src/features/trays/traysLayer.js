@@ -374,6 +374,10 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
         return
       }
       if ((e.button ?? 0) !== 0) return
+      // Select + drag only in SELECT mode — non-SELECT modes need the
+      // click to fall through to the stage handler (e.g. DRAW_CABLE_TRAY
+      // adds a draft vertex; PLACE_SWITCH drops a switch).
+      if (useEditorStore.getState().editorMode !== EDITOR_MODE.SELECT) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.tray.id, 'cable_tray')
       beginDrag(entry, e)

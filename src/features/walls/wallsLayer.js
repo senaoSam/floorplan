@@ -239,21 +239,22 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
         return
       }
       if ((e.button ?? 0) !== 0) return
-      e.stopPropagation()
       const editor = useEditorStore.getState()
+      // DOOR_WINDOW mode keeps its own click semantics (insert opening
+      // at click foot on the wall under cursor).
       if (editor.editorMode === EDITOR_MODE.DOOR_WINDOW) {
+        e.stopPropagation()
         handleDoorWindowClick(entry, e)
         return
       }
-      // SELECT mode: select the wall and start a potential drag. If the
-      // pointer doesn't move > DRAG_COMMIT_THRESHOLD_PX before release we
-      // treat the gesture as a click (selection only); otherwise we commit
-      // a translation of both endpoints by the same delta.
+      // In any other non-SELECT mode (draw / place), clicking on a wall
+      // should fall through to the stage handler — the user wants their
+      // draw / place action, not to select the wall.
+      if (editor.editorMode !== EDITOR_MODE.SELECT) return
+      e.stopPropagation()
       dlog('  → setSelected', entry.wall.id)
       editor.setSelected(entry.wall.id, 'wall')
-      if (editor.editorMode === EDITOR_MODE.SELECT) {
-        beginDrag(entry, e)
-      }
+      beginDrag(entry, e)
     })
     container.on('pointerover', () => useHoverStore.getState().setHover(entry.wall.id, 'wall'))
     container.on('pointerout',  () => useHoverStore.getState().clearHoverIf(entry.wall.id))

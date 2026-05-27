@@ -105,9 +105,13 @@ export function bindViewport({
       stage.cursor = 'grabbing'
       return
     }
-    if (isBackground && button === 0) {
-      // Place modes (PLACE_AP / PLACE_SWITCH / PLACE_RISER) treat the
-      // background click as "drop here" instead of "marquee select".
+    if (button === 0) {
+      // Place / Draw modes consume the LMB regardless of whether the
+      // cursor was over an object or empty canvas. Object layers' own
+      // pointerdown handlers return early in non-SELECT modes WITHOUT
+      // stopPropagation, so the event bubbles up to here. Without this
+      // change the user couldn't drop an AP or extend a draft point on
+      // top of an existing wall / tray / scope etc.
       if (typeof isPlaceMode === 'function' && isPlaceMode()) {
         const wp = world.toLocal(e.global)
         if (typeof onPlaceModeClick === 'function') {
@@ -115,8 +119,6 @@ export function bindViewport({
         }
         return
       }
-      // Draw modes (DRAW_WALL / DRAW_SCOPE / DRAW_FLOOR_HOLE /
-      // DRAW_CABLE_TRAY / DRAW_SCALE) add a draft point on click.
       if (typeof isDrawMode === 'function' && isDrawMode()) {
         const wp = world.toLocal(e.global)
         if (typeof onDrawModeClick === 'function') {
@@ -124,11 +126,16 @@ export function bindViewport({
         }
         return
       }
-      pendingDrag = {
-        startGlobal: { x: e.global.x, y: e.global.y },
-        startWorld: { ...world.toLocal(e.global) },
+      // SELECT mode: background LMB starts a marquee-or-clear gesture.
+      // We only ever get here when isBackground is true, because objects
+      // in SELECT mode stopPropagation() inside their own handler.
+      if (isBackground) {
+        pendingDrag = {
+          startGlobal: { x: e.global.x, y: e.global.y },
+          startWorld: { ...world.toLocal(e.global) },
+        }
+        marqueeActive = false
       }
-      marqueeActive = false
     }
     // Right-click on stage background while in a draw mode commits the
     // open polyline / polygon (Enter alt path).

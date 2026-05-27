@@ -158,6 +158,7 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
         return
       }
       if ((e.button ?? 0) !== 0) return
+      if (useEditorStore.getState().editorMode !== 'select') return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.scope.id, 'scope')
     })

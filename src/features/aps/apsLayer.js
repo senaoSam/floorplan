@@ -328,6 +328,10 @@ export function attachAPsLayer({
         return
       }
       if ((e.button ?? 0) !== 0) return
+      // Select + drag are only valid in SELECT mode. In draw / place
+      // modes the user clicking an existing object should fall through
+      // to the stage handler (add draft point / drop a new device).
+      if (useEditorStore.getState().editorMode !== 'select') return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.ap.id, 'ap')
       beginDrag(entry, e)

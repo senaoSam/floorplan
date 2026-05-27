@@ -267,6 +267,8 @@ export function attachSwitchesLayer({
         return
       }
       if ((e.button ?? 0) !== 0) return
+      // Select + drag only in SELECT mode — see apsLayer for rationale.
+      if (useEditorStore.getState().editorMode !== 'select') return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.sw.id, 'switch')
       beginDrag(entry, e)

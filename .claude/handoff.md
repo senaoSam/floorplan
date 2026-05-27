@@ -1,4 +1,4 @@
-# Session Handoff — 2026-05-26 (Phase 25 — Bundle 10 shipped)
+# Session Handoff — 2026-05-27 (Phase 25 — Bundle 10–15 shipped)
 
 > 新 session **必讀**順序：
 > 1. `CLAUDE.md`（專案規則 + Session Start 流程）

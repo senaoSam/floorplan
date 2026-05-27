@@ -104,6 +104,7 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
         return
       }
       if ((e.button ?? 0) !== 0) return
+      if (useEditorStore.getState().editorMode !== 'select') return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.hole.id, 'floor_hole')
     })
