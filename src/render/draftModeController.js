@@ -3,6 +3,10 @@ import { MATERIALS } from '@/constants/materials'
 import { DEFAULT_TRAY } from '@/store/useCableStore'
 import { generateId } from '@/utils/id'
 import { snapTrayPoint } from '@/features/draft/traySnap'
+import { angleLockToAnchor } from '@/features/draft/traySnap'
+
+// oldSrc Editor2D SNAP_PX (= 12 screen px) — wall draw endpoint snap radius.
+const WALL_SNAP_PX_SCREEN = 12
 
 // Owns the draft-mode click / move / commit / cancel flow.
 // Returns the callback set viewport.bindViewport reads, plus a separate
@@ -32,31 +36,59 @@ export function createDraftModeController({
 
   // DRAW_CABLE_TRAY: snap raw cursor onto tray vertex / wall endpoint /
   // wall segment foot / parallel-wall lock and surface the snap kind so
-  // draftOverlayLayer can render the matching halo. Other modes pass
-  // through unchanged.
+  // draftOverlayLayer can render the matching halo.
+  // DRAW_WALL: snap to existing wall endpoint within 12 screen-px (oldSrc
+  // SNAP_PX / Editor2D snapToWallEndpoint) + Shift-held angle lock to
+  // 0/45/90° from the first click (parity with tray).
+  // Other modes pass through unchanged.
   const snapDraftPoint = (raw, mode) => {
-    if (mode !== EDITOR_MODE.DRAW_CABLE_TRAY) return { pos: raw, kind: null }
     const fid = useFloorStore.getState().activeFloorId
-    if (!fid) return { pos: raw, kind: null }
-    return snapTrayPoint(raw, {
-      walls: useWallStore.getState().wallsByFloor[fid] ?? [],
-      trays: useCableStore.getState().traysByFloor[fid] ?? [],
-      draftPoints: useDraftStore.getState().points,
-      scale: useViewportStore?.getState?.()?.scale ?? 1,
-      shiftHeld: !!useDraftStore.getState()._shiftHeld,
-    })
+    if (mode === EDITOR_MODE.DRAW_CABLE_TRAY) {
+      if (!fid) return { pos: raw, kind: null }
+      return snapTrayPoint(raw, {
+        walls: useWallStore.getState().wallsByFloor[fid] ?? [],
+        trays: useCableStore.getState().traysByFloor[fid] ?? [],
+        draftPoints: useDraftStore.getState().points,
+        scale: useViewportStore?.getState?.()?.scale ?? 1,
+        shiftHeld: !!useDraftStore.getState()._shiftHeld,
+      })
+    }
+    if (mode === EDITOR_MODE.DRAW_WALL) {
+      if (!fid) return { pos: raw, kind: null }
+      let pos = raw
+      // Shift + anchor → 0/45/90° lock (matches tray angleLockToAnchor).
+      const draftPoints = useDraftStore.getState().points
+      if (useDraftStore.getState()._shiftHeld && draftPoints.length > 0) {
+        pos = angleLockToAnchor(raw, draftPoints[0])
+      }
+      const scale = useViewportStore?.getState?.()?.scale ?? 1
+      const snapDist = WALL_SNAP_PX_SCREEN / (scale || 1)
+      const walls = useWallStore.getState().wallsByFloor[fid] ?? []
+      for (const w of walls) {
+        for (const ep of [{ x: w.startX, y: w.startY }, { x: w.endX, y: w.endY }]) {
+          if (Math.hypot(pos.x - ep.x, pos.y - ep.y) < snapDist) {
+            return { pos: { x: ep.x, y: ep.y }, kind: 'wallEndpoint' }
+          }
+        }
+      }
+      return { pos, kind: null }
+    }
+    return { pos: raw, kind: null }
   }
 
   const commitWall = (a, b) => {
     const fid = useFloorStore.getState().activeFloorId
     if (!fid) return
     const floor = useFloorStore.getState().floors.find((f) => f.id === fid)
+    // Use editor.wallMaterial so number-key 1-6 (FloorplanSystem keydown)
+    // takes effect for the next drawn wall (oldSrc Editor2D 585).
+    const material = useEditorStore.getState().wallMaterial ?? MATERIALS.CONCRETE
     useWallStore.getState().addWall(fid, {
       id: generateId('wall'),
       name: useWallStore.getState().nextWallName({ floor }),
       startX: a.x, startY: a.y,
       endX:   b.x, endY:   b.y,
-      material: MATERIALS.CONCRETE,
+      material,
       topHeight: 3.0,
       bottomHeight: 0,
       openings: [],
@@ -167,6 +199,14 @@ export function createDraftModeController({
         ? s
         : null
       useDraftStore.getState().setSnapHint(visibleKind)
+    } else if (mode === EDITOR_MODE.DRAW_WALL) {
+      // Wall draw — surface endpoint snap so draftOverlayLayer can render
+      // the cyan ring + black halo at the snap target (oldSrc WallLayer
+      // 280-285).
+      useDraftStore.getState().setSnapHint(s.kind === 'wallEndpoint' ? { kind: 'wallEndpoint', pos: s.pos } : null)
+    } else {
+      // Other modes — clear any stale hint left over from the previous mode.
+      if (useDraftStore.getState().snapHint) useDraftStore.getState().setSnapHint(null)
     }
   }
 

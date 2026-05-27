@@ -92,7 +92,16 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
 
   const redraw = () => {
     g.clear()
-    const { mode, points, cursor } = useDraftStore.getState()
+    const { mode, points, cursor, snapHint } = useDraftStore.getState()
+
+    // Wall endpoint snap halo — render whenever the snapHint says we're
+    // snapping to an existing wall endpoint, even before the user has
+    // placed the first draft point (oldSrc WallLayer 280-285 fires from
+    // mousePos regardless of drawStart).
+    if (snapHint && snapHint.kind === 'wallEndpoint' && snapHint.pos) {
+      drawWallEndpointSnapHalo(g, snapHint.pos.x, snapHint.pos.y)
+    }
+
     if (!mode || points.length === 0) return
 
     if (mode === EDITOR_MODE.DRAW_CABLE_TRAY) {
@@ -108,6 +117,21 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
       return
     }
     drawPolyDraft(g, mode, points, cursor)
+  }
+
+  // Cyan ring + black halo at an existing wall endpoint the cursor is
+  // snapping to. Ports oldSrc WallLayer.jsx 280-285:
+  //   Circle r=9 fill #000 alpha 0.4
+  //   Circle r=7 stroke #00e5ff width 2 fill rgba(0,229,255,0.25)
+  // World-px values (not inverse-scaled) match oldSrc which used raw px
+  // in canvas coords too.
+  function drawWallEndpointSnapHalo(g, x, y) {
+    const vpScale = useViewportStore.getState().scale || 1
+    const s = 1 / vpScale
+    g.circle(x, y, 9 * s).fill({ color: 0x000000, alpha: 0.4 })
+    g.circle(x, y, 7 * s)
+      .fill({ color: 0x00e5ff, alpha: 0.25 })
+      .stroke({ width: 2 * s, color: 0x00e5ff, alpha: 1 })
   }
 
   // CROP_IMAGE draft preview (oldSrc CropLayer): dashed cyan rect from

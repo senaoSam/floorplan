@@ -36,6 +36,9 @@ import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
 import { useDraftStore } from '@/store/useDraftStore'
+import { useMaterialToastStore } from '@/store/useMaterialToastStore'
+import { MATERIAL_LIST } from '@/constants/materials'
+import MaterialToast from '@/components/MaterialToast/MaterialToast'
 import './FloorplanSystem.sass'
 
 // Integration boundary the host product will mount. Owns the PIXI scene
@@ -323,6 +326,14 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       }
     })
 
+    // Track Shift state for tray / wall angle-lock — independent of the
+    // mode-specific handler below so we catch keyup too. oldSrc Editor2D
+    // 824-836 wires this exact pair of listeners.
+    const onShiftDown = (e) => { if (e.key === 'Shift') useDraftStore.getState().setShiftHeld(true) }
+    const onShiftUp   = (e) => { if (e.key === 'Shift') useDraftStore.getState().setShiftHeld(false) }
+    window.addEventListener('keydown', onShiftDown)
+    window.addEventListener('keyup',   onShiftUp)
+
     const onKeyDown = (e) => {
       // Don't fire while typing in inputs/textareas (e.g. AP name field).
       const tag = e.target.tagName
@@ -375,6 +386,29 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           return
         }
       }
+
+      // Number keys 1-6 — wall material picker (oldSrc Editor2D 577-593).
+      // In DRAW_WALL → set the active wall material for the next stroke.
+      // If a wall is currently selected → also rewrite its material.
+      // Either branch pops a 1.5 s toast naming the chosen material.
+      if (e.key >= '1' && e.key <= '6' && !cmd && !e.altKey) {
+        const idx = parseInt(e.key, 10) - 1
+        const mat = MATERIAL_LIST[idx]
+        if (!mat) return
+        const ed = useEditorStore.getState()
+        const inWallMode = ed.editorMode === EDITOR_MODE.DRAW_WALL
+        const wallSelected = ed.selectedId && ed.selectedType === 'wall'
+        if (!inWallMode && !wallSelected) return
+        if (inWallMode) ed.setWallMaterial(mat)
+        if (wallSelected) {
+          const fid = useFloorStore.getState().activeFloorId
+          if (fid) useWallStore.getState().updateWall(fid, ed.selectedId, { material: mat })
+        }
+        useMaterialToastStore.getState().showToast({
+          label: mat.label, color: mat.color, key: e.key,
+        })
+        return
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const s = useEditorStore.getState()
         const fid = useFloorStore.getState().activeFloorId
@@ -419,6 +453,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     return () => {
       cancelled = true
       window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keydown', onShiftDown)
+      window.removeEventListener('keyup',   onShiftUp)
       if (detachLayerVisibility) detachLayerVisibility()
       if (detachHandles) detachHandles()
       if (detachDraftOverlay) detachDraftOverlay()
@@ -452,6 +488,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
   return (
     <div className="floorplan-system">
       <div ref={containerRef} className="floorplan-system__canvas" />
+      <MaterialToast />
       {scaleDialog && (
         <ScaleDialog
           pixelDistance={pxDist}

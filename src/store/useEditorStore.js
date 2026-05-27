@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { MATERIALS } from '@/constants/materials'
 
 export const EDITOR_MODE = {
   SELECT: 'select',
@@ -33,6 +34,10 @@ export const useEditorStore = create((set, get) => ({
   // know which AP band / switch kind to drop on the next click.
   placeApBand: 5,
   placeSwitchKind: 'switch',
+  // Active wall material for DRAW_WALL — number keys 1-6 (FloorplanSystem
+  // keydown) flip this to MATERIAL_LIST[key-1] and pop a toast. Matches
+  // oldSrc Editor2D `wallMaterial` state (119).
+  wallMaterial: MATERIALS.CONCRETE,
 
   // Toolbar dropdown open — surfaced so the mode hint banner can hide
   // itself while a dropdown is expanded.
@@ -98,6 +103,7 @@ export const useEditorStore = create((set, get) => ({
 
   setPlaceApBand: (band) => set({ placeApBand: band }),
   setPlaceSwitchKind: (kind) => set({ placeSwitchKind: kind }),
+  setWallMaterial: (mat) => set({ wallMaterial: mat }),
   setToolbarMenuOpen: (open) => set({ toolbarMenuOpen: open }),
   togglePanelCollapsed: () => set((s) => ({ panelCollapsed: !s.panelCollapsed })),
   toggleSidebarCollapsed: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),

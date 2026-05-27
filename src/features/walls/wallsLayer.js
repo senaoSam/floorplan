@@ -24,13 +24,27 @@ const WALL_HALO_WIDTH_SELECTED = 7
 const WALL_HALO_WIDTH_HOVERED  = 10
 const WALL_BODY_WIDTH_NORMAL   = 3
 const WALL_BODY_WIDTH_SELECTED = 5
-const WALL_BODY_WIDTH_HOVERED  = 6
-const WALL_HOVER_BEAM_WIDTH    = 22
+// User update (Phase 25 polish): wall body stays at NORMAL width on hover
+// (was 6); the hover affordance is just the slim white centerline below.
+const WALL_BODY_WIDTH_HOVERED  = WALL_BODY_WIDTH_NORMAL
+// User update: white hover overlay slimmed from 22 → 2 px and rendered ON
+// TOP of the body (oldSrc was a thick under-glow). User wants a subtle
+// centerline marker, not a halo.
+const WALL_HOVER_BEAM_WIDTH    = 2
 const WALL_HOVER_BEAM_COLOR    = '#ffffff'
-const WALL_HOVER_BEAM_ALPHA    = 0.45
-const OPENING_WIDTH_NORMAL     = 6
-const OPENING_WIDTH_HOVERED    = 8
-const OPENING_WIDTH_SELECTED   = 6
+const WALL_HOVER_BEAM_ALPHA    = 0.9
+// User update: selected walls get an outer cyan ring (matches the wall
+// draft accent colour) so "this is selected" is unambiguous. Drawn BEFORE
+// the black halo so the halo covers the inside, leaving a thin cyan rim.
+const WALL_SELECTED_RING_PAD   = 4       // total extra width vs halo (2 px each side)
+const WALL_SELECTED_RING_COLOR = '#00e5ff'
+const WALL_SELECTED_RING_ALPHA = 0.85
+// User update: openings render at the SAME width as the wall body
+// (oldSrc had thicker openings to call them out; user wants visual
+// consistency). Each state mirrors the matching body width above.
+const OPENING_WIDTH_NORMAL     = WALL_BODY_WIDTH_NORMAL
+const OPENING_WIDTH_HOVERED    = WALL_BODY_WIDTH_HOVERED
+const OPENING_WIDTH_SELECTED   = WALL_BODY_WIDTH_SELECTED
 // Hit envelope in SCREEN px (matches oldSrc Konva hitStrokeWidth=14). We
 // convert to world px by dividing by viewport.scale on every viewport
 // change — otherwise zooming out makes the wall hit area shrink to a few
@@ -135,16 +149,40 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     const bodyWidth = hoverInvert ? WALL_BODY_WIDTH_HOVERED
                                   : isSelected ? WALL_BODY_WIDTH_SELECTED
                                               : WALL_BODY_WIDTH_NORMAL
-    const bodyColor = hoverInvert ? '#ffffff' : wall.material.color
     const openingWidth = hoverInvert ? OPENING_WIDTH_HOVERED
                                      : isSelected ? OPENING_WIDTH_SELECTED
                                                   : OPENING_WIDTH_NORMAL
 
     graphics.clear()
 
-    // (1) Hover invert beam — wide white stroke under the body so the
-    // wall lights up under the cursor. Skipped when wall is selected
-    // (red selection halo + thicker body already provide emphasis).
+    // (1) Selected outer cyan rim — drawn FIRST so the wider black halo
+    // covers the inside, leaving a thin ring around the wall (only visible
+    // when selected and not hovered).
+    if (isSelected && !hoverInvert) {
+      graphics
+        .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
+        .stroke({
+          width: haloWidth + WALL_SELECTED_RING_PAD,
+          color: WALL_SELECTED_RING_COLOR,
+          alpha: WALL_SELECTED_RING_ALPHA,
+          cap: 'round',
+        })
+    }
+
+    // (2) Black outline halo for contrast.
+    graphics
+      .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
+      .stroke({ width: haloWidth, color: '#000000', alpha: 0.4, cap: 'round' })
+
+    // (3) Wall body — keeps material colour even on hover so the body
+    // colour stays consistent (user prefers no width change on hover).
+    graphics
+      .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
+      .stroke({ width: bodyWidth, color: wall.material.color, alpha: 1, cap: 'round' })
+
+    // (3b) Hover centerline — slim white line ON TOP of the body so the
+    // wall under the cursor is visibly marked without changing the body
+    // width or colour. User update (2px overlay request).
     if (hoverInvert) {
       graphics
         .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
@@ -155,16 +193,6 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
           cap: 'round',
         })
     }
-
-    // (2) Black outline halo for contrast.
-    graphics
-      .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
-      .stroke({ width: haloWidth, color: '#000000', alpha: 0.4, cap: 'round' })
-
-    // (3) Wall body — white on hover, else material colour.
-    graphics
-      .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
-      .stroke({ width: bodyWidth, color: bodyColor, alpha: 1, cap: 'round' })
 
     // (4) Openings overlay the wall body in OPENING_TYPES colour
     // (door brown / window blue — independent from the wall material).

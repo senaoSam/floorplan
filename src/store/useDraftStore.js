@@ -22,6 +22,10 @@ export const useDraftStore = create((set) => ({
   points: [],
   cursor: null,
   snapHint: null,
+  // Shift-held tracker — driven by global keydown / keyup in
+  // FloorplanSystem. Tray + wall draft snap pipelines read this to
+  // decide whether to angle-lock the cursor to 45° from the anchor.
+  _shiftHeld: false,
 
   beginDraft: (mode, firstPoint) => set({
     mode,
@@ -32,5 +36,6 @@ export const useDraftStore = create((set) => ({
   addPoint: (p) => set((s) => ({ points: [...s.points, p] })),
   setCursor: (p) => set({ cursor: p }),
   setSnapHint: (h) => set({ snapHint: h }),
+  setShiftHeld: (held) => set({ _shiftHeld: !!held }),
   clearDraft: () => set({ mode: null, points: [], cursor: null, snapHint: null }),
 }))
