@@ -32,7 +32,7 @@ function ContextMenuMount() {
   const floorHolesByFloor = useFloorHoleStore((s) => s.floorHolesByFloor)
   const floors = useFloorStore((s) => s.floors)
 
-  if (typeof window !== 'undefined' && window.__debugRMB !== false) {
+  if (typeof window !== 'undefined' && window.__debugRMB === true) {
     console.log('[RMB ContextMenuMount] render ctx=', ctx, 'activeFloorId=', activeFloorId)
   }
   if (!ctx || !activeFloorId) return null
@@ -117,7 +117,7 @@ function ContextMenuMount() {
 
   if (!target) {
     // Target was removed underneath; close menu silently.
-    if (typeof window !== 'undefined' && window.__debugRMB !== false) {
+    if (typeof window !== 'undefined' && window.__debugRMB === true) {
       console.log('[RMB ContextMenuMount] target NOT FOUND, closing menu. targetType=', targetType, 'targetId=', targetId, 'wallsByFloor[fid]=', wallsByFloor[activeFloorId], 'scopesByFloor[fid]=', scopesByFloor[activeFloorId])
     }
     closeContextMenu()

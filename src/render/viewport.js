@@ -82,7 +82,7 @@ export function bindViewport({
   const onStageDown = (e) => {
     const isBackground = e.target === stage
     const button = e.button ?? 0
-    if (typeof window !== 'undefined' && window.__debugRMB !== false && button === 2) {
+    if (typeof window !== 'undefined' && window.__debugRMB === true && button === 2) {
       console.log('[RMB stage] pointerdown isBackground=', isBackground, 'target=', e.target?.label ?? e.target?.constructor?.name, 'global=', `${e.global.x.toFixed(1)},${e.global.y.toFixed(1)}`)
     }
     // Clear the trace so we only capture contains() calls between this

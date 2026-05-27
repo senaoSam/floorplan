@@ -314,7 +314,7 @@ export function attachAPsLayer({
   const bindInteractions = (entry) => {
     const { container } = entry
     container.on('pointerdown', (e) => {
-      if (typeof window !== 'undefined' && window.__debugRMB !== false) {
+      if (typeof window !== 'undefined' && window.__debugRMB === true) {
         console.log('[RMB ap] pointerdown id=', entry.ap.id, 'btn=', e.button, 'orig=', e.originalEvent?.button)
       }
       if (e.button === 2) {

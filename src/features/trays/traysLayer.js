@@ -345,7 +345,7 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
   const bindInteractions = (entry) => {
     const { container } = entry
     container.on('pointerdown', (e) => {
-      if (typeof window !== 'undefined' && window.__debugRMB !== false) {
+      if (typeof window !== 'undefined' && window.__debugRMB === true) {
         console.log('[RMB tray] pointerdown id=', entry.tray.id, 'btn=', e.button)
       }
       if (e.button === 2) {

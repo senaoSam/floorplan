@@ -224,7 +224,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
   const bindInteractions = (entry) => {
     const { container } = entry
     container.on('pointerdown', (e) => {
-      if (typeof window !== 'undefined' && window.__debugRMB !== false) {
+      if (typeof window !== 'undefined' && window.__debugRMB === true) {
         console.log('[RMB wall] pointerdown id=', entry.wall.id, 'btn=', e.button)
       }
       dlog('pointerdown wall=', entry.wall.id, 'button=', e.button, 'mode=', useEditorStore.getState().editorMode, 'target===container?', e.target === container)

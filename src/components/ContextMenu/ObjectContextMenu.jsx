@@ -44,6 +44,16 @@ function ObjectContextMenu({
   }, [x, y])
 
   // Outside click + Esc dismiss. Esc backs out of rename view first.
+  //
+  // The mousedown listener is attached on the NEXT animation frame, not
+  // synchronously on mount. Reason: the right-click that opened this menu
+  // fires `pointerdown` first → PIXI handler → openContextMenu → React
+  // commits (sync flush for discrete events) → this useEffect runs and
+  // attaches the listener. The browser THEN fires the matching `mousedown`
+  // event (browsers fire pointerdown before mousedown for the same gesture),
+  // which bubbles to document and immediately triggers onDocDown, closing
+  // the menu that just opened. Deferring by one rAF lets that mousedown
+  // pass through first.
   useEffect(() => {
     const onDocDown = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) onClose?.()
@@ -54,10 +64,15 @@ function ObjectContextMenu({
       if (renaming) { setRenaming(false); return }
       onClose?.()
     }
-    document.addEventListener('mousedown', onDocDown)
+    let attached = false
+    const raf = requestAnimationFrame(() => {
+      document.addEventListener('mousedown', onDocDown)
+      attached = true
+    })
     document.addEventListener('keydown', onKey)
     return () => {
-      document.removeEventListener('mousedown', onDocDown)
+      cancelAnimationFrame(raf)
+      if (attached) document.removeEventListener('mousedown', onDocDown)
       document.removeEventListener('keydown', onKey)
     }
   }, [onClose, renaming])

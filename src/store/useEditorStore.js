@@ -115,14 +115,14 @@ export const useEditorStore = create((set, get) => ({
 
   contextMenu: null,
   openContextMenu: (payload) => {
-    if (typeof window !== 'undefined' && window.__debugRMB !== false) {
+    if (typeof window !== 'undefined' && window.__debugRMB === true) {
       console.log('[RMB openContextMenu]', payload)
       console.trace()
     }
     set({ contextMenu: payload })
   },
   closeContextMenu: () => set((s) => {
-    if (typeof window !== 'undefined' && window.__debugRMB !== false && s.contextMenu) {
+    if (typeof window !== 'undefined' && window.__debugRMB === true && s.contextMenu) {
       console.log('[RMB closeContextMenu] CALLED, current ctx =', s.contextMenu)
       console.trace()
     }
