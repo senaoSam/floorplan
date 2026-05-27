@@ -30,6 +30,14 @@ const TRAY_HANDLE_STROKE_WIDTH = 1.8
 const TRAY_HANDLE_FILL = '#ffffff'
 const TRAY_HANDLE_STROKE = '#0e7490'
 
+// Crop adjust visuals — oldSrc CropLayer.jsx 4-8.
+const CROP_HANDLE_RADIUS = 8
+const CROP_HANDLE_STROKE_WIDTH = 2
+const CROP_HANDLE_FILL = '#ffffff'
+const CROP_BORDER_COLOR = 0x00e5ff
+const CROP_MASK_COLOR = 0x000000
+const CROP_MASK_ALPHA = 0.55
+
 // oldSrc Editor2D SNAP_PX (= 12 screen px) — endpoint-snap radius for
 // wall-handle drag, converted to world px via /viewport.scale.
 const SNAP_PX_SCREEN = 12
@@ -68,6 +76,16 @@ export function attachHandlesLayer({
   // handles re-render at the committed positions.
   let isDragging = false
 
+  // Containers that should resize inversely with viewport zoom so they
+  // stay screen-sized. Crop-adjust rotation Containers do NOT belong
+  // here (their children are in image coords and would be doubly scaled).
+  const inverseScaleNodes = new Set()
+  // Closure that re-renders the crop overlay (border + optional mask /
+  // thirds) at the current viewport scale. Set by buildCropAdjustHandles,
+  // cleared by rebuild(). Used by the viewport subscription so dashed
+  // border stroke widths stay constant in screen px during pan / zoom.
+  let cropRedrawOnViewport = null
+
   const targetWall = () => {
     const editor = useEditorStore.getState()
     const hover = useHoverStore.getState()
@@ -97,6 +115,8 @@ export function attachHandlesLayer({
       root.removeChild(c)
       c.destroy({ children: true })
     }
+    inverseScaleNodes.clear()
+    cropRedrawOnViewport = null
 
     const wall = targetWall()
     if (wall) {
@@ -114,6 +134,14 @@ export function attachHandlesLayer({
       bindWallEndpointDrag(endHandle, wall, 'end')
       root.addChild(startHandle)
       root.addChild(endHandle)
+      inverseScaleNodes.add(startHandle)
+      inverseScaleNodes.add(endHandle)
+      return
+    }
+
+    const floor = targetFloorForCrop()
+    if (floor) {
+      buildCropAdjustHandles(floor)
       return
     }
 
@@ -133,8 +161,195 @@ export function attachHandlesLayer({
         )
         bindTrayVertexDrag(h, tray, idx)
         root.addChild(h)
+        inverseScaleNodes.add(h)
       })
     }
+  }
+
+  // Selected floor_image (with a saved crop) in SELECT mode → show 4
+  // corner handles + dashed cyan border (oldSrc CropLayer's "adjust"
+  // path). Returns null otherwise.
+  const targetFloorForCrop = () => {
+    const editor = useEditorStore.getState()
+    if (editor.editorMode !== EDITOR_MODE.SELECT) return null
+    if (editor.selectedType !== 'floor_image') return null
+    const floors = useFloorStore.getState().floors
+    const f = floors.find((x) => x.id === editor.selectedId)
+    if (!f) return null
+    if (f.cropX == null || f.cropY == null) return null
+    if (!(f.cropWidth > 0) || !(f.cropHeight > 0)) return null
+    return f
+  }
+
+  // Builds the rotation Container holding the crop border + 4 corner
+  // handles. The Container is pivoted on image centre so it rotates
+  // with the sprite (matches floorImageLayer's sprite.rotation).
+  function buildCropAdjustHandles(floor) {
+    const imgW = floor.imageWidth
+    const imgH = floor.imageHeight
+    const cx = imgW / 2
+    const cy = imgH / 2
+    const rotRad = ((floor.rotation ?? 0) * Math.PI) / 180
+
+    const rot = new Container()
+    rot.eventMode = 'passive'
+    rot.position.set(cx, cy)
+    rot.pivot.set(cx, cy)
+    rot.rotation = rotRad
+    root.addChild(rot)
+
+    const overlayG = new Graphics()
+    overlayG.eventMode = 'none'
+    rot.addChild(overlayG)
+
+    const initialRect = {
+      x: floor.cropX, y: floor.cropY,
+      w: floor.cropWidth, h: floor.cropHeight,
+    }
+
+    const handles = {}
+    for (const key of ['tl', 'tr', 'bl', 'br']) {
+      const h = makeHandleDot(
+        0, 0,
+        CROP_HANDLE_FILL, CROP_BORDER_COLOR,
+        CROP_HANDLE_RADIUS, CROP_HANDLE_STROKE_WIDTH,
+      )
+      handles[key] = h
+      rot.addChild(h)
+      inverseScaleNodes.add(h)
+    }
+    positionCropHandles(handles, initialRect)
+
+    // Redraw closure — captures overlayG + floor.id so it can pull the
+    // freshest rect from useFloorStore each tick (covers viewport zoom
+    // while the rect lives in the store).
+    const redrawCropOverlay = (rectOverride, showMaskGuides) => {
+      const fresh = rectOverride ?? readCropRect(floor.id)
+      if (!fresh) return
+      drawCropOverlay(overlayG, imgW, imgH, fresh, showMaskGuides)
+    }
+    cropRedrawOnViewport = () => redrawCropOverlay(null, false)
+    redrawCropOverlay(initialRect, false)
+
+    for (const key of Object.keys(handles)) {
+      bindCropHandleDrag(handles[key], floor.id, key, handles, redrawCropOverlay)
+    }
+  }
+
+  const readCropRect = (floorId) => {
+    const f = useFloorStore.getState().floors.find((x) => x.id === floorId)
+    if (!f || f.cropX == null) return null
+    return { x: f.cropX, y: f.cropY, w: f.cropWidth, h: f.cropHeight }
+  }
+
+  const positionCropHandles = (handles, rect) => {
+    handles.tl.position.set(rect.x,          rect.y)
+    handles.tr.position.set(rect.x + rect.w, rect.y)
+    handles.bl.position.set(rect.x,          rect.y + rect.h)
+    handles.br.position.set(rect.x + rect.w, rect.y + rect.h)
+  }
+
+  // Draw dashed cyan border + (optionally) dark mask outside crop +
+  // rule-of-thirds. All widths use 1/scale so they stay constant in
+  // screen px. Matches oldSrc CropLayer.
+  function drawCropOverlay(g, imgW, imgH, rect, showMaskGuides) {
+    g.clear()
+    const inv = 1 / (useViewportStore.getState().scale || 1)
+    if (showMaskGuides) {
+      g.rect(0, 0, imgW, Math.max(0, rect.y))
+        .fill({ color: CROP_MASK_COLOR, alpha: CROP_MASK_ALPHA })
+      g.rect(0, rect.y + rect.h, imgW, Math.max(0, imgH - rect.y - rect.h))
+        .fill({ color: CROP_MASK_COLOR, alpha: CROP_MASK_ALPHA })
+      g.rect(0, rect.y, Math.max(0, rect.x), rect.h)
+        .fill({ color: CROP_MASK_COLOR, alpha: CROP_MASK_ALPHA })
+      g.rect(rect.x + rect.w, rect.y, Math.max(0, imgW - rect.x - rect.w), rect.h)
+        .fill({ color: CROP_MASK_COLOR, alpha: CROP_MASK_ALPHA })
+      for (const frac of [1 / 3, 2 / 3]) {
+        g.moveTo(rect.x + rect.w * frac, rect.y)
+         .lineTo(rect.x + rect.w * frac, rect.y + rect.h)
+         .stroke({ width: 0.5 * inv, color: CROP_BORDER_COLOR, alpha: 0.4 })
+        g.moveTo(rect.x, rect.y + rect.h * frac)
+         .lineTo(rect.x + rect.w, rect.y + rect.h * frac)
+         .stroke({ width: 0.5 * inv, color: CROP_BORDER_COLOR, alpha: 0.4 })
+      }
+    }
+    const w = 2 * inv, on = 8 * inv, off = 4 * inv
+    drawDashedLine(g, rect.x,          rect.y,          rect.x + rect.w, rect.y,          w, on, off)
+    drawDashedLine(g, rect.x + rect.w, rect.y,          rect.x + rect.w, rect.y + rect.h, w, on, off)
+    drawDashedLine(g, rect.x + rect.w, rect.y + rect.h, rect.x,          rect.y + rect.h, w, on, off)
+    drawDashedLine(g, rect.x,          rect.y + rect.h, rect.x,          rect.y,          w, on, off)
+  }
+
+  function drawDashedLine(g, ax, ay, bx, by, width, on, off) {
+    const len = Math.hypot(bx - ax, by - ay)
+    if (len < 1e-9) return
+    const ux = (bx - ax) / len, uy = (by - ay) / len
+    let cur = 0, phaseOn = true, remain = on
+    while (cur < len) {
+      const step = Math.min(len - cur, remain)
+      if (phaseOn) {
+        g.moveTo(ax + ux * cur, ay + uy * cur)
+         .lineTo(ax + ux * (cur + step), ay + uy * (cur + step))
+         .stroke({ width, color: CROP_BORDER_COLOR, alpha: 1 })
+      }
+      cur += step; remain -= step
+      if (remain <= 1e-9) { phaseOn = !phaseOn; remain = phaseOn ? on : off }
+    }
+  }
+
+  // Crop handle drag — rot.toLocal(global) gives unrotated image-coord
+  // pos, which is exactly the space cropX/Y/W/H live in. Writes to
+  // useFloorStore on every move so the sprite mask (in floorImageLayer)
+  // follows the drag live; isDragging blocks our own rebuild from
+  // tearing down the dragged handle.
+  const bindCropHandleDrag = (handle, floorId, corner, handles, redrawCropOverlay) => {
+    handle.on('pointerdown', (e) => {
+      if ((e.button ?? 0) !== 0) return
+      e.stopPropagation()
+      isDragging = true
+      const stage = scene.app.stage
+      const rot = handle.parent
+      const startLocal = rot.toLocal(e.global)
+      const f0 = useFloorStore.getState().floors.find((x) => x.id === floorId)
+      if (!f0) { isDragging = false; return }
+      const original = {
+        x: f0.cropX, y: f0.cropY,
+        w: f0.cropWidth, h: f0.cropHeight,
+      }
+
+      const onMove = (ev) => {
+        if (handle.destroyed || !handle.position) return
+        const lp = rot.toLocal(ev.global)
+        const dx = lp.x - startLocal.x
+        const dy = lp.y - startLocal.y
+        let x1 = original.x, y1 = original.y
+        let x2 = original.x + original.w, y2 = original.y + original.h
+        if (corner === 'tl') { x1 = original.x + dx;             y1 = original.y + dy }
+        if (corner === 'tr') { x2 = original.x + original.w + dx; y1 = original.y + dy }
+        if (corner === 'bl') { x1 = original.x + dx;             y2 = original.y + original.h + dy }
+        if (corner === 'br') { x2 = original.x + original.w + dx; y2 = original.y + original.h + dy }
+        const rx = Math.min(x1, x2), ry = Math.min(y1, y2)
+        const rw = Math.abs(x2 - x1), rh = Math.abs(y2 - y1)
+        if (rw < 2 || rh < 2) return
+        const rect = { x: rx, y: ry, w: rw, h: rh }
+        positionCropHandles(handles, rect)
+        redrawCropOverlay(rect, true)
+        useFloorStore.getState().updateFloor(floorId, {
+          cropX: rect.x, cropY: rect.y, cropWidth: rect.w, cropHeight: rect.h,
+        })
+      }
+      const onUp = () => {
+        stage.off('pointermove', onMove)
+        stage.off('pointerup', onUp)
+        stage.off('pointerupoutside', onUp)
+        isDragging = false
+        rebuild()
+        applyInverseScale()
+      }
+      stage.on('pointermove', onMove)
+      stage.on('pointerup', onUp)
+      stage.on('pointerupoutside', onUp)
+    })
   }
 
   // Snap-to-endpoint while dragging a wall handle. Returns the snapped
@@ -280,12 +495,15 @@ export function attachHandlesLayer({
     })
   }
 
-  // Screen-space handle sizing — each handle is a separate Container; we
-  // set every child's scale to 1 / viewport.scale so they don't shrink to
-  // nothing when zoomed out.
+  // Screen-space handle sizing — only the explicitly-tracked handles get
+  // inverse-scaled. Crop-adjust rotation Containers are excluded so their
+  // children (in image coords) aren't doubly scaled.
   const applyInverseScale = () => {
     const inv = 1 / (useViewportStore.getState().scale || 1)
-    for (const child of root.children) child.scale.set(inv)
+    for (const node of inverseScaleNodes) {
+      if (node.destroyed) continue
+      node.scale.set(inv)
+    }
   }
 
   const unsubEditor = useEditorStore.subscribe(() => { rebuild(); applyInverseScale() })
@@ -293,7 +511,12 @@ export function attachHandlesLayer({
   const unsubWall = useWallStore.subscribe(() => { rebuild(); applyInverseScale() })
   const unsubCable = useCableStore.subscribe(() => { rebuild(); applyInverseScale() })
   const unsubHover = useHoverStore.subscribe(() => { rebuild(); applyInverseScale() })
-  const unsubViewport = useViewportStore.subscribe(applyInverseScale)
+  const unsubViewport = useViewportStore.subscribe(() => {
+    applyInverseScale()
+    // Crop border / thirds stroke widths are baked into Graphics — redraw
+    // so they stay at constant screen px on pan / zoom.
+    if (cropRedrawOnViewport) cropRedrawOnViewport()
+  })
   rebuild()
   applyInverseScale()
 
