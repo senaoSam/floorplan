@@ -3,6 +3,7 @@ import { initScene } from '@/render/scene'
 import { bindViewport } from '@/render/viewport'
 import { attachModeAdapter } from '@/render/modeAdapter'
 import { useHistoryStore } from '@/store/useHistoryStore'
+import { collectMarqueeHits } from '@/features/marquee/marqueeHits'
 import { attachFloorImageLayer } from '@/features/floorImage/floorImageLayer'
 import { attachWallsLayer } from '@/features/walls/wallsLayer'
 import { attachAPsLayer } from '@/features/aps/apsLayer'
@@ -94,14 +95,29 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         onMarqueeCommit: (rect) => {
           const fid = useFloorStore.getState().activeFloorId
           if (!fid) return
-          const aps = useAPStore.getState().apsByFloor[fid] ?? []
-          const inside = aps.filter((ap) =>
-            ap.x >= rect.minX && ap.x <= rect.maxX &&
-            ap.y >= rect.minY && ap.y <= rect.maxY,
-          )
-          useEditorStore.getState().setSelectedItems(
-            inside.map((ap) => ({ id: ap.id, type: 'ap' })),
-          )
+          const editor = useEditorStore.getState()
+          const cable = useCableStore.getState()
+          // Marquee respects per-layer visibility (oldSrc parity).
+          const hits = collectMarqueeHits(rect, {
+            floorId: fid,
+            walls:       useWallStore.getState().wallsByFloor[fid] ?? [],
+            aps:         useAPStore.getState().apsByFloor[fid] ?? [],
+            scopes:      useScopeStore.getState().scopesByFloor[fid] ?? [],
+            floorHoles:  useFloorHoleStore.getState().floorHolesByFloor[fid] ?? [],
+            switches:    cable.switchesByFloor[fid] ?? [],
+            trays:       cable.traysByFloor[fid] ?? [],
+            risers:      cable.risers ?? [],
+            visibility: {
+              showWalls:      editor.showWalls,
+              showAPs:        editor.showAPs,
+              showScopes:     editor.showScopes,
+              showFloorHoles: editor.showFloorHoles,
+              showSwitches:   editor.showSwitches,
+              showCableTrays: editor.showCableTrays,
+              showRisers:     editor.showRisers,
+            },
+          })
+          editor.setSelectedItems(hits)
         },
         isPlaceMode: () => {
           const m = useEditorStore.getState().editorMode
@@ -344,9 +360,19 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         if (!fid) return
 
         // Batch (marquee multi-select) takes priority over single selection.
+        // Bundle 19: removes all selected types, not just APs.
         if (s.selectedItems.length > 1) {
-          const apIds = s.selectedItems.filter((it) => it.type === 'ap').map((it) => it.id)
-          if (apIds.length > 0) useAPStore.getState().removeAPs(fid, apIds)
+          const byType = {}
+          for (const it of s.selectedItems) {
+            (byType[it.type] ??= []).push(it.id)
+          }
+          if (byType.ap?.length)         useAPStore.getState().removeAPs(fid, byType.ap)
+          if (byType.wall?.length)       useWallStore.getState().removeWalls(fid, byType.wall)
+          if (byType.scope?.length)      useScopeStore.getState().removeScopes(fid, byType.scope)
+          if (byType.floor_hole?.length) useFloorHoleStore.getState().removeFloorHoles(fid, byType.floor_hole)
+          if (byType.switch?.length)     useCableStore.getState().removeSwitches(fid, byType.switch)
+          if (byType.cable_tray?.length) useCableStore.getState().removeTrays(fid, byType.cable_tray)
+          if (byType.cable_riser?.length) useCableStore.getState().removeRisers(byType.cable_riser)
           s.clearSelected()
           return
         }
