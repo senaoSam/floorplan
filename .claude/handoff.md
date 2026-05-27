@@ -1,4 +1,4 @@
-# Session Handoff — 2026-05-27 (Phase 25 — Bundle 10–15 shipped)
+# Session Handoff — 2026-05-27 (Phase 25 — Bundles 10–21 shipped)
 
 > 新 session **必讀**順序：
 > 1. `CLAUDE.md`（專案規則 + Session Start 流程）
@@ -31,10 +31,24 @@ User 多次強調 + 抓 bug 都是因為這條被破壞：
 
 ## 1. 現況一句話
 
-**Phase 25 PixiJS hybrid 重構 — Bundle 10 完成全 Tier 1A 嚴格 oldSrc port (AP / Switch / Wall / Cable / Scope / Tray) + DRAW_CABLE_TRAY 繪製 UI + Scope/FloorHole/FloorImage 右鍵 menu。Perf shader (31-4/5/6) 全沒動。**
+**Phase 25 PixiJS hybrid 重構 — Bundles 10-21 完成全 Tier 1A oldSrc port + capability matrix (cursor/dim/hover gating) + undo/redo + marquee 跨層 + tray snap helpers + cable riser feature。剩 perf shader (31-4/5/6) 跟 3D viewer 沒做。**
 
 commits（最新在上）：
 ```
+bd35992  Bundle 21 — Cable Riser feature (risersLayer + RiserPanel + dragOverlay slot)
+5491532  Bundle 20 — DRAW_CABLE_TRAY snap helpers (wallEndpoint/Segment/parallel)
+69779b0  Bundle 19 — Marquee multi-type hits (oldSrc collectMarqueeHits port)
+41d6a8c  Bundle 19.1 — Toolbar comment refresh
+39a25a9  Bundle 18 — Real Undo/Redo (oldSrc useHistoryStore port + Ctrl+Z wiring)
+fd65e39  Bundle 17 — modeCapabilities matrix + cursor + dimOthers
+f60214b  Bundle 16 — LMB select only in SELECT mode (capability parity)
+7d19565  Bundle 13 — Revert floor image to non-interactive (fix can't-draw-over-image)
+9bdbd7f  Bundle 12 — Esc fully exits draw/place mode
+47f6f22  Bundle 15 — Fix handle drag interrupted by hover-triggered rebuild
+e63e85e  Bundle 14 — Tray vertex drag overlay (fix destroy-during-drag crash)
+ccc34ad  Bundle 11 — Tray hit-context menu (split/extend/merge/convert)
+436389b  Bundle 10e — Fix RMB on object B while A's menu open closes everything
+f61cee0  Bundle 10d — Fix RMB menu instant-close from same-gesture mousedown
 6dc9fd5  Bundle 10c — DRAW_CABLE_TRAY draft UI + scope/hole/image right-click
 ec36914  Bundle 10b — Strict oldSrc port: Cable / Scope / Tray
 4b73884  Bundle 10a — Strict oldSrc port: AP / Switch / Wall / endpoint handles
@@ -78,7 +92,7 @@ efcad22  Bundle 2 — Sidebar overhaul + ProgressPanel
 ✅ Tray magnet halo 條件顯示（SELECT 只 hover/selected / DRAW_CABLE_TRAY 全顯）
 ✅ Debug log infra (`window.__debugWallSelect = true`)
 
-### Bundle 10 新增 (2026-05-26, autonomous session)
+### Bundle 10 新增 (2026-05-26, autonomous session 1)
 
 ✅ **Tier 1A AP layer 嚴格 port**：focus halo radius 15 / azimuth 0=+x convention / dashed directional selected ring / `patternPolygonPoints` custom 天線 / orientation arrow group / name label 改 ABOVE body / info pill width 80 + y 19
 ✅ **Tier 1A Switch layer 嚴格 port**：chassis roundRect / 刪自編 status LED / 補 PoE badge yellow line / port pip square Rect + 對齊公式 / status dot 2.8 / warning 5+'!'fs7 / kind label top of chassis / name label 改 ABOVE
@@ -87,70 +101,65 @@ efcad22  Bundle 2 — Sidebar overhaul + ProgressPanel
 ✅ **Tier 1A Cable layer 嚴格 port**：inverse-scale 全套 widths + dashes / S2S switch link 完整 (purple copper + rose fiber + node markers) / tray node markers (foot/riser-foot/riser@floor) / fallback elbow marker / unroutable badge 完整 (fill+!)+stroke
 ✅ **Tier 1A Scope layer 嚴格 port**：per-scope Container w/ point-in-polygon hit-test / hover fill alpha 0.18→0.5 / 改成 interactive
 ✅ **Tier 1A Tray layer 嚴格 port**：closed polygon w/ semicircle caps + miter joints (offsetPolyline + buildChannelPolygon) / 2-tray junction detect (computeTrayNeighborExts) / inverse-scale 全套 / 刪 always-on vertex dots / hover invert 完整
-✅ **DRAW_CABLE_TRAY 繪製 UI**：draftOverlayLayer 改 per-mode；tray draft 完整 port DraftTray（magnet halo 沿 committed + ghost / dashed ghost / vertex dots 白fill+colored stroke / 綠 snap halo on cursor at existing vertex）；wall draft 改 cyan dot + dashed cyan ghost；polygon draft (scope/hole) 改 dashed
-✅ **右鍵 context menu 覆蓋**：Scope / FloorHole / FloorImage 都接好 button===2；ContextMenuMount 新增 3 個 case；FloorImage 的 '移除底圖' 走 oldSrc 邏輯 (clear imageUrl + dimensions + crop)
+✅ **DRAW_CABLE_TRAY 繪製 UI**：draftOverlayLayer 改 per-mode；tray draft 完整 port DraftTray
+✅ **右鍵 context menu 覆蓋**：Scope / FloorHole / FloorImage 都接好 button===2
+
+### Bundles 10d–16 (2026-05-27 早段, 互動 race fixes)
+
+✅ **Bundle 10d / 10e**：RMB menu 自我關閉的 timing bug — outside-click listener 加 rAF 延後 + button===2 短路
+✅ **Bundle 11**：Tray hit-context menu 完整 (segment 切割 / endpoint 延伸 + 合併 / 轉換系統 submenu)
+✅ **Bundle 12**：Esc 完全退出 draw/place 模式 (清 draft + setEditorMode(SELECT))
+✅ **Bundle 13**：Floor image 改回 `eventMode='none'` — 修「DRAW_SCOPE 不能在底圖上點」
+✅ **Bundle 14 / 15**：Tray vertex drag dragOverlay 改寫 + handlesLayer `isDragging` flag (修拖一點就卡)
+✅ **Bundle 16**：LMB 只在 SELECT mode 才 setSelected (oldSrc allowSelectClick capability)
+
+### Bundles 17–21 (2026-05-27 晚段, autonomous session 2)
+
+✅ **Bundle 17 — modeCapabilities matrix**：完整 port oldSrc capability 系統 (14 mode × 9 flag)；新 `src/render/modeCapabilities.js` + `modeAdapter.js`；layers 改用 `cap.allowSelectClick`/`allowSelectHover`/`allowCommandHover`/`showMagnet`；cursor + `dimOthers` 跟 mode 走（draw 模式 AP/SW/tray dim 0.4 等）
+✅ **Bundle 18 — Undo/Redo**：完整 port `useHistoryStore` 雪花機制 (debounce 300ms + idle commit)；Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 鍵盤 shortcut；Toolbar undo/redo 按鈕自動啟用
+✅ **Bundle 19 — Marquee 跨層**：完整 port oldSrc `collectMarqueeHits`；wall / scope / floorHole / switch / tray / riser 全可框；Delete 批次刪除所有類型；尊重 layer visibility 開關
+✅ **Bundle 20 — DRAW_CABLE_TRAY snap helpers**：完整 port oldSrc 20-3 — shift angle lock / tray vertex snap / wall endpoint 橘環 / wall segment 橘方 / parallel wall 紫色 guide
+✅ **Bundle 21 — Cable Riser feature**：完整 feature port — `risersLayer.js` + `RiserPanel.jsx` + dragOverlay slot + ContextMenuMount cable_riser case + PanelRight 路由
 
 ---
 
 ## 3. **未完成** backlog
 
-### A. Tray 完整 hit-context menu (deferred)
+### F. Phase 25 perf shader (核心 — 1000 AP 規格)
 
-❌ Tray 還只是 basic 3 項；缺 segment/endpoint/vertex 各自 menu (split/extend/merge/vertex ops)。完整邏輯在 **`oldSrc/features/editor/Editor2D.jsx` 2014-2156** + `oldSrc/components/ContextMenu/TrayContextMenu.sass`。
-Bundle 10 沒做 — vertex handles 已在 handlesLayer，下個 session 加 right-click 觸發即可。
-
-### B. DRAW_CABLE_TRAY 進階 snap (deferred)
-
-✅ Vertex snap halo (cursor on existing tray vertex) 已 port。
-❌ 還沒做：wallEndpoint 橘色圓 ring / wallSegment 橘色方 ring (oldSrc 20-3) / parallel-wall 紫色 guide。需要 snapHint state，新 src 沒這 plumbing。
-
-### C. Audit polish
-
-- A6 `CableTrayPanel` 19-x 詳細欄位細部對照
-- B1 `floor_image` / `floor_align` / `cable_riser` panel route（占位中）
-- D4 Toolbar 細部 icon / undo-redo 細節
-- E3 CableSummaryPanel BOM 細分 + CSV/PDF export
-- F7 FloorImage crop / rotation / opacity / align transform
-
-### D. Workflow gaps
-
-- AutoPowerModal（Sidebar 自動規劃 button stub）
-- Marquee 跨 layer type（只 AP）
-- PNG 匯出（Sidebar floor menu 沒此項；oldSrc 用 Konva exporter）
-- AI walls modal（從底圖辨識牆）
-- Snap helpers 在 DRAW_CABLE_TRAY（20-3）
-- Auto-channel on place（已 port `autoChannelPlan.js` + apModels，沒接 placement）
-- Tray vertex context menu（同 A 提）
-- History (Undo/Redo) — `useHistoryStore` stub
-- DRAW_SCALE mode → ScaleDialog wiring 沒測
-- Crop image mode
-
-### E. Cable Riser 整 feature
-
-`risersLayer.js` + `PLACE_RISER` mode + `RiserPanel` + 跨樓層 xy 共用邏輯（cable-spec §12-3）— 完全沒做。估 2-3 天。
-
-### F. Phase 25 perf shader（**真正核心** — 1000 AP 規格達標）
-
-| Layer | 內容 | 估時 |
-|---|---|---|
-| 31-4 | Walls Mesh + line shader | 2-3 天 |
-| 31-5 | Cables Mesh + dashed line shader | 2-3 天 |
-| 31-6 | AP markers texture atlas | 2 天 |
-| 31-9 | Scopes/FloorHoles R-tree | 1 天 |
-| 31-10 | Stage event router + R-tree + uniform grid | 2 天 |
-| 31-11 | SDF text atlas + ticker animation | 2-3 天 |
-| 31-12 | 1000 AP 壓力測試 + diff 8 場景 | 2 天 |
-| 31-13 | 刪除 `oldSrc/` | 0.5 天 |
+❌ **31-4 Walls Mesh + line shader** — 2-3 天，技術風險最高
+❌ **31-5 Cables Mesh + dashed line shader** — 2-3 天
+❌ **31-6 AP markers texture atlas** — 2 天
+❌ **31-9 Scopes/FloorHoles R-tree** — 1 天
+❌ **31-10 Stage event router + R-tree + uniform grid** — 2 天
+❌ **31-11 SDF text atlas + ticker animation** — 2-3 天
+❌ **31-12 1000 AP 壓力測試 + diff 8 場景** — 2 天
+❌ **31-13 刪除 `oldSrc/`** — 0.5 天
 
 合計 ~15 天。**沒這部分 Phase 25 不算 ship**。
+
+### H. 3D Viewer
+
+❌ TopBar 3D toggle 目前 disabled；oldSrc 有完整 Viewer3D 用 `@react-three/fiber 7.0.29`。整套沒做。估 5-7 天。
+
+### Workflow gaps (小)
+
+- AutoPowerModal（Sidebar 自動規劃 button stub）
+- PNG 匯出（Sidebar floor menu 沒此項）
+- AI walls modal（從底圖辨識牆）
+- Crop image mode
+- DRAW_SCALE → ScaleDialog wiring 沒完整測
+- Auto-channel on place（已 port `autoChannelPlan.js` + apModels，沒接 placement）
+
+### Audit polish (小, 大多是 feature 沒做不是 polish)
+
+- E3 CableSummaryPanel BOM 細分 + CSV/PDF export — 從 119 → 598 LoC
+- F7 FloorImage crop / rotation / opacity / align transform — full feature
+- B1 `floor_image` / `floor_align` panel route（占位中）
 
 ### G. Phase 26（條件式）
 
 32-0 量測 baseline + 32-C 增量 routing（看量測結果決定）
-
-### H. 3D Viewer
-
-oldSrc `Viewer3D` 用 `@react-three/fiber 7.0.29`（package.json 依賴還在）。整套沒做。估 5-7 天。
 
 ---
 
@@ -199,18 +208,19 @@ window.__wallNearestTo(worldX, worldY)
 
 ## 6. 建議下個 task
 
-Bundle 10 完成後剩餘 backlog（依嚴重度 + 影響面排序）：
+Bundles 17-21 完成後剩餘的依嚴重度排序：
 
-1. **Tray 完整 context menu**（segment / endpoint / vertex 各自 menu — split / extend / merge / vertex 刪除/插入/分段）— 1-2 天
-2. **Bundle 漏單 polish**（A6 / D4 / E3 / F7 / 各 mode 文案 / unit suffix）— 1-2 天
-3. **Workflow gaps**：undo/redo 基礎 + marquee 跨層 + auto-channel on place + AutoPowerModal + PNG export — 3-5 天
-4. **Cable Riser 整 feature**（risersLayer + PLACE_RISER + RiserPanel + 跨樓層 xy）— 2-3 天
-5. **Phase 25 perf shader 31-4 walls / 31-5 cables / 31-6 AP atlas** — 6-8 天
-6. **3D Viewer** — 5-7 天
+1. **Phase 25 perf shader 31-4 walls** — 2-3 天，技術風險最高。**沒這個 Phase 25 不算 ship**（1000 AP 規格）
+2. **Phase 25 perf shader 31-5 cables / 31-6 AP atlas** — 4-5 天，接 31-4 之後
+3. **Workflow gaps 小項**：AutoPowerModal / PNG export / Auto-channel on place — 1-2 天
+4. **CableSummaryPanel BOM 完整版** — 0.5-1 天（純 UI work）
+5. **FloorImage 修圖工具**（crop / rotation / opacity / align transform）— 1-2 天
+6. **AI walls modal** — 1 天（OpenCV.js + worker 已 port，要接 UI）
+7. **3D Viewer** — 5-7 天，最後做
 
 **永遠記住**：不要動 oldSrc / 不要重設計 / grep oldSrc 抓常數 / MCP 並排對照 / commit message 標 oldSrc 出處。
 
-Bundle 10 commit 範例可參考標的 — 每個視覺常數變更都標明 oldSrc 對應行號。
+Bundle 10-21 commit 範例可參考標的 — 每個視覺常數變更都標明 oldSrc 對應行號。
 
 ---
 
