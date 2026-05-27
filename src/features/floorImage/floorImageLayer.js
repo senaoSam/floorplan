@@ -1,15 +1,25 @@
 import { Assets, Sprite, Graphics } from 'pixi.js'
+import { getModeCapability } from '@/render/modeCapabilities'
 
 // Floor image adapter — subscribes to useFloorStore and mounts the active
-// floor's image as a PIXI.Sprite into scene.layers.floorImage. On floor swap
-// the previous sprite is removed and the new one fitted into the viewport.
+// floor's image as a PIXI.Sprite into scene.layers.floorImage.
 //
-// The sprite is `eventMode='none'` (pure visual backdrop) — it must not
-// claim pointer events, otherwise PIXI's hit-test stops here and draw
-// modes (DRAW_SCOPE / DRAW_CABLE_TRAY / etc.) can't get their background
-// click to the stage handler. No right-click menu either — floor image
-// is not deletable from canvas; the floor record's other panels own that.
-export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore }) {
+// Interaction (oldSrc FloorImageLayer parity, Bundle 30):
+//   * LMB in SELECT mode → setSelected(floorId, 'floor_image'), which
+//     opens FloorImagePanel on the right side (Bundle 31). Other modes
+//     (draw / place) leave the click unconsumed so the stage handler
+//     can route it to the draw / place pipeline — drawing on top of
+//     the image still works.
+//   * RMB → openContextMenu({ targetType: 'floor_image' }) so the user
+//     can remove the image / etc. via ContextMenuMount.
+//
+// Rotation + opacity + crop are sourced from the floor record:
+//   * rotation: sprite.rotation in radians (oldSrc degrees → /180*π).
+//     Sprite pivots on image centre (imageWidth/2, imageHeight/2) so the
+//     rotation feels like rotating the page, not orbiting from corner.
+//   * opacity:  sprite.alpha (default 1)
+//   * cropX/Y/Width/Height: applyCrop() pins a Graphics rect as sprite.mask
+export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, useEditorStore }) {
   const layer = scene.layers.floorImage
   let currentSprite = null
   let currentMask = null   // Graphics rect used as sprite.mask when floor has cropX/Y/W/H
@@ -33,6 +43,17 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore }
     currentSprite = null
     currentFloorId = null
     currentImageUrl = null
+  }
+
+  // Apply rotation + opacity from the floor record (oldSrc parity).
+  // Rotation in PIXI is radians; floor.rotation is degrees so we
+  // convert. Sprite is pivot-centred via anchor(0.5, 0.5), so rotation
+  // spins around the image centre as expected.
+  const applyVisualProps = (floor) => {
+    if (!currentSprite || !floor) return
+    const deg = floor.rotation ?? 0
+    currentSprite.rotation = (deg * Math.PI) / 180
+    currentSprite.alpha = floor.opacity ?? 1
   }
 
   // Refresh the crop mask from the floor record. Called whenever the
@@ -84,7 +105,9 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore }
     }
 
     if (floor.id === currentFloorId && floor.imageUrl === currentImageUrl) {
-      // Same floor, same texture — only crop may have changed.
+      // Same floor, same texture — only crop / rotation / opacity may
+      // have changed.
+      applyVisualProps(floor)
       applyCrop(floor)
       return
     }
@@ -99,16 +122,43 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore }
 
       clearSprite()
       const sprite = new Sprite(texture)
-      sprite.eventMode = 'none' // floor image is pure backdrop; never intercept clicks
-      sprite.x = 0
-      sprite.y = 0
+      // Pivot on image centre so rotation feels like rotating the
+      // page itself (oldSrc Konva Image uses offsetX=cx, offsetY=cy).
+      sprite.anchor.set(0.5, 0.5)
+      sprite.x = floor.imageWidth / 2
+      sprite.y = floor.imageHeight / 2
       sprite.width = floor.imageWidth
       sprite.height = floor.imageHeight
+      // Bundle 30: interactive so SELECT-mode LMB can select the floor
+      // image. Non-SELECT modes return early WITHOUT stopPropagation, so
+      // the click bubbles to stage and draw/place still works on top of
+      // the image.
+      sprite.eventMode = 'static'
+      sprite.on('pointerdown', (e) => {
+        const editor = useEditorStore?.getState?.()
+        if (!editor) return
+        if (e.button === 2) {
+          e.stopPropagation()
+          editor.openContextMenu({
+            targetType: 'floor_image',
+            targetId: floor.id,
+            screenX: e.originalEvent?.clientX ?? 0,
+            screenY: e.originalEvent?.clientY ?? 0,
+          })
+          return
+        }
+        if ((e.button ?? 0) !== 0) return
+        const cap = getModeCapability(editor.editorMode)
+        if (!cap.allowSelectClick.meta) return
+        e.stopPropagation()
+        editor.setSelected(floor.id, 'floor_image')
+      })
       layer.addChild(sprite)
       currentSprite = sprite
       currentFloorId = floor.id
       currentImageUrl = floor.imageUrl
 
+      applyVisualProps(floor)
       applyCrop(floor)
       fitViewportTo(floor.imageWidth, floor.imageHeight)
     } catch (err) {

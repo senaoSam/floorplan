@@ -8,6 +8,7 @@ import RiserPanel from './RiserPanel'
 import WallPanel from './WallPanel'
 import ScopePanel from './ScopePanel'
 import FloorHolePanel from './FloorHolePanel'
+import FloorImagePanel from './FloorImagePanel'
 import BatchPanel from './BatchPanel'
 import './PanelRight.sass'
 
@@ -37,6 +38,7 @@ function PanelRight() {
       case 'switch':     body = <SwitchPanel   floorId={activeFloorId} swId={selectedId} />;   break
       case 'cable_tray': body = <CableTrayPanel floorId={activeFloorId} trayId={selectedId} />; break
       case 'cable_riser': body = <RiserPanel riserId={selectedId} />; break
+      case 'floor_image': body = <FloorImagePanel floorId={selectedId} />; break
       case 'wall':       body = <WallPanel     floorId={activeFloorId} wallId={selectedId} />; break
       case 'scope':      body = <ScopePanel    floorId={activeFloorId} zoneId={selectedId} />; break
       case 'floor_hole': body = <FloorHolePanel floorId={activeFloorId} holeId={selectedId} />; break

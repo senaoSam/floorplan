@@ -1,0 +1,62 @@
+@use '@/styles/variables' as *
+
+// 24-3 Slimmed FloorImagePanel-specific styles. Layout / form primitives
+// (header / section / button / input) come from _shared/shared.sass; this
+// file now only holds the bits without a shared equivalent — the rotation
+// slider track + opacity row + 4-up preset button grid.
+
+.floor-image-panel
+  &__angle-row
+    display: flex
+    align-items: center
+    gap: 6px
+
+  &__opacity-row
+    display: flex
+    align-items: center
+    gap: 8px
+
+  &__opacity-value
+    font-size: 13px
+    color: $text-primary
+    width: 36px
+    text-align: right
+    flex-shrink: 0
+
+  // 4-up preset row (0/90/180/270 degrees and 25/50/75/100 %).
+  // Spaces buttons evenly inside a PanelSection — pnl-btn alone doesn't
+  // stretch since it's inline-flex by default.
+  &__presets
+    display: flex
+    gap: 4px
+
+    > button
+      flex: 1
+
+  &__angle-slider
+    flex: 1
+    height: 4px
+    -webkit-appearance: none
+    appearance: none
+    background: rgba(255, 255, 255, 0.12)
+    border-radius: 2px
+    outline: none
+    cursor: pointer
+
+    &::-webkit-slider-thumb
+      -webkit-appearance: none
+      appearance: none
+      width: 14px
+      height: 14px
+      border-radius: 50%
+      background: var(--panel-accent, $accent)
+      cursor: pointer
+      border: 2px solid $bg-secondary
+
+    &::-moz-range-thumb
+      width: 14px
+      height: 14px
+      border-radius: 50%
+      background: var(--panel-accent, $accent)
+      cursor: pointer
+      border: 2px solid $bg-secondary

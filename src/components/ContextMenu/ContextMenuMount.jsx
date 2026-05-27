@@ -105,10 +105,28 @@ function ContextMenuMount() {
       useCableStore.getState().removeRiser(targetId)
       clearSelected()
     }
+  } else if (targetType === 'floor_image') {
+    // Bundle 30: floor image is interactive again (capability-gated)
+    // so the right-click menu must come back. Delete detaches the
+    // imageUrl + dimensions + crop (oldSrc Editor2D 2222-2239).
+    const f = useFloorStore.getState().floors.find((x) => x.id === targetId)
+    target = f ? { id: targetId, name: f.name } : null
+    title = f ? `${f.name} 底圖` : `${targetId} 底圖`
+    onRename = null
+    deleteLabel = '移除底圖'
+    onDelete = () => {
+      useFloorStore.getState().updateFloor(targetId, {
+        imageUrl: null,
+        imageWidth: undefined,
+        imageHeight: undefined,
+        cropX: null,
+        cropY: null,
+        cropWidth: null,
+        cropHeight: null,
+      })
+      clearSelected()
+    }
   }
-  // (Floor image is intentionally non-interactive — pure backdrop. No
-  // right-click menu, no delete from canvas; deletion would happen via
-  // floor record management in the sidebar / panels.)
 
   if (!target) {
     // Target was removed underneath; close menu silently.
