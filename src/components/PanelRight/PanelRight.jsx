@@ -4,6 +4,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import APPanel from './APPanel'
 import SwitchPanel from './SwitchPanel'
 import CableTrayPanel from './CableTrayPanel'
+import RiserPanel from './RiserPanel'
 import WallPanel from './WallPanel'
 import ScopePanel from './ScopePanel'
 import FloorHolePanel from './FloorHolePanel'
@@ -35,6 +36,7 @@ function PanelRight() {
       case 'ap':         body = <APPanel       floorId={activeFloorId} apId={selectedId} />;   break
       case 'switch':     body = <SwitchPanel   floorId={activeFloorId} swId={selectedId} />;   break
       case 'cable_tray': body = <CableTrayPanel floorId={activeFloorId} trayId={selectedId} />; break
+      case 'cable_riser': body = <RiserPanel riserId={selectedId} />; break
       case 'wall':       body = <WallPanel     floorId={activeFloorId} wallId={selectedId} />; break
       case 'scope':      body = <ScopePanel    floorId={activeFloorId} zoneId={selectedId} />; break
       case 'floor_hole': body = <FloorHolePanel floorId={activeFloorId} holeId={selectedId} />; break

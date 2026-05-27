@@ -14,6 +14,7 @@ import { create } from 'zustand'
 //   hole:       { id, dx, dy } | null
 //   tray:       { id, dx, dy } | null                          (Phase 24-30-2: body drag offset)
 //   trayVertex: { trayId, vertexIdx, x, y } | null             (Phase 24-30-2: single-vertex drag pos)
+//   riser:      { id, x, y } | null                            (Phase 25 Bundle 21: riser drag pos)
 export const useDragOverlayStore = create((set) => ({
   ap: null,
   sw: null,
@@ -22,6 +23,7 @@ export const useDragOverlayStore = create((set) => ({
   hole: null,
   tray: null,
   trayVertex: null,
+  riser: null,
 
   setAP:         (v) => set({ ap: v }),
   setSwitch:     (v) => set({ sw: v }),
@@ -30,5 +32,6 @@ export const useDragOverlayStore = create((set) => ({
   setHole:       (v) => set({ hole: v }),
   setTray:       (v) => set({ tray: v }),
   setTrayVertex: (v) => set({ trayVertex: v }),
-  clear:         () => set({ ap: null, sw: null, wall: null, scope: null, hole: null, tray: null, trayVertex: null }),
+  setRiser:      (v) => set({ riser: v }),
+  clear:         () => set({ ap: null, sw: null, wall: null, scope: null, hole: null, tray: null, trayVertex: null, riser: null }),
 }))

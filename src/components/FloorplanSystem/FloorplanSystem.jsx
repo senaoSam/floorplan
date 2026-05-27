@@ -9,6 +9,7 @@ import { attachWallsLayer } from '@/features/walls/wallsLayer'
 import { attachAPsLayer } from '@/features/aps/apsLayer'
 import { attachSwitchesLayer } from '@/features/switches/switchesLayer'
 import { attachTraysLayer } from '@/features/trays/traysLayer'
+import { attachRisersLayer } from '@/features/risers/risersLayer'
 import { attachCablesLayer } from '@/features/cables/cablesLayer'
 import { attachSelectionOverlay } from '@/features/selection/selectionOverlayLayer'
 import { attachHoverOverlay } from '@/features/selection/hoverOverlayLayer'
@@ -56,6 +57,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachAPs = null
     let detachSwitches = null
     let detachTrays = null
+    let detachRisers = null
     let detachCables = null
     let detachHeatmap = null
     let detachSelection = null
@@ -211,6 +213,11 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useAPStore,
       })
       detachTrays = attachTraysLayer({
+        scene: s,
+        useFloorStore,
+        useCableStore,
+      })
+      detachRisers = attachRisersLayer({
         scene: s,
         useFloorStore,
         useCableStore,
@@ -410,6 +417,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (detachHeatmap) detachHeatmap()
       if (detachCables) detachCables()
       if (detachTrays) detachTrays()
+      if (detachRisers) detachRisers()
       if (detachSwitches) detachSwitches()
       if (detachAPs) detachAPs()
       if (detachWalls) detachWalls()

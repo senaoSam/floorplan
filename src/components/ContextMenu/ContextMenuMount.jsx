@@ -94,6 +94,17 @@ function ContextMenuMount() {
       useFloorHoleStore.getState().removeFloorHole(activeFloorId, targetId)
       clearSelected()
     }
+  } else if (targetType === 'cable_riser') {
+    // Risers are global (cross-floor); look up against the entire risers
+    // array rather than per-floor.
+    const risers = useCableStore.getState().risers ?? []
+    target = risers.find((r) => r.id === targetId)
+    title = target?.name ?? targetId
+    onRename = (name) => useCableStore.getState().updateRiser(targetId, { name })
+    onDelete = () => {
+      useCableStore.getState().removeRiser(targetId)
+      clearSelected()
+    }
   }
   // (Floor image is intentionally non-interactive — pure backdrop. No
   // right-click menu, no delete from canvas; deletion would happen via
