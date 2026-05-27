@@ -1,4 +1,5 @@
 import { Container, Graphics } from 'pixi.js'
+import { DropShadowFilter } from 'pixi-filters'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
@@ -10,13 +11,54 @@ import { getModeCapability } from '@/render/modeCapabilities'
 // violet fill + solid purple stroke. Distinguishes "void / atrium" from
 // scope evaluation regions (green/red).
 
-const HOLE_FILL          = 'rgba(124, 58, 237, 0.20)'
-const HOLE_FILL_HOVER    = 'rgba(124, 58, 237, 0.45)'
-const HOLE_STROKE        = '#7c3aed'
-const HOLE_STROKE_WIDTH  = 2
+// Visual constants ported 1:1 from oldSrc/features/editor/layers/FloorHoleLayer.jsx
+//   normal: violet stroke 3 px, dashed [10, 4], low-alpha violet fill
+//   hover : white stroke 4 px, dashed [10, 4], brighter violet fill (0.5 alpha)
+//   selected: red stroke 4 px, dashed [10, 4], fill unchanged
+const HOLE_FILL            = 'rgba(124, 58, 237, 0.20)'
+const HOLE_FILL_HOVER      = 'rgba(124, 58, 237, 0.50)'
+const HOLE_STROKE          = '#7c3aed'
+const HOLE_STROKE_WIDTH    = 3   // oldSrc normal stroke 3 (was 2 — fix)
 const HOLE_STROKE_EMPHASIS = 4
-const SELECT_STROKE      = '#e74c3c'
-const HOVER_STROKE       = '#ffffff'
+const SELECT_STROKE        = '#e74c3c'
+const HOVER_STROKE         = '#ffffff'
+const DASH_ON              = 10
+const DASH_OFF             = 4
+
+// Dashed-polygon stroke (PIXI v8 stroke() has no native dash). Walks the
+// polygon edge-by-edge laying alternating on/off segments. Same helper
+// scopesLayer uses for out-scope; inlined here so each layer can tweak
+// dash pattern independently.
+function drawDashedPolygon(g, flat, dashOn, dashOff, opts) {
+  if (!flat || flat.length < 4) return
+  const n = flat.length / 2
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n
+    const cx = flat[i * 2], cy = flat[i * 2 + 1]
+    const tx = flat[j * 2], ty = flat[j * 2 + 1]
+    const len = Math.hypot(tx - cx, ty - cy)
+    if (len <= 1e-9) continue
+    const ux = (tx - cx) / len
+    const uy = (ty - cy) / len
+    let cursor = 0
+    let phaseOn = true
+    let remain = dashOn
+    while (cursor < len) {
+      const step = Math.min(len - cursor, remain)
+      const x1 = cx + ux * cursor
+      const y1 = cy + uy * cursor
+      const x2 = cx + ux * (cursor + step)
+      const y2 = cy + uy * (cursor + step)
+      if (phaseOn) g.moveTo(x1, y1).lineTo(x2, y2).stroke(opts)
+      cursor += step
+      remain -= step
+      if (remain <= 1e-9) {
+        phaseOn = !phaseOn
+        remain = phaseOn ? dashOn : dashOff
+      }
+    }
+  }
+}
 
 function makePolygonHitArea(flat) {
   return {
@@ -51,8 +93,14 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
       const g = new Graphics()
       g.eventMode = 'none'
       c.addChild(g)
+      // oldSrc shadowColor/Blur/Offset on the Konva Line — port via
+      // per-container DropShadowFilter (drawHole mutates per state).
+      const shadow = new DropShadowFilter({
+        color: 0x000000, alpha: 0.6, blur: 1, offset: { x: 0, y: 0 }, quality: 3,
+      })
+      c.filters = [shadow]
       layer.addChild(c)
-      entry = { container: c, graphics: g, hole, floorId }
+      entry = { container: c, graphics: g, shadow, hole, floorId }
       containers.set(hole.id, entry)
       bindInteractions(entry)
     } else {
@@ -71,7 +119,7 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
   }
 
   const drawHole = (entry) => {
-    const { graphics, container, hole } = entry
+    const { graphics, container, shadow, hole } = entry
     const flat = hole.points?.slice() ?? []
     if (flat.length < 6) return
     const editorState = useEditorStore.getState()
@@ -80,11 +128,26 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
     const isHovered  = hoverState.id === hole.id && hoverState.type === 'floor_hole'
     const isInvert   = isHovered && !isSelected
 
+    if (shadow) {
+      if (isInvert) {
+        shadow.color = 0xffffff
+        shadow.alpha = 0.9
+        shadow.blur  = 2
+      } else {
+        shadow.color = 0x000000
+        shadow.alpha = 0.6
+        shadow.blur  = 1
+      }
+    }
+
     graphics.clear()
     graphics.poly(flat).fill({ color: isInvert ? HOLE_FILL_HOVER : HOLE_FILL, alpha: 1 })
     const stroke = isSelected ? SELECT_STROKE : (isInvert ? HOVER_STROKE : HOLE_STROKE)
     const width  = (isSelected || isInvert) ? HOLE_STROKE_EMPHASIS : HOLE_STROKE_WIDTH
-    graphics.poly(flat).stroke({ width, color: stroke, alpha: 1 })
+    // oldSrc renders the floor-hole outline ALWAYS dashed [10, 4] —
+    // regardless of selected / hover state. The dash signals "this is
+    // a void" even when emphasised.
+    drawDashedPolygon(graphics, flat, DASH_ON, DASH_OFF, { width, color: stroke, alpha: 1 })
 
     container.hitArea = makePolygonHitArea(flat)
   }

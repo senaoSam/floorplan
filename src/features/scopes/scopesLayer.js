@@ -1,4 +1,5 @@
 import { Container, Graphics } from 'pixi.js'
+import { DropShadowFilter } from 'pixi-filters'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
@@ -92,8 +93,17 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
       const g = new Graphics()
       g.eventMode = 'none'
       c.addChild(g)
+      // oldSrc Konva Line has shadowColor / shadowBlur / shadowOffset.
+      // Default: black rgba(0,0,0,0.6) blur 4. Hover: white blur 8.
+      // PIXI v8 doesn't ship a built-in drop shadow on Graphics, so we
+      // attach a per-container DropShadowFilter that drawScope mutates
+      // on state change.
+      const shadow = new DropShadowFilter({
+        color: 0x000000, alpha: 0.6, blur: 1, offset: { x: 0, y: 0 }, quality: 3,
+      })
+      c.filters = [shadow]
       layer.addChild(c)
-      entry = { container: c, graphics: g, scope, floorId }
+      entry = { container: c, graphics: g, shadow, scope, floorId }
       containers.set(scope.id, entry)
       bindInteractions(entry)
     } else {
@@ -112,7 +122,7 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
   }
 
   const drawScope = (entry) => {
-    const { graphics, container, scope } = entry
+    const { graphics, container, shadow, scope } = entry
     const flat = scope.points?.slice() ?? []
     if (flat.length < 6) return
     const isOut = scope.type === 'out'
@@ -121,6 +131,19 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
     const isSelected = editorState.selectedId === scope.id && editorState.selectedType === 'scope'
     const isHovered  = hoverState.id === scope.id && hoverState.type === 'scope'
     const isInvert   = isHovered && !isSelected
+
+    // Update shadow per oldSrc: hover → white blur 8, else black blur 4.
+    if (shadow) {
+      if (isInvert) {
+        shadow.color = 0xffffff
+        shadow.alpha = 0.9
+        shadow.blur  = 2
+      } else {
+        shadow.color = 0x000000
+        shadow.alpha = 0.6
+        shadow.blur  = 1
+      }
+    }
 
     graphics.clear()
     const fillColor = isInvert
@@ -134,7 +157,10 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
     if (isSelected) { stroke = SELECT_STROKE; width = STROKE_WIDTH_EMPHASIS }
     else if (isInvert) { stroke = HOVER_STROKE; width = STROKE_WIDTH_EMPHASIS }
 
-    if (isOut && !isSelected && !isInvert) {
+    // oldSrc out-scope ALWAYS dashes [8, 4], regardless of selected /
+    // hover state — the dash carries the "out" semantic. In-scope stays
+    // solid in every state.
+    if (isOut) {
       drawDashedPolygon(graphics, flat, DASH_ON, DASH_OFF, { width, color: stroke, alpha: 1 })
     } else {
       graphics.poly(flat).stroke({ width, color: stroke, alpha: 1 })
