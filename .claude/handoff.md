@@ -1,4 +1,4 @@
-# Session Handoff — 2026-05-27 (Phase 25 — Bundles 10–21 shipped)
+# Session Handoff — 2026-05-27 (Phase 25 — Bundles 10–24 shipped)
 
 > 新 session **必讀**順序：
 > 1. `CLAUDE.md`（專案規則 + Session Start 流程）
@@ -31,10 +31,13 @@ User 多次強調 + 抓 bug 都是因為這條被破壞：
 
 ## 1. 現況一句話
 
-**Phase 25 PixiJS hybrid 重構 — Bundles 10-21 完成全 Tier 1A oldSrc port + capability matrix (cursor/dim/hover gating) + undo/redo + marquee 跨層 + tray snap helpers + cable riser feature。剩 perf shader (31-4/5/6) 跟 3D viewer 沒做。**
+**Phase 25 PixiJS hybrid 重構 — Bundles 10-24 完成全 Tier 1A oldSrc port + capability matrix + undo/redo + marquee 跨層 + tray snap + cable riser + PNG export + AutoPowerModal + AI walls modal。剩 perf shader (31-4/5/6) 跟 3D viewer 沒做。**
 
 commits（最新在上）：
 ```
+d325864  Bundle 24 — AI walls modal (Gemini + OpenCV HoughLinesP)
+e8e39b6  Bundle 23 — AutoPowerModal (heatmap-driven AP power planner)
+83c6cdb  Bundle 22 — PNG export (oldSrc workflow, PIXI v8 extract)
 bd35992  Bundle 21 — Cable Riser feature (risersLayer + RiserPanel + dragOverlay slot)
 5491532  Bundle 20 — DRAW_CABLE_TRAY snap helpers (wallEndpoint/Segment/parallel)
 69779b0  Bundle 19 — Marquee multi-type hits (oldSrc collectMarqueeHits port)
@@ -142,13 +145,13 @@ efcad22  Bundle 2 — Sidebar overhaul + ProgressPanel
 
 ❌ TopBar 3D toggle 目前 disabled；oldSrc 有完整 Viewer3D 用 `@react-three/fiber 7.0.29`。整套沒做。估 5-7 天。
 
-### Workflow gaps (小)
+### Workflow gaps (剩餘)
 
-- AutoPowerModal（Sidebar 自動規劃 button stub）
-- PNG 匯出（Sidebar floor menu 沒此項）
-- AI walls modal（從底圖辨識牆）
-- Crop image mode
-- DRAW_SCALE → ScaleDialog wiring 沒完整測
+- ✅ ~~AutoPowerModal~~ — Bundle 23
+- ✅ ~~PNG 匯出~~ — Bundle 22
+- ✅ ~~AI walls modal~~ — Bundle 24
+- Crop image mode（沒做）
+- DRAW_SCALE → ScaleDialog wiring 沒完整測（用 prompt() 取代 dialog）
 - Auto-channel on place（已 port `autoChannelPlan.js` + apModels，沒接 placement）
 
 ### Audit polish (小, 大多是 feature 沒做不是 polish)
