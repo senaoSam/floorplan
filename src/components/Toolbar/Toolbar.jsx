@@ -1,16 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
+import { useFloorStore } from '@/store/useFloorStore'
 import Icon from '@/components/Icon/Icon'
 import Tooltip from '@/components/Tooltip/Tooltip'
+import AIWallsModal from '@/components/AIWallsModal/AIWallsModal'
 import './Toolbar.sass'
 
 // Phase 18 + 24-2 floating toolbar — top-center icon strip with hover-
-// expand group dropdowns. Trimmed Phase 25 port:
-//   - AI walls action removed (AIWallsModal not ported yet)
+// expand group dropdowns. Phase 25 port:
 //   - Align-mode "are you sure" confirm dialog removed (align mode not
 //     implemented in Phase 25 yet)
 //   - Undo / Redo wired up to the real useHistoryStore as of Bundle 18.
+//   - AI walls action wired Bundle 24.
 
 const GROUPS = [
   {
@@ -31,6 +33,7 @@ const GROUPS = [
       { mode: EDITOR_MODE.DRAW_WALL,       icon: 'wall',       label: '畫牆' },
       { mode: EDITOR_MODE.DOOR_WINDOW,     icon: 'doorWindow', label: '門窗' },
       { mode: EDITOR_MODE.DRAW_FLOOR_HOLE, icon: 'floorHole',  label: '中庭' },
+      { action: 'aiWalls',                 icon: 'aiWalls',    label: 'AI 牆（從底圖辨識）' },
     ],
   },
   {
@@ -94,8 +97,13 @@ function Toolbar() {
   const redoLen = useHistoryStore((s) => s.redoStack.length)
   const undo = useHistoryStore((s) => s.undo)
   const redo = useHistoryStore((s) => s.redo)
+  const activeFloorId = useFloorStore((s) => s.activeFloorId)
+  const floors = useFloorStore((s) => s.floors)
+  const activeFloor = floors.find((f) => f.id === activeFloorId)
+  const aiEnabled = !!(activeFloor && activeFloor.imageUrl)
 
   const [openGroupId, setOpenGroupId] = useState(null)
+  const [aiOpen, setAiOpen] = useState(false)
   const closeTimerRef = useRef(null)
 
   const cancelClose = () => {
@@ -126,8 +134,9 @@ function Toolbar() {
 
   const resolveAction = (action) => {
     switch (action) {
-      case 'undo': return { enabled: undoLen > 0, onClick: undo }
-      case 'redo': return { enabled: redoLen > 0, onClick: redo }
+      case 'undo':    return { enabled: undoLen > 0, onClick: undo }
+      case 'redo':    return { enabled: redoLen > 0, onClick: redo }
+      case 'aiWalls': return { enabled: aiEnabled,   onClick: () => setAiOpen(true) }
       default:     return { enabled: false, onClick: () => {} }
     }
   }
@@ -234,6 +243,7 @@ function Toolbar() {
           )
         })}
       </div>
+      <AIWallsModal open={aiOpen} onClose={() => setAiOpen(false)} />
     </div>
   )
 }
