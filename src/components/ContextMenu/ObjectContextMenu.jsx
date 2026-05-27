@@ -45,17 +45,26 @@ function ObjectContextMenu({
 
   // Outside click + Esc dismiss. Esc backs out of rename view first.
   //
-  // The mousedown listener is attached on the NEXT animation frame, not
-  // synchronously on mount. Reason: the right-click that opened this menu
-  // fires `pointerdown` first → PIXI handler → openContextMenu → React
-  // commits (sync flush for discrete events) → this useEffect runs and
-  // attaches the listener. The browser THEN fires the matching `mousedown`
-  // event (browsers fire pointerdown before mousedown for the same gesture),
-  // which bubbles to document and immediately triggers onDocDown, closing
-  // the menu that just opened. Deferring by one rAF lets that mousedown
-  // pass through first.
+  // Two-part guard so the listener doesn't close the menu in two race
+  // conditions both rooted in the browser's pointerdown → mousedown
+  // ordering for the same right-click gesture:
+  //
+  //   1) `e.button === 2` short-circuit. Right-clicks anywhere (canvas,
+  //      another object, even the menu) should never close via the
+  //      outside-click path — they are either the gesture that opened
+  //      this menu, or a gesture targeting another object whose own
+  //      handler will swap our ctx for theirs. Only left clicks outside
+  //      the menu DOM should dismiss it.
+  //
+  //   2) rAF-deferred attach. Belt-and-suspenders for the FIRST open:
+  //      even with the button check above, if some browser fires a
+  //      `mousedown` with button=0 alongside the right-click (rare —
+  //      certain trackpad emulations), the deferral keeps us safe by
+  //      not having the listener live during the gesture that opened
+  //      the menu in the first place.
   useEffect(() => {
     const onDocDown = (e) => {
+      if (e.button === 2) return
       if (menuRef.current && !menuRef.current.contains(e.target)) onClose?.()
     }
     const onKey = (e) => {

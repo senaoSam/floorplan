@@ -143,8 +143,18 @@ function ContextMenuMount() {
     onClick: onDelete,
   })
 
+  // `key` includes targetType + targetId + screen xy so that EVERY new
+  // openContextMenu (different object OR same object at a different click
+  // position) forces ObjectContextMenu to unmount + remount. Without the
+  // remount, the outside-click listener attached when the FIRST menu opened
+  // would still be live when the user right-clicks a second object —
+  // the second gesture's mousedown would fire that stale listener and
+  // close the freshly-opened menu in the same tick. The remount triggers
+  // the rAF-deferred listener attach inside ObjectContextMenu, which
+  // skips the right-click's own mousedown event.
   return (
     <ObjectContextMenu
+      key={`${targetType}:${targetId}:${screenX}:${screenY}`}
       x={screenX}
       y={screenY}
       title={title}
