@@ -284,9 +284,21 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
 
       if (e.key === 'Escape') {
-        // Active draft in flight → cancel it first.
-        if (draftCtrl.handleKey('Escape')) return
         const s = useEditorStore.getState()
+        const draft = useDraftStore.getState()
+        const inNonSelectMode = s.editorMode !== EDITOR_MODE.SELECT
+                              && s.editorMode !== EDITOR_MODE.PAN
+        // Drawing / placing / cropping / aligning modes — Esc fully aborts.
+        // Clear any draft in flight AND drop back to SELECT so the next
+        // canvas click doesn't start a fresh draft of the abandoned mode.
+        // (oldSrc only cleared the draft and kept the mode; the user
+        // perceived that as "Esc did nothing" because clicks kept opening
+        // new walls / scopes / trays.)
+        if (inNonSelectMode || (draft && draft.mode != null)) {
+          draftCtrl.handleKey('Escape')   // clearDraft via the controller
+          if (inNonSelectMode) s.setEditorMode(EDITOR_MODE.SELECT)
+          return
+        }
         // Esc closes the context menu first if open, otherwise clears
         // selection. Matches the ObjectContextMenu's own Esc handler.
         if (s.contextMenu) {
