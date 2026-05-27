@@ -14,11 +14,11 @@ import { useCableStore } from '@/store/useCableStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorImport } from '@/features/importer/useFloorImport'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
+import { capturePlanPng, triggerImageDownload } from '@/features/exportPng/exportPlanView'
 import './SidebarLeft.sass'
 
 // Ported from oldSrc; trimmed against the PIXI port:
-//   * 匯出 PNG ↘ requires the Konva stage — not available now (the new
-//     renderer uses PIXI). Hidden until a PIXI exporter lands.
+//   * 匯出 PNG ↘ ported Bundle 22 via PIXI renderer.extract.canvas.
 //   * 自動規劃整層 AP 功率 ↘ requires AutoPowerModal (heatmap-driven
 //     greedy planner) — not ported yet. Button kept but stubs an alert.
 // Everything else (add / collapse / rename / align switch / inline floor
@@ -119,6 +119,42 @@ function SidebarLeft() {
   const requestRemove = (floor) => {
     setMenuOpenId(null)
     setPendingRemove(floor)
+  }
+
+  const exportPng = (floor) => {
+    setMenuOpenId(null)
+    if (!floor.imageUrl || !floor.imageWidth || !floor.imageHeight) return
+    const doExport = () => {
+      // window.__pixiApp + window.__scene are exposed in DEV by
+      // FloorplanSystem; in production the FloorplanSystem will hand us
+      // these refs directly via a future prop. For now MVP relies on
+      // the DEV bridge — matches how exportPng runs anyway (debug tool).
+      const app = window.__pixiApp
+      const world = window.__scene?.world
+      if (!app || !world) {
+        // eslint-disable-next-line no-alert
+        alert('PIXI scene 還沒就緒，請等載入完再試一次。')
+        return
+      }
+      const png = capturePlanPng({
+        app, world,
+        imageWidth: floor.imageWidth,
+        imageHeight: floor.imageHeight,
+        pixelRatio: 2,
+      })
+      if (!png) return
+      const safeName = (floor.name ?? 'plan').replace(/[^\w\-一-龥]+/g, '_')
+      const stamp = new Date().toISOString().slice(0, 10)
+      triggerImageDownload(png, `floorplan-${safeName}-${stamp}.png`)
+    }
+    // Switch to the target floor first (so its content is what gets baked)
+    // — only needed if the active floor differs.
+    if (floor.id !== activeFloorId) {
+      setActiveFloor(floor.id)
+      setTimeout(doExport, 50)   // let one render frame land
+    } else {
+      doExport()
+    }
   }
 
   const startAlign = (floor) => {
@@ -287,6 +323,14 @@ function SidebarLeft() {
                   >
                     <button className="sidebar-left__menu-item" onClick={() => startRename(floor)}>重新命名</button>
                     <button className="sidebar-left__menu-item" onClick={() => startAlign(floor)}>對齊樓層</button>
+                    <button
+                      className="sidebar-left__menu-item"
+                      disabled={!floor.imageUrl}
+                      title={floor.imageUrl ? '匯出本層平面圖（含 walls / AP / heatmap）為 PNG' : '需先匯入底圖'}
+                      onClick={() => exportPng(floor)}
+                    >
+                      匯出 PNG
+                    </button>
                     <button className="sidebar-left__menu-item sidebar-left__menu-item--danger" onClick={() => requestRemove(floor)}>刪除樓層</button>
                   </div>
                 )}
