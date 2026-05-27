@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react'
 import { initScene } from '@/render/scene'
 import { bindViewport } from '@/render/viewport'
 import { attachModeAdapter } from '@/render/modeAdapter'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { attachFloorImageLayer } from '@/features/floorImage/floorImageLayer'
 import { attachWallsLayer } from '@/features/walls/wallsLayer'
 import { attachAPsLayer } from '@/features/aps/apsLayer'
@@ -280,6 +281,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           hole: useFloorHoleStore,
           hoverReadout: useHoverReadoutStore,
           draft: useDraftStore,
+          history: useHistoryStore,
         }
       }
     })
@@ -288,6 +290,22 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       // Don't fire while typing in inputs/textareas (e.g. AP name field).
       const tag = e.target.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
+      // Ctrl/Cmd+Z = undo, Ctrl/Cmd+Shift+Z OR Ctrl+Y = redo. Matches
+      // oldSrc keyboard shortcuts. Trigger BEFORE the per-key branches
+      // so editing chords don't fall through into the mode logic.
+      const cmd = e.ctrlKey || e.metaKey
+      if (cmd && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault()
+        if (e.shiftKey) useHistoryStore.getState().redo()
+        else useHistoryStore.getState().undo()
+        return
+      }
+      if (cmd && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault()
+        useHistoryStore.getState().redo()
+        return
+      }
 
       if (e.key === 'Escape') {
         const s = useEditorStore.getState()
