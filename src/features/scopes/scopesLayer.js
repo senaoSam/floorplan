@@ -1,6 +1,7 @@
 import { Container, Graphics } from 'pixi.js'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
+import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { getModeCapability } from '@/render/modeCapabilities'
 
 // Scope adapter — per-scope interactive Container with click-select,
@@ -163,6 +164,7 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
       if (!cap.allowSelectClick.struct) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.scope.id, 'scope')
+      beginScopeDrag(entry, e)
     })
     container.on('pointerover', () => {
       const cap = getModeCapability(useEditorStore.getState().editorMode)
@@ -172,13 +174,51 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
     container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.scope.id))
   }
 
+  const DRAG_COMMIT_THRESHOLD_PX = 1
+  const beginScopeDrag = (entry, downEvent) => {
+    const startWorld = scene.world.toLocal(downEvent.global)
+    const stage = scene.app.stage
+    const onMove = (e) => {
+      const wp = scene.world.toLocal(e.global)
+      const dx = wp.x - startWorld.x
+      const dy = wp.y - startWorld.y
+      useDragOverlayStore.getState().setScope({ id: entry.scope.id, dx, dy })
+    }
+    const onUp = () => {
+      const overlay = useDragOverlayStore.getState().scope
+      stage.off('pointermove', onMove)
+      stage.off('pointerup', onUp)
+      stage.off('pointerupoutside', onUp)
+      if (overlay && overlay.id === entry.scope.id) {
+        const moved = Math.hypot(overlay.dx, overlay.dy)
+        if (moved > DRAG_COMMIT_THRESHOLD_PX) {
+          const cur = useScopeStore.getState().scopesByFloor[entry.floorId]?.find((s) => s.id === entry.scope.id)
+          if (cur) {
+            const newPoints = []
+            for (let i = 0; i < cur.points.length; i += 2) {
+              newPoints.push(cur.points[i] + overlay.dx, cur.points[i + 1] + overlay.dy)
+            }
+            useScopeStore.getState().updateScope(entry.floorId, entry.scope.id, { points: newPoints })
+          }
+        }
+      }
+      useDragOverlayStore.getState().setScope(null)
+    }
+    stage.on('pointermove', onMove)
+    stage.on('pointerup', onUp)
+    stage.on('pointerupoutside', onUp)
+  }
+
   let lastFloorId = undefined
   let lastScopes = undefined
 
   const reconcile = () => {
     const activeFloorId = useFloorStore.getState().activeFloorId
     const scopes = useScopeStore.getState().scopesByFloor[activeFloorId] ?? []
-    if (activeFloorId === lastFloorId && scopes === lastScopes) return
+    if (activeFloorId === lastFloorId && scopes === lastScopes) {
+      applyDragOverlay()
+      return
+    }
     lastFloorId = activeFloorId
     lastScopes = scopes
     const next = new Set(scopes.map((s) => s.id))
@@ -188,6 +228,21 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
     for (const scope of scopes) {
       const entry = ensureContainer(scope, activeFloorId)
       drawScope(entry)
+    }
+    applyDragOverlay()
+  }
+
+  let lastDragId = null
+  const applyDragOverlay = () => {
+    const drag = useDragOverlayStore.getState().scope
+    if (lastDragId && (!drag || drag.id !== lastDragId)) {
+      const prev = containers.get(lastDragId)
+      if (prev) prev.container.position.set(0, 0)
+    }
+    lastDragId = drag?.id ?? null
+    if (drag) {
+      const entry = containers.get(drag.id)
+      if (entry) entry.container.position.set(drag.dx, drag.dy)
     }
   }
 
@@ -227,11 +282,13 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
   const unsubScope = useScopeStore.subscribe(reconcile)
   const unsubEditor = useEditorStore.subscribe(onEditorChange)
   const unsubHover = useHoverStore.subscribe(onHoverChange)
+  const unsubDrag = useDragOverlayStore.subscribe(applyDragOverlay)
   reconcile()
 
   return () => {
     unsubFloor()
     unsubScope()
+    unsubDrag()
     unsubEditor()
     unsubHover()
     for (const id of Array.from(containers.keys())) removeContainer(id)

@@ -1,6 +1,7 @@
 import { Container, Graphics } from 'pixi.js'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
+import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { getModeCapability } from '@/render/modeCapabilities'
 
 // Floor-hole adapter — per-hole interactive Container with click-select +
@@ -109,6 +110,7 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
       if (!cap.allowSelectClick.struct) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.hole.id, 'floor_hole')
+      beginHoleDrag(entry, e)
     })
     container.on('pointerover', () => {
       const cap = getModeCapability(useEditorStore.getState().editorMode)
@@ -118,13 +120,51 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
     container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.hole.id))
   }
 
+  const DRAG_COMMIT_THRESHOLD_PX = 1
+  const beginHoleDrag = (entry, downEvent) => {
+    const startWorld = scene.world.toLocal(downEvent.global)
+    const stage = scene.app.stage
+    const onMove = (e) => {
+      const wp = scene.world.toLocal(e.global)
+      const dx = wp.x - startWorld.x
+      const dy = wp.y - startWorld.y
+      useDragOverlayStore.getState().setHole({ id: entry.hole.id, dx, dy })
+    }
+    const onUp = () => {
+      const overlay = useDragOverlayStore.getState().hole
+      stage.off('pointermove', onMove)
+      stage.off('pointerup', onUp)
+      stage.off('pointerupoutside', onUp)
+      if (overlay && overlay.id === entry.hole.id) {
+        const moved = Math.hypot(overlay.dx, overlay.dy)
+        if (moved > DRAG_COMMIT_THRESHOLD_PX) {
+          const cur = useFloorHoleStore.getState().floorHolesByFloor[entry.floorId]?.find((h) => h.id === entry.hole.id)
+          if (cur) {
+            const newPoints = []
+            for (let i = 0; i < cur.points.length; i += 2) {
+              newPoints.push(cur.points[i] + overlay.dx, cur.points[i + 1] + overlay.dy)
+            }
+            useFloorHoleStore.getState().updateFloorHole(entry.floorId, entry.hole.id, { points: newPoints })
+          }
+        }
+      }
+      useDragOverlayStore.getState().setHole(null)
+    }
+    stage.on('pointermove', onMove)
+    stage.on('pointerup', onUp)
+    stage.on('pointerupoutside', onUp)
+  }
+
   let lastFloorId = undefined
   let lastHoles = undefined
 
   const reconcile = () => {
     const activeFloorId = useFloorStore.getState().activeFloorId
     const holes = useFloorHoleStore.getState().floorHolesByFloor[activeFloorId] ?? []
-    if (activeFloorId === lastFloorId && holes === lastHoles) return
+    if (activeFloorId === lastFloorId && holes === lastHoles) {
+      applyDragOverlay()
+      return
+    }
     lastFloorId = activeFloorId
     lastHoles = holes
     const next = new Set(holes.map((h) => h.id))
@@ -134,6 +174,21 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
     for (const hole of holes) {
       const entry = ensureContainer(hole, activeFloorId)
       drawHole(entry)
+    }
+    applyDragOverlay()
+  }
+
+  let lastDragId = null
+  const applyDragOverlay = () => {
+    const drag = useDragOverlayStore.getState().hole
+    if (lastDragId && (!drag || drag.id !== lastDragId)) {
+      const prev = containers.get(lastDragId)
+      if (prev) prev.container.position.set(0, 0)
+    }
+    lastDragId = drag?.id ?? null
+    if (drag) {
+      const entry = containers.get(drag.id)
+      if (entry) entry.container.position.set(drag.dx, drag.dy)
     }
   }
 
@@ -172,6 +227,7 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
   const unsubHole = useFloorHoleStore.subscribe(reconcile)
   const unsubEditor = useEditorStore.subscribe(onEditorChange)
   const unsubHover = useHoverStore.subscribe(onHoverChange)
+  const unsubDrag = useDragOverlayStore.subscribe(applyDragOverlay)
   reconcile()
 
   return () => {
@@ -179,6 +235,7 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
     unsubHole()
     unsubEditor()
     unsubHover()
+    unsubDrag()
     for (const id of Array.from(containers.keys())) removeContainer(id)
   }
 }
