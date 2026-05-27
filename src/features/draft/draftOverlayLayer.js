@@ -199,6 +199,37 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
           .fill({ color: SNAP_GREEN, alpha: 1 })
       }
     }
+    // 20-3 wall / parallel snap visuals (oldSrc CableTrayLayer 798-838).
+    const hint = useDraftStore.getState().snapHint
+    if (hint && hint.pos) {
+      const SNAP_ORANGE = '#f59e0b'
+      const PARALLEL_PURPLE = '#a78bfa'
+      if (hint.kind === 'wallEndpoint') {
+        // Solid orange circle ring at endpoint.
+        g.circle(hint.pos.x, hint.pos.y, 13 * s)
+          .stroke({ width: 2.5 * s, color: SNAP_ORANGE, alpha: 1 })
+      } else if (hint.kind === 'wallSegment') {
+        // Orange square ring around segment foot.
+        const r = 13 * s
+        g.poly([
+          hint.pos.x - r, hint.pos.y - r,
+          hint.pos.x + r, hint.pos.y - r,
+          hint.pos.x + r, hint.pos.y + r,
+          hint.pos.x - r, hint.pos.y + r,
+        ]).stroke({ width: 2.5 * s, color: SNAP_ORANGE, alpha: 1 })
+      } else if (hint.kind === 'parallelWall' && hint.ref && points.length > 0) {
+        // Tint the reference wall + dashed purple guide from the last draft
+        // anchor to the locked cursor pos.
+        const w = hint.ref
+        g.moveTo(w.startX, w.startY).lineTo(w.endX, w.endY)
+          .stroke({ width: 3 * s, color: PARALLEL_PURPLE, alpha: 0.55, cap: 'round' })
+        const anchor = points[points.length - 1]
+        drawDashedSegment(g, anchor.x, anchor.y, hint.pos.x, hint.pos.y,
+          PARALLEL_PURPLE, 1.2 * s, 4 * s, 4 * s, 0.8)
+        g.circle(hint.pos.x, hint.pos.y, 4 * s)
+          .fill({ color: PARALLEL_PURPLE, alpha: 1 })
+      }
+    }
   }
 
   const unsubscribe = useDraftStore.subscribe(redraw)

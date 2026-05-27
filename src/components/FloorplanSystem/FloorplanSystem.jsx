@@ -76,6 +76,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       useFloorHoleStore,
       useCableStore,
       useDraftStore,
+      useViewportStore,
       onRequestScaleDialog: ({ p0, p1 }) => setScaleDialog({ p0, p1 }),
     })
 

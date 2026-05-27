@@ -2,6 +2,7 @@ import { EDITOR_MODE } from '@/store/useEditorStore'
 import { MATERIALS } from '@/constants/materials'
 import { DEFAULT_TRAY } from '@/store/useCableStore'
 import { generateId } from '@/utils/id'
+import { snapTrayPoint } from '@/features/draft/traySnap'
 
 // Owns the draft-mode click / move / commit / cancel flow.
 // Returns the callback set viewport.bindViewport reads, plus a separate
@@ -23,9 +24,27 @@ export function createDraftModeController({
   useFloorHoleStore,
   useCableStore,
   useDraftStore,
+  useViewportStore,                            // for tray snap radius (screen-px / scale)
   onRequestScaleDialog, // ({ p0, p1 }) => void — caller opens dialog and writes floor.scale
 }) {
   const isDrawMode = () => DRAW_MODES.has(useEditorStore.getState().editorMode)
+
+  // DRAW_CABLE_TRAY: snap raw cursor onto tray vertex / wall endpoint /
+  // wall segment foot / parallel-wall lock and surface the snap kind so
+  // draftOverlayLayer can render the matching halo. Other modes pass
+  // through unchanged.
+  const snapDraftPoint = (raw, mode) => {
+    if (mode !== EDITOR_MODE.DRAW_CABLE_TRAY) return { pos: raw, kind: null }
+    const fid = useFloorStore.getState().activeFloorId
+    if (!fid) return { pos: raw, kind: null }
+    return snapTrayPoint(raw, {
+      walls: useWallStore.getState().wallsByFloor[fid] ?? [],
+      trays: useCableStore.getState().traysByFloor[fid] ?? [],
+      draftPoints: useDraftStore.getState().points,
+      scale: useViewportStore?.getState?.()?.scale ?? 1,
+      shiftHeld: !!useDraftStore.getState()._shiftHeld,
+    })
+  }
 
   const commitWall = (a, b) => {
     const fid = useFloorStore.getState().activeFloorId
@@ -91,33 +110,43 @@ export function createDraftModeController({
     const draft = useDraftStore.getState()
     const mode = editor.editorMode
 
-    // Begin a new draft if mode just changed or no points yet.
+    // Apply tray snap so the committed point lands on the snapped xy
+    // (not the raw cursor). Other modes pass through.
+    const snapped = snapDraftPoint(worldPt, mode).pos
+
     if (draft.mode !== mode || draft.points.length === 0) {
-      useDraftStore.getState().beginDraft(mode, worldPt)
+      useDraftStore.getState().beginDraft(mode, snapped)
       return
     }
 
     if (mode === EDITOR_MODE.DRAW_WALL) {
-      // Two clicks → 1 wall + reset for next wall (chain mode).
-      commitWall(draft.points[0], worldPt)
-      useDraftStore.getState().beginDraft(mode, worldPt)
+      commitWall(draft.points[0], snapped)
+      useDraftStore.getState().beginDraft(mode, snapped)
       return
     }
     if (mode === EDITOR_MODE.DRAW_SCALE) {
-      // Two clicks → ask caller to open a scale dialog. The dialog
-      // resolves px-per-meter from the user's meter input.
       if (typeof onRequestScaleDialog === 'function') {
-        onRequestScaleDialog({ p0: draft.points[0], p1: worldPt })
+        onRequestScaleDialog({ p0: draft.points[0], p1: snapped })
       }
       useDraftStore.getState().clearDraft()
       return
     }
-    // Polygon / polyline modes — accumulate.
-    useDraftStore.getState().addPoint(worldPt)
+    useDraftStore.getState().addPoint(snapped)
   }
 
   const onDrawModeMove = (worldPt) => {
-    useDraftStore.getState().setCursor(worldPt)
+    const mode = useEditorStore.getState().editorMode
+    const s = snapDraftPoint(worldPt, mode)
+    useDraftStore.getState().setCursor(s.pos)
+    // Wall + parallel snap kinds drive an extra halo overlay. Tray-vertex
+    // snap has its own green halo path already inside draftOverlayLayer
+    // (findVertexAt looks up cursor xy against existing trays).
+    if (mode === EDITOR_MODE.DRAW_CABLE_TRAY) {
+      const visibleKind = (s.kind === 'wallEndpoint' || s.kind === 'wallSegment' || s.kind === 'parallelWall')
+        ? s
+        : null
+      useDraftStore.getState().setSnapHint(visibleKind)
+    }
   }
 
   const commitDraft = () => {
