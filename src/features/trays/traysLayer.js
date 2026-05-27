@@ -258,8 +258,20 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     containers.delete(id)
   }
 
+  // If the user is mid-drag of one of this tray's vertices, substitute the
+  // dragged xy into the points array — the canonical store keeps the old
+  // position until dragend (handlesLayer commits there).
+  const pointsWithVertexOverlay = (tray) => {
+    const overlay = useDragOverlayStore.getState().trayVertex
+    if (!overlay || overlay.trayId !== tray.id) return tray.points
+    return tray.points.map((p, i) =>
+      i === overlay.vertexIdx ? { x: overlay.x, y: overlay.y } : p,
+    )
+  }
+
   const drawTray = (entry) => {
     const { haloG, bodyG, container, tray } = entry
+    const points = pointsWithVertexOverlay(tray)
     const sys = getTraySystem(tray.system)
     const magnetPx = tray.magnetDistance ?? 100
     const vpScale = useViewportStore.getState().scale || 1
@@ -285,7 +297,7 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
 
     if (showMagnet) {
       // Solid capsule fill via wide stroke + round caps.
-      drawPolylineStroke(haloG, tray.points, {
+      drawPolylineStroke(haloG, points, {
         width: magnetPx * 2,
         color: MAGNET_FILL,
         alpha: 1,
@@ -293,7 +305,7 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
         join: 'round',
       })
       // Dashed centreline overlay along the same path.
-      drawDashedPolyline(haloG, tray.points, 6 * s, 4 * s, {
+      drawDashedPolyline(haloG, points, 6 * s, 4 * s, {
         width: 1.2 * s,
         color: MAGNET_STROKE,
         alpha: 0.7,
@@ -304,7 +316,7 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     // BELOW devicesSW (z 7b > trays 6). Width 9 (world-px) keeps it
     // chunky enough to register without scaling weirdly across zooms.
     if (isSelected) {
-      drawPolylineStroke(haloG, tray.points, {
+      drawPolylineStroke(haloG, points, {
         width: 9,
         color: TRAY_SELECTED_BORDER,
         alpha: 0.95,
@@ -316,7 +328,7 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     // Channel body — closed polygon with semicircle caps + miter join.
     const halfW = (TRAY_WIDTH_SCREEN_PX * s) / 2
     const ext = neighborExts.get(tray.id) ?? { startExt: null, endExt: null }
-    const polyFlat = buildChannelPolygon(tray.points, halfW, ext.startExt, ext.endExt)
+    const polyFlat = buildChannelPolygon(points, halfW, ext.startExt, ext.endExt)
     const borderW  = (isSelected ? 2.2 : isHovered ? 1.4 : 1.1) * s
 
     // Hover invert (oldSrc 23-3f). Normal: body = sys.fill / border = sys.color.
@@ -332,14 +344,14 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     }
 
     // Dashed centreline (separate so dash phase stays straight).
-    drawDashedPolyline(bodyG, tray.points, 6 * s, 4 * s, {
+    drawDashedPolyline(bodyG, points, 6 * s, 4 * s, {
       width: 0.9 * s,
       color: centerCol,
       alpha: isInvert ? 0.85 : 0.7,
       cap: 'round',
     })
 
-    container.hitArea = makePolylineHitArea(tray.points, HIT_TOLERANCE_PX / vpScale)
+    container.hitArea = makePolylineHitArea(points, HIT_TOLERANCE_PX / vpScale)
   }
 
   const bindInteractions = (entry) => {
@@ -488,6 +500,7 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
   }
 
   let lastDragId = null
+  let lastVertexDragId = null
   const applyDragOverlay = () => {
     const drag = useDragOverlayStore.getState().tray
     if (lastDragId && (!drag || drag.id !== lastDragId)) {
@@ -498,6 +511,21 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     if (drag) {
       const entry = containers.get(drag.id)
       if (entry) entry.container.position.set(drag.dx, drag.dy)
+    }
+
+    // Tray vertex drag — redraw the affected tray with the substituted
+    // vertex xy taken from the overlay. drawTray reads the overlay inline
+    // via pointsWithVertexOverlay so we just need to retrigger it.
+    const vDrag = useDragOverlayStore.getState().trayVertex
+    const vertexDragId = vDrag?.trayId ?? null
+    if (lastVertexDragId && (!vDrag || vDrag.trayId !== lastVertexDragId)) {
+      const prev = containers.get(lastVertexDragId)
+      if (prev) drawTray(prev)  // overlay just cleared → repaint w/ canonical pts
+    }
+    lastVertexDragId = vertexDragId
+    if (vDrag) {
+      const entry = containers.get(vDrag.trayId)
+      if (entry) drawTray(entry)
     }
   }
 

@@ -2,6 +2,7 @@ import { Container, Graphics, Circle } from 'pixi.js'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useDraftStore } from '@/store/useDraftStore'
+import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { EDITOR_MODE } from '@/store/useEditorStore'
 
 // Edit handles for the selected (or hovered) wall + selected tray.
@@ -158,6 +159,7 @@ export function attachHandlesLayer({
       const fid = useFloorStore.getState().activeFloorId
 
       const onMove = (ev) => {
+        if (handle.destroyed || !handle.position) return
         const wp = scene.world.toLocal(ev.global)
         const raw = {
           x: original.x + (wp.x - startWorld.x),
@@ -214,19 +216,44 @@ export function attachHandlesLayer({
       const startWorld = scene.world.toLocal(e.global)
       const original = { x: tray.points[vertexIdx].x, y: tray.points[vertexIdx].y }
       const fid = useFloorStore.getState().activeFloorId
+      const trayId = tray.id
 
       const onMove = (ev) => {
+        // The handle Container may have been destroyed by an unrelated
+        // store change (Esc clearing selection, tray deleted from another
+        // panel, etc.) — bail out before touching its null fields.
+        if (handle.destroyed || !handle.position) return
         const wp = scene.world.toLocal(ev.global)
         const nx = original.x + (wp.x - startWorld.x)
         const ny = original.y + (wp.y - startWorld.y)
         handle.position.set(nx, ny)
-        const nextPoints = tray.points.map((p, i) => i === vertexIdx ? { x: nx, y: ny } : p)
-        useCableStore.getState().updateTray(fid, tray.id, { points: nextPoints })
+        // Write to drag overlay only — committing into useCableStore on
+        // every tick triggers handlesLayer.rebuild (subscribed to
+        // useCableStore) which destroys the handle we're dragging. The
+        // overlay store has no rebuild subscription, so the handle stays
+        // alive. traysLayer subscribes to the overlay and renders the
+        // moved vertex with substituted xy. Commit happens in onUp.
+        useDragOverlayStore.getState().setTrayVertex({
+          trayId, vertexIdx, x: nx, y: ny,
+        })
       }
       const onUp = () => {
         stage.off('pointermove', onMove)
         stage.off('pointerup', onUp)
         stage.off('pointerupoutside', onUp)
+        const overlay = useDragOverlayStore.getState().trayVertex
+        if (overlay && overlay.trayId === trayId && overlay.vertexIdx === vertexIdx) {
+          // Read fresh points so concurrent mutations during the drag
+          // (rare but cheap to handle) aren't clobbered by the commit.
+          const fresh = useCableStore.getState().traysByFloor[fid]?.find((t) => t.id === trayId)
+          if (fresh) {
+            const nextPoints = fresh.points.map((p, i) =>
+              i === vertexIdx ? { x: overlay.x, y: overlay.y } : p,
+            )
+            useCableStore.getState().updateTray(fid, trayId, { points: nextPoints })
+          }
+        }
+        useDragOverlayStore.getState().setTrayVertex(null)
       }
       stage.on('pointermove', onMove)
       stage.on('pointerup', onUp)
