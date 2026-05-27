@@ -427,8 +427,18 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     }
   }
 
+  // Bring an entry's container to the top of the layer so it can't be
+  // hidden behind a sibling wall when hovered / selected. Re-adding to
+  // the layer re-orders it to the last child = topmost.
+  const liftToTop = (entry) => {
+    if (!entry || !entry.container) return
+    if (entry.container.parent === layer) layer.addChild(entry.container)
+  }
+
   // Hover + selection redraws — repaint only the two walls that changed
   // state so the halo + body widths flip without rebuilding all containers.
+  // Also lifts the hovered / selected wall to top so other walls can't
+  // overlap it.
   let lastHoverId = useHoverStore.getState().id
   const onHoverChange = () => {
     const s = useHoverStore.getState()
@@ -439,6 +449,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     const next = s.id ? containers.get(s.id) : null
     if (prev) drawWall(prev)
     if (next && next !== prev) drawWall(next)
+    if (next) liftToTop(next)
   }
 
   let lastSelectedId = useEditorStore.getState().selectedId
@@ -457,7 +468,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     }
     if (s.selectedType === 'wall' && s.selectedId) {
       const e = containers.get(s.selectedId)
-      if (e) drawWall(e)
+      if (e) { drawWall(e); liftToTop(e) }
     }
   }
 

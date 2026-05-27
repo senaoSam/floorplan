@@ -272,6 +272,12 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
     }
   }
 
+  // Lift hovered / selected scope above sibling scopes / floor holes.
+  const liftToTop = (entry) => {
+    if (!entry || !entry.container) return
+    if (entry.container.parent === layer) layer.addChild(entry.container)
+  }
+
   // Hover / selection redraws — only redraw affected scopes.
   let lastHoverId = useHoverStore.getState().id
   const onHoverChange = () => {
@@ -283,6 +289,7 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
     const next = s.id ? containers.get(s.id) : null
     if (prev) drawScope(prev)
     if (next && next !== prev) drawScope(next)
+    if (next) liftToTop(next)
   }
 
   let lastSelectedId = useEditorStore.getState().selectedId
@@ -300,7 +307,7 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
     }
     if (s.selectedType === 'scope' && s.selectedId) {
       const e = containers.get(s.selectedId)
-      if (e) drawScope(e)
+      if (e) { drawScope(e); liftToTop(e) }
     }
   }
 

@@ -539,6 +539,13 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     }
   }
 
+  // Lift hovered / selected tray above sibling trays so it can't get
+  // hidden under another magnet halo or polygon body.
+  const liftToTop = (entry) => {
+    if (!entry || !entry.container) return
+    if (entry.container.parent === layer) layer.addChild(entry.container)
+  }
+
   let lastHoverId = useHoverStore.getState().id
   const onHoverChange = () => {
     const s = useHoverStore.getState()
@@ -549,6 +556,7 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     const next = s.id ? containers.get(s.id) : null
     if (prev) drawTray(prev)
     if (next && next !== prev) drawTray(next)
+    if (next) liftToTop(next)
   }
 
   let lastSelectedId = useEditorStore.getState().selectedId
@@ -574,7 +582,7 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     }
     if (s.selectedType === 'cable_tray' && s.selectedId) {
       const e = containers.get(s.selectedId)
-      if (e) drawTray(e)
+      if (e) { drawTray(e); liftToTop(e) }
     }
   }
 

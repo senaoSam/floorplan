@@ -387,6 +387,12 @@ export function attachSwitchesLayer({
   }
 
   // Re-draw on showSwitchKind / selection change.
+  // Lift hovered / selected chassis above sibling switches.
+  const liftToTop = (entry) => {
+    if (!entry || !entry.container) return
+    if (entry.container.parent === layer) layer.addChild(entry.container)
+  }
+
   let lastShowSwitchKind = useEditorStore.getState().showSwitchKind
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
@@ -400,6 +406,9 @@ export function attachSwitchesLayer({
     lastSelectedType = s.selectedType
     if (selectionChanged) recomputeFocus()
     for (const entry of containers.values()) drawSwitch(entry)
+    if (selectionChanged && s.selectedType === 'switch' && s.selectedId) {
+      liftToTop(containers.get(s.selectedId))
+    }
   }
 
   let lastHoverId = useHoverStore.getState().id
@@ -412,6 +421,7 @@ export function attachSwitchesLayer({
     const next = s.id ? containers.get(s.id) : null
     if (prev) drawSwitch(prev)
     if (next && next !== prev) drawSwitch(next)
+    if (next) liftToTop(next)
   }
 
   // Screen-space chassis sizing — same trick as apsLayer. The chassis

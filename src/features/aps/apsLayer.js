@@ -483,10 +483,17 @@ export function attachAPsLayer({
       }
       if (s.selectedType === 'ap' && s.selectedId) {
         const e = containers.get(s.selectedId)
-        if (e) drawAP(e)
+        if (e) { drawAP(e); liftToTop(e) }
       }
       recomputeFocus()
     }
+  }
+
+  // Bring an entry's container to the front of the layer so it can't be
+  // hidden behind an overlapping AP when hovered / selected.
+  const liftToTop = (entry) => {
+    if (!entry || !entry.container) return
+    if (entry.container.parent === layer) layer.addChild(entry.container)
   }
 
   // Hover invert (oldSrc Phase 23-3f): hovered + non-selected AP swaps the
@@ -502,6 +509,7 @@ export function attachAPsLayer({
     const next = s.id ? containers.get(s.id) : null
     if (prev) drawAP(prev)
     if (next && next !== prev) drawAP(next)
+    if (next) liftToTop(next)
   }
 
   // Screen-space marker sizing (oldSrc convention): container.scale =

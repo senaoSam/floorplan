@@ -25,8 +25,11 @@ const HANDLE_STROKE_WIDTH = 2.5  // oldSrc 2.5 * inverseScale
 const HANDLE_HIT_PAD = 2
 const WALL_HANDLE_FILL = '#ffffff'
 const WALL_HANDLE_STROKE = '#e74c3c'
-const TRAY_HANDLE_RADIUS = 5
-const TRAY_HANDLE_STROKE_WIDTH = 1.8
+// Tray vertex handles — oldSrc CableTrayLayer VertexHandle 187-194:
+//   radius 6 → 8 on hover, strokeWidth 2 → 2.4 on hover.
+const TRAY_HANDLE_RADIUS = 6
+const TRAY_HANDLE_RADIUS_HOVER = 8
+const TRAY_HANDLE_STROKE_WIDTH = 2
 const TRAY_HANDLE_FILL = '#ffffff'
 const TRAY_HANDLE_STROKE = '#0e7490'
 
@@ -159,7 +162,14 @@ export function attachHandlesLayer({
           TRAY_HANDLE_FILL, TRAY_HANDLE_STROKE,
           TRAY_HANDLE_RADIUS, TRAY_HANDLE_STROKE_WIDTH,
         )
+        h.cursor = 'move'
         bindTrayVertexDrag(h, tray, idx)
+        // Hover expansion — oldSrc VertexHandle 190-193 grows radius
+        // 6→8 px when hovered. We implement that via a per-handle scale
+        // multiplier read by applyInverseScale.
+        h._hoverScaleMul = TRAY_HANDLE_RADIUS_HOVER / TRAY_HANDLE_RADIUS
+        h.on('pointerover', () => { h._hovered = true; applyInverseScale() })
+        h.on('pointerout',  () => { h._hovered = false; applyInverseScale() })
         root.addChild(h)
         inverseScaleNodes.add(h)
       })
@@ -497,12 +507,15 @@ export function attachHandlesLayer({
 
   // Screen-space handle sizing — only the explicitly-tracked handles get
   // inverse-scaled. Crop-adjust rotation Containers are excluded so their
-  // children (in image coords) aren't doubly scaled.
+  // children (in image coords) aren't doubly scaled. Tray vertex handles
+  // additionally apply a hover-multiplier (8/6 ≈ 1.33) so the dot grows
+  // under the cursor (oldSrc VertexHandle).
   const applyInverseScale = () => {
     const inv = 1 / (useViewportStore.getState().scale || 1)
     for (const node of inverseScaleNodes) {
       if (node.destroyed) continue
-      node.scale.set(inv)
+      const mul = (node._hovered && node._hoverScaleMul) ? node._hoverScaleMul : 1
+      node.scale.set(inv * mul)
     }
   }
 

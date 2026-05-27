@@ -2,6 +2,7 @@ import { Container, Graphics, Text, TextStyle } from 'pixi.js'
 import { computeRoutes } from '@/features/cable/computeRoutes'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
+import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 
 // Cable adapter — runs computeRoutes against the full building data on
 // every change to floor / AP / wall / cable stores, then draws the routes
@@ -140,12 +141,70 @@ export function attachCablesLayer({
     badgeRoot.addChild(t)
   }
 
+  // Apply drag overlay onto canonical stores so cables redraw LIVE while
+  // the user moves an AP / switch / tray (user-flagged improvement —
+  // oldSrc froze cables until dragend with comment "26-2 P3b — DON'T
+  // subscribe to dragAP/dragSwitch"; PIXI now updates per pointermove).
+  const overlayedApsByFloor = (apsByFloor, override) => {
+    if (!override) return apsByFloor
+    const out = {}
+    for (const fid in apsByFloor) {
+      out[fid] = apsByFloor[fid].map((a) =>
+        a.id === override.id ? { ...a, x: override.x, y: override.y } : a,
+      )
+    }
+    return out
+  }
+  const overlayedSwitchesByFloor = (switchesByFloor, override) => {
+    if (!override) return switchesByFloor
+    const out = {}
+    for (const fid in switchesByFloor) {
+      out[fid] = switchesByFloor[fid].map((sw) =>
+        sw.id === override.id ? { ...sw, x: override.x, y: override.y } : sw,
+      )
+    }
+    return out
+  }
+  const overlayedTraysByFloor = (traysByFloor, bodyOverride, vertexOverride) => {
+    if (!bodyOverride && !vertexOverride) return traysByFloor
+    const out = {}
+    for (const fid in traysByFloor) {
+      out[fid] = traysByFloor[fid].map((t) => {
+        if (bodyOverride && t.id === bodyOverride.id) {
+          return {
+            ...t,
+            points: t.points.map((p) => ({
+              x: p.x + bodyOverride.dx,
+              y: p.y + bodyOverride.dy,
+            })),
+          }
+        }
+        if (vertexOverride && t.id === vertexOverride.trayId) {
+          return {
+            ...t,
+            points: t.points.map((p, i) =>
+              i === vertexOverride.vertexIdx
+                ? { x: vertexOverride.x, y: vertexOverride.y }
+                : p,
+            ),
+          }
+        }
+        return t
+      })
+    }
+    return out
+  }
+
   const rebuild = () => {
     const { floors, activeFloorId } = useFloorStore.getState()
-    const apsByFloor = useAPStore.getState().apsByFloor
-    const switchesByFloor = useCableStore.getState().switchesByFloor
-    const traysByFloor = useCableStore.getState().traysByFloor
+    let apsByFloor = useAPStore.getState().apsByFloor
+    let switchesByFloor = useCableStore.getState().switchesByFloor
+    let traysByFloor = useCableStore.getState().traysByFloor
     const risers = useCableStore.getState().risers
+    const drag = useDragOverlayStore.getState()
+    apsByFloor      = overlayedApsByFloor(apsByFloor, drag.ap)
+    switchesByFloor = overlayedSwitchesByFloor(switchesByFloor, drag.sw)
+    traysByFloor    = overlayedTraysByFloor(traysByFloor, drag.tray, drag.trayVertex)
     const editor = useEditorStore.getState()
     const vpScale = useViewportStore.getState().scale || 1
     const s = 1 / vpScale
@@ -317,6 +376,23 @@ export function attachCablesLayer({
   const unsubAP = useAPStore.subscribe(rebuild)
   const unsubCable = useCableStore.subscribe(rebuild)
   const unsubViewport = useViewportStore.subscribe(rebuild)
+  // Live cable redraw during AP/SW/tray drag. Subscribe gated by checking
+  // whether any relevant override key changed so unrelated dragOverlay
+  // mutations (e.g. wall drag dx/dy) don't trigger a route recompute.
+  let lastDragAp = useDragOverlayStore.getState().ap
+  let lastDragSw = useDragOverlayStore.getState().sw
+  let lastDragTray = useDragOverlayStore.getState().tray
+  let lastDragTrayVtx = useDragOverlayStore.getState().trayVertex
+  const unsubDrag = useDragOverlayStore.subscribe(() => {
+    const d = useDragOverlayStore.getState()
+    if (d.ap === lastDragAp && d.sw === lastDragSw &&
+        d.tray === lastDragTray && d.trayVertex === lastDragTrayVtx) return
+    lastDragAp = d.ap
+    lastDragSw = d.sw
+    lastDragTray = d.tray
+    lastDragTrayVtx = d.trayVertex
+    rebuild()
+  })
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
   const unsubEditor = useEditorStore.subscribe(() => {
@@ -334,6 +410,7 @@ export function attachCablesLayer({
     unsubCable()
     unsubEditor()
     unsubViewport()
+    unsubDrag()
     layer.removeChild(g)
     g.destroy()
     clearBadges()

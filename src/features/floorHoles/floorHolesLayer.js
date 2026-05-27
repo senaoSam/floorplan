@@ -255,6 +255,12 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
     }
   }
 
+  // Lift hovered / selected hole above sibling holes / scopes.
+  const liftToTop = (entry) => {
+    if (!entry || !entry.container) return
+    if (entry.container.parent === layer) layer.addChild(entry.container)
+  }
+
   let lastHoverId = useHoverStore.getState().id
   const onHoverChange = () => {
     const s = useHoverStore.getState()
@@ -265,6 +271,7 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
     const next = s.id ? containers.get(s.id) : null
     if (prev) drawHole(prev)
     if (next && next !== prev) drawHole(next)
+    if (next) liftToTop(next)
   }
 
   let lastSelectedId = useEditorStore.getState().selectedId
@@ -282,7 +289,7 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
     }
     if (s.selectedType === 'floor_hole' && s.selectedId) {
       const e = containers.get(s.selectedId)
-      if (e) drawHole(e)
+      if (e) { drawHole(e); liftToTop(e) }
     }
   }
 

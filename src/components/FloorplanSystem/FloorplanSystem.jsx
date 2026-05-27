@@ -387,6 +387,40 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         }
       }
 
+      // Tab — cycle PLACE_AP band (2.4 / 5 / 6) or PLACE_SWITCH kind
+      // (switch / idf / mdf / router). Shift+Tab reverses. Pops the
+      // material toast naming the new selection. (oldSrc Editor2D 552-573.)
+      if (e.key === 'Tab' && !cmd && !e.altKey) {
+        const ed = useEditorStore.getState()
+        if (ed.editorMode === EDITOR_MODE.PLACE_AP) {
+          e.preventDefault()
+          const bands = [2.4, 5, 6]
+          const idx = Math.max(0, bands.indexOf(ed.placeApBand ?? 5))
+          const dir = e.shiftKey ? -1 : 1
+          const next = bands[(idx + dir + bands.length) % bands.length]
+          ed.setPlaceApBand(next)
+          const colorByBand = { 2.4: '#f39c12', 5: '#4fc3f7', 6: '#a855f7' }
+          useMaterialToastStore.getState().showToast({
+            label: `${next} GHz`, color: colorByBand[next], key: 'Tab',
+          })
+          return
+        }
+        if (ed.editorMode === EDITOR_MODE.PLACE_SWITCH) {
+          e.preventDefault()
+          const kinds  = ['switch', 'idf', 'mdf', 'router']
+          const labels = { switch: 'Switch', idf: 'IDF', mdf: 'MDF', router: 'Router' }
+          const colors = { switch: '#22d3ee', idf: '#34d399', mdf: '#fbbf24', router: '#f472b6' }
+          const idx = Math.max(0, kinds.indexOf(ed.placeSwitchKind ?? 'switch'))
+          const dir = e.shiftKey ? -1 : 1
+          const next = kinds[(idx + dir + kinds.length) % kinds.length]
+          ed.setPlaceSwitchKind(next)
+          useMaterialToastStore.getState().showToast({
+            label: labels[next], color: colors[next], key: 'Tab',
+          })
+          return
+        }
+      }
+
       // Number keys 1-6 — wall material picker (oldSrc Editor2D 577-593).
       // In DRAW_WALL → set the active wall material for the next stroke.
       // If a wall is currently selected → also rewrite its material.
