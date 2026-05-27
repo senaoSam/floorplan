@@ -114,6 +114,18 @@ export const useEditorStore = create((set, get) => ({
   toggleAutoChannelOnPlace: () => set((s) => ({ autoChannelOnPlace: !s.autoChannelOnPlace })),
 
   contextMenu: null,
-  openContextMenu: (payload) => set({ contextMenu: payload }),
-  closeContextMenu: () => set((s) => (s.contextMenu ? { contextMenu: null } : {})),
+  openContextMenu: (payload) => {
+    if (typeof window !== 'undefined' && window.__debugRMB !== false) {
+      console.log('[RMB openContextMenu]', payload)
+      console.trace()
+    }
+    set({ contextMenu: payload })
+  },
+  closeContextMenu: () => set((s) => {
+    if (typeof window !== 'undefined' && window.__debugRMB !== false && s.contextMenu) {
+      console.log('[RMB closeContextMenu] CALLED, current ctx =', s.contextMenu)
+      console.trace()
+    }
+    return s.contextMenu ? { contextMenu: null } : {}
+  }),
 }))

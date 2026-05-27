@@ -117,6 +117,9 @@ function ContextMenuMount() {
 
   if (!target) {
     // Target was removed underneath; close menu silently.
+    if (typeof window !== 'undefined' && window.__debugRMB !== false) {
+      console.log('[RMB ContextMenuMount] target NOT FOUND, closing menu. targetType=', targetType, 'targetId=', targetId, 'wallsByFloor[fid]=', wallsByFloor[activeFloorId], 'scopesByFloor[fid]=', scopesByFloor[activeFloorId])
+    }
     closeContextMenu()
     return null
   }
