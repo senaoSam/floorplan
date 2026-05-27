@@ -10,8 +10,7 @@ import './Toolbar.sass'
 //   - AI walls action removed (AIWallsModal not ported yet)
 //   - Align-mode "are you sure" confirm dialog removed (align mode not
 //     implemented in Phase 25 yet)
-//   - Undo / Redo stay rendered but disabled until useHistoryStore real
-//     undo/redo lands.
+//   - Undo / Redo wired up to the real useHistoryStore as of Bundle 18.
 
 const GROUPS = [
   {
