@@ -148,6 +148,9 @@ export function createDraftModeController({
       return
     }
     if (mode === EDITOR_MODE.DRAW_SCALE) {
+      // Keep the measured line visible behind the dialog (matches oldSrc
+      // Editor2D where scalePt1 / scalePt2 persist until onConfirm/onCancel).
+      useDraftStore.getState().setScalePreview({ p0: draft.points[0], p1: snapped })
       if (typeof onRequestScaleDialog === 'function') {
         onRequestScaleDialog({ p0: draft.points[0], p1: snapped })
       }

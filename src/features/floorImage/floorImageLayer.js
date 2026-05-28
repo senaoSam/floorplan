@@ -1,5 +1,19 @@
-import { Assets, Sprite, Graphics } from 'pixi.js'
+import { Sprite, Texture, Graphics } from 'pixi.js'
 import { getModeCapability } from '@/render/modeCapabilities'
+
+// Load an image URL via HTMLImageElement and wrap as PIXI.Texture. We
+// avoid PIXI's Assets.load() because v8's resolver uses URL extension to
+// pick a parser — blob URLs (from file upload / PDF import) have none, so
+// the texture parser returns null and `.texture` access throws. The
+// HTMLImageElement path matches what oldSrc FloorImageLayer used with
+// Konva and handles blob / data / http URLs uniformly.
+const loadTextureFromUrl = (url) =>
+  new Promise((resolve, reject) => {
+    const img = new window.Image()
+    img.onload  = () => resolve(Texture.from(img))
+    img.onerror = (e) => reject(e instanceof Error ? e : new Error(`image load failed: ${url}`))
+    img.src = url
+  })
 
 // Floor image adapter — subscribes to useFloorStore and mounts the active
 // floor's image as a PIXI.Sprite into scene.layers.floorImage.
@@ -117,7 +131,7 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, 
     pendingLoadKey = loadKey
 
     try {
-      const texture = await Assets.load(floor.imageUrl)
+      const texture = await loadTextureFromUrl(floor.imageUrl)
       if (pendingLoadKey !== loadKey) return
 
       clearSprite()

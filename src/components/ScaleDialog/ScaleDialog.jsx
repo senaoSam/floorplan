@@ -2,9 +2,12 @@ import React, { useState, useEffect, useRef } from 'react'
 import './ScaleDialog.sass'
 
 // Modal asking for the real-world distance between two clicked points.
-// Caller passes the pixel distance + a callback that receives px-per-m.
-// Esc cancels, Enter confirms.
-function ScaleDialog({ pixelDistance, onConfirm, onCancel }) {
+// Visual + interaction ports oldSrc ScaleDialog.jsx 1:1 — title / hint
+// copy / placeholder / unit label / live "px/m" result preview / button
+// labels all match. Caller passes pixelDist + onConfirm receives the
+// entered metres (caller computes pxPerM).
+// Esc / backdrop click cancels; Enter confirms.
+function ScaleDialog({ pixelDist, onConfirm, onCancel }) {
   const [meters, setMeters] = useState('')
   const inputRef = useRef(null)
 
@@ -12,50 +15,51 @@ function ScaleDialog({ pixelDistance, onConfirm, onCancel }) {
     inputRef.current?.focus()
   }, [])
 
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape') onCancel?.()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onCancel])
-
-  const submit = () => {
+  const handleConfirm = () => {
     const m = parseFloat(meters)
-    if (!isFinite(m) || m <= 0) return
-    const pxPerM = pixelDistance / m
-    onConfirm?.(pxPerM)
+    if (!m || m <= 0) return
+    onConfirm(m)
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter')  handleConfirm()
+    if (e.key === 'Escape') onCancel()
   }
 
   return (
-    <div className="scale-dialog-backdrop" onMouseDown={onCancel}>
-      <div className="scale-dialog" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="scale-dialog__title">設定比例尺</div>
-        <div className="scale-dialog__hint">
-          兩點之間的螢幕距離為 {pixelDistance.toFixed(1)} px。請輸入這段距離的實際公尺數：
-        </div>
+    <div className="scale-dialog-overlay" onClick={onCancel}>
+      <div className="scale-dialog" onClick={(e) => e.stopPropagation()}>
+        <p className="scale-dialog__title">設定比例尺</p>
+        <p className="scale-dialog__px">量測長度：{pixelDist} px</p>
         <div className="scale-dialog__row">
           <input
             ref={inputRef}
+            className="scale-dialog__input"
             type="number"
+            min="0.01"
             step="0.1"
-            min="0"
+            placeholder="實際距離"
             value={meters}
-            placeholder="公尺"
             onChange={(e) => setMeters(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit() } }}
+            onKeyDown={handleKeyDown}
           />
-          <span>m</span>
+          <span className="scale-dialog__unit">公尺</span>
         </div>
+        {meters && parseFloat(meters) > 0 && (
+          <p className="scale-dialog__result">
+            比例尺：{(pixelDist / parseFloat(meters)).toFixed(2)} px/m
+          </p>
+        )}
         <div className="scale-dialog__actions">
-          <button type="button" className="scale-dialog__btn" onClick={onCancel}>取消</button>
+          <button className="scale-dialog__btn scale-dialog__btn--cancel" onClick={onCancel}>
+            取消
+          </button>
           <button
-            type="button"
-            className="scale-dialog__btn scale-dialog__btn--primary"
-            onClick={submit}
-            disabled={!meters || !(parseFloat(meters) > 0)}
+            className="scale-dialog__btn scale-dialog__btn--confirm"
+            onClick={handleConfirm}
+            disabled={!meters || parseFloat(meters) <= 0}
           >
-            設定
+            確認
           </button>
         </div>
       </div>

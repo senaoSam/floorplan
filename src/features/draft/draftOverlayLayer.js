@@ -1,9 +1,19 @@
-import { Graphics } from 'pixi.js'
+import { Container, Graphics, Text, TextStyle } from 'pixi.js'
 import { EDITOR_MODE } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { getTraySystem, DEFAULT_TRAY } from '@/store/useCableStore'
 import { useWallStore } from '@/store/useWallStore'
 import { OPENING_TYPES } from '@/constants/materials'
+
+const SCALE_COLOR = '#f1c40f'
+// Reused TextStyle for "{px} px" label — matches oldSrc ScaleLayer (fontSize
+// 11 yellow, on a black 68×18 rounded box drawn separately).
+const SCALE_LABEL_STYLE = new TextStyle({
+  fill: SCALE_COLOR,
+  fontFamily: 'system-ui, sans-serif',
+  fontSize: 11,
+  align: 'center',
+})
 
 // Draws the in-progress draft for DRAW_WALL / DRAW_SCOPE / DRAW_FLOOR_HOLE
 // / DRAW_CABLE_TRAY / DRAW_SCALE on scene.layers.overlays. Per-mode visuals
@@ -76,6 +86,19 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
   const g = new Graphics()
   g.eventMode = 'none'
   layer.addChild(g)
+  // Separate Container for Pixi Text labels (px-distance readout while
+  // drawing / scale-preview). Cleared and rebuilt each redraw alongside g.
+  const labelRoot = new Container()
+  labelRoot.eventMode = 'none'
+  layer.addChild(labelRoot)
+
+  const clearLabels = () => {
+    while (labelRoot.children.length > 0) {
+      const c = labelRoot.children[0]
+      labelRoot.removeChild(c)
+      c.destroy({ children: true })
+    }
+  }
 
   // Find an existing tray vertex (across the active floor) that matches
   // the cursor xy exactly — drives the green snap halo while drawing.
@@ -94,7 +117,17 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
 
   const redraw = () => {
     g.clear()
-    const { mode, points, cursor, snapHint, doorWindowDraft } = useDraftStore.getState()
+    clearLabels()
+    const { mode, points, cursor, snapHint, doorWindowDraft, scalePreview } = useDraftStore.getState()
+
+    // Scale preview while ScaleDialog is open — renders the locked pt1→pt2
+    // line (solid, no dashes) + both endpoint dots + the px label. Mirrors
+    // oldSrc ScaleLayer with pt1 + pt2 both set. Rendered on top of (i.e.
+    // after) regular draft so a stale draft doesn't paint over it; in
+    // practice draft is cleared right before scalePreview is set.
+    if (scalePreview) {
+      drawScalePreview(g, scalePreview.p0, scalePreview.p1)
+    }
 
     // DRAW_DOOR / DRAW_WINDOW preview — after the first click on a wall,
     // paint a coloured band between startFrac and the live cursorFrac so
@@ -146,7 +179,106 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
       drawCropDraft(g, points, cursor)
       return
     }
+    if (mode === EDITOR_MODE.DRAW_SCALE) {
+      drawScaleDraft(g, points, cursor)
+      return
+    }
     drawPolyDraft(g, mode, points, cursor)
+  }
+
+  // DRAW_SCALE draft — between 1st click and 2nd click. Mirrors oldSrc
+  // ScaleLayer with pt1 set + endPt = mousePos: dashed [6,4] yellow line
+  // from pt1 to cursor, endpoint dot ONLY at pt1 (oldSrc's `pt2` block is
+  // gated on pt2 being committed, so during the ghost the cursor end is
+  // bare). Label tracks the cursor and updates live.
+  function drawScaleDraft(g, points, cursor) {
+    const p0 = points[0]
+    if (!p0) return
+    const endPt = cursor ?? null
+    drawScaleLine(g, p0, endPt, /* dashed */ true)
+    drawScaleEndpoint(g, p0)
+    if (endPt) drawScaleLabel(p0, endPt)
+  }
+
+  // DRAW_SCALE preview — after 2nd click + while ScaleDialog is open.
+  // Mirrors oldSrc ScaleLayer with pt2 set (solid line, both endpoints,
+  // px label).
+  function drawScalePreview(g, p0, p1) {
+    if (!p0 || !p1) return
+    drawScaleLine(g, p0, p1, /* dashed */ false)
+    drawScaleEndpoint(g, p0)
+    drawScaleEndpoint(g, p1)
+    drawScaleLabel(p0, p1)
+  }
+
+  // oldSrc ScaleLayer line: black outline width 4 alpha 0.45, yellow inner
+  // width 2. Dash [6,4] when ghost, solid when committed.
+  function drawScaleLine(g, a, b, dashed) {
+    if (!a || !b) return
+    if (dashed) {
+      drawDashedScaleSegment(g, a.x, a.y, b.x, b.y)
+    } else {
+      g.moveTo(a.x, a.y).lineTo(b.x, b.y)
+        .stroke({ width: 4, color: HALO_COLOR, alpha: 0.45 })
+      g.moveTo(a.x, a.y).lineTo(b.x, b.y)
+        .stroke({ width: 2, color: SCALE_COLOR, alpha: 1 })
+    }
+  }
+
+  // Same line shape as solid path but rebuilt segment-by-segment so the
+  // dash mask applies to BOTH the black halo + the yellow inner stroke
+  // together. oldSrc Konva Line dash parameter wraps both effective layers
+  // because both share the same Line node.
+  function drawDashedScaleSegment(g, ax, ay, bx, by) {
+    const len = Math.hypot(bx - ax, by - ay)
+    if (len <= 1e-9) return
+    const ux = (bx - ax) / len
+    const uy = (by - ay) / len
+    const dashOn = 6, dashOff = 4
+    let cursor = 0
+    let phaseOn = true
+    let remain = dashOn
+    while (cursor < len) {
+      const step = Math.min(len - cursor, remain)
+      const x1 = ax + ux * cursor
+      const y1 = ay + uy * cursor
+      const x2 = ax + ux * (cursor + step)
+      const y2 = ay + uy * (cursor + step)
+      if (phaseOn) {
+        g.moveTo(x1, y1).lineTo(x2, y2)
+          .stroke({ width: 4, color: HALO_COLOR, alpha: 0.45 })
+        g.moveTo(x1, y1).lineTo(x2, y2)
+          .stroke({ width: 2, color: SCALE_COLOR, alpha: 1 })
+      }
+      cursor += step
+      remain -= step
+      if (remain <= 1e-9) {
+        phaseOn = !phaseOn
+        remain = phaseOn ? dashOn : dashOff
+      }
+    }
+  }
+
+  // oldSrc ScaleLayer endpoint: black halo r=7 alpha 0.3 + yellow inner r=5.
+  function drawScaleEndpoint(g, p) {
+    if (!p) return
+    g.circle(p.x, p.y, 7).fill({ color: HALO_COLOR, alpha: 0.3 })
+    g.circle(p.x, p.y, 5).fill({ color: SCALE_COLOR, alpha: 1 })
+  }
+
+  // oldSrc ScaleLayer label: black rounded rect 68×18 alpha 0.55 + yellow
+  // 11px "{round(pixelDist)} px" text, anchored 18 px above the line midpoint.
+  function drawScaleLabel(a, b) {
+    const pixelDist = Math.round(Math.hypot(b.x - a.x, b.y - a.y))
+    if (pixelDist <= 0) return
+    const midX = (a.x + b.x) / 2
+    const midY = (a.y + b.y) / 2 - 18
+    g.roundRect(midX - 34, midY - 9, 68, 18, 4)
+      .fill({ color: HALO_COLOR, alpha: 0.55 })
+    const t = new Text({ text: `${pixelDist} px`, style: SCALE_LABEL_STYLE })
+    t.anchor.set(0.5, 0.5)
+    t.position.set(midX, midY)
+    labelRoot.addChild(t)
   }
 
   // DRAW_DOOR / DRAW_WINDOW: paint a coloured band between startFrac and
@@ -281,11 +413,11 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
     }
   }
 
-  // Polygon / polyline draft (scope / floor hole / scale).
+  // Polygon / polyline draft (scope / floor hole). DRAW_SCALE has its own
+  // dedicated path (drawScaleDraft) — keep this routine polygon-only.
   function drawPolyDraft(g, mode, points, cursor) {
     const color = COLOR_BY_MODE[mode] ?? DEFAULT_COLOR
     const isPolygon = mode === EDITOR_MODE.DRAW_SCOPE || mode === EDITOR_MODE.DRAW_FLOOR_HOLE
-    // Committed segments — dashed for scope / hole (oldSrc), solid for scale.
     const dashed = isPolygon
     for (let i = 1; i < points.length; i++) {
       const a = points[i - 1], b = points[i]
@@ -406,5 +538,8 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
     unsubWalls()
     layer.removeChild(g)
     g.destroy()
+    clearLabels()
+    layer.removeChild(labelRoot)
+    labelRoot.destroy({ children: true })
   }
 }

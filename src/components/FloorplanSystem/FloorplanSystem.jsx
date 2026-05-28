@@ -530,9 +530,35 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     }
   }, [])
 
+  // oldSrc rounds pixel distance for the label / dialog readout — match
+  // that so 「量測長度：N px」 reads as a whole number.
   const pxDist = scaleDialog
-    ? Math.hypot(scaleDialog.p1.x - scaleDialog.p0.x, scaleDialog.p1.y - scaleDialog.p0.y)
+    ? Math.round(Math.hypot(scaleDialog.p1.x - scaleDialog.p0.x, scaleDialog.p1.y - scaleDialog.p0.y))
     : 0
+
+  // oldSrc Editor2D handleScaleConfirm/Cancel both reset to SELECT — so
+  // hitting Esc / clicking the backdrop leaves the user in pointer mode,
+  // not stuck in DRAW_SCALE waiting for another click.
+  const closeScaleDialog = () => {
+    setScaleDialog(null)
+    useDraftStore.getState().clearScalePreview()
+    useEditorStore.getState().setEditorMode(EDITOR_MODE.SELECT)
+  }
+
+  // Floor switch invalidates any in-flight scale measurement — the pt1 /
+  // pt2 coords belong to the previous floor's image space. Mirrors oldSrc
+  // Editor2D's blanket "clear all drawing state on floor switch" reset.
+  useEffect(() => {
+    let prevFid = useFloorStore.getState().activeFloorId
+    const unsub = useFloorStore.subscribe((s) => {
+      if (s.activeFloorId !== prevFid) {
+        prevFid = s.activeFloorId
+        setScaleDialog(null)
+        useDraftStore.getState().clearScalePreview()
+      }
+    })
+    return unsub
+  }, [])
 
   return (
     <div className="floorplan-system">
@@ -540,14 +566,14 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       <MaterialToast />
       {scaleDialog && (
         <ScaleDialog
-          pixelDistance={pxDist}
-          onConfirm={(pxPerM) => {
+          pixelDist={pxDist}
+          onConfirm={(meters) => {
             const fid = useFloorStore.getState().activeFloorId
-            if (fid) useFloorStore.getState().setFloorScale(fid, pxPerM)
-            setScaleDialog(null)
-            useEditorStore.getState().setEditorMode(EDITOR_MODE.SELECT)
+            // oldSrc Editor2D handleScaleConfirm: pxPerM = pixelDist / meters.
+            if (fid && meters > 0) useFloorStore.getState().setFloorScale(fid, pxDist / meters)
+            closeScaleDialog()
           }}
-          onCancel={() => setScaleDialog(null)}
+          onCancel={closeScaleDialog}
         />
       )}
     </div>
