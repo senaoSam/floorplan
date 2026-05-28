@@ -2,8 +2,7 @@ import { EDITOR_MODE } from '@/store/useEditorStore'
 import { MATERIALS } from '@/constants/materials'
 import { DEFAULT_TRAY } from '@/store/useCableStore'
 import { generateId } from '@/utils/id'
-import { snapTrayPoint } from '@/features/draft/traySnap'
-import { angleLockToAnchor } from '@/features/draft/traySnap'
+import { snapTrayPoint, angleLockToAnchor, parallelWallLock } from '@/features/draft/traySnap'
 
 // oldSrc Editor2D SNAP_PX (= 12 screen px) — wall draw endpoint snap radius.
 const WALL_SNAP_PX_SCREEN = 12
@@ -55,15 +54,19 @@ export function createDraftModeController({
     }
     if (mode === EDITOR_MODE.DRAW_WALL) {
       if (!fid) return { pos: raw, kind: null }
-      let pos = raw
-      // Shift + anchor → 0/45/90° lock (matches tray angleLockToAnchor).
       const draftPoints = useDraftStore.getState().points
-      if (useDraftStore.getState()._shiftHeld && draftPoints.length > 0) {
-        pos = angleLockToAnchor(raw, draftPoints[0])
-      }
+      const shiftHeld = !!useDraftStore.getState()._shiftHeld
       const scale = useViewportStore?.getState?.()?.scale ?? 1
-      const snapDist = WALL_SNAP_PX_SCREEN / (scale || 1)
       const walls = useWallStore.getState().wallsByFloor[fid] ?? []
+      const anchor = draftPoints.length > 0 ? draftPoints[0] : null
+
+      // (1) Shift + anchor → 0/45/90° lock (matches tray angleLockToAnchor).
+      let pos = raw
+      if (shiftHeld && anchor) {
+        pos = angleLockToAnchor(raw, anchor)
+      }
+      // (2) Existing-wall endpoint snap within 12 screen-px (oldSrc SNAP_PX).
+      const snapDist = WALL_SNAP_PX_SCREEN / (scale || 1)
       for (const w of walls) {
         for (const ep of [{ x: w.startX, y: w.startY }, { x: w.endX, y: w.endY }]) {
           if (Math.hypot(pos.x - ep.x, pos.y - ep.y) < snapDist) {
@@ -71,7 +74,22 @@ export function createDraftModeController({
           }
         }
       }
-      return { pos, kind: null }
+      // (3) Parallel / perpendicular-wall lock — same helper as tray. Only
+      // fires after the first click (needs an anchor) and is bypassed when
+      // Shift is held (angle lock wins). User flagged that wall draw should
+      // get the same smart angle correction tray already has.
+      if (!shiftHeld && anchor) {
+        const par = parallelWallLock(raw, anchor, walls, scale)
+        if (par) {
+          return {
+            pos: par.pos,
+            kind: 'parallelWall',
+            ref: par.refWall,
+            lockedAngle: par.lockedAngle,
+          }
+        }
+      }
+      return { pos, kind: shiftHeld && anchor ? 'angleLock' : null }
     }
     return { pos: raw, kind: null }
   }
@@ -200,10 +218,20 @@ export function createDraftModeController({
         : null
       useDraftStore.getState().setSnapHint(visibleKind)
     } else if (mode === EDITOR_MODE.DRAW_WALL) {
-      // Wall draw — surface endpoint snap so draftOverlayLayer can render
-      // the cyan ring + black halo at the snap target (oldSrc WallLayer
-      // 280-285).
-      useDraftStore.getState().setSnapHint(s.kind === 'wallEndpoint' ? { kind: 'wallEndpoint', pos: s.pos } : null)
+      // Wall draw — surface endpoint snap (cyan ring + black halo) and
+      // parallel-wall lock (purple guide + tinted reference wall).
+      if (s.kind === 'wallEndpoint') {
+        useDraftStore.getState().setSnapHint({ kind: 'wallEndpoint', pos: s.pos })
+      } else if (s.kind === 'parallelWall') {
+        useDraftStore.getState().setSnapHint({
+          kind: 'parallelWall',
+          pos: s.pos,
+          ref: s.ref,
+          lockedAngle: s.lockedAngle,
+        })
+      } else {
+        if (useDraftStore.getState().snapHint) useDraftStore.getState().setSnapHint(null)
+      }
     } else {
       // Other modes — clear any stale hint left over from the previous mode.
       if (useDraftStore.getState().snapHint) useDraftStore.getState().setSnapHint(null)

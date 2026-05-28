@@ -164,11 +164,28 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
   }
 
   // Wall: dashed cyan ghost + cyan endpoint marker at the draft start
-  // (oldSrc WallLayer.jsx 250-285).
+  // (oldSrc WallLayer.jsx 250-285). Plus parallel-wall lock visualisation
+  // when snapHint says we're locked to an existing wall's angle / perp —
+  // same purple guide tray uses (drawTrayDraft 253-264).
   function drawWallDraft(g, points, cursor) {
     const color = COLOR_BY_MODE[EDITOR_MODE.DRAW_WALL]
-    // Start dot.
     const start = points[0]
+    // Parallel-wall lock indicator (drawn UNDER the start dot so it
+    // doesn't obscure the marker).
+    const hint = useDraftStore.getState().snapHint
+    if (hint && hint.kind === 'parallelWall' && hint.ref && cursor) {
+      const vpScale = useViewportStore.getState().scale || 1
+      const s = 1 / vpScale
+      const PARALLEL_PURPLE = '#a78bfa'
+      const w = hint.ref
+      g.moveTo(w.startX, w.startY).lineTo(w.endX, w.endY)
+        .stroke({ width: 3 * s, color: PARALLEL_PURPLE, alpha: 0.55, cap: 'round' })
+      drawDashedSegment(g, start.x, start.y, hint.pos.x, hint.pos.y,
+        PARALLEL_PURPLE, 1.2 * s, 4 * s, 4 * s, 0.8)
+      g.circle(hint.pos.x, hint.pos.y, 4 * s)
+        .fill({ color: PARALLEL_PURPLE, alpha: 1 })
+    }
+    // Start dot.
     g.circle(start.x, start.y, 9).fill({ color: HALO_COLOR, alpha: HALO_ALPHA })
     g.circle(start.x, start.y, 6).fill({ color, alpha: 1 })
     if (cursor) {
