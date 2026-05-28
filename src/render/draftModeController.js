@@ -74,12 +74,17 @@ export function createDraftModeController({
           }
         }
       }
-      // (3) Parallel / perpendicular-wall lock — same helper as tray. Only
-      // fires after the first click (needs an anchor) and is bypassed when
-      // Shift is held (angle lock wins). User flagged that wall draw should
-      // get the same smart angle correction tray already has.
+      // (3) Parallel / perpendicular-wall lock. Wall draw uses a stronger
+      // variant than tray (angleToleranceRad=null = no threshold, 300px
+      // proximity instead of 180): as long as the cursor is reasonably
+      // near any existing wall, lock onto the closer of parallel /
+      // perpendicular. User asked for an "always parallel-correct toward
+      // nearest wall" feel, not tray's tight 6° gate.
       if (!shiftHeld && anchor) {
-        const par = parallelWallLock(raw, anchor, walls, scale)
+        const par = parallelWallLock(raw, anchor, walls, scale, {
+          angleToleranceRad: null,
+          proximityPx: 300,
+        })
         if (par) {
           return {
             pos: par.pos,

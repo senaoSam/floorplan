@@ -334,6 +334,22 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     window.addEventListener('keydown', onShiftDown)
     window.addEventListener('keyup',   onShiftUp)
 
+    // Cancel any in-flight draft when the editor mode changes. Without
+    // this, switching from DRAW_WALL (mid-draft) to PLACE_AP leaves
+    // draftStore.mode === DRAW_WALL and the overlay keeps painting the
+    // wall ghost while the user is trying to place APs — user-flagged
+    // bug "繪製中切換 mode 會卡 bug".
+    let lastEditorModeForDraft = useEditorStore.getState().editorMode
+    const unsubModeForDraft = useEditorStore.subscribe(() => {
+      const m = useEditorStore.getState().editorMode
+      if (m === lastEditorModeForDraft) return
+      lastEditorModeForDraft = m
+      const draftMode = useDraftStore.getState().mode
+      if (draftMode != null && draftMode !== m) {
+        useDraftStore.getState().clearDraft()
+      }
+    })
+
     const onKeyDown = (e) => {
       // Don't fire while typing in inputs/textareas (e.g. AP name field).
       const tag = e.target.tagName
@@ -489,6 +505,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keydown', onShiftDown)
       window.removeEventListener('keyup',   onShiftUp)
+      unsubModeForDraft()
       if (detachLayerVisibility) detachLayerVisibility()
       if (detachHandles) detachHandles()
       if (detachDraftOverlay) detachDraftOverlay()

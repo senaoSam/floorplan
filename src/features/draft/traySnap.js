@@ -78,16 +78,21 @@ export function snapToWallForTray(pos, walls, scale) {
   return best
 }
 
-export function parallelWallLock(cursor, anchor, walls, scale) {
+// `angleToleranceRad`: max delta between cursor angle (from anchor) and a
+// wall candidate angle (parallel / perpendicular / anti / anti-perp) for
+// the snap to engage. Tray uses 6° (tight) — wall draw uses null to mean
+// "no threshold" (always pick the closest candidate as long as we found
+// a wall within proximityPx).
+export function parallelWallLock(cursor, anchor, walls, scale, { angleToleranceRad = (6 * Math.PI) / 180, proximityPx = 180 } = {}) {
   if (!walls.length) return null
   const dx0 = cursor.x - anchor.x
   const dy0 = cursor.y - anchor.y
   const len = Math.hypot(dx0, dy0)
   if (len < 4 / (scale || 1)) return null
   const cursorAngle = Math.atan2(dy0, dx0)
-  const proximityPx = 180 / (scale || 1)
+  const proximityWorldPx = proximityPx / (scale || 1)
   let ref = null
-  let refD = proximityPx
+  let refD = proximityWorldPx
   for (const w of walls) {
     const ax = w.startX, ay = w.startY
     const bx = w.endX,   by = w.endY
@@ -104,7 +109,10 @@ export function parallelWallLock(cursor, anchor, walls, scale) {
   const wallAngle = Math.atan2(ref.endY - ref.startY, ref.endX - ref.startX)
   const candidates = [wallAngle, wallAngle + Math.PI / 2, wallAngle + Math.PI, wallAngle + 3 * Math.PI / 2]
   const normAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a))
-  let bestAngle = null, bestDelta = (6 * Math.PI) / 180
+  // When angleToleranceRad is null → always pick the closest candidate
+  // (no threshold). Otherwise require delta < tolerance.
+  let bestAngle = null
+  let bestDelta = angleToleranceRad == null ? Infinity : angleToleranceRad
   for (const a of candidates) {
     const delta = Math.abs(normAngle(a - cursorAngle))
     if (delta < bestDelta) { bestDelta = delta; bestAngle = normAngle(a) }

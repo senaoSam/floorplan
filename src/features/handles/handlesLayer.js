@@ -410,12 +410,33 @@ export function attachHandlesLayer({
           [end + 'X']: snapped.x,
           [end + 'Y']: snapped.y,
         })
+        // User-flagged: show the same cyan-ring halo at the snap target
+        // when an endpoint drag is locked onto another wall's endpoint.
+        // Reuse draftStore.snapHint — draftOverlayLayer already renders
+        // it for kind='wallEndpoint' regardless of editor / draft mode.
+        const wasSnapped = snapped !== raw
+        const draftSt = useDraftStore.getState()
+        if (wasSnapped) {
+          if (!draftSt.snapHint ||
+              draftSt.snapHint.kind !== 'wallEndpoint' ||
+              draftSt.snapHint.pos.x !== snapped.x ||
+              draftSt.snapHint.pos.y !== snapped.y) {
+            draftSt.setSnapHint({ kind: 'wallEndpoint', pos: { x: snapped.x, y: snapped.y } })
+          }
+        } else if (draftSt.snapHint && draftSt.snapHint.kind === 'wallEndpoint') {
+          draftSt.setSnapHint(null)
+        }
       }
       const onUp = () => {
         stage.off('pointermove', onMove)
         stage.off('pointerup', onUp)
         stage.off('pointerupoutside', onUp)
         isDragging = false
+        // Clear the snap halo regardless of whether it was set.
+        const draftSt = useDraftStore.getState()
+        if (draftSt.snapHint && draftSt.snapHint.kind === 'wallEndpoint') {
+          draftSt.setSnapHint(null)
+        }
         rebuild()
         applyInverseScale()
       }
