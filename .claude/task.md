@@ -623,12 +623,12 @@ ship-able 妥協：解掉 SW+Tray+50AP 操作卡頓的臨床問題，cable 拖�
 | #     | 狀態 | Task | 估時 |
 |-------|------|------|------|
 | 31-0  | ✅   | **預備動作** — `src → oldSrc` 改名（user）；新 `src/main.jsx` React 17 mount → `<App>` → `<FloorplanSystem>`；安裝 `pixi.js@^8.18.1`；index.html / global sass 加 fullscreen reset。`.eslintignore` / vitest exclude 略過（repo 無這兩個 config）。Dev server boots clean、WebGPU renderer confirmed | 1 天 |
-| 31-1  | ✅   | **PIXI.Application + Container 階層 + viewport** — `src/render/scene.js` 12 named layer containers under single `world` Container（spec §3.3）；`src/render/viewport.js` wheel zoom + space/middle pan + cursor-anchor zoomAt + minScale/maxScale clamp；DPR + autoDensity；cables `eventMode='none'`。WEBGL_lose_context restore handler 留 31-4 shader 落地後一起做（裸 Container 沒 buffer 可丟） | 2 天 |
+| 31-1  | ✅   | **PIXI.Application + Container 階層 + viewport** — `src/render/scene.js` 12 named layer containers under single `world` Container（spec §3.3）；`src/render/viewport.js` wheel zoom + space/middle pan + cursor-anchor zoomAt + minScale/maxScale clamp；DPR + autoDensity；cables `eventMode='none'`。WEBGL_lose_context restore handler 留 31-5 shader 落地後一起做（裸 Container 沒 buffer 可丟） | 2 天 |
 | 31-2  | ✅   | **Store wiring** — `useViewportStore` 為 PIXI viewport 單一 source of truth；`useEditorStore` 帶 mode + selection 骨架（其他 slice 隨 layer 進場補回）；`bindViewport` imperative `store.subscribe(apply)` → mutate world.position/scale；React `<ViewportHud>` 同樣 subscribe 同 store 驗證雙端一致。Layer-level update pattern（store diff → mutate）留待 layer 進場時各自落地 | 1 天 |
 | 31-3a | ✅   | **Floor image adapter（part of 31-3）** — `src/features/floorImage/floorImageLayer.js` 訂閱 `useFloorStore`、active floor 變動 swap PIXI.Sprite + 自動 fit viewport（32px padding）；港 `useFloorStore`（trim 掉 floor slab material 欄位、PDF 多頁載入）+ `utils/id.js`；最小 `DemoLoader` 載 `public/sample-walls/example3.png`。Heatmap 本體留 31-3b 等 useAPStore + useWallStore 進場後一起做 | 0.5 天 |
 | 31-3b | ✅   | **Heatmap 整合（rest of 31-3）** — 11 個 heatmap module + antennaPatterns + useHeatmapStore 整批 cp 從 oldSrc（無改動）；新 `src/render/heatmapAdapter.js` `Texture.from(gl.canvas)` → PIXI.Sprite 掛 Layer heatmap，store-subscribe 重算 + PIXI v8 CanvasSource.resize() 同步；HeatmapControl 浮動 panel（on/off + 4 mode 下拉）；DemoLoader 自動 enable。<br><br>**MVP 限制**（later phases 補回）：單樓層、無 padding、無 drag-LOD / 無 solo / 無 snapshot、無 hover readout、無 fingerprint skip、無 scope mask、無 floor hole / 跨樓層 | 1 天 |
 | 31-4-mvp | ✅   | **Walls MVP** — Graphics-based 渲染（world-space width 4、material color、openings 蓋色顯示）；港 `useWallStore` + `MATERIALS` + `floorplanFromLines`；DemoLoader 從 `source.json` 載 45 wall（含 door / window opening）；無 shader / 無 AA / 無 spatial index | 0.5 天 |
-| 31-4  | ⬜   | **Walls Mesh + line shader（取代 mvp）** — `src/render/shaders/wallLine.glsl.js`：vertex 展 quad、screen-space width + DPR、smoothstep AA、per-material color、`hoverWallId` uniform、`isSelected` per-vertex attribute；Opening 預切 sub-segments；drag-freeze + dragend commit；R-tree of wall AABBs for hit-test | 2-3 天 |
+| 31-4  | ⏸️ 撤回 | **Walls Mesh + line shader** — 評估後撤回。理由：(1) 5000 wall 對 GPU 是 trivial 量級（~20k vertices），Pixi Graphics + batching 也撐得到，render 從來不是瓶頸；(2) shader 真正的 win 是 update granularity / screen-space width / 銳利 AA，不是 raw throughput — 對本工具實際使用情境收益小；(3) 持續維護成本高（GLSL/WGSL 雙寫、跨 GPU 像素 diff、Pixi 版本綁定、shader debug 工具鏈差）；(4) 真正撞天花板的 scaling 瓶頸在 routing（multi-source Dijkstra / Phase 26）、spatial index（31-10）、SDF text（31-11），跟 wall shader 完全無關。31-4-mvp Graphics 版本即為最終版本；若日後實測 5000 wall 場景拖曳/zoom 卡頓再重啟。|
 | 31-5-mvp | ✅ | **Cables MVP** — 港 5 個 cable algorithm 檔（useCableStore + geometry + routing + buildGraph + computeRoutes + switchSnapStatus）；新 `src/features/cables/cablesLayer.js` 訂閱 floor/AP/cable stores、computeRoutes → 對 active floor AP 的 route 畫 polyline：`routeStatus === 'tray'` 實線 cyan、`'fallback-manhattan'` 手寫 dash 灰、`'unroutable'` 紅圈。`eventMode='none'`。無 focus halo / 無 selection / 無 fingerprint skip | 1 天 |
 | 31-5  | ⬜   | **Cables Mesh + dashed line shader（取代 mvp）** — `src/render/shaders/cableDashed.glsl.js`：基於 wall shader + dash pattern（screen-space distance）+ per-route color/dash semantics（沿用 CableLayer.jsx 各 route 類型）+ focus halo second pass；`eventMode='none'`（無 hit-test） | 2-3 天 |
 | 31-6-mvp | ✅   | **AP markers MVP** — Graphics circle 半徑 9 world-px、frequency color 填、白邊 stroke；港 `useAPStore`；DemoLoader 從 oldSrc 帶 5 顆 AP 種子（5 GHz）。無 sprite atlas、無 spatial index | 0.25 天 |
@@ -687,7 +687,7 @@ ship-able 妥協：解掉 SW+Tray+50AP 操作卡頓的臨床問題，cable 拖�
 
 **順序建議**
 - 31-0 / 31-1 / 31-2 / 31-3 是地基，按順序
-- 31-4 / 31-5 自寫 shader 是技術風險最高，早點做（不要留最後）
+- 31-5 自寫 shader 是技術風險最高，早點做（不要留最後）；31-4 wall shader 已撤回
 - 31-6 → 31-9 標準 PixiJS 路徑，由易到難
 - 31-10 / 31-11 收尾
 - 31-12 驗收，31-13 廢棄 oldSrc
