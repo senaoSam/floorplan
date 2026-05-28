@@ -5,7 +5,7 @@ import { useDraftStore } from '@/store/useDraftStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { EDITOR_MODE } from '@/store/useEditorStore'
 import { generateId } from '@/utils/id'
-import { snapToWallForTray } from '@/features/draft/traySnap'
+import { snapToWallForTray, parallelWallLock } from '@/features/draft/traySnap'
 
 // Edit handles for the selected (or hovered) wall + selected tray.
 // Rendered on scene.layers.handles so they sit above object layers but
@@ -374,6 +374,8 @@ export function attachHandlesLayer({
       const stage = scene.app.stage
       const startWorld = scene.world.toLocal(e.global)
       const original = { x: wall[end + 'X'], y: wall[end + 'Y'] }
+      const otherEnd = end === 'start' ? 'end' : 'start'
+      const anchor = { x: wall[otherEnd + 'X'], y: wall[otherEnd + 'Y'] }
       const fid = useFloorStore.getState().activeFloorId
 
       const onMove = (ev) => {
@@ -387,29 +389,60 @@ export function attachHandlesLayer({
         if (moveMag > 0.5) dragMoved = true
         const scale = useViewportStore.getState().scale || 1
         const walls = useWallStore.getState().wallsByFloor[fid] ?? []
-        // User-flagged: wall-endpoint drag now uses the full wall snap
-        // chain (endpoint 14 px → segment foot 10 px) — same kinds as
-        // tray onto wall. Exclude self so the dragged endpoint doesn't
-        // snap to its own wall.
+        // Snap chain mirrors DRAW_WALL / DRAW_CABLE_TRAY (snapTrayPoint):
+        //   (1) wall endpoint 14 screen-px
+        //   (2) wall segment foot 10 screen-px
+        //   (3) parallel / perpendicular intent lock against nearest wall
+        //       (6°, 180 px) — anchor is the OTHER (static) endpoint of
+        //       this wall, so dragging detects "I want this wall parallel
+        //       / perpendicular to that nearby wall" the same way the
+        //       draw flow does between clicks.
+        // Exclude self so the dragged endpoint doesn't snap to its own wall.
         const wallsExclSelf = walls.filter((w) => w.id !== wall.id)
         const hit = snapToWallForTray(raw, wallsExclSelf, scale)
-        const snapped = hit ? hit.pos : raw
+        let snapped, hintKind, hintRef, hintLockedAngle
+        if (hit) {
+          snapped = hit.pos
+          hintKind = hit.kind
+          hintRef = hit.wall
+        } else {
+          const par = parallelWallLock(raw, anchor, wallsExclSelf, scale, {
+            angleToleranceRad: (3 * Math.PI) / 180,
+          })
+          if (par) {
+            snapped = par.pos
+            hintKind = 'parallelWall'
+            hintRef = par.refWall
+            hintLockedAngle = par.lockedAngle
+          } else {
+            snapped = raw
+            hintKind = null
+          }
+        }
         handle.position.set(snapped.x, snapped.y)
         useWallStore.getState().updateWall(fid, wall.id, {
           [end + 'X']: snapped.x,
           [end + 'Y']: snapped.y,
         })
         // draftStore.snapHint drives draftOverlayLayer's visual halo —
-        // cyan ring for wallEndpoint, orange square for wallSegment.
+        // cyan ring for wallEndpoint, orange square for wallSegment,
+        // purple guide line for parallelWall.
         const draftSt = useDraftStore.getState()
         const cur = draftSt.snapHint
-        if (hit) {
-          const same = cur && cur.kind === hit.kind &&
+        if (hintKind) {
+          const same = cur && cur.kind === hintKind &&
             cur.pos && cur.pos.x === snapped.x && cur.pos.y === snapped.y
           if (!same) {
-            draftSt.setSnapHint({ kind: hit.kind, pos: { x: snapped.x, y: snapped.y } })
+            const next = { kind: hintKind, pos: { x: snapped.x, y: snapped.y } }
+            if (hintKind === 'parallelWall') {
+              next.ref = hintRef
+              next.lockedAngle = hintLockedAngle
+            } else if (hintKind === 'wallSegment') {
+              next.ref = hintRef
+            }
+            draftSt.setSnapHint(next)
           }
-        } else if (cur && (cur.kind === 'wallEndpoint' || cur.kind === 'wallSegment')) {
+        } else if (cur && (cur.kind === 'wallEndpoint' || cur.kind === 'wallSegment' || cur.kind === 'parallelWall')) {
           draftSt.setSnapHint(null)
         }
       }
@@ -420,7 +453,7 @@ export function attachHandlesLayer({
         isDragging = false
         useDragOverlayStore.getState().setWallEndpoint(null)
         const draftSt = useDraftStore.getState()
-        if (draftSt.snapHint && (draftSt.snapHint.kind === 'wallEndpoint' || draftSt.snapHint.kind === 'wallSegment')) {
+        if (draftSt.snapHint && (draftSt.snapHint.kind === 'wallEndpoint' || draftSt.snapHint.kind === 'wallSegment' || draftSt.snapHint.kind === 'parallelWall')) {
           draftSt.setSnapHint(null)
         }
         rebuild()

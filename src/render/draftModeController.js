@@ -2,7 +2,7 @@ import { EDITOR_MODE } from '@/store/useEditorStore'
 import { MATERIALS } from '@/constants/materials'
 import { DEFAULT_TRAY } from '@/store/useCableStore'
 import { generateId } from '@/utils/id'
-import { snapTrayPoint, snapToWallForTray, angleLockToAnchor, parallelWallLock } from '@/features/draft/traySnap'
+import { snapTrayPoint } from '@/features/draft/traySnap'
 
 // Owns the draft-mode click / move / commit / cancel flow.
 // Returns the callback set viewport.bindViewport reads, plus a separate
@@ -51,43 +51,17 @@ export function createDraftModeController({
     }
     if (mode === EDITOR_MODE.DRAW_WALL) {
       if (!fid) return { pos: raw, kind: null }
-      const draftPoints = useDraftStore.getState().points
-      const shiftHeld = !!useDraftStore.getState()._shiftHeld
-      const scale = useViewportStore?.getState?.()?.scale ?? 1
-      const walls = useWallStore.getState().wallsByFloor[fid] ?? []
-      const anchor = draftPoints.length > 0 ? draftPoints[0] : null
-
-      // (1) Shift + anchor → 0/45/90° lock (matches tray angleLockToAnchor).
-      let pos = raw
-      if (shiftHeld && anchor) {
-        pos = angleLockToAnchor(raw, anchor)
-      }
-      // (2) Existing-wall snap — endpoint (14 screen-px) wins over
-      // perpendicular foot on segment (10 screen-px). Same chain tray
-      // uses (snapToWallForTray). User-flagged: a wall-draw click that
-      // lands on another wall's body should snap to that body's
-      // segment, not free.
-      const wallHit = snapToWallForTray(pos, walls, scale)
-      if (wallHit) {
-        return { pos: wallHit.pos, kind: wallHit.kind, ref: wallHit.wall }
-      }
-      // (3) Parallel / perpendicular-wall lock — strictly matches tray's
-      // defaults so the user keeps a free draft angle most of the time
-      // and only sees the angle auto-correct when the cursor is already
-      // close to parallel / perpendicular with a nearby wall (6° gate,
-      // 180 px proximity).
-      if (!shiftHeld && anchor) {
-        const par = parallelWallLock(raw, anchor, walls, scale)
-        if (par) {
-          return {
-            pos: par.pos,
-            kind: 'parallelWall',
-            ref: par.refWall,
-            lockedAngle: par.lockedAngle,
-          }
-        }
-      }
-      return { pos, kind: shiftHeld && anchor ? 'angleLock' : null }
+      // Run the exact same snap chain as DRAW_CABLE_TRAY (shift angle-lock
+      // → wall endpoint → wall segment foot → parallel-wall intent lock).
+      // trays=[] makes the tray-vertex branch a no-op so the chain reduces
+      // to wall + parallel — byte-for-byte the behaviour tray uses.
+      return snapTrayPoint(raw, {
+        walls: useWallStore.getState().wallsByFloor[fid] ?? [],
+        trays: [],
+        draftPoints: useDraftStore.getState().points,
+        scale: useViewportStore?.getState?.()?.scale ?? 1,
+        shiftHeld: !!useDraftStore.getState()._shiftHeld,
+      })
     }
     return { pos: raw, kind: null }
   }
