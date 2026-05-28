@@ -133,6 +133,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
               || m === EDITOR_MODE.PLACE_RISER
         },
         isDrawMode: draftCtrl.isDrawMode,
+        isMarqueeMode: () => useEditorStore.getState().editorMode === EDITOR_MODE.MARQUEE_SELECT,
         onDrawModeClick: draftCtrl.onDrawModeClick,
         onDrawModeMove: draftCtrl.onDrawModeMove,
         onDrawModeRightClick: draftCtrl.onDrawModeRightClick,

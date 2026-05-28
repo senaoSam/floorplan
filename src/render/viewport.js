@@ -31,6 +31,7 @@ export function bindViewport({
   onPlaceModeClick,
   isPlaceMode,
   isDrawMode,
+  isMarqueeMode,
   onDrawModeClick,
   onDrawModeMove,
   onDrawModeRightClick,
@@ -126,15 +127,30 @@ export function bindViewport({
         }
         return
       }
-      // SELECT mode: background LMB starts a marquee-or-clear gesture.
-      // We only ever get here when isBackground is true, because objects
-      // in SELECT mode stopPropagation() inside their own handler.
+      // MARQUEE_SELECT mode only: background LMB starts a marquee-or-clear
+      // gesture (oldSrc Editor2D 783-787 — handleMouseDown gated on
+      // isMarqueeMode). In SELECT mode background LMB is a click that
+      // clears the selection, no marquee. We only ever get here when
+      // isBackground is true, because objects in SELECT mode
+      // stopPropagation() inside their own handler.
       if (isBackground) {
-        pendingDrag = {
-          startGlobal: { x: e.global.x, y: e.global.y },
-          startWorld: { ...world.toLocal(e.global) },
+        if (typeof isMarqueeMode === 'function' && isMarqueeMode()) {
+          pendingDrag = {
+            startGlobal: { x: e.global.x, y: e.global.y },
+            startWorld: { ...world.toLocal(e.global) },
+          }
+          marqueeActive = false
+        } else {
+          // SELECT (or any other non-marquee, non-draw, non-place mode):
+          // treat the down as a pending click — pointerup will fire
+          // onBackgroundClick to clear the selection.
+          pendingDrag = {
+            startGlobal: { x: e.global.x, y: e.global.y },
+            startWorld: { ...world.toLocal(e.global) },
+            clickOnly: true,
+          }
+          marqueeActive = false
         }
-        marqueeActive = false
       }
     }
     // Right-click on stage background while in a draw mode commits the
@@ -161,7 +177,7 @@ export function bindViewport({
         onDrawModeMove({ x: wp.x, y: wp.y })
       }
     }
-    if (pendingDrag) {
+    if (pendingDrag && !pendingDrag.clickOnly) {
       const dist = Math.hypot(
         e.global.x - pendingDrag.startGlobal.x,
         e.global.y - pendingDrag.startGlobal.y,
