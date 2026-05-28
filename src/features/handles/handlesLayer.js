@@ -4,6 +4,7 @@ import { useHoverStore } from '@/store/useHoverStore'
 import { useDraftStore } from '@/store/useDraftStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { EDITOR_MODE } from '@/store/useEditorStore'
+import { generateId } from '@/utils/id'
 
 // Edit handles for the selected (or hovered) wall + selected tray.
 // Rendered on scene.layers.handles so they sit above object layers but
@@ -387,6 +388,9 @@ export function attachHandlesLayer({
       e.stopPropagation()
       dragMoved = false
       isDragging = true
+      // Signal "wall endpoint drag in flight" so isAnyDragging() bails
+      // every layer's pointerover (hover suppressed during the drag).
+      useDragOverlayStore.getState().setWallEndpoint({ wallId: wall.id, end })
       const stage = scene.app.stage
       const startWorld = scene.world.toLocal(e.global)
       const original = { x: wall[end + 'X'], y: wall[end + 'Y'] }
@@ -432,6 +436,7 @@ export function attachHandlesLayer({
         stage.off('pointerup', onUp)
         stage.off('pointerupoutside', onUp)
         isDragging = false
+        useDragOverlayStore.getState().setWallEndpoint(null)
         // Clear the snap halo regardless of whether it was set.
         const draftSt = useDraftStore.getState()
         if (draftSt.snapHint && draftSt.snapHint.kind === 'wallEndpoint') {
@@ -477,42 +482,177 @@ export function attachHandlesLayer({
       const fid = useFloorStore.getState().activeFloorId
       const trayId = tray.id
 
+      // Tracked snap target across onMove / onUp. Either:
+      //   { kind: 'vertex', trayId, vertexIdx, x, y } — snapped to another
+      //     tray's vertex (24 screen-px, oldSrc snapVertexDrag).
+      //   { kind: 'segment', trayId, segIdx, foot } — snapped onto another
+      //     tray's segment (14 screen-px). Triggers auto-split on dragend.
+      //   null — free.
+      let snapResult = null
+
       const onMove = (ev) => {
-        // The handle Container may have been destroyed by an unrelated
-        // store change (Esc clearing selection, tray deleted from another
-        // panel, etc.) — bail out before touching its null fields.
         if (handle.destroyed || !handle.position) return
         const wp = scene.world.toLocal(ev.global)
-        const nx = original.x + (wp.x - startWorld.x)
-        const ny = original.y + (wp.y - startWorld.y)
+        const rawX = original.x + (wp.x - startWorld.x)
+        const rawY = original.y + (wp.y - startWorld.y)
+        const scale = useViewportStore.getState().scale || 1
+        const vertexDist = 24 / scale
+        const segmentDist = 14 / scale
+        const trays = useCableStore.getState().traysByFloor[fid] ?? []
+
+        // Pass 1: vertex snap (highest priority).
+        let vertexHit = null
+        let bestVD = vertexDist
+        for (const t of trays) {
+          for (let i = 0; i < t.points.length; i++) {
+            if (t.id === trayId && i === vertexIdx) continue
+            const v = t.points[i]
+            const d = Math.hypot(rawX - v.x, rawY - v.y)
+            if (d < bestVD) {
+              bestVD = d
+              vertexHit = { trayId: t.id, vertexIdx: i, x: v.x, y: v.y }
+            }
+          }
+        }
+        // Pass 2: segment snap (only on a different tray, no vertex hit).
+        let segmentHit = null
+        if (!vertexHit) {
+          let bestSD = segmentDist
+          for (const t of trays) {
+            if (t.id === trayId) continue
+            for (let i = 0; i < t.points.length - 1; i++) {
+              const a = t.points[i], b = t.points[i + 1]
+              const dx = b.x - a.x, dy = b.y - a.y
+              const lenSq = dx * dx + dy * dy
+              if (lenSq < 1e-6) continue
+              const tt = ((rawX - a.x) * dx + (rawY - a.y) * dy) / lenSq
+              if (tt < 0 || tt > 1) continue
+              const fx = a.x + tt * dx, fy = a.y + tt * dy
+              const d = Math.hypot(rawX - fx, rawY - fy)
+              if (d < bestSD) {
+                bestSD = d
+                segmentHit = { trayId: t.id, segIdx: i, foot: { x: fx, y: fy } }
+              }
+            }
+          }
+        }
+
+        let nx = rawX, ny = rawY
+        if (vertexHit) {
+          nx = vertexHit.x
+          ny = vertexHit.y
+          snapResult = { kind: 'vertex', ...vertexHit }
+        } else if (segmentHit) {
+          nx = segmentHit.foot.x
+          ny = segmentHit.foot.y
+          snapResult = { kind: 'segment', ...segmentHit }
+        } else {
+          snapResult = null
+        }
+
         handle.position.set(nx, ny)
-        // Write to drag overlay only — committing into useCableStore on
-        // every tick triggers handlesLayer.rebuild (subscribed to
-        // useCableStore) which destroys the handle we're dragging. The
-        // overlay store has no rebuild subscription, so the handle stays
-        // alive. traysLayer subscribes to the overlay and renders the
-        // moved vertex with substituted xy. Commit happens in onUp.
         useDragOverlayStore.getState().setTrayVertex({
           trayId, vertexIdx, x: nx, y: ny,
         })
+
+        // draftStore.snapHint drives draftOverlayLayer's visual halo —
+        // green ring for vertex, orange square for segment.
+        const draftSt = useDraftStore.getState()
+        const wantKind = vertexHit ? 'trayVertex' : segmentHit ? 'traySegment' : null
+        const wantPos = vertexHit
+          ? { x: vertexHit.x, y: vertexHit.y }
+          : segmentHit
+            ? { x: segmentHit.foot.x, y: segmentHit.foot.y }
+            : null
+        const cur = draftSt.snapHint
+        const sameHint = cur && wantKind && cur.kind === wantKind &&
+          cur.pos && cur.pos.x === wantPos.x && cur.pos.y === wantPos.y
+        if (wantKind && !sameHint) {
+          draftSt.setSnapHint({ kind: wantKind, pos: wantPos })
+        } else if (!wantKind && (cur?.kind === 'trayVertex' || cur?.kind === 'traySegment')) {
+          draftSt.setSnapHint(null)
+        }
       }
       const onUp = () => {
         stage.off('pointermove', onMove)
         stage.off('pointerup', onUp)
         stage.off('pointerupoutside', onUp)
+
         const overlay = useDragOverlayStore.getState().trayVertex
-        if (overlay && overlay.trayId === trayId && overlay.vertexIdx === vertexIdx) {
-          // Read fresh points so concurrent mutations during the drag
-          // (rare but cheap to handle) aren't clobbered by the commit.
-          const fresh = useCableStore.getState().traysByFloor[fid]?.find((t) => t.id === trayId)
-          if (fresh) {
-            const nextPoints = fresh.points.map((p, i) =>
+        const cable = useCableStore.getState()
+        const sourceFresh = cable.traysByFloor[fid]?.find((t) => t.id === trayId)
+
+        // Build the source tray's post-commit points (vertex moved to the
+        // final snapped / raw xy). Use this array — NOT a re-read of the
+        // store after updateTray — for downstream merge / split logic;
+        // useCableStore.getState() taken above is a frozen snapshot, so a
+        // subsequent updateTray() doesn't refresh `cable.traysByFloor`.
+        // Reading the stale snapshot was the root cause of the merged
+        // tray drawing a zig-zag back through the source's old position.
+        const nextSourcePoints = (sourceFresh && overlay && overlay.trayId === trayId && overlay.vertexIdx === vertexIdx)
+          ? sourceFresh.points.map((p, i) =>
               i === vertexIdx ? { x: overlay.x, y: overlay.y } : p,
             )
-            useCableStore.getState().updateTray(fid, trayId, { points: nextPoints })
+          : sourceFresh?.points
+
+        // Vertex-to-vertex snap on ENDPOINT-to-ENDPOINT pair (different
+        // trays) → merge into one continuous tray (user request "snap吸
+        // 過去後放開, 要自動幫她合併線段"). Source tray keeps its id; the
+        // target tray is removed. The plain commit is INCLUDED in the
+        // merged points so we only call updateTray once for the source.
+        let didMerge = false
+        if (snapResult && snapResult.kind === 'vertex' && sourceFresh && nextSourcePoints) {
+          const targetFresh = cable.traysByFloor[fid]?.find((t) => t.id === snapResult.trayId)
+          if (targetFresh && trayId !== snapResult.trayId) {
+            const srcLen = nextSourcePoints.length
+            const tgtLen = targetFresh.points.length
+            const srcIsEnd = vertexIdx === 0 || vertexIdx === srcLen - 1
+            const tgtIsEnd = snapResult.vertexIdx === 0 || snapResult.vertexIdx === tgtLen - 1
+            if (srcIsEnd && tgtIsEnd) {
+              const srcOriented = vertexIdx === srcLen - 1
+                ? nextSourcePoints
+                : [...nextSourcePoints].reverse()
+              const tgtOriented = snapResult.vertexIdx === 0
+                ? targetFresh.points
+                : [...targetFresh.points].reverse()
+              // Skip duplicate merge xy on the target side.
+              const merged = [...srcOriented, ...tgtOriented.slice(1)]
+              cable.updateTray(fid, trayId, { points: merged })
+              cable.removeTray(fid, snapResult.trayId)
+              didMerge = true
+            }
           }
         }
+
+        // Plain commit when we DIDN'T merge — covers no-snap, interior-
+        // vertex collisions, and the segment-snap path below.
+        if (!didMerge && sourceFresh && nextSourcePoints) {
+          cable.updateTray(fid, trayId, { points: nextSourcePoints })
+        }
+
+        // Segment snap → split the target tray at the foot. The source
+        // tray's vertex (already at foot xy after the commit above) plus
+        // the two halves of the split target share the exact xy, so the
+        // graph builder coincidence-merges them and the network stays
+        // connected.
+        if (snapResult && snapResult.kind === 'segment' && snapResult.trayId !== trayId) {
+          const target = cable.traysByFloor[fid]?.find((t) => t.id === snapResult.trayId)
+          if (target) {
+            const floors = useFloorStore.getState().floors
+            const floor = floors.find((f) => f.id === fid)
+            const ptsA = [...target.points.slice(0, snapResult.segIdx + 1), { ...snapResult.foot }]
+            const ptsB = [{ ...snapResult.foot }, ...target.points.slice(snapResult.segIdx + 1)]
+            cable.removeTray(fid, target.id)
+            cable.addTray(fid, { ...target, id: generateId('tray'), name: cable.nextTrayName({ floor }), points: ptsA })
+            cable.addTray(fid, { ...target, id: generateId('tray'), name: cable.nextTrayName({ floor }), points: ptsB })
+          }
+        }
+
         useDragOverlayStore.getState().setTrayVertex(null)
+        const draftSt = useDraftStore.getState()
+        if (draftSt.snapHint && (draftSt.snapHint.kind === 'trayVertex' || draftSt.snapHint.kind === 'traySegment')) {
+          draftSt.setSnapHint(null)
+        }
         isDragging = false
         // Rebuild now so the handle dots re-render at the committed
         // canonical positions (and any pending hover-driven swap to

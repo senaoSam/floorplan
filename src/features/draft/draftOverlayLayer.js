@@ -101,6 +101,21 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
     if (snapHint && snapHint.kind === 'wallEndpoint' && snapHint.pos) {
       drawWallEndpointSnapHalo(g, snapHint.pos.x, snapHint.pos.y)
     }
+    // Tray vertex snap halo — green ring at the target vertex while a
+    // tray-vertex drag is locked onto another tray's endpoint (oldSrc
+    // CableTrayLayer dragSnapTarget). Rendered regardless of editor /
+    // draft mode so the SELECT-mode vertex drag drives it.
+    if (snapHint && snapHint.kind === 'trayVertex' && snapHint.pos) {
+      drawTrayVertexSnapHalo(g, snapHint.pos.x, snapHint.pos.y)
+    }
+    // Tray segment snap halo — orange SQUARE ring at the perpendicular
+    // foot when a tray-vertex drag is locked onto another tray's
+    // segment. Same shape as the wall-segment snap during tray draw
+    // (SNAP_ORANGE square). Triggers auto-split of the target tray on
+    // pointerup, wired in handlesLayer.
+    if (snapHint && snapHint.kind === 'traySegment' && snapHint.pos) {
+      drawTraySegmentSnapHalo(g, snapHint.pos.x, snapHint.pos.y)
+    }
 
     if (!mode || points.length === 0) return
 
@@ -130,6 +145,32 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
     g.circle(x, y, 11 * s)
       .fill({ color: 0x00e5ff, alpha: 0.25 })
       .stroke({ width: 2 * s, color: 0x00e5ff, alpha: 1 })
+  }
+
+  // Green snap halo at a tray vertex (oldSrc CableTrayLayer 774-778:
+  // ring r=10, dot r=4, colour #22c55e). Same style as the tray-draw
+  // vertex snap so the drag visual matches the draw visual.
+  function drawTrayVertexSnapHalo(g, x, y) {
+    const vpScale = useViewportStore.getState().scale || 1
+    const s = 1 / vpScale
+    g.circle(x, y, 10 * s).stroke({ width: 2 * s, color: SNAP_GREEN, alpha: 1 })
+    g.circle(x, y, 4 * s).fill({ color: SNAP_GREEN, alpha: 1 })
+  }
+
+  // Orange square ring at the perpendicular foot when a tray-vertex
+  // drag is locked onto another tray's segment. Same shape as the
+  // wall-segment snap during tray draw (drawTrayDraft 246-252).
+  function drawTraySegmentSnapHalo(g, x, y) {
+    const vpScale = useViewportStore.getState().scale || 1
+    const s = 1 / vpScale
+    const SNAP_ORANGE = '#f59e0b'
+    const r = 13 * s
+    g.poly([
+      x - r, y - r,
+      x + r, y - r,
+      x + r, y + r,
+      x - r, y + r,
+    ]).stroke({ width: 2.5 * s, color: SNAP_ORANGE, alpha: 1 })
   }
 
   // CROP_IMAGE draft preview (oldSrc CropLayer): dashed cyan rect from

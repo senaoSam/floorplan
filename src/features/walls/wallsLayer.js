@@ -2,6 +2,7 @@ import { Container, Graphics } from 'pixi.js'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
+import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
 import { OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 import { getModeCapability } from '@/render/modeCapabilities'
@@ -293,6 +294,12 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
       beginDrag(entry, e)
     })
     container.on('pointerover', () => {
+      // Suppress hover while ANY object is body-dragging (oldSrc-like —
+      // we don't want every wall the cursor passes over to light up when
+      // the user is translating an AP / SW / wall body / tray etc.).
+      // Endpoint / vertex drags don't set the body-drag flag, so they
+      // intentionally keep hover enabled for the drop-target affordance.
+      if (isAnyBodyDragging()) return
       const cap = getModeCapability(useEditorStore.getState().editorMode)
       if (!cap.allowSelectHover.struct && !cap.allowCommandHover.struct) return
       useHoverStore.getState().setHover(entry.wall.id, 'wall')
@@ -323,6 +330,9 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
       // Live preview: temporarily shift the wall container so the line
       // moves with the cursor without committing to the store yet.
       entry.container.position.set(dx, dy)
+      // Signal "wall body drag in flight" so every layer's pointerover
+      // bail (isAnyBodyDragging) suppresses hover during the drag.
+      useDragOverlayStore.getState().setWall({ id: entry.wall.id, dx, dy })
     }
     const onUp = () => {
       stage.off('pointermove', onMove)
@@ -340,6 +350,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
           endY:   startWall.endY   + dy,
         })
       }
+      useDragOverlayStore.getState().setWall(null)
     }
     stage.on('pointermove', onMove)
     stage.on('pointerup', onUp)

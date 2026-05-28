@@ -1,6 +1,6 @@
 import { Container, Graphics } from 'pixi.js'
 import { getTraySystem } from '@/store/useCableStore'
-import { useDragOverlayStore } from '@/store/useDragOverlayStore'
+import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
@@ -391,6 +391,7 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
       beginDragOrInsert(entry, e, wasSelected, shiftKey)
     })
     container.on('pointerover', () => {
+      if (isAnyBodyDragging()) return
       const cap = getModeCapability(useEditorStore.getState().editorMode)
       if (!cap.allowSelectHover.cable && !cap.allowCommandHover.cable) return
       useHoverStore.getState().setHover(entry.tray.id, 'cable_tray')

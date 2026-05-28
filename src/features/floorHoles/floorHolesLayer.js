@@ -2,7 +2,7 @@ import { Container, Graphics } from 'pixi.js'
 import { DropShadowFilter } from 'pixi-filters'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
-import { useDragOverlayStore } from '@/store/useDragOverlayStore'
+import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
 import { getModeCapability } from '@/render/modeCapabilities'
 
 // Floor-hole adapter — per-hole interactive Container with click-select +
@@ -176,6 +176,7 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
       beginHoleDrag(entry, e)
     })
     container.on('pointerover', () => {
+      if (isAnyBodyDragging()) return
       const cap = getModeCapability(useEditorStore.getState().editorMode)
       if (!cap.allowSelectHover.struct && !cap.allowCommandHover.struct) return
       useHoverStore.getState().setHover(entry.hole.id, 'floor_hole')

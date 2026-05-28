@@ -1,5 +1,5 @@
 import { Container, Graphics, Circle, Text, TextStyle } from 'pixi.js'
-import { useDragOverlayStore } from '@/store/useDragOverlayStore'
+import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
@@ -343,6 +343,7 @@ export function attachAPsLayer({
     // (oldSrc allowAnyHover). Non-SELECT modes still want a faint
     // affordance so the user knows what right-click would target.
     container.on('pointerover', () => {
+      if (isAnyBodyDragging()) return
       const cap = getModeCapability(useEditorStore.getState().editorMode)
       if (!cap.allowSelectHover.wireless && !cap.allowCommandHover.wireless) return
       useHoverStore.getState().setHover(entry.ap.id, 'ap')
