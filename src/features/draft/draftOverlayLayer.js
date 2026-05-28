@@ -126,8 +126,8 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
   function drawWallEndpointSnapHalo(g, x, y) {
     const vpScale = useViewportStore.getState().scale || 1
     const s = 1 / vpScale
-    g.circle(x, y, 11 * s).fill({ color: 0x000000, alpha: 0.4 })
-    g.circle(x, y, 9 * s)
+    g.circle(x, y, 13 * s).fill({ color: 0x000000, alpha: 0.4 })
+    g.circle(x, y, 11 * s)
       .fill({ color: 0x00e5ff, alpha: 0.25 })
       .stroke({ width: 2 * s, color: 0x00e5ff, alpha: 1 })
   }

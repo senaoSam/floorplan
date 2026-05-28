@@ -20,19 +20,18 @@ const DRAG_COMMIT_THRESHOLD_PX = 1
 // Hit area is 14 screen-px wide along the segment so clicks register
 // even on thin segments at zoomed-out viewports.
 const WALL_HALO_WIDTH_NORMAL   = 4
-const WALL_HALO_WIDTH_SELECTED = 7
-const WALL_HALO_WIDTH_HOVERED  = 10
+const WALL_HALO_WIDTH_SELECTED = 4
+const WALL_HALO_WIDTH_HOVERED  = 4
 const WALL_BODY_WIDTH_NORMAL   = 3
-const WALL_BODY_WIDTH_SELECTED = 5
+const WALL_BODY_WIDTH_SELECTED = 3
 // User update: wall body keeps NORMAL width on hover (oldSrc thickened to
 // 6; user wants no width change). Colour does flip to white on hover so
 // the body itself reads as the bright marker.
 const WALL_BODY_WIDTH_HOVERED  = WALL_BODY_WIDTH_NORMAL
 // White hover beam — drawn UNDER the black halo, wider than the halo so
-// 2 px of white shows on each side of the black ring (= the "white outer
-// ring" the user asked for, restored from earlier mistaken slim-on-top
-// variant). PAD is total extra width over the halo (2 px each side).
-const WALL_HOVER_BEAM_PAD      = 4
+// a thin white ring shows on each side of the black ring. PAD is total
+// extra width over the halo (so 1 px each side at PAD=2).
+const WALL_HOVER_BEAM_PAD      = 2
 const WALL_HOVER_BEAM_COLOR    = '#ffffff'
 const WALL_HOVER_BEAM_ALPHA    = 0.9
 // User update: selected walls get an outer cyan ring (matches the wall
