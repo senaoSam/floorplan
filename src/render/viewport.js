@@ -132,30 +132,20 @@ export function bindViewport({
         }
         return
       }
-      // MARQUEE_SELECT mode only: background LMB starts a marquee-or-clear
-      // gesture (oldSrc Editor2D 783-787 — handleMouseDown gated on
-      // isMarqueeMode). In SELECT mode background LMB is a click that
-      // clears the selection, no marquee. We only ever get here when
-      // isBackground is true, because objects in SELECT mode
-      // stopPropagation() inside their own handler.
+      // Background LMB:
+      //   MARQUEE_SELECT  → click-or-marquee (oldSrc Editor2D 783-787).
+      //   SELECT / other  → click-or-pan: pointerup with no drag clears
+      //                     the selection; drag past the threshold
+      //                     upgrades the gesture to a pan (matches the
+      //                     "拖曳畫布移動視角" affordance the user expects).
       if (isBackground) {
-        if (typeof isMarqueeMode === 'function' && isMarqueeMode()) {
-          pendingDrag = {
-            startGlobal: { x: e.global.x, y: e.global.y },
-            startWorld: { ...world.toLocal(e.global) },
-          }
-          marqueeActive = false
-        } else {
-          // SELECT (or any other non-marquee, non-draw, non-place mode):
-          // treat the down as a pending click — pointerup will fire
-          // onBackgroundClick to clear the selection.
-          pendingDrag = {
-            startGlobal: { x: e.global.x, y: e.global.y },
-            startWorld: { ...world.toLocal(e.global) },
-            clickOnly: true,
-          }
-          marqueeActive = false
+        const inMarquee = typeof isMarqueeMode === 'function' && isMarqueeMode()
+        pendingDrag = {
+          startGlobal: { x: e.global.x, y: e.global.y },
+          startWorld: { ...world.toLocal(e.global) },
+          mode: inMarquee ? 'marquee' : 'pan',
         }
+        marqueeActive = false
       }
     }
     // Right-click on stage background while in a draw mode commits the
@@ -182,17 +172,28 @@ export function bindViewport({
         onDrawModeMove({ x: wp.x, y: wp.y })
       }
     }
-    if (pendingDrag && !pendingDrag.clickOnly) {
+    if (pendingDrag) {
       const dist = Math.hypot(
         e.global.x - pendingDrag.startGlobal.x,
         e.global.y - pendingDrag.startGlobal.y,
       )
-      if (!marqueeActive && dist > MARQUEE_DRAG_THRESHOLD_PX) {
-        marqueeActive = true
-      }
-      if (marqueeActive) {
-        const cur = world.toLocal(e.global)
-        drawMarquee(pendingDrag.startWorld, cur)
+      if (pendingDrag.mode === 'marquee') {
+        if (!marqueeActive && dist > MARQUEE_DRAG_THRESHOLD_PX) {
+          marqueeActive = true
+        }
+        if (marqueeActive) {
+          const cur = world.toLocal(e.global)
+          drawMarquee(pendingDrag.startWorld, cur)
+        }
+      } else if (pendingDrag.mode === 'pan' && dist > MARQUEE_DRAG_THRESHOLD_PX) {
+        // Upgrade click-or-pan to an active pan now that the user has
+        // dragged past the threshold. Subsequent moves are handled by the
+        // panActive branch above on the next tick.
+        panActive = true
+        panLastX = e.global.x
+        panLastY = e.global.y
+        stage.cursor = 'grabbing'
+        pendingDrag = null
       }
     }
   }
