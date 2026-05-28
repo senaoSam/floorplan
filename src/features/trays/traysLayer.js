@@ -5,6 +5,7 @@ import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { getModeCapability } from '@/render/modeCapabilities'
+import { generateId } from '@/utils/id'
 
 // Cable tray adapter — per-tray Container with magnet halo + channel
 // body + custom polyline hitArea. Visuals ported 1:1 from oldSrc
@@ -233,7 +234,8 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     if (!entry) {
       const c = new Container()
       c.eventMode = 'static'
-      c.cursor = 'grab'
+      // drawTray flips this to 'move' / 'pointer' based on selection state.
+      c.cursor = 'pointer'
       const haloG = new Graphics()
       const bodyG = new Graphics()
       haloG.eventMode = 'none'
@@ -316,18 +318,10 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
       })
     }
 
-    // Selection white halo — rendered in-layer (Bundle 7) so it sits
-    // BELOW devicesSW (z 7b > trays 6). Width 9 (world-px) keeps it
-    // chunky enough to register without scaling weirdly across zooms.
-    if (isSelected) {
-      drawPolylineStroke(haloG, points, {
-        width: 9,
-        color: TRAY_SELECTED_BORDER,
-        alpha: 0.95,
-        cap: 'round',
-        join: 'round',
-      })
-    }
+    // (Selection cue is the channel-polygon white border below — strictly
+    // matches oldSrc CableTrayLayer.jsx 437 which only swaps the border
+    // colour to white on select. The earlier PIXI-only extra wide halo
+    // was removed per user "比照 old" request.)
 
     // Channel body — closed polygon with semicircle caps + miter join.
     const halfW = (TRAY_WIDTH_SCREEN_PX * s) / 2
@@ -356,6 +350,10 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     })
 
     container.hitArea = makePolylineHitArea(points, HIT_TOLERANCE_PX / vpScale)
+    // Cursor parity with oldSrc CableTrayLayer 290-292: 'move' once the
+    // tray is selected (drag now translates), 'pointer' otherwise (click
+    // will select). PIXI applies cursor on pointerover automatically.
+    container.cursor = isSelected ? 'move' : 'pointer'
   }
 
   const bindInteractions = (entry) => {
@@ -381,8 +379,16 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
       const cap = getModeCapability(useEditorStore.getState().editorMode)
       if (!cap.allowSelectClick.cable) return
       e.stopPropagation()
-      useEditorStore.getState().setSelected(entry.tray.id, 'cable_tray')
-      beginDrag(entry, e)
+      const ed = useEditorStore.getState()
+      const wasSelected = ed.selectedId === entry.tray.id && ed.selectedType === 'cable_tray'
+      const shiftKey = !!e.originalEvent?.shiftKey
+      ed.setSelected(entry.tray.id, 'cable_tray')
+      // wasSelected → the click might be a "click on segment to insert
+      // vertex" gesture instead of a body drag. beginDragOrInsert decides
+      // at pointerup: any drag past threshold becomes a body drag; a near-
+      // zero-distance click on a segment foot fires insertVertex (or
+      // splitTray on Shift, oldSrc CableTrayLayer 400-409).
+      beginDragOrInsert(entry, e, wasSelected, shiftKey)
     })
     container.on('pointerover', () => {
       const cap = getModeCapability(useEditorStore.getState().editorMode)
@@ -447,34 +453,111 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     return { hitContext, mergeCandidate }
   }
 
-  const beginDrag = (entry, downEvent) => {
+  // Find which segment of `points` the world-coord click is on (within
+  // CLICK_FOOT_TOLERANCE_SCREEN_PX). Returns { segIdx, foot } or null.
+  const CLICK_FOOT_TOLERANCE_SCREEN_PX = 14
+  const findSegmentFoot = (points, worldPt) => {
+    const scale = useViewportStore.getState().scale || 1
+    const tol = CLICK_FOOT_TOLERANCE_SCREEN_PX / scale
+    let best = null, bestD = tol
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i], b = points[i + 1]
+      const dx = b.x - a.x, dy = b.y - a.y
+      const lenSq = dx * dx + dy * dy
+      if (lenSq < 1e-6) continue
+      const t = ((worldPt.x - a.x) * dx + (worldPt.y - a.y) * dy) / lenSq
+      const tc = Math.max(0, Math.min(1, t))
+      const fx = a.x + tc * dx, fy = a.y + tc * dy
+      const d = Math.hypot(worldPt.x - fx, worldPt.y - fy)
+      if (d < bestD) { bestD = d; best = { segIdx: i, foot: { x: fx, y: fy } } }
+    }
+    return best
+  }
+
+  const insertVertexAt = (entry, segIdx, foot) => {
+    const fresh = useCableStore.getState().traysByFloor[entry.floorId]?.find((t) => t.id === entry.tray.id)
+    if (!fresh) return
+    const nextPoints = [
+      ...fresh.points.slice(0, segIdx + 1),
+      foot,
+      ...fresh.points.slice(segIdx + 1),
+    ]
+    useCableStore.getState().updateTray(entry.floorId, entry.tray.id, { points: nextPoints })
+  }
+
+  // Split tray into two trays at `foot` on segment segIdx. Both new trays
+  // contain `foot` so the graph builder's coincidence-merge keeps them
+  // connected (oldSrc CableTrayLayer 732-755, cable-spec §10 / 12-2d).
+  const splitTrayAt = (entry, segIdx, foot) => {
+    const cable = useCableStore.getState()
+    const tray = cable.traysByFloor[entry.floorId]?.find((t) => t.id === entry.tray.id)
+    if (!tray) return
+    const floors = useFloorStore.getState().floors
+    const floor = floors.find((f) => f.id === entry.floorId)
+    const ptsA = [...tray.points.slice(0, segIdx + 1), { ...foot }]
+    const ptsB = [{ ...foot }, ...tray.points.slice(segIdx + 1)]
+    cable.removeTray(entry.floorId, tray.id)
+    const nameA = cable.nextTrayName({ floor })
+    cable.addTray(entry.floorId, { ...tray, id: generateId('tray'), name: nameA, points: ptsA })
+    const nameB = cable.nextTrayName({ floor })
+    cable.addTray(entry.floorId, { ...tray, id: generateId('tray'), name: nameB, points: ptsB })
+    // Drop selection — the original tray no longer exists.
+    useEditorStore.getState().clearSelected()
+  }
+
+  const beginDragOrInsert = (entry, downEvent, wasSelected, shiftKey) => {
     const startWorld = scene.world.toLocal(downEvent.global)
+    const startGlobal = { x: downEvent.global.x, y: downEvent.global.y }
     const stage = scene.app.stage
+    let didDrag = false
 
     const onMove = (e) => {
-      const wp = scene.world.toLocal(e.global)
-      const dx = wp.x - startWorld.x
-      const dy = wp.y - startWorld.y
-      useDragOverlayStore.getState().setTray({ id: entry.tray.id, dx, dy })
+      const distScreen = Math.hypot(
+        e.global.x - startGlobal.x,
+        e.global.y - startGlobal.y,
+      )
+      if (!didDrag && distScreen > 4) didDrag = true
+      if (didDrag) {
+        const wp = scene.world.toLocal(e.global)
+        useDragOverlayStore.getState().setTray({
+          id: entry.tray.id,
+          dx: wp.x - startWorld.x,
+          dy: wp.y - startWorld.y,
+        })
+      }
     }
     const onUp = () => {
-      const overlay = useDragOverlayStore.getState().tray
       stage.off('pointermove', onMove)
       stage.off('pointerup', onUp)
       stage.off('pointerupoutside', onUp)
-      if (overlay && overlay.id === entry.tray.id) {
-        const moved = Math.hypot(overlay.dx, overlay.dy)
-        if (moved > DRAG_COMMIT_THRESHOLD_PX) {
-          const nextPoints = entry.tray.points.map((p) => ({
-            x: p.x + overlay.dx,
-            y: p.y + overlay.dy,
-          }))
-          useCableStore.getState().updateTray(entry.floorId, entry.tray.id, {
-            points: nextPoints,
-          })
+
+      if (didDrag) {
+        const overlay = useDragOverlayStore.getState().tray
+        if (overlay && overlay.id === entry.tray.id) {
+          const moved = Math.hypot(overlay.dx, overlay.dy)
+          if (moved > DRAG_COMMIT_THRESHOLD_PX) {
+            const nextPoints = entry.tray.points.map((p) => ({
+              x: p.x + overlay.dx,
+              y: p.y + overlay.dy,
+            }))
+            useCableStore.getState().updateTray(entry.floorId, entry.tray.id, {
+              points: nextPoints,
+            })
+          }
         }
+        useDragOverlayStore.getState().setTray(null)
+        return
       }
-      useDragOverlayStore.getState().setTray(null)
+
+      // No drag — if the tray was ALREADY selected before this click,
+      // treat the click on a segment foot as an insert / split request.
+      // (First click on an unselected tray only selects it; insert
+      // requires confirmation by clicking again on the now-selected tray.)
+      if (!wasSelected) return
+      const hit = findSegmentFoot(entry.tray.points, startWorld)
+      if (!hit) return
+      if (shiftKey) splitTrayAt(entry, hit.segIdx, hit.foot)
+      else          insertVertexAt(entry, hit.segIdx, hit.foot)
     }
     stage.on('pointermove', onMove)
     stage.on('pointerup', onUp)
