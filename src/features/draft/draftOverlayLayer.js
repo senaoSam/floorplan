@@ -2,6 +2,8 @@ import { Graphics } from 'pixi.js'
 import { EDITOR_MODE } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { getTraySystem, DEFAULT_TRAY } from '@/store/useCableStore'
+import { useWallStore } from '@/store/useWallStore'
+import { OPENING_TYPES } from '@/constants/materials'
 
 // Draws the in-progress draft for DRAW_WALL / DRAW_SCOPE / DRAW_FLOOR_HOLE
 // / DRAW_CABLE_TRAY / DRAW_SCALE on scene.layers.overlays. Per-mode visuals
@@ -92,7 +94,16 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
 
   const redraw = () => {
     g.clear()
-    const { mode, points, cursor, snapHint } = useDraftStore.getState()
+    const { mode, points, cursor, snapHint, doorWindowDraft } = useDraftStore.getState()
+
+    // DRAW_DOOR / DRAW_WINDOW preview — after the first click on a wall,
+    // paint a coloured band between startFrac and the live cursorFrac so
+    // the user sees both endpoints + drag direction before the second
+    // click commits. Coloured to match the eventual opening (door brown
+    // / window blue, OPENING_TYPES.color).
+    if (doorWindowDraft) {
+      drawDoorWindowDraft(g, doorWindowDraft)
+    }
 
     // Wall endpoint snap halo — render whenever the snapHint says we're
     // snapping to an existing wall endpoint, even before the user has
@@ -136,6 +147,38 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
       return
     }
     drawPolyDraft(g, mode, points, cursor)
+  }
+
+  // DRAW_DOOR / DRAW_WINDOW: paint a coloured band between startFrac and
+  // cursorFrac along the host wall + a marker at the first click. Reads
+  // the wall geometry on each redraw (cheap) so cursorFrac → world coords
+  // tracks any wall edit happening underneath.
+  function drawDoorWindowDraft(g, draft) {
+    const fid = useFloorStore.getState().activeFloorId
+    if (!fid) return
+    const wall = (useWallStore.getState().wallsByFloor[fid] ?? []).find((w) => w.id === draft.wallId)
+    if (!wall) return
+    const vpScale = useViewportStore.getState().scale || 1
+    const s = 1 / vpScale
+    const dxw = wall.endX - wall.startX
+    const dyw = wall.endY - wall.startY
+    const sx = wall.startX + dxw * draft.startFrac
+    const sy = wall.startY + dyw * draft.startFrac
+    const cx = wall.startX + dxw * draft.cursorFrac
+    const cy = wall.startY + dyw * draft.cursorFrac
+    const ot = draft.kind === 'window' ? OPENING_TYPES.WINDOW : OPENING_TYPES.DOOR
+    const color = ot.color
+    // Dashed coloured band (matches the eventual opening colour) between
+    // the two endpoints. Width 5 world-px so it visually reads as the
+    // opening preview without overpowering the wall body underneath.
+    drawDashedSegment(g, sx, sy, cx, cy, color, 5, 10 * s, 5 * s, 0.85)
+    // First-click marker — solid coloured disc + black halo so the user
+    // can clearly see "this is the start of the opening".
+    g.circle(sx, sy, 7 * s).fill({ color: HALO_COLOR, alpha: HALO_ALPHA })
+    g.circle(sx, sy, 5 * s).fill({ color, alpha: 1 })
+    // Cursor-end marker — open ring so it reads as "this end is still
+    // moving" / not yet committed.
+    g.circle(cx, cy, 6 * s).stroke({ width: 2 * s, color, alpha: 1 })
   }
 
   // Cyan ring + black halo at an existing wall endpoint the cursor is
@@ -352,11 +395,15 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
 
   const unsubscribe = useDraftStore.subscribe(redraw)
   const unsubViewport = useViewportStore.subscribe(redraw)
+  // Wall store subscription keeps the DRAW_DOOR / DRAW_WINDOW preview band
+  // in sync if the host wall is dragged / edited between clicks.
+  const unsubWalls = useWallStore.subscribe(redraw)
   redraw()
 
   return () => {
     unsubscribe()
     unsubViewport()
+    unsubWalls()
     layer.removeChild(g)
     g.destroy()
   }

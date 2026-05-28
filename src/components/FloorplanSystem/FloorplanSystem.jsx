@@ -405,9 +405,10 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         }
       }
 
-      // Tab — cycle PLACE_AP band (2.4 / 5 / 6) or PLACE_SWITCH kind
-      // (switch / idf / mdf / router). Shift+Tab reverses. Pops the
-      // material toast naming the new selection. (oldSrc Editor2D 552-573.)
+      // Tab — cycle PLACE_AP band (2.4 / 5 / 6), PLACE_SWITCH kind
+      // (switch / idf / mdf / router), or DRAW_WALL material (glass →
+      // drywall → wood → brick → concrete → metal). Shift+Tab reverses.
+      // Pops the material toast naming the new selection.
       if (e.key === 'Tab' && !cmd && !e.altKey) {
         const ed = useEditorStore.getState()
         if (ed.editorMode === EDITOR_MODE.PLACE_AP) {
@@ -437,29 +438,24 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           })
           return
         }
-      }
-
-      // Number keys 1-6 — wall material picker (oldSrc Editor2D 577-593).
-      // In DRAW_WALL → set the active wall material for the next stroke.
-      // If a wall is currently selected → also rewrite its material.
-      // Either branch pops a 1.5 s toast naming the chosen material.
-      if (e.key >= '1' && e.key <= '6' && !cmd && !e.altKey) {
-        const idx = parseInt(e.key, 10) - 1
-        const mat = MATERIAL_LIST[idx]
-        if (!mat) return
-        const ed = useEditorStore.getState()
-        const inWallMode = ed.editorMode === EDITOR_MODE.DRAW_WALL
-        const wallSelected = ed.selectedId && ed.selectedType === 'wall'
-        if (!inWallMode && !wallSelected) return
-        if (inWallMode) ed.setWallMaterial(mat)
-        if (wallSelected) {
-          const fid = useFloorStore.getState().activeFloorId
-          if (fid) useWallStore.getState().updateWall(fid, ed.selectedId, { material: mat })
+        if (ed.editorMode === EDITOR_MODE.DRAW_WALL) {
+          e.preventDefault()
+          const curId = ed.wallMaterial?.id
+          const idx = Math.max(0, MATERIAL_LIST.findIndex((m) => m.id === curId))
+          const dir = e.shiftKey ? -1 : 1
+          const next = MATERIAL_LIST[(idx + dir + MATERIAL_LIST.length) % MATERIAL_LIST.length]
+          ed.setWallMaterial(next)
+          // If a wall is also selected, rewrite its material in the same
+          // stroke — mirrors the prior 1-6 behaviour.
+          if (ed.selectedId && ed.selectedType === 'wall') {
+            const fid = useFloorStore.getState().activeFloorId
+            if (fid) useWallStore.getState().updateWall(fid, ed.selectedId, { material: next })
+          }
+          useMaterialToastStore.getState().showToast({
+            label: next.label, color: next.color, key: 'Tab',
+          })
+          return
         }
-        useMaterialToastStore.getState().showToast({
-          label: mat.label, color: mat.color, key: e.key,
-        })
-        return
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const s = useEditorStore.getState()

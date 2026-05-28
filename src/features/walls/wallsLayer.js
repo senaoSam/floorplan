@@ -3,6 +3,7 @@ import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
+import { useDraftStore } from '@/store/useDraftStore'
 import { OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 import { getModeCapability } from '@/render/modeCapabilities'
@@ -92,11 +93,14 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
   layer.eventMode = 'passive'
 
   const containers = new Map()
-  // DOOR_WINDOW mode state — first click records (wallId, frac), the next
-  // click on the SAME wall inserts an opening over [min, max]. Click on a
-  // different wall resets to that wall. Esc / right-click clear via the
-  // shared keyboard / context-menu paths (cleared on mode exit).
-  const dw = { wallId: null, startFrac: null, openingKind: 'door' }
+  // DRAW_DOOR / DRAW_WINDOW mode state — first click records (wallId, frac),
+  // the next click on the SAME wall inserts an opening over [min, max].
+  // Click on a different wall resets to that wall. Esc / right-click clear
+  // via the shared keyboard / context-menu paths (cleared on mode exit).
+  // openingKind is derived from the current editor mode (no per-mode toggle).
+  const dw = { wallId: null, startFrac: null }
+  const isDoorWindowMode = (mode) =>
+    mode === EDITOR_MODE.DRAW_DOOR || mode === EDITOR_MODE.DRAW_WINDOW
 
   const ensureContainer = (wall, floorId) => {
     let entry = containers.get(wall.id)
@@ -277,13 +281,13 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
       }
       if ((e.button ?? 0) !== 0) return
       const editor = useEditorStore.getState()
-      // DOOR_WINDOW mode keeps its own click semantics (insert opening
-      // at click foot on the wall under cursor) — capability says
-      // allowSelectClick.struct = true but the layer handles it
-      // differently for this mode only.
-      if (editor.editorMode === EDITOR_MODE.DOOR_WINDOW) {
+      // DRAW_DOOR / DRAW_WINDOW modes keep their own click semantics (insert
+      // opening at click foot on the wall under cursor) — capability says
+      // allowSelectClick.struct = true but the layer handles it differently
+      // for these two modes.
+      if (isDoorWindowMode(editor.editorMode)) {
         e.stopPropagation()
-        handleDoorWindowClick(entry, e)
+        handleDoorWindowClick(entry, e, editor.editorMode)
         return
       }
       const cap = getModeCapability(editor.editorMode)
@@ -305,6 +309,24 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
       useHoverStore.getState().setHover(entry.wall.id, 'wall')
     })
     container.on('pointerout',  () => useHoverStore.getState().clearHoverIf(entry.wall.id))
+    // DRAW_DOOR / DRAW_WINDOW preview — once the user has placed the first
+    // click on THIS wall, drive a live cursorFrac so draftOverlayLayer can
+    // paint a coloured band between startFrac and cursorFrac (door brown /
+    // window blue, matching the eventual opening colour).
+    container.on('pointermove', (e) => {
+      const mode = useEditorStore.getState().editorMode
+      if (!isDoorWindowMode(mode)) return
+      if (dw.wallId !== entry.wall.id) return
+      const local = scene.world.toLocal(e.global)
+      const frac = projectToWallFrac(entry.wall, local.x, local.y)
+      const clamped = Math.max(0, Math.min(1, frac))
+      useDraftStore.getState().setDoorWindowDraft({
+        wallId: entry.wall.id,
+        startFrac: dw.startFrac,
+        cursorFrac: clamped,
+        kind: mode === EDITOR_MODE.DRAW_WINDOW ? 'window' : 'door',
+      })
+    })
   }
 
   // Wall-body drag — translate both endpoints by the same delta. Uses the
@@ -357,7 +379,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     stage.on('pointerupoutside', onUp)
   }
 
-  const handleDoorWindowClick = (entry, e) => {
+  const handleDoorWindowClick = (entry, e, mode) => {
     const { wall } = entry
     const local = scene.world.toLocal(e.global)
     const frac = projectToWallFrac(wall, local.x, local.y)
@@ -365,6 +387,14 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     if (dw.wallId !== wall.id) {
       dw.wallId = wall.id
       dw.startFrac = frac
+      // Seed the live preview at the first click — cursorFrac will be
+      // updated on every subsequent pointermove over this wall.
+      useDraftStore.getState().setDoorWindowDraft({
+        wallId: wall.id,
+        startFrac: frac,
+        cursorFrac: frac,
+        kind: mode === EDITOR_MODE.DRAW_WINDOW ? 'window' : 'door',
+      })
       return
     }
     const f1 = Math.min(dw.startFrac, frac)
@@ -373,11 +403,12 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
       const existing = wall.openings ?? []
       const overlaps = existing.some((o) => f1 < o.endFrac && f2 > o.startFrac)
       if (!overlaps) {
-        const ot = dw.openingKind === 'window' ? OPENING_TYPES.WINDOW : OPENING_TYPES.DOOR
+        const openingKind = mode === EDITOR_MODE.DRAW_WINDOW ? 'window' : 'door'
+        const ot = openingKind === 'window' ? OPENING_TYPES.WINDOW : OPENING_TYPES.DOOR
         const defaultMat = getMaterialById(ot.defaultMaterial)
         useWallStore.getState().addOpening(entry.floorId, wall.id, {
           id: generateId('opening'),
-          type: dw.openingKind,
+          type: openingKind,
           startFrac: f1,
           endFrac: f2,
           material: defaultMat,
@@ -388,6 +419,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     }
     dw.wallId = null
     dw.startFrac = null
+    useDraftStore.getState().setDoorWindowDraft(null)
   }
 
   // Project a point onto the wall's segment, returning the fraction
@@ -401,16 +433,17 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     return ((px - wall.startX) * dx + (py - wall.startY) * dy) / len2
   }
 
-  // Reset DOOR_WINDOW state when the user leaves the mode (Esc, mode pick,
-  // selection in another layer). D / W keys still flip the openingKind
-  // *while* in the mode — wired in a keydown listener below.
+  // Esc clears the half-finished click pair. Mode is now driven entirely by
+  // DRAW_DOOR / DRAW_WINDOW selection — no per-mode toggle key.
   const onKeyDown = (e) => {
     const tag = e.target?.tagName
     if (tag === 'INPUT' || tag === 'TEXTAREA') return
-    if (useEditorStore.getState().editorMode !== EDITOR_MODE.DOOR_WINDOW) return
-    if (e.key === 'd' || e.key === 'D') dw.openingKind = 'door'
-    else if (e.key === 'w' || e.key === 'W') dw.openingKind = 'window'
-    else if (e.key === 'Escape') { dw.wallId = null; dw.startFrac = null }
+    if (!isDoorWindowMode(useEditorStore.getState().editorMode)) return
+    if (e.key === 'Escape') {
+      dw.wallId = null
+      dw.startFrac = null
+      useDraftStore.getState().setDoorWindowDraft(null)
+    }
   }
   window.addEventListener('keydown', onKeyDown)
 
@@ -419,9 +452,10 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     const mode = useEditorStore.getState().editorMode
     if (mode !== lastEditorMode) {
       lastEditorMode = mode
-      if (mode !== EDITOR_MODE.DOOR_WINDOW) {
+      if (!isDoorWindowMode(mode)) {
         dw.wallId = null
         dw.startFrac = null
+        useDraftStore.getState().setDoorWindowDraft(null)
       }
     }
   })

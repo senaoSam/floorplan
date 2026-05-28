@@ -70,8 +70,8 @@ export function createDraftModeController({
     const fid = useFloorStore.getState().activeFloorId
     if (!fid) return
     const floor = useFloorStore.getState().floors.find((f) => f.id === fid)
-    // Use editor.wallMaterial so number-key 1-6 (FloorplanSystem keydown)
-    // takes effect for the next drawn wall (oldSrc Editor2D 585).
+    // Use editor.wallMaterial so Tab / Shift+Tab cycling (FloorplanSystem
+    // keydown) takes effect for the next drawn wall.
     const material = useEditorStore.getState().wallMaterial ?? MATERIALS.CONCRETE
     useWallStore.getState().addWall(fid, {
       id: generateId('wall'),

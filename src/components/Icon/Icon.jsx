@@ -46,13 +46,25 @@ const ICONS = {
     </>
   ),
 
-  // Door + Window — small wall break with door swing
-  doorWindow: (
+  // Door — wall break + hinged door leaf + swing arc
+  door: (
     <>
-      <line x1="3" y1="17" x2="9" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <line x1="15" y1="17" x2="21" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M9 17v-6h6" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M9 11a6 6 0 0 1 6 6" fill="none" stroke="currentColor" strokeWidth="1.2" strokeDasharray="1.5 1.5" />
+      <line x1="3" y1="19" x2="7" y2="19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <line x1="17" y1="19" x2="21" y2="19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <line x1="7" y1="19" x2="7" y2="7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M7 7a12 12 0 0 1 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" strokeDasharray="1.5 1.5" />
+    </>
+  ),
+
+  // Window — wall break + double glazing lines
+  window: (
+    <>
+      <line x1="3" y1="17" x2="6" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <line x1="18" y1="17" x2="21" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <line x1="6" y1="15" x2="18" y2="15" stroke="currentColor" strokeWidth="1.4" />
+      <line x1="6" y1="19" x2="18" y2="19" stroke="currentColor" strokeWidth="1.4" />
+      <line x1="6" y1="15" x2="6" y2="19" stroke="currentColor" strokeWidth="1.4" />
+      <line x1="18" y1="15" x2="18" y2="19" stroke="currentColor" strokeWidth="1.4" />
     </>
   ),
 

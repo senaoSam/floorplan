@@ -80,6 +80,9 @@ const DRAW_WALL_CAP = {
   dimOthers: ['wireless', 'cable', 'meta'],
 }
 
+// Shared by DRAW_DOOR + DRAW_WINDOW — both modes drive the same click flow
+// (pick wall, pick second point on the same wall, insert opening); only
+// the openingKind written by wallsLayer differs.
 const DOOR_WINDOW_CAP = (() => {
   const c = emptyCap()
   c.allowSelectClick.struct = true
@@ -160,7 +163,8 @@ const CAP_BY_MODE = {
   [EDITOR_MODE.MARQUEE_SELECT]:   MARQUEE_CAP,
   [EDITOR_MODE.PAN]:              PAN_CAP,
   [EDITOR_MODE.DRAW_WALL]:        DRAW_WALL_CAP,
-  [EDITOR_MODE.DOOR_WINDOW]:      DOOR_WINDOW_CAP,
+  [EDITOR_MODE.DRAW_DOOR]:        DOOR_WINDOW_CAP,
+  [EDITOR_MODE.DRAW_WINDOW]:      DOOR_WINDOW_CAP,
   [EDITOR_MODE.DRAW_SCOPE]:       DRAW_SCOPE_CAP,
   [EDITOR_MODE.DRAW_FLOOR_HOLE]:  DRAW_FLOOR_HOLE_CAP,
   [EDITOR_MODE.PLACE_AP]:         PLACE_AP_CAP,

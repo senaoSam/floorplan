@@ -11,7 +11,8 @@ export const EDITOR_MODE = {
   DRAW_FLOOR_HOLE: 'draw_floor_hole',
   CROP_IMAGE: 'crop_image',
   MARQUEE_SELECT: 'marquee_select',
-  DOOR_WINDOW: 'door_window',
+  DRAW_DOOR: 'draw_door',
+  DRAW_WINDOW: 'draw_window',
   ALIGN_FLOOR: 'align_floor',
   PLACE_SWITCH: 'place_switch',
   DRAW_CABLE_TRAY: 'draw_cable_tray',
@@ -34,9 +35,8 @@ export const useEditorStore = create((set, get) => ({
   // know which AP band / switch kind to drop on the next click.
   placeApBand: 5,
   placeSwitchKind: 'switch',
-  // Active wall material for DRAW_WALL — number keys 1-6 (FloorplanSystem
-  // keydown) flip this to MATERIAL_LIST[key-1] and pop a toast. Matches
-  // oldSrc Editor2D `wallMaterial` state (119).
+  // Active wall material for DRAW_WALL — Tab / Shift+Tab in DRAW_WALL mode
+  // cycles MATERIAL_LIST and pops a toast (FloorplanSystem keydown).
   wallMaterial: MATERIALS.CONCRETE,
 
   // Toolbar dropdown open — surfaced so the mode hint banner can hide

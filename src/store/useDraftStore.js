@@ -17,11 +17,18 @@ import { create } from 'zustand'
 //   }
 //   — used by draftOverlayLayer to render the matching halo (orange ring /
 //     square / purple guide).
+//   doorWindowDraft: null | { wallId, startFrac, cursorFrac, kind }
+//   — set by wallsLayer after the first click in DRAW_DOOR / DRAW_WINDOW
+//     mode. cursorFrac updates on pointermove over the SAME wall so
+//     draftOverlayLayer can paint a coloured preview band between
+//     startFrac and cursorFrac (matches the door / window OPENING_TYPES
+//     colour). Cleared on commit / Esc / mode exit.
 export const useDraftStore = create((set) => ({
   mode: null,
   points: [],
   cursor: null,
   snapHint: null,
+  doorWindowDraft: null,
   // Shift-held tracker — driven by global keydown / keyup in
   // FloorplanSystem. Tray + wall draft snap pipelines read this to
   // decide whether to angle-lock the cursor to 45° from the anchor.
@@ -36,6 +43,7 @@ export const useDraftStore = create((set) => ({
   addPoint: (p) => set((s) => ({ points: [...s.points, p] })),
   setCursor: (p) => set({ cursor: p }),
   setSnapHint: (h) => set({ snapHint: h }),
+  setDoorWindowDraft: (d) => set({ doorWindowDraft: d }),
   setShiftHeld: (held) => set({ _shiftHeld: !!held }),
   clearDraft: () => set({ mode: null, points: [], cursor: null, snapHint: null }),
 }))
