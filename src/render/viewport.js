@@ -148,9 +148,14 @@ export function bindViewport({
         marqueeActive = false
       }
     }
-    // Right-click on stage background while in a draw mode commits the
-    // open polyline / polygon (Enter alt path).
-    if (isBackground && button === 2 && typeof isDrawMode === 'function' && isDrawMode()) {
+    // Right-click while in a draw mode commits the open polyline /
+    // polygon (Enter alt path) — matches oldSrc Editor2D handleContextMenu
+    // where draft-in-progress always trumps any per-object menu. No
+    // isBackground gate: per-layer RMB handlers bail (without
+    // stopPropagation) when a draft is active so the event bubbles here
+    // regardless of whether the cursor sits over a wall / AP / floor
+    // image. With no active draft, commitDraft early-returns.
+    if (button === 2 && typeof isDrawMode === 'function' && isDrawMode()) {
       if (typeof onDrawModeRightClick === 'function') onDrawModeRightClick()
     }
   }

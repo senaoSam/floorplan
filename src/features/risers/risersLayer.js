@@ -1,6 +1,7 @@
 import { Container, Graphics, Rectangle, Text, TextStyle } from 'pixi.js'
 import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { useDraftStore } from '@/store/useDraftStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { getModeCapability } from '@/render/modeCapabilities'
@@ -137,6 +138,8 @@ export function attachRisersLayer({ scene, useFloorStore, useCableStore }) {
     const { container } = entry
     container.on('pointerdown', (e) => {
       if (e.button === 2) {
+        const draft = useDraftStore.getState()
+        if (draft.mode != null && draft.points.length > 0) return
         e.stopPropagation()
         useEditorStore.getState().openContextMenu({
           targetType: 'cable_riser',

@@ -1,5 +1,6 @@
 import { Sprite, Texture, Graphics } from 'pixi.js'
 import { getModeCapability } from '@/render/modeCapabilities'
+import { useDraftStore } from '@/store/useDraftStore'
 
 // Load an image URL via HTMLImageElement and wrap as PIXI.Texture. We
 // avoid PIXI's Assets.load() because v8's resolver uses URL extension to
@@ -152,6 +153,12 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, 
         const editor = useEditorStore?.getState?.()
         if (!editor) return
         if (e.button === 2) {
+          // Active draft trumps per-object RMB menu (oldSrc Editor2D
+          // handleContextMenu rule). Bail without stopPropagation so the
+          // event bubbles to the stage RMB handler, which commits/cancels
+          // the in-progress draft.
+          const draft = useDraftStore.getState()
+          if (draft.mode != null && draft.points.length > 0) return
           e.stopPropagation()
           editor.openContextMenu({
             targetType: 'floor_image',

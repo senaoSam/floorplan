@@ -1,6 +1,7 @@
 import { Container, Graphics, Circle, Text, TextStyle } from 'pixi.js'
 import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { useDraftStore } from '@/store/useDraftStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { computeFocusedDevices, FOCUS_HALO_COLOR, FOCUS_HALO_ALPHA, FOCUS_HALO_WIDTH } from '@/features/focus/focusedDevices'
@@ -319,6 +320,8 @@ export function attachAPsLayer({
         console.log('[RMB ap] pointerdown id=', entry.ap.id, 'btn=', e.button, 'orig=', e.originalEvent?.button)
       }
       if (e.button === 2) {
+        const draft = useDraftStore.getState()
+        if (draft.mode != null && draft.points.length > 0) return
         e.stopPropagation()
         useEditorStore.getState().openContextMenu({
           targetType: 'ap',

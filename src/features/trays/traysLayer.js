@@ -2,6 +2,7 @@ import { Container, Graphics } from 'pixi.js'
 import { getTraySystem } from '@/store/useCableStore'
 import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
+import { useDraftStore } from '@/store/useDraftStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { getModeCapability } from '@/render/modeCapabilities'
@@ -363,6 +364,8 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
         console.log('[RMB tray] pointerdown id=', entry.tray.id, 'btn=', e.button)
       }
       if (e.button === 2) {
+        const draft = useDraftStore.getState()
+        if (draft.mode != null && draft.points.length > 0) return
         e.stopPropagation()
         const { hitContext, mergeCandidate } = computeTrayRmbContext(entry, e)
         useEditorStore.getState().openContextMenu({

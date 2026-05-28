@@ -270,6 +270,11 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
       }
       dlog('pointerdown wall=', entry.wall.id, 'button=', e.button, 'mode=', useEditorStore.getState().editorMode, 'target===container?', e.target === container)
       if (e.button === 2) {
+        // Active draft trumps per-object RMB menu (oldSrc Editor2D
+        // handleContextMenu rule). Bail without stopPropagation so the
+        // event bubbles to the stage RMB handler, which calls commitDraft.
+        const draft = useDraftStore.getState()
+        if (draft.mode != null && draft.points.length > 0) return
         e.stopPropagation()
         useEditorStore.getState().openContextMenu({
           targetType: 'wall',

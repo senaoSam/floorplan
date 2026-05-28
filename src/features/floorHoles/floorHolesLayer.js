@@ -1,6 +1,7 @@
 import { Container, Graphics } from 'pixi.js'
 import { DropShadowFilter } from 'pixi-filters'
 import { useEditorStore } from '@/store/useEditorStore'
+import { useDraftStore } from '@/store/useDraftStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
 import { getModeCapability } from '@/render/modeCapabilities'
@@ -159,6 +160,8 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
         console.log('[RMB hole] pointerdown id=', entry.hole.id, 'btn=', e.button)
       }
       if (e.button === 2) {
+        const draft = useDraftStore.getState()
+        if (draft.mode != null && draft.points.length > 0) return
         e.stopPropagation()
         useEditorStore.getState().openContextMenu({
           targetType: 'floor_hole',
