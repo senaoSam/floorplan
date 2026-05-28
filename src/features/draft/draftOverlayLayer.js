@@ -101,6 +101,12 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
     if (snapHint && snapHint.kind === 'wallEndpoint' && snapHint.pos) {
       drawWallEndpointSnapHalo(g, snapHint.pos.x, snapHint.pos.y)
     }
+    // Wall segment snap halo — orange SQUARE ring at the perpendicular
+    // foot when wall draw / wall endpoint drag is locked onto another
+    // wall's segment. Same shape as the tray-onto-wall snap.
+    if (snapHint && snapHint.kind === 'wallSegment' && snapHint.pos) {
+      drawSegmentSnapHalo(g, snapHint.pos.x, snapHint.pos.y)
+    }
     // Tray vertex snap halo — green ring at the target vertex while a
     // tray-vertex drag is locked onto another tray's endpoint (oldSrc
     // CableTrayLayer dragSnapTarget). Rendered regardless of editor /
@@ -108,13 +114,11 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
     if (snapHint && snapHint.kind === 'trayVertex' && snapHint.pos) {
       drawTrayVertexSnapHalo(g, snapHint.pos.x, snapHint.pos.y)
     }
-    // Tray segment snap halo — orange SQUARE ring at the perpendicular
-    // foot when a tray-vertex drag is locked onto another tray's
-    // segment. Same shape as the wall-segment snap during tray draw
-    // (SNAP_ORANGE square). Triggers auto-split of the target tray on
-    // pointerup, wired in handlesLayer.
+    // Tray segment snap halo — orange SQUARE (same shape / colour as
+    // wall-segment, drawSegmentSnapHalo). Triggers auto-split of the
+    // target tray on pointerup, wired in handlesLayer.
     if (snapHint && snapHint.kind === 'traySegment' && snapHint.pos) {
-      drawTraySegmentSnapHalo(g, snapHint.pos.x, snapHint.pos.y)
+      drawSegmentSnapHalo(g, snapHint.pos.x, snapHint.pos.y)
     }
 
     if (!mode || points.length === 0) return
@@ -157,10 +161,11 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
     g.circle(x, y, 4 * s).fill({ color: SNAP_GREEN, alpha: 1 })
   }
 
-  // Orange square ring at the perpendicular foot when a tray-vertex
-  // drag is locked onto another tray's segment. Same shape as the
-  // wall-segment snap during tray draw (drawTrayDraft 246-252).
-  function drawTraySegmentSnapHalo(g, x, y) {
+  // Orange square ring at the perpendicular foot when wall draw / wall
+  // endpoint drag / tray vertex drag is locked onto another wall's or
+  // tray's segment. Same shape as the wall-segment snap during tray
+  // draw (drawTrayDraft 246-252). Shared across all four code paths.
+  function drawSegmentSnapHalo(g, x, y) {
     const vpScale = useViewportStore.getState().scale || 1
     const s = 1 / vpScale
     const SNAP_ORANGE = '#f59e0b'

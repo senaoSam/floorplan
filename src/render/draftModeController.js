@@ -2,10 +2,7 @@ import { EDITOR_MODE } from '@/store/useEditorStore'
 import { MATERIALS } from '@/constants/materials'
 import { DEFAULT_TRAY } from '@/store/useCableStore'
 import { generateId } from '@/utils/id'
-import { snapTrayPoint, angleLockToAnchor, parallelWallLock } from '@/features/draft/traySnap'
-
-// oldSrc Editor2D SNAP_PX (= 12 screen px) — wall draw endpoint snap radius.
-const WALL_SNAP_PX_SCREEN = 12
+import { snapTrayPoint, snapToWallForTray, angleLockToAnchor, parallelWallLock } from '@/features/draft/traySnap'
 
 // Owns the draft-mode click / move / commit / cancel flow.
 // Returns the callback set viewport.bindViewport reads, plus a separate
@@ -65,14 +62,14 @@ export function createDraftModeController({
       if (shiftHeld && anchor) {
         pos = angleLockToAnchor(raw, anchor)
       }
-      // (2) Existing-wall endpoint snap within 12 screen-px (oldSrc SNAP_PX).
-      const snapDist = WALL_SNAP_PX_SCREEN / (scale || 1)
-      for (const w of walls) {
-        for (const ep of [{ x: w.startX, y: w.startY }, { x: w.endX, y: w.endY }]) {
-          if (Math.hypot(pos.x - ep.x, pos.y - ep.y) < snapDist) {
-            return { pos: { x: ep.x, y: ep.y }, kind: 'wallEndpoint' }
-          }
-        }
+      // (2) Existing-wall snap — endpoint (14 screen-px) wins over
+      // perpendicular foot on segment (10 screen-px). Same chain tray
+      // uses (snapToWallForTray). User-flagged: a wall-draw click that
+      // lands on another wall's body should snap to that body's
+      // segment, not free.
+      const wallHit = snapToWallForTray(pos, walls, scale)
+      if (wallHit) {
+        return { pos: wallHit.pos, kind: wallHit.kind, ref: wallHit.wall }
       }
       // (3) Parallel / perpendicular-wall lock — strictly matches tray's
       // defaults so the user keeps a free draft angle most of the time
@@ -219,10 +216,12 @@ export function createDraftModeController({
         : null
       useDraftStore.getState().setSnapHint(visibleKind)
     } else if (mode === EDITOR_MODE.DRAW_WALL) {
-      // Wall draw — surface endpoint snap (cyan ring + black halo) and
-      // parallel-wall lock (purple guide + tinted reference wall).
+      // Wall draw — surface endpoint (cyan ring), wall-segment foot
+      // (orange square), and parallel-wall lock (purple guide).
       if (s.kind === 'wallEndpoint') {
         useDraftStore.getState().setSnapHint({ kind: 'wallEndpoint', pos: s.pos })
+      } else if (s.kind === 'wallSegment') {
+        useDraftStore.getState().setSnapHint({ kind: 'wallSegment', pos: s.pos, ref: s.ref })
       } else if (s.kind === 'parallelWall') {
         useDraftStore.getState().setSnapHint({
           kind: 'parallelWall',

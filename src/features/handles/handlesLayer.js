@@ -5,6 +5,7 @@ import { useDraftStore } from '@/store/useDraftStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { EDITOR_MODE } from '@/store/useEditorStore'
 import { generateId } from '@/utils/id'
+import { snapToWallForTray } from '@/features/draft/traySnap'
 
 // Edit handles for the selected (or hovered) wall + selected tray.
 // Rendered on scene.layers.handles so they sit above object layers but
@@ -13,8 +14,8 @@ import { generateId } from '@/utils/id'
 // Wall endpoint handle visuals match oldSrc EndpointHandle:
 //   - Circle radius 7, fill #fff, stroke #e74c3c, strokeWidth 2.5
 //   - cursor crosshair
-//   - drag rewrites the endpoint; snaps to other walls' endpoints within
-//     SNAP_PX_SCREEN screen-pixels
+//   - drag rewrites the endpoint; uses tray's wall-snap chain
+//     (endpoint 14 px → segment foot 10 px, via snapToWallForTray)
 //   - double-click → enter DRAW_WALL with first point preset to endpoint
 //   - shown when wall is selected OR hovered (for discoverability)
 //
@@ -41,10 +42,6 @@ const CROP_HANDLE_FILL = '#ffffff'
 const CROP_BORDER_COLOR = 0x00e5ff
 const CROP_MASK_COLOR = 0x000000
 const CROP_MASK_ALPHA = 0.55
-
-// oldSrc Editor2D SNAP_PX (= 12 screen px) — endpoint-snap radius for
-// wall-handle drag, converted to world px via /viewport.scale.
-const SNAP_PX_SCREEN = 12
 
 function makeHandleDot(x, y, fill, stroke, radius, strokeWidth) {
   const c = new Container()
@@ -363,23 +360,6 @@ export function attachHandlesLayer({
     })
   }
 
-  // Snap-to-endpoint while dragging a wall handle. Returns the snapped
-  // {x, y} if any other wall's endpoint is within snapDist; otherwise
-  // returns the original {x, y}. Mirrors oldSrc snapToEndpoint().
-  const snapToEndpoint = (pos, walls, snapDist, excludeWallId) => {
-    for (const w of walls) {
-      if (w.id === excludeWallId) continue
-      const eps = [
-        { x: w.startX, y: w.startY },
-        { x: w.endX,   y: w.endY   },
-      ]
-      for (const ep of eps) {
-        if (Math.hypot(pos.x - ep.x, pos.y - ep.y) < snapDist) return ep
-      }
-    }
-    return pos
-  }
-
   const bindWallEndpointDrag = (handle, wall, end) => {
     let dragMoved = false
 
@@ -406,28 +386,30 @@ export function attachHandlesLayer({
         const moveMag = Math.hypot(raw.x - original.x, raw.y - original.y)
         if (moveMag > 0.5) dragMoved = true
         const scale = useViewportStore.getState().scale || 1
-        const snapDist = SNAP_PX_SCREEN / scale
         const walls = useWallStore.getState().wallsByFloor[fid] ?? []
-        const snapped = snapToEndpoint(raw, walls, snapDist, wall.id)
+        // User-flagged: wall-endpoint drag now uses the full wall snap
+        // chain (endpoint 14 px → segment foot 10 px) — same kinds as
+        // tray onto wall. Exclude self so the dragged endpoint doesn't
+        // snap to its own wall.
+        const wallsExclSelf = walls.filter((w) => w.id !== wall.id)
+        const hit = snapToWallForTray(raw, wallsExclSelf, scale)
+        const snapped = hit ? hit.pos : raw
         handle.position.set(snapped.x, snapped.y)
         useWallStore.getState().updateWall(fid, wall.id, {
           [end + 'X']: snapped.x,
           [end + 'Y']: snapped.y,
         })
-        // User-flagged: show the same cyan-ring halo at the snap target
-        // when an endpoint drag is locked onto another wall's endpoint.
-        // Reuse draftStore.snapHint — draftOverlayLayer already renders
-        // it for kind='wallEndpoint' regardless of editor / draft mode.
-        const wasSnapped = snapped !== raw
+        // draftStore.snapHint drives draftOverlayLayer's visual halo —
+        // cyan ring for wallEndpoint, orange square for wallSegment.
         const draftSt = useDraftStore.getState()
-        if (wasSnapped) {
-          if (!draftSt.snapHint ||
-              draftSt.snapHint.kind !== 'wallEndpoint' ||
-              draftSt.snapHint.pos.x !== snapped.x ||
-              draftSt.snapHint.pos.y !== snapped.y) {
-            draftSt.setSnapHint({ kind: 'wallEndpoint', pos: { x: snapped.x, y: snapped.y } })
+        const cur = draftSt.snapHint
+        if (hit) {
+          const same = cur && cur.kind === hit.kind &&
+            cur.pos && cur.pos.x === snapped.x && cur.pos.y === snapped.y
+          if (!same) {
+            draftSt.setSnapHint({ kind: hit.kind, pos: { x: snapped.x, y: snapped.y } })
           }
-        } else if (draftSt.snapHint && draftSt.snapHint.kind === 'wallEndpoint') {
+        } else if (cur && (cur.kind === 'wallEndpoint' || cur.kind === 'wallSegment')) {
           draftSt.setSnapHint(null)
         }
       }
@@ -437,9 +419,8 @@ export function attachHandlesLayer({
         stage.off('pointerupoutside', onUp)
         isDragging = false
         useDragOverlayStore.getState().setWallEndpoint(null)
-        // Clear the snap halo regardless of whether it was set.
         const draftSt = useDraftStore.getState()
-        if (draftSt.snapHint && draftSt.snapHint.kind === 'wallEndpoint') {
+        if (draftSt.snapHint && (draftSt.snapHint.kind === 'wallEndpoint' || draftSt.snapHint.kind === 'wallSegment')) {
           draftSt.setSnapHint(null)
         }
         rebuild()
