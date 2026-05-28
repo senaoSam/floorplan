@@ -121,14 +121,13 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
 
   // Cyan ring + black halo at an existing wall endpoint the cursor is
   // snapping to. Used for BOTH draw-mode snap and wall-endpoint-drag snap.
-  // Radii bumped +1 vs the original oldSrc port per user request.
-  //   Circle r=10 fill #000 alpha 0.4
-  //   Circle r=8 stroke #00e5ff width 2 fill rgba(0,229,255,0.25)
+  // Radii bumped +2 vs the original oldSrc port per user request (9 → 11,
+  // 7 → 9).
   function drawWallEndpointSnapHalo(g, x, y) {
     const vpScale = useViewportStore.getState().scale || 1
     const s = 1 / vpScale
-    g.circle(x, y, 10 * s).fill({ color: 0x000000, alpha: 0.4 })
-    g.circle(x, y, 8 * s)
+    g.circle(x, y, 11 * s).fill({ color: 0x000000, alpha: 0.4 })
+    g.circle(x, y, 9 * s)
       .fill({ color: 0x00e5ff, alpha: 0.25 })
       .stroke({ width: 2 * s, color: 0x00e5ff, alpha: 1 })
   }

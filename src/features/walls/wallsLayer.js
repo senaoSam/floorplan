@@ -24,13 +24,15 @@ const WALL_HALO_WIDTH_SELECTED = 7
 const WALL_HALO_WIDTH_HOVERED  = 10
 const WALL_BODY_WIDTH_NORMAL   = 3
 const WALL_BODY_WIDTH_SELECTED = 5
-// User update (Phase 25 polish): wall body stays at NORMAL width on hover
-// (was 6); the hover affordance is just the slim white centerline below.
+// User update: wall body keeps NORMAL width on hover (oldSrc thickened to
+// 6; user wants no width change). Colour does flip to white on hover so
+// the body itself reads as the bright marker.
 const WALL_BODY_WIDTH_HOVERED  = WALL_BODY_WIDTH_NORMAL
-// User update: white hover overlay slimmed from 22 → 2 px and rendered ON
-// TOP of the body (oldSrc was a thick under-glow). User wants a subtle
-// centerline marker, not a halo.
-const WALL_HOVER_BEAM_WIDTH    = 2
+// White hover beam — drawn UNDER the black halo, wider than the halo so
+// 2 px of white shows on each side of the black ring (= the "white outer
+// ring" the user asked for, restored from earlier mistaken slim-on-top
+// variant). PAD is total extra width over the halo (2 px each side).
+const WALL_HOVER_BEAM_PAD      = 4
 const WALL_HOVER_BEAM_COLOR    = '#ffffff'
 const WALL_HOVER_BEAM_ALPHA    = 0.9
 // User update: selected walls get an outer cyan ring (matches the wall
@@ -169,30 +171,36 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
         })
     }
 
-    // (2) Black outline halo for contrast.
-    graphics
-      .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
-      .stroke({ width: haloWidth, color: '#000000', alpha: 0.4, cap: 'round' })
-
-    // (3) Wall body — keeps material colour even on hover so the body
-    // colour stays consistent (user prefers no width change on hover).
-    graphics
-      .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
-      .stroke({ width: bodyWidth, color: wall.material.color, alpha: 1, cap: 'round' })
-
-    // (3b) Hover centerline — slim white line ON TOP of the body so the
-    // wall under the cursor is visibly marked without changing the body
-    // width or colour. User update (2px overlay request).
+    // (2) Hover white outer aura — drawn UNDER the black halo, wider so a
+    // thin white ring shows outside the black. This is the "white outer
+    // ring" the user wanted restored from oldSrc.
     if (hoverInvert) {
       graphics
         .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
         .stroke({
-          width: WALL_HOVER_BEAM_WIDTH,
+          width: haloWidth + WALL_HOVER_BEAM_PAD,
           color: WALL_HOVER_BEAM_COLOR,
           alpha: WALL_HOVER_BEAM_ALPHA,
           cap: 'round',
         })
     }
+
+    // (3) Black outline halo for contrast.
+    graphics
+      .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
+      .stroke({ width: haloWidth, color: '#000000', alpha: 0.4, cap: 'round' })
+
+    // (4) Wall body — white on hover (oldSrc parity), else material colour.
+    // Width is unchanged on hover per user preference; only the colour
+    // flips so the hovered wall reads as "lit".
+    graphics
+      .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
+      .stroke({
+        width: bodyWidth,
+        color: hoverInvert ? '#ffffff' : wall.material.color,
+        alpha: 1,
+        cap: 'round',
+      })
 
     // (4) Openings overlay the wall body in OPENING_TYPES colour
     // (door brown / window blue — independent from the wall material).

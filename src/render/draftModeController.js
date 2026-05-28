@@ -74,17 +74,13 @@ export function createDraftModeController({
           }
         }
       }
-      // (3) Parallel / perpendicular-wall lock. Wall draw uses a stronger
-      // variant than tray (angleToleranceRad=null = no threshold, 300px
-      // proximity instead of 180): as long as the cursor is reasonably
-      // near any existing wall, lock onto the closer of parallel /
-      // perpendicular. User asked for an "always parallel-correct toward
-      // nearest wall" feel, not tray's tight 6° gate.
+      // (3) Parallel / perpendicular-wall lock — strictly matches tray's
+      // defaults so the user keeps a free draft angle most of the time
+      // and only sees the angle auto-correct when the cursor is already
+      // close to parallel / perpendicular with a nearby wall (6° gate,
+      // 180 px proximity).
       if (!shiftHeld && anchor) {
-        const par = parallelWallLock(raw, anchor, walls, scale, {
-          angleToleranceRad: null,
-          proximityPx: 300,
-        })
+        const par = parallelWallLock(raw, anchor, walls, scale)
         if (par) {
           return {
             pos: par.pos,
