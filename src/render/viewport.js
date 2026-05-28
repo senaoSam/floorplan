@@ -32,6 +32,7 @@ export function bindViewport({
   isPlaceMode,
   isDrawMode,
   isMarqueeMode,
+  isPanMode,
   onDrawModeClick,
   onDrawModeMove,
   onDrawModeRightClick,
@@ -99,7 +100,11 @@ export function bindViewport({
     }
     const isMiddle = button === 1
     const isLeftPan = button === 0 && spaceDown
-    if (isMiddle || isLeftPan) {
+    // PAN toolbar mode: left-button drags the canvas (oldSrc parity —
+    // ActiveModeBadge hint "拖曳畫布移動視角"). Same path as middle-button
+    // pan / space+left pan.
+    const isLeftPanMode = button === 0 && typeof isPanMode === 'function' && isPanMode()
+    if (isMiddle || isLeftPan || isLeftPanMode) {
       panActive = true
       panLastX = e.global.x
       panLastY = e.global.y
@@ -195,7 +200,8 @@ export function bindViewport({
   const onStageUp = (e) => {
     if (panActive) {
       panActive = false
-      stage.cursor = spaceDown ? 'grab' : ''
+      const inPanMode = typeof isPanMode === 'function' && isPanMode()
+      stage.cursor = (spaceDown || inPanMode) ? 'grab' : ''
       return
     }
     if (pendingDrag) {
