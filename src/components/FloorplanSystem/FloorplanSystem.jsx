@@ -135,6 +135,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         isDrawMode: draftCtrl.isDrawMode,
         isMarqueeMode: () => useEditorStore.getState().editorMode === EDITOR_MODE.MARQUEE_SELECT,
         isPanMode:     () => useEditorStore.getState().editorMode === EDITOR_MODE.PAN,
+        isCropMode:    () => useEditorStore.getState().editorMode === EDITOR_MODE.CROP_IMAGE,
         onDrawModeClick: draftCtrl.onDrawModeClick,
         onDrawModeMove: draftCtrl.onDrawModeMove,
         onDrawModeRightClick: draftCtrl.onDrawModeRightClick,

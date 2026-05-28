@@ -33,6 +33,7 @@ export function bindViewport({
   isDrawMode,
   isMarqueeMode,
   isPanMode,
+  isCropMode,
   onDrawModeClick,
   onDrawModeMove,
   onDrawModeRightClick,
@@ -55,6 +56,13 @@ export function bindViewport({
 
   let pendingDrag = null  // { kind: 'click-or-marquee', startGlobal, startWorld }
   let marqueeActive = false
+  // CROP_IMAGE drag tracker — set on pointerdown so the matching pointerup
+  // can promote a drag-past-threshold gesture into a 2nd-click commit
+  // (matches MARQUEE_SELECT's drag-to-select feel; user explicit request
+  // for consistency between the two box-select modes). Plain click-click
+  // still works: pointerup with no drag leaves the draft alive for the
+  // user's next pointerdown to commit at the 2nd point.
+  let cropDragDownGlobal = null
 
   const apply = (s) => {
     world.position.set(s.x, s.y)
@@ -129,6 +137,12 @@ export function bindViewport({
         const wp = world.toLocal(e.global)
         if (typeof onDrawModeClick === 'function') {
           onDrawModeClick({ x: wp.x, y: wp.y })
+        }
+        // CROP_IMAGE: record the down-position so onStageUp can promote
+        // a drag gesture into a commit (Q1 — drag-to-select consistency
+        // with MARQUEE_SELECT).
+        if (typeof isCropMode === 'function' && isCropMode()) {
+          cropDragDownGlobal = { x: e.global.x, y: e.global.y }
         }
         return
       }
@@ -209,6 +223,22 @@ export function bindViewport({
       const inPanMode = typeof isPanMode === 'function' && isPanMode()
       stage.cursor = (spaceDown || inPanMode) ? 'grab' : ''
       return
+    }
+    // CROP_IMAGE drag-to-commit (Q1 — marquee-style). If the cursor
+    // travelled past the same threshold marquee uses, fire onDrawModeClick
+    // at the release position so the existing 2nd-click commit path runs.
+    // A pointerup with no drag falls through silently; the draft stays
+    // alive so the user can fall back to the 2-click pattern.
+    if (cropDragDownGlobal) {
+      const dx = e.global.x - cropDragDownGlobal.x
+      const dy = e.global.y - cropDragDownGlobal.y
+      const dist = Math.hypot(dx, dy)
+      cropDragDownGlobal = null
+      if (dist > MARQUEE_DRAG_THRESHOLD_PX && typeof onDrawModeClick === 'function') {
+        const wp = world.toLocal(e.global)
+        onDrawModeClick({ x: wp.x, y: wp.y })
+        return
+      }
     }
     if (pendingDrag) {
       if (marqueeActive) {

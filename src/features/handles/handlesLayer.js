@@ -189,9 +189,20 @@ export function attachHandlesLayer({
     return f
   }
 
-  // Builds the rotation Container holding the crop border + 4 corner
-  // handles. The Container is pivoted on image centre so it rotates
-  // with the sprite (matches floorImageLayer's sprite.rotation).
+  // Builds the rotation Container holding the crop border + body-drag
+  // hit area + 4 corner handles. Container is pivoted on image centre so
+  // it rotates with the sprite (matches floorImageLayer's sprite.rotation).
+  //
+  // Q2 — divergence from oldSrc: mask + rule-of-thirds stay visible in
+  // idle adjust mode (oldSrc only showed mask while drawing / dragging).
+  // Without this the user couldn't easily tell the crop had been applied;
+  // they saw a thin dashed border buried among walls / APs and asked
+  // "now what?". Persistent mask makes the cropped area obvious.
+  //
+  // Q3 — divergence from oldSrc: a body Container with hitArea covering
+  // the rect interior lets the user drag the whole crop frame as one,
+  // not just resize via corners. Added BEFORE handles so the corner
+  // handles' hitAreas win the z-order overlap.
   function buildCropAdjustHandles(floor) {
     const imgW = floor.imageWidth
     const imgH = floor.imageHeight
@@ -215,6 +226,32 @@ export function attachHandlesLayer({
       w: floor.cropWidth, h: floor.cropHeight,
     }
 
+    // Body drag hit area — frame-shaped (border ribbon only, NOT the
+    // interior) so clicks inside the crop pass through to walls / APs
+    // below. PIXI v8 hitArea accepts any { contains(x,y) }, so we synth
+    // a "rect minus inner rect" via two bounds checks. Width tracks
+    // viewport zoom so the grab ribbon stays ~CROP_BODY_GRAB_PX screen-px
+    // thick regardless of scale.
+    const CROP_BODY_GRAB_PX = 8
+    const body = new Container()
+    body.eventMode = 'static'
+    body.cursor = 'move'
+    body.hitArea = {
+      contains: (lx, ly) => {
+        const r = readCropRect(floor.id) ?? initialRect
+        if (!r) return false
+        const vpScale = useViewportStore.getState().scale || 1
+        const pad = CROP_BODY_GRAB_PX / vpScale
+        const inOuter = lx >= r.x - pad && lx <= r.x + r.w + pad
+                     && ly >= r.y - pad && ly <= r.y + r.h + pad
+        if (!inOuter) return false
+        const inInner = lx > r.x + pad && lx < r.x + r.w - pad
+                     && ly > r.y + pad && ly < r.y + r.h - pad
+        return !inInner
+      },
+    }
+    rot.addChild(body)
+
     const handles = {}
     for (const key of ['tl', 'tr', 'bl', 'br']) {
       const h = makeHandleDot(
@@ -235,13 +272,20 @@ export function attachHandlesLayer({
       const fresh = rectOverride ?? readCropRect(floor.id)
       if (!fresh) return
       drawCropOverlay(overlayG, imgW, imgH, fresh, showMaskGuides)
+      // body.hitArea is a contains-fn closure that reads the freshest
+      // rect from useFloorStore on every hit-test, so no update needed
+      // here — it always tracks the current crop extents.
     }
-    cropRedrawOnViewport = () => redrawCropOverlay(null, false)
-    redrawCropOverlay(initialRect, false)
+    // Q2 — show mask + guides ALWAYS in adjust mode (not just during
+    // drag). User explicitly asked for a persistent visual cue of "this
+    // is your cropped area".
+    cropRedrawOnViewport = () => redrawCropOverlay(null, true)
+    redrawCropOverlay(initialRect, true)
 
     for (const key of Object.keys(handles)) {
       bindCropHandleDrag(handles[key], floor.id, key, handles, redrawCropOverlay)
     }
+    bindCropBodyDrag(body, floor.id, handles, redrawCropOverlay)
   }
 
   const readCropRect = (floorId) => {
@@ -340,6 +384,57 @@ export function attachHandlesLayer({
         const rw = Math.abs(x2 - x1), rh = Math.abs(y2 - y1)
         if (rw < 2 || rh < 2) return
         const rect = { x: rx, y: ry, w: rw, h: rh }
+        positionCropHandles(handles, rect)
+        redrawCropOverlay(rect, true)
+        useFloorStore.getState().updateFloor(floorId, {
+          cropX: rect.x, cropY: rect.y, cropWidth: rect.w, cropHeight: rect.h,
+        })
+      }
+      const onUp = () => {
+        stage.off('pointermove', onMove)
+        stage.off('pointerup', onUp)
+        stage.off('pointerupoutside', onUp)
+        isDragging = false
+        rebuild()
+        applyInverseScale()
+      }
+      stage.on('pointermove', onMove)
+      stage.on('pointerup', onUp)
+      stage.on('pointerupoutside', onUp)
+    })
+  }
+
+  // Q3 — body drag for the crop rect (oldSrc had no body drag, corners
+  // only). Translates all four corners by the pointermove delta in
+  // image-space; width / height preserved. Mirrors bindCropHandleDrag's
+  // toLocal-based delta pattern so it works correctly when the floor is
+  // rotated.
+  const bindCropBodyDrag = (body, floorId, handles, redrawCropOverlay) => {
+    body.on('pointerdown', (e) => {
+      if ((e.button ?? 0) !== 0) return
+      e.stopPropagation()
+      isDragging = true
+      const stage = scene.app.stage
+      const rot = body.parent
+      const startLocal = rot.toLocal(e.global)
+      const f0 = useFloorStore.getState().floors.find((x) => x.id === floorId)
+      if (!f0) { isDragging = false; return }
+      const original = {
+        x: f0.cropX, y: f0.cropY,
+        w: f0.cropWidth, h: f0.cropHeight,
+      }
+
+      const onMove = (ev) => {
+        if (body.destroyed) return
+        const lp = rot.toLocal(ev.global)
+        const dx = lp.x - startLocal.x
+        const dy = lp.y - startLocal.y
+        const rect = {
+          x: original.x + dx,
+          y: original.y + dy,
+          w: original.w,
+          h: original.h,
+        }
         positionCropHandles(handles, rect)
         redrawCropOverlay(rect, true)
         useFloorStore.getState().updateFloor(floorId, {

@@ -354,10 +354,12 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
   }
 
   // CROP_IMAGE draft preview (oldSrc CropLayer): dashed cyan rect from
-  // click1 to cursor + dark mask outside the rect (so the user can see
-  // what part of the image they'll keep). The actual crop is committed
-  // to floor.cropX/Y/Width/Height on the 2nd click — draftModeController
-  // owns that. We only handle the visual preview here.
+  // click1 to cursor + dark mask outside the rect (oldSrc CropLayer
+  // MASK_FILL rgba(0,0,0,0.55) on 4 rects covering everything outside
+  // the crop area within image bounds) + rule-of-thirds guides. Lets the
+  // user see what gets kept vs discarded before the 2nd click commits.
+  // The actual crop is committed to floor.cropX/Y/Width/Height by
+  // draftModeController on the 2nd click.
   function drawCropDraft(g, points, cursor) {
     if (!cursor || points.length === 0) return
     const vpScale = useViewportStore.getState().scale || 1
@@ -368,6 +370,31 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
     const w = Math.abs(cursor.x - p0.x)
     const h = Math.abs(cursor.y - p0.y)
     if (w < 1 || h < 1) return
+    // Dark mask outside the crop, clipped to image bounds. Drawn FIRST so
+    // the dashed border + guides paint on top (oldSrc Group order is the
+    // same: <Rect mask /> before <Rect border />).
+    const fid = useFloorStore?.getState?.()?.activeFloorId
+    const floor = fid ? useFloorStore.getState().floors.find((f) => f.id === fid) : null
+    if (floor) {
+      const imgW = floor.imageWidth
+      const imgH = floor.imageHeight
+      const maskColor = 0x000000
+      const maskAlpha = 0.55
+      // 4 rects: top band, bottom band, left band, right band (all within
+      // image extent). Same decomposition as oldSrc CropLayer masks[].
+      if (y > 0) {
+        g.rect(0, 0, imgW, y).fill({ color: maskColor, alpha: maskAlpha })
+      }
+      if (y + h < imgH) {
+        g.rect(0, y + h, imgW, imgH - (y + h)).fill({ color: maskColor, alpha: maskAlpha })
+      }
+      if (x > 0) {
+        g.rect(0, y, x, h).fill({ color: maskColor, alpha: maskAlpha })
+      }
+      if (x + w < imgW) {
+        g.rect(x + w, y, imgW - (x + w), h).fill({ color: maskColor, alpha: maskAlpha })
+      }
+    }
     // Dashed cyan border (oldSrc BORDER_COLOR #00e5ff, dash [8, 4] * 1/scale).
     drawDashedSegment(g, x,     y,     x + w, y,     '#00e5ff', 2 * s, 8 * s, 4 * s, 1)
     drawDashedSegment(g, x + w, y,     x + w, y + h, '#00e5ff', 2 * s, 8 * s, 4 * s, 1)
