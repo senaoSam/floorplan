@@ -123,7 +123,6 @@ Default wall material: `MATERIALS.CONCRETE`.
 **At the beginning of every new conversation:**
 1. 讀 `.claude/workflow.md` 了解協作流程
 2. 讀 `.claude/task.md` 了解目前任務進度
-3. 讀 `.claude/file-structure.md` 了解檔案結構
 
 ---
 
@@ -141,7 +140,6 @@ Default wall material: `MATERIALS.CONCRETE`.
 | 檔案 | 用途 |
 |------|------|
 | `.claude/workflow.md` | 協作流程規範（commit、測試、回應語言） |
-| `.claude/file-structure.md` | 完整檔案結構與各檔說明（隨時更新） |
 | `.claude/task.md` | 任務進度追蹤 |
 | `.claude/spec.md` | 產品規格書 |
 | `.claude/youtube.md` | Hamina Network Planner 影片筆記 |
