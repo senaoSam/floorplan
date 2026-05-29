@@ -4,8 +4,12 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useCableStore, DEFAULT_TRAY } from '@/store/useCableStore'
+import { useEditorStore } from '@/store/useEditorStore'
 import { floorplanFromLines } from '@/utils/floorplanFromLines'
+import { greedyChannelAssign } from '@/utils/autoChannelPlan'
 import { generateId } from '@/utils/id'
+import { DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
+import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
 import Icon from '@/components/Icon/Icon'
 import './DemoLoader.sass'
 
@@ -56,14 +60,8 @@ function nextDemoName(floors) {
   return `${DEMO_BASE_NAME}-${n}`
 }
 
-const FIXED_CHANNEL_BY_FREQ = {
-  2.4: 1,
-  5: 36,
-  6: 1,
-}
-
-function buildDemoAPs(canvasWidth, canvasHeight) {
-  return DEMO_AP_POSITIONS_NORM.map((p, i) => ({
+function buildDemoAPs(canvasWidth, canvasHeight, regulatoryDomain) {
+  const aps = DEMO_AP_POSITIONS_NORM.map((p, i) => ({
     id: generateId('ap'),
     name: `AP-${String(i + 1).padStart(2, '0')}`,
     x: p.x * canvasWidth,
@@ -71,16 +69,21 @@ function buildDemoAPs(canvasWidth, canvasHeight) {
     z: 2.4,
     txPower: 20,
     frequency: 5,
-    channel: FIXED_CHANNEL_BY_FREQ[5],
-    channelWidth: 80,
+    channel: 36,
+    channelWidth: DEFAULT_CHANNEL_WIDTH[5],
     antennaMode: 'omni',
     azimuth: 0,
     beamwidth: 60,
     patternId: null,
     mountType: 'ceiling',
-    modelId: null,
+    modelId: DEFAULT_AP_MODEL_ID,
     color: '#4fc3f7',
   }))
+  const assignments = greedyChannelAssign(aps, regulatoryDomain)
+  return aps.map((ap) => {
+    const picked = assignments.get(ap.id)
+    return picked ? { ...ap, channel: picked.channel } : ap
+  })
 }
 
 function DemoLoader() {
@@ -93,6 +96,7 @@ function DemoLoader() {
   const addTray            = useCableStore((s) => s.addTray)
   const nextSwitchName     = useCableStore((s) => s.nextSwitchName)
   const nextTrayName       = useCableStore((s) => s.nextTrayName)
+  const regulatoryDomain   = useEditorStore((s) => s.regulatoryDomain)
   const [loading, setLoading] = useState(false)
 
   const handleLoad = async () => {
@@ -125,7 +129,7 @@ function DemoLoader() {
 
       const { walls } = floorplanFromLines(lines)
       setWalls(floor.id, walls)
-      setAPs(floor.id, buildDemoAPs(img.naturalWidth, img.naturalHeight))
+      setAPs(floor.id, buildDemoAPs(img.naturalWidth, img.naturalHeight, regulatoryDomain))
 
       const W = img.naturalWidth, H = img.naturalHeight
       addTray(floor.id, {
