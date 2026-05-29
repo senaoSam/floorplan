@@ -142,12 +142,21 @@ export function attachHeatmapLayer({
     //     loss only; no diffraction across floors).
     //   * floorStack carries slab attenuation per floor + the hole list
     //     (vertical range) that lets samples skip slabs at hole columns.
+    // Build crossFloor UNCONDITIONALLY — even for a single floor — to match
+    // oldSrc HeatmapLayer.jsx (200-263), which never guarded on floor count.
+    // This matters for visual parity: buildScenario takes a different path when
+    // crossFloor is an object vs null. With crossFloor present it resolves the
+    // AP→rx geometry in 3D (rxHeightM 1.0 + per-AP elevation), so even a lone
+    // floor's RSSI field — hence its iso-contour positions — differs subtly
+    // from the null/2D path. A `length > 1` guard here made the single-floor
+    // demo's contours drift relative to Konva (MCP-confirmed: null crossFloor
+    // field checksum 461800843 vs object 914922232, the latter matching oldSrc).
     let crossFloor = null
     const allFloors = floors
-    if (allFloors.length > 1 && useFloorHoleStore) {
+    if (allFloors.length > 0) {
       const elevations = computeFloorElevations(allFloors)
       const floorIndexById = new Map(allFloors.map((f, i) => [f.id, i]))
-      const holesByFloor = useFloorHoleStore.getState().floorHolesByFloor ?? {}
+      const holesByFloor = useFloorHoleStore?.getState().floorHolesByFloor ?? {}
       const apsByFloor   = useAPStore.getState().apsByFloor ?? {}
       const wallsByFloor = useWallStore.getState().wallsByFloor ?? {}
       const floorStack = allFloors.map((f) => ({

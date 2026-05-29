@@ -75,6 +75,7 @@ oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap /
 | 22    | 3D 強化：AP label sprite、樓層切換 UI、camera presets、hover readout |
 | 24    | Konva layer 拆分 + Tray drag overlay（解 SW+Tray+50AP 拖曳卡頓） |
 | 25 (Bundle 1–52) | PixiJS hybrid 全功能 port：scene/viewport/store wiring + 全物件 layer + heatmap + 3D viewer + crop + align + scale + undo/redo + marquee + snap + AI walls + AutoPower + export + BOM |
+| 25 (parity) | Heatmap PIXI↔Konva 等高線對齊：heatmapAdapter 無條件建 crossFloor（移除 `length>1` 守衛），單樓層也走 3D 幾何路徑，canvas 與 oldSrc byte-identical（MCP 驗證 checksum 2469578956） |
 
 ---
 
