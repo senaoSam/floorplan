@@ -154,10 +154,17 @@ export function attachSwitchesLayer({
 
     // 17-4 snap foot-drops — dashed lines from chassis to every tray foot
     // within magnet range. Drawn first so the chassis covers the entry point.
+    // The endpoint (footXy - sw) is a WORLD-space delta, but `graphics` lives in
+    // the switch container which is scaled 1/viewport.scale for constant on-
+    // screen chassis size. So multiply the delta by viewport.scale to cancel
+    // that and make the stub actually REACH the tray foot — without this the
+    // line was drawn at worldDelta/scale and fell short of the tray (visible
+    // when no AP routes through to draw the full cable drop leg over it).
     if (snap.drops && snap.drops.length > 0) {
+      const vpScale = useViewportStore.getState().scale || 1
       for (const d of snap.drops) {
-        const dx = d.footXy.x - sw.x
-        const dy = d.footXy.y - sw.y
+        const dx = (d.footXy.x - sw.x) * vpScale
+        const dy = (d.footXy.y - sw.y) * vpScale
         drawDashedLine(graphics, 0, 0, dx, dy, SNAP_FOOT_COLOR, 1.1, 5, 4)
       }
     }
@@ -445,6 +452,16 @@ export function attachSwitchesLayer({
     const inv = 1 / (vp.scale || 1)
     for (const entry of containers.values()) {
       entry.container.scale.set(inv)
+      // The snap foot-drop endpoint is pre-multiplied by viewport.scale (so it
+      // reaches the world-space tray foot from inside this 1/scale container),
+      // so it must be redrawn when the scale changes. Only switches that have a
+      // snap drop need it — the rest are pure constant-size chassis.
+      const snap = snapBySwitch.get(entry.sw.id)
+      if (snap && snap.drops && snap.drops.length > 0) {
+        const drag = useDragOverlayStore.getState().sw
+        if (drag && drag.id === entry.sw.id) drawSwitch(entry, drag.x, drag.y)
+        else drawSwitch(entry)
+      }
     }
   }
 
