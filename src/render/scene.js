@@ -34,11 +34,20 @@ const LAYER_KEYS = [
 
 export async function initScene({ container, background = '#1e1e2e' }) {
   const app = new Application()
+  // Renderer preference defaults to WebGPU (auto-falls back to WebGL2 when the
+  // browser lacks WebGPU). Dev override: append ?renderer=webgl to force WebGL2
+  // so we can reproduce no-hardware-WebGPU / software-render environments.
+  let preference = 'webgpu'
+  try {
+    const r = new URLSearchParams(window.location.search).get('renderer')
+    if (r === 'webgl' || r === 'webgl2') preference = 'webgl'
+    if (r === 'webgpu') preference = 'webgpu'
+  } catch { /* no-op */ }
   await app.init({
     resizeTo: container,
     background,
     antialias: true,
-    preference: 'webgpu',
+    preference,
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
   })
@@ -82,13 +91,53 @@ export async function initScene({ container, background = '#1e1e2e' }) {
   // Cables are pure visual — disable hit-test entirely.
   layers.cables.eventMode = 'none'
 
+  // ── Render-on-demand ────────────────────────────────────────────────────
+  // PIXI's default ticker re-renders the whole scene 60×/s even when nothing
+  // changed. On hardware GPUs that's free, but on SOFTWARE renderers
+  // (chrome://gpu "hardware acceleration unavailable" — incognito, VMs, remote
+  // desktops, old machines) every frame re-rasterises the full scene (72k+
+  // cable instructions, AP markers, heatmap) on the CPU → idle/hover/drag all
+  // jank. We can't assume users have hardware accel, so we drive rendering
+  // ourselves: render only when something actually changed.
+  //
+  // requestRender() schedules a render on the next animation frame; many calls
+  // in one tick coalesce into a single render. A small frame "budget" keeps
+  // rendering for a few extra frames after the last request so layers that
+  // settle slightly late in the same gesture (async heatmap texture upload,
+  // a follow-up store write) aren't missed — the belt-and-suspenders the
+  // safety-net design calls for. Idle cost drops from 60 renders/s to 0.
+  app.ticker.stop()
+  let rafId = 0
+  let renderBudget = 0
+  const RENDER_BUDGET_FRAMES = 2  // render this many frames per requestRender
+  const frame = () => {
+    app.renderer.render(app.stage)
+    renderBudget -= 1
+    if (renderBudget > 0) {
+      rafId = requestAnimationFrame(frame)
+    } else {
+      rafId = 0
+    }
+  }
+  const requestRender = () => {
+    renderBudget = RENDER_BUDGET_FRAMES
+    if (!rafId) rafId = requestAnimationFrame(frame)
+  }
+  // Canvas resize (window / panel layout change) needs a repaint — the ticker
+  // is stopped so PIXI won't repaint on its own resize.
+  app.renderer.on('resize', requestRender)
+  // First paint.
+  app.renderer.render(app.stage)
+
   return {
     app,
     world,
     refOverlay,
     contentWrap,
     layers,
+    requestRender,
     destroy() {
+      if (rafId) cancelAnimationFrame(rafId)
       app.destroy(true, { children: true, texture: false })
     },
   }

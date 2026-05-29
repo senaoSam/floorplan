@@ -5,6 +5,8 @@ import {
   routeOneAP,
   routeOneSwitchLink,
 } from '@/features/cable/computeRoutes'
+import { clearRoutesCache } from '@/features/cable/routesCache'
+import { perfOn, probe, probeEvent } from '@/features/cable/perfProbe'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
@@ -31,6 +33,19 @@ import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 //
 // All sizes are world-px multiplied by inverseScale (= 1/viewport.scale)
 // so cables render at constant screen-px size regardless of zoom.
+//
+// 32-E perf — two draw-side bottlenecks fixed (routing was already made
+// incremental in 32-C; see .claude/perf-baseline.md §32-E):
+//   A. selection / viewport rebuilds re-ran the FULL computeRoutes even
+//      though neither changes route geometry (selection only dims/highlights,
+//      viewport only rescales widths). `routingDirty` now gates the cache so
+//      those rebuilds reuse baseResult and skip Dijkstra entirely — selecting
+//      an AP at 300 AP went from ~2.4-3.4s to draw-only cost.
+//   B. dragging one AP/SW redrew ALL ~26,850 stroke segments per frame. The
+//      single Graphics is split into gStatic (the un-dragged routes, drawn
+//      once at drag start and frozen) + gDynamic (only the dragged route's,
+//      cleared and redrawn each frame). Outside a drag everything draws into
+//      gStatic and gDynamic stays empty.
 
 const TRAY_COLOR        = '#22d3ee'
 const TRAY_NODE_STROKE  = '#0e7490'
@@ -112,26 +127,38 @@ export function attachCablesLayer({
   useCableStore,
 }) {
   const layer = scene.layers.cables
-  const g = new Graphics()
-  g.eventMode = 'none' // pure visual — never intercept clicks
-  layer.addChild(g)
-  // Badges go in a separate Container so we can manage Text children
-  // without rebuilding them per-redraw beyond clearing.
-  const badgeRoot = new Container()
-  badgeRoot.eventMode = 'none'
-  layer.addChild(badgeRoot)
 
-  const clearBadges = () => {
-    while (badgeRoot.children.length > 0) {
-      const c = badgeRoot.children[0]
-      badgeRoot.removeChild(c)
+  // 32-E static/dynamic split. Outside a drag, all cables draw into gStatic
+  // (gDynamic empty). During an AP/SW drag, the un-affected routes are drawn
+  // once into gStatic and frozen, while only the dragged route(s) redraw into
+  // gDynamic each frame. Each Graphics gets its own badge Container so a frozen
+  // static badge isn't wiped when the dynamic layer clears mid-drag.
+  const gStatic = new Graphics()
+  gStatic.eventMode = 'none' // pure visual — never intercept clicks
+  layer.addChild(gStatic)
+  const badgeStatic = new Container()
+  badgeStatic.eventMode = 'none'
+  layer.addChild(badgeStatic)
+
+  const gDynamic = new Graphics()
+  gDynamic.eventMode = 'none'
+  layer.addChild(gDynamic)
+  const badgeDynamic = new Container()
+  badgeDynamic.eventMode = 'none'
+  layer.addChild(badgeDynamic)
+
+  const clearBadges = (root) => {
+    while (root.children.length > 0) {
+      const c = root.children[0]
+      root.removeChild(c)
       c.destroy({ children: true })
     }
   }
 
-  const drawUnroutableBadge = (x, y, s, alpha) => {
-    // oldSrc: Circle radius 8*s at (ap.x + 14*s, ap.y - 18*s),
-    // fill #ef4444, stroke #fff width 1.5*s, then Text "!" fontSize 12*s.
+  // Draw the unroutable "!" badge: a circle into `g` and the text into the
+  // matching badge Container. oldSrc: Circle radius 8*s at (x + 14*s, y - 18*s),
+  // fill #ef4444, stroke #fff width 1.5*s, then Text "!" fontSize 12*s.
+  const drawUnroutableBadge = (g, badgeRoot, x, y, s, alpha) => {
     const bx = x + 14 * s
     const by = y - 18 * s
     g.circle(bx, by, 8 * s)
@@ -211,6 +238,66 @@ export function attachCablesLayer({
   // the drag-time route equals what dragend's full recompute produces — the
   // cable never jumps on release (verified by scripts/test-incremental-routing.mjs).
   let baseResult = null  // { routes: Map, switchLinks: Map }
+  // 32-E: only floor / ap / cable store changes alter route geometry.
+  // selection (editor) and viewport changes do NOT — so they reuse baseResult
+  // without re-running Dijkstra. routingDirty is set true by those three
+  // subscriptions and on drag end; cleared after a full recompute.
+  let routingDirty = true
+  // 32-E: the store-slice refs from the last FULL computeRoutes, so a dirty
+  // rebuild can diff what actually changed. A drag COMMIT (updateAP on release)
+  // or any single-AP edit changes only that AP's object (Zustand immutable
+  // update) while trays / switches / risers keep identity — then we reroute
+  // just the changed AP(s) (~1 ms) instead of a full building Dijkstra
+  // (~400–600 ms at 300 AP + a spanning tray, which was the "放下卡一下"). Full
+  // recompute still runs when the tray/switch/riser graph changed or APs were
+  // added/removed (topology shift).
+  let lastInputs = null  // { floors, apsByFloor, switchesByFloor, traysByFloor, risers }
+
+  // Reroute only the APs whose data object changed since lastInputs, reusing
+  // baseResult for everything else. Returns a fresh { routes, switchLinks } or
+  // null if an incremental update isn't safe (graph topology changed / AP set
+  // changed / no prior result) → caller falls back to full computeRoutes.
+  const tryIncrementalDirty = (building) => {
+    if (!baseResult || !lastInputs) return null
+    // Graph topology must be unchanged (same tray / riser / switch refs) — any
+    // of those shifts edge weights for many routes, so reroute-all is needed.
+    if (building.traysByFloor !== lastInputs.traysByFloor) return null
+    if (building.switchesByFloor !== lastInputs.switchesByFloor) return null
+    if (building.risers !== lastInputs.risers) return null
+    if (building.floors !== lastInputs.floors) return null
+    // Find changed AP ids by object identity, same floor set.
+    const changed = []  // [{ ap, floorId }]
+    const prevByFloor = lastInputs.apsByFloor
+    const curByFloor = building.apsByFloor
+    const prevFloors = Object.keys(prevByFloor)
+    const curFloors = Object.keys(curByFloor)
+    if (prevFloors.length !== curFloors.length) return null
+    for (const floorId of curFloors) {
+      const prevList = prevByFloor[floorId]
+      const curList = curByFloor[floorId]
+      if (!prevList || prevList.length !== curList.length) return null  // add/remove → full
+      const prevById = new Map(prevList.map((a) => [a.id, a]))
+      for (const ap of curList) {
+        const prev = prevById.get(ap.id)
+        if (prev === undefined) return null   // id set changed → full
+        if (prev !== ap) changed.push({ ap, floorId })
+      }
+    }
+    // Too many changed → full is simpler/safer (and not a single-edit gesture).
+    if (changed.length === 0) return baseResult
+    if (changed.length > 4) return null
+
+    const ctx = buildRoutingContext(building)
+    const routes = new Map(baseResult.routes)
+    const switchLinks = new Map(baseResult.switchLinks)
+    for (const { ap, floorId } of changed) {
+      routes.set(ap.id, routeOneAP(ctx, ap, floorId))
+    }
+    baseResult = { routes, switchLinks }
+    lastInputs = building
+    routingDirty = false
+    return baseResult
+  }
 
   // Produce { routes, switchLinks } for drawing, choosing full vs incremental
   // based on what (if anything) is being dragged. `building` already has the
@@ -228,10 +315,29 @@ export function attachCablesLayer({
       return baseResult
     }
 
-    // No single-object drag in flight, OR no cache yet → full recompute and
-    // refresh the cache. This is also the dragend path (overlay back to null).
-    if ((!draggingAP && !draggingSW) || !baseResult) {
+    // No single-object drag in flight. Reuse the cache unless routing inputs
+    // actually changed (routingDirty) or there is no cache yet. This is the
+    // 32-E fast path for selection / viewport rebuilds, and also the dragend
+    // path (drag overlay back to null, routingDirty set by the drag sub).
+    if (!draggingAP && !draggingSW) {
+      if (!baseResult || routingDirty) {
+        // Try a cheap incremental update first (e.g. a drag-commit / single-AP
+        // edit changed only that AP). Falls back to full when topology or the
+        // AP set changed.
+        const inc = tryIncrementalDirty(building)
+        if (inc) return inc
+        baseResult = computeRoutes(building)
+        lastInputs = building
+        routingDirty = false
+      }
+      return baseResult
+    }
+
+    // No cache yet but mid-drag (e.g. first frame after a fresh load) → full.
+    if (!baseResult) {
       baseResult = computeRoutes(building)
+      lastInputs = building
+      routingDirty = false
       return baseResult
     }
 
@@ -272,46 +378,47 @@ export function attachCablesLayer({
     return { routes, switchLinks }
   }
 
-  const rebuild = () => {
-    const { floors, activeFloorId } = useFloorStore.getState()
-    let apsByFloor = useAPStore.getState().apsByFloor
-    let switchesByFloor = useCableStore.getState().switchesByFloor
-    let traysByFloor = useCableStore.getState().traysByFloor
-    const risers = useCableStore.getState().risers
-    const drag = useDragOverlayStore.getState()
-    apsByFloor      = overlayedApsByFloor(apsByFloor, drag.ap)
-    switchesByFloor = overlayedSwitchesByFloor(switchesByFloor, drag.sw)
-    traysByFloor    = overlayedTraysByFloor(traysByFloor, drag.tray, drag.trayVertex)
-    const editor = useEditorStore.getState()
-    const vpScale = useViewportStore.getState().scale || 1
-    const s = 1 / vpScale
-
-    g.clear()
-    clearBadges()
-    if (!activeFloorId || floors.length === 0) {
-      baseResult = null  // stale once there's no floor; force full next time
-      return
+  // 32-E: compute the set of route apIds + switchLink srcIds that a single
+  // AP/SW drag mutates. These (and only these) redraw into gDynamic each
+  // frame; everything else is frozen in gStatic. Mirrors the incremental
+  // routing's affected-set so the split is exact.
+  const computeAffected = (drag, routes, switchLinks) => {
+    const apIds = new Set()
+    const linkIds = new Set()
+    if (drag.ap) {
+      apIds.add(drag.ap.id)
     }
-
-    const { routes, switchLinks } = computeRoutesForDraw(
-      { floors, apsByFloor, switchesByFloor, traysByFloor, risers },
-      drag,
-    )
-
-    const hasFocus = editor.selectedId && (editor.selectedType === 'ap' || editor.selectedType === 'switch')
-    const isRouteRelevant = (r) => {
-      if (!hasFocus) return true
-      if (editor.selectedType === 'ap')     return r.apId     === editor.selectedId
-      if (editor.selectedType === 'switch') return r.switchId === editor.selectedId
-      return true
+    if (drag.sw) {
+      linkIds.add(drag.sw.id)
+      for (const r of routes.values()) {
+        if (r.switchId === drag.sw.id) apIds.add(r.apId)
+      }
     }
-    const isLinkRelevant = (link) => {
-      if (!hasFocus) return true
-      if (editor.selectedType === 'switch') return link.srcId === editor.selectedId || link.targetId === editor.selectedId
-      return false
-    }
-    const isRouteFocused = (r) => hasFocus && isRouteRelevant(r)
-    const isLinkFocused  = (link) => hasFocus && isLinkRelevant(link)
+    return { apIds, linkIds }
+  }
+
+  // Pure draw of routes + switch links into a single Graphics / badge
+  // Container, gated by `keep(kind, idObj)`. Extracted from rebuild() (32-E) —
+  // every color / width / dash / radius constant is unchanged.
+  //
+  // 32-E dimming change: focus-dim is NOT applied per-route here anymore.
+  // Drawing 300 routes at alpha 0.18 was ~16× slower than at alpha 1 (PIXI
+  // can't batch translucent strokes the same way) → selecting an AP cost
+  // ~2080ms. Instead every route draws at its FULL base alpha and the caller
+  // dims the whole background layer via `gStatic.alpha = DIM_OPACITY` (one
+  // property, no redraw). Per-element effective alpha is identical
+  // (e.g. 0.95 × 0.18); only translucent-overlap blending differs slightly
+  // (within the §32-E visual tolerance — cables rarely overlap densely).
+  // So `keep` doubles as the focus split: focused routes go to gDynamic
+  // (alpha 1, with highlight band), the rest to gStatic (dimmed by container).
+  //   keep('route', route)  → draw this AP→Switch route?
+  //   keep('link',  link)   → draw this Switch→Switch link?
+  const drawRoutes = (g, badgeRoot, routes, switchLinks, dctx, keep) => {
+    const {
+      s, activeFloorId, hasFocus,
+      isRouteFocused, isLinkFocused,
+      apsByFloor, switchesByFloor,
+    } = dctx
 
     // First pass: indigo highlight band UNDER focused routes/links.
     const drawHighlightBand = (pts) => {
@@ -325,11 +432,13 @@ export function attachCablesLayer({
     }
     if (hasFocus) {
       for (const r of routes.values()) {
+        if (!keep('route', r)) continue
         if (!isRouteFocused(r)) continue
         if (r.routeStatus === 'unroutable') continue
         drawHighlightBand(r.points)
       }
       for (const link of switchLinks.values()) {
+        if (!keep('link', link)) continue
         if (!isLinkFocused(link)) continue
         if (link.routeStatus === 'unroutable') continue
         drawHighlightBand(link.points)
@@ -339,13 +448,13 @@ export function attachCablesLayer({
     // Routes (AP → Switch).
     const apsOnFloor = apsByFloor[activeFloorId] ?? []
     for (const r of routes.values()) {
-      const relevant = isRouteRelevant(r)
-      const baseAlpha = hasFocus && !relevant ? DIM_OPACITY : 1
+      if (!keep('route', r)) continue
+      // Full base alpha — focus-dim is applied at the container level (see header).
       if (r.routeStatus === 'unroutable') {
         if (r.homeFloorId !== activeFloorId) continue
         const ap = apsOnFloor.find((a) => a.id === r.apId)
         if (!ap) continue
-        drawUnroutableBadge(ap.x, ap.y, s, baseAlpha)
+        drawUnroutableBadge(g, badgeRoot, ap.x, ap.y, s, 1)
         continue
       }
       const pts = r.points
@@ -356,12 +465,12 @@ export function attachCablesLayer({
         for (let i = 1; i < pts.length; i++) {
           const a = pts[i - 1], b = pts[i]
           if (a.floorId !== activeFloorId || b.floorId !== activeFloorId) continue
-          drawDashedSegment(g, a.x, a.y, b.x, b.y, FALLBACK_COLOR, 1.2 * s, 14 * s, 10 * s, 0.7 * baseAlpha)
+          drawDashedSegment(g, a.x, a.y, b.x, b.y, FALLBACK_COLOR, 1.2 * s, 14 * s, 10 * s, 0.7)
         }
         // Elbow marker (only when there are exactly 3 points = single bend).
         if (pts.length === 3) {
           g.circle(pts[1].x, pts[1].y, 2 * s)
-            .fill({ color: FALLBACK_COLOR, alpha: 0.85 * baseAlpha })
+            .fill({ color: FALLBACK_COLOR, alpha: 0.85 })
         }
         continue
       }
@@ -372,9 +481,9 @@ export function attachCablesLayer({
         if (a.floorId !== activeFloorId || b.floorId !== activeFloorId) continue
         const isDrop = a.kind === 'endpoint' || b.kind === 'endpoint'
         if (isDrop) {
-          drawDashedSegment(g, a.x, a.y, b.x, b.y, TRAY_COLOR, 1.4 * s, 6 * s, 4 * s, 0.85 * baseAlpha)
+          drawDashedSegment(g, a.x, a.y, b.x, b.y, TRAY_COLOR, 1.4 * s, 6 * s, 4 * s, 0.85)
         } else {
-          drawSolidSegment(g, a.x, a.y, b.x, b.y, TRAY_COLOR, 1.6 * s, 0.95 * baseAlpha)
+          drawSolidSegment(g, a.x, a.y, b.x, b.y, TRAY_COLOR, 1.6 * s, 0.95)
         }
       }
       // Node markers for tray points on this floor (skip endpoints — they
@@ -384,18 +493,18 @@ export function attachCablesLayer({
         if (p.kind === 'endpoint') continue
         const radius = trayNodeRadius(p) * s
         g.circle(p.x, p.y, radius)
-          .fill({ color: TRAY_COLOR, alpha: 0.9 * baseAlpha })
+          .fill({ color: TRAY_COLOR, alpha: 0.9 })
         if (nodeHasOutline(p)) {
           g.circle(p.x, p.y, radius)
-            .stroke({ width: 0.6 * s, color: TRAY_NODE_STROKE, alpha: 0.9 * baseAlpha })
+            .stroke({ width: 0.6 * s, color: TRAY_NODE_STROKE, alpha: 0.9 })
         }
       }
     }
 
     // Switch-to-switch links.
     for (const link of switchLinks.values()) {
-      const relevant = isLinkRelevant(link)
-      const baseAlpha = hasFocus && !relevant ? DIM_OPACITY : 1
+      if (!keep('link', link)) continue
+      // Full base alpha — focus-dim is applied at the container level (see header).
       const isFiber = link.cableType === 'fiber'
       const trunk = isFiber ? S2S_FIBER_TRUNK : S2S_COPPER_TRUNK
       const stroke2 = isFiber ? S2S_FIBER_STROKE : S2S_COPPER_STROKE
@@ -404,7 +513,7 @@ export function attachCablesLayer({
         const switchesOnFloor = switchesByFloor[activeFloorId] ?? []
         const sw = switchesOnFloor.find((sw) => sw.id === link.srcId)
         if (!sw) continue
-        drawUnroutableBadge(sw.x, sw.y, s, baseAlpha)
+        drawUnroutableBadge(g, badgeRoot, sw.x, sw.y, s, 1)
         continue
       }
       const pts = link.points
@@ -417,7 +526,7 @@ export function attachCablesLayer({
           if (a.floorId !== activeFloorId || b.floorId !== activeFloorId) continue
           const dashOn  = isFiber ? 18 * s : 14 * s
           const dashOff = isFiber ?  8 * s : 10 * s
-          drawDashedSegment(g, a.x, a.y, b.x, b.y, trunk, 1.6 * s, dashOn, dashOff, 0.8 * baseAlpha)
+          drawDashedSegment(g, a.x, a.y, b.x, b.y, trunk, 1.6 * s, dashOn, dashOff, 0.8)
         }
         continue
       }
@@ -428,11 +537,11 @@ export function attachCablesLayer({
         if (a.floorId !== activeFloorId || b.floorId !== activeFloorId) continue
         const isDrop = a.kind === 'endpoint' || b.kind === 'endpoint'
         if (isDrop) {
-          drawDashedSegment(g, a.x, a.y, b.x, b.y, trunk, 1.5 * s, 6 * s, 4 * s, 0.85 * baseAlpha)
+          drawDashedSegment(g, a.x, a.y, b.x, b.y, trunk, 1.5 * s, 6 * s, 4 * s, 0.85)
         } else if (isFiber) {
-          drawDashedSegment(g, a.x, a.y, b.x, b.y, trunk, 1.9 * s, 12 * s, 6 * s, 0.95 * baseAlpha)
+          drawDashedSegment(g, a.x, a.y, b.x, b.y, trunk, 1.9 * s, 12 * s, 6 * s, 0.95)
         } else {
-          drawSolidSegment(g, a.x, a.y, b.x, b.y, trunk, 1.9 * s, 0.95 * baseAlpha)
+          drawSolidSegment(g, a.x, a.y, b.x, b.y, trunk, 1.9 * s, 0.95)
         }
       }
       for (const p of pts) {
@@ -440,19 +549,200 @@ export function attachCablesLayer({
         if (p.kind === 'endpoint') continue
         const radius = switchLinkNodeRadius(p) * s
         g.circle(p.x, p.y, radius)
-          .fill({ color: trunk, alpha: 0.9 * baseAlpha })
+          .fill({ color: trunk, alpha: 0.9 })
         if (nodeHasOutline(p)) {
           g.circle(p.x, p.y, radius)
-            .stroke({ width: 0.6 * s, color: stroke2, alpha: 0.9 * baseAlpha })
+            .stroke({ width: 0.6 * s, color: stroke2, alpha: 0.9 })
         }
       }
     }
   }
 
-  const unsubFloor = useFloorStore.subscribe(rebuild)
-  const unsubAP = useAPStore.subscribe(rebuild)
-  const unsubCable = useCableStore.subscribe(rebuild)
-  const unsubViewport = useViewportStore.subscribe(rebuild)
+  // 32-E split-state tracking. gStatic holds the frozen BACKGROUND (drawn once
+  // per split-key change); gDynamic holds the FOREGROUND (focused + dragged
+  // routes), redrawn each frame. `splitKey` fingerprints what's in each layer
+  // so we only rebuild gStatic when the selection or drag target actually
+  // changes — continuous drag of the same object touches gDynamic only.
+  let splitKey = null
+  // 32-E dragend fast path — the affected set from the last in-drag frame, so
+  // release can append just those route(s) to gStatic instead of rebuilding all.
+  let lastDragAffected = null
+
+  const rebuildImpl = () => {
+    const { floors, activeFloorId } = useFloorStore.getState()
+    let apsByFloor = useAPStore.getState().apsByFloor
+    let switchesByFloor = useCableStore.getState().switchesByFloor
+    let traysByFloor = useCableStore.getState().traysByFloor
+    const risers = useCableStore.getState().risers
+    const drag = useDragOverlayStore.getState()
+    apsByFloor      = overlayedApsByFloor(apsByFloor, drag.ap)
+    switchesByFloor = overlayedSwitchesByFloor(switchesByFloor, drag.sw)
+    traysByFloor    = overlayedTraysByFloor(traysByFloor, drag.tray, drag.trayVertex)
+    const editor = useEditorStore.getState()
+    const vpScale = useViewportStore.getState().scale || 1
+    const s = 1 / vpScale
+
+    if (!activeFloorId || floors.length === 0) {
+      gStatic.clear()
+      gDynamic.clear()
+      clearBadges(badgeStatic)
+      clearBadges(badgeDynamic)
+      gStatic.alpha = 1
+      baseResult = null      // stale once there's no floor; force full next time
+      routingDirty = false   // !baseResult already forces a full recompute
+      splitKey = null
+      lastDragAffected = null
+      return
+    }
+
+    const { routes, switchLinks } = computeRoutesForDraw(
+      { floors, apsByFloor, switchesByFloor, traysByFloor, risers },
+      drag,
+    )
+
+    const hasFocus = editor.selectedId && (editor.selectedType === 'ap' || editor.selectedType === 'switch')
+    const isRouteFocused = (r) => {
+      if (!hasFocus) return false
+      if (editor.selectedType === 'ap')     return r.apId     === editor.selectedId
+      if (editor.selectedType === 'switch') return r.switchId === editor.selectedId
+      return false
+    }
+    const isLinkFocused = (link) => {
+      if (!hasFocus) return false
+      if (editor.selectedType === 'switch') return link.srcId === editor.selectedId || link.targetId === editor.selectedId
+      return false
+    }
+
+    const dctx = {
+      s, activeFloorId, hasFocus,
+      isRouteFocused, isLinkFocused,
+      apsByFloor, switchesByFloor,
+    }
+
+    // 32-E unified static/dynamic split.
+    //
+    // gStatic = the heavy background, drawn at FULL base alpha. Selection-dim
+    //   is applied via `gStatic.alpha` (a single property — NOT a redraw, and
+    //   NOT per-route alpha, which costs ~16× more to tessellate; see
+    //   drawRoutes header). gStatic excludes only the DRAG-affected routes,
+    //   because a frozen copy at the drag-start position would show as a stale
+    //   duplicate while the live one moves. Focused (selected) routes DO stay
+    //   in gStatic — they're simply occluded by the full-bright copy gDynamic
+    //   paints on top, so selection never has to rebuild this layer.
+    //
+    // gDynamic = the foreground overlay, redrawn each frame (cheap): focused
+    //   routes/links (full alpha + indigo highlight band) and drag-affected
+    //   routes/links (at their live position).
+    //
+    // Net effect: SELECTING an AP touches only gDynamic (1 route) + one alpha
+    //   assignment (~5 ms), instead of redrawing all ~300 dimmed routes
+    //   (~2080 ms before 32-E). DRAGGING redraws only the dragged route.
+    const affected = computeAffected(drag, routes, switchLinks)
+    const inForeground = (kind, o) => {
+      if (kind === 'route') return isRouteFocused(o) || affected.apIds.has(o.apId)
+      return isLinkFocused(o) || affected.linkIds.has(o.srcId)
+    }
+    // The static layer must omit ONLY drag-affected routes (stale-duplicate
+    // problem). Focused-but-not-dragged routes stay (occluded by gDynamic).
+    const inStatic = (kind, o) =>
+      kind === 'route' ? !affected.apIds.has(o.apId) : !affected.linkIds.has(o.srcId)
+
+    gStatic.alpha = hasFocus ? DIM_OPACITY : 1
+
+    // staticKey fingerprints what gStatic holds: it changes with the drag
+    // target (and is force-nulled by data / viewport changes via
+    // invalidateStatic), but NOT with selection. While unchanged the heavy
+    // background isn't redrawn.
+    const nextStaticKey = drag.ap ? `ap:${drag.ap.id}` : drag.sw ? `sw:${drag.sw.id}` : 'none'
+
+    // 32-E dragend fast path. When a single-object drag RELEASES (splitKey was
+    // 'ap:X'/'sw:X', now 'none') the only diff between the current gStatic and
+    // the desired one is that the just-dropped route(s) must rejoin it — the
+    // other ~299 are already there, unchanged. Rebuilding all 300 costs ~0.5–
+    // 0.9 s on WebGL2 / multi-seconds on software renderers (the "放下卡一下"),
+    // so instead we APPEND just the settled route(s) onto the existing gStatic.
+    // Guarded to the exact transition: no drag now, the prior frame was a
+    // single-object drag, the background wasn't force-invalidated (splitKey !==
+    // null, i.e. no data/viewport change), and we actually know which routes to
+    // re-add (lastDragAffected). Anything else → full rebuild.
+    let staticRedrawn = false
+    const releasing =
+      nextStaticKey === 'none' &&
+      splitKey !== null && splitKey !== 'none' &&
+      lastDragAffected &&
+      (lastDragAffected.apIds.size + lastDragAffected.linkIds.size) > 0
+    if (releasing) {
+      // Append the dropped route(s) into frozen gStatic (no clear → keep the
+      // other 299). gDynamic is cleared below, handing the route back to static.
+      const a = lastDragAffected
+      const onlySettled = (kind, o) =>
+        kind === 'route' ? a.apIds.has(o.apId) : a.linkIds.has(o.srcId)
+      drawRoutes(gStatic, badgeStatic, routes, switchLinks, dctx, onlySettled)
+      splitKey = nextStaticKey
+      staticRedrawn = true
+    } else if (splitKey !== nextStaticKey) {
+      gStatic.clear()
+      clearBadges(badgeStatic)
+      drawRoutes(gStatic, badgeStatic, routes, switchLinks, dctx, inStatic)
+      splitKey = nextStaticKey
+      staticRedrawn = true
+    }
+    // Re-bake the gStatic cache texture only when its content changed (see the
+    // cacheAsTexture note in the header). Software renderers re-raster a 72k-
+    // instruction Graphics at ~120 ms/frame otherwise.
+    if (staticRedrawn) {
+      if (!gStatic.isCachedAsTexture) gStatic.cacheAsTexture(true)
+      else gStatic.updateCacheTexture()
+    }
+    lastDragAffected = (drag.ap || drag.sw) ? affected : null
+
+    // Foreground overlay — redrawn every rebuild (cheap: focused + dragged only).
+    gDynamic.clear()
+    clearBadges(badgeDynamic)
+    drawRoutes(gDynamic, badgeDynamic, routes, switchLinks, dctx, inForeground)
+    if (perfOn()) probe(staticRedrawn ? 'cable.rebuild(static+dyn)' : 'cable.rebuild(dyn-only)', 0)
+  }
+
+  // Timed wrapper — when the perf probe is on, record how long each cablesLayer
+  // rebuild takes (the synchronous CPU cost; frame time is sampled separately).
+  const rebuild = () => {
+    if (!perfOn()) return rebuildImpl()
+    const t0 = performance.now()
+    rebuildImpl()
+    probe('cable.rebuild.total', performance.now() - t0)
+  }
+
+  // Invalidate the frozen background so the next rebuild redraws gStatic. The
+  // splitKey only tracks selection / drag-target identity; changes that affect
+  // the background's GEOMETRY or SCALE (route data, viewport zoom/pan → the `s`
+  // line-width factor) leave the key unchanged, so we must null it explicitly
+  // or the static layer would render stale.
+  const invalidateStatic = () => { splitKey = null }
+  // floor / AP / cable data changed → routing may need recompute. But DON'T
+  // force a full gStatic rebuild while a single AP/SW drag is in flight: the
+  // static/dynamic split already excludes the dragged object, and a mid-drag
+  // commit of that same object (apsLayer calls updateAP before clearing the
+  // drag overlay on release) only moves the dragged route — the frozen other
+  // ~299 in gStatic are untouched. Invalidating here forced a full 299-route
+  // rebuild + cache re-bake mid-gesture (~300 ms on software renderers — the
+  // residual "放下卡一下"). The drag-end transition rebuilds/append-settles
+  // gStatic correctly via the splitKey logic.
+  const markDirtyAndRebuild = () => {
+    routingDirty = true
+    const d = useDragOverlayStore.getState()
+    if (!d.ap && !d.sw) invalidateStatic()
+    probeEvent('floor/ap/cable')
+    rebuild()
+  }
+
+  const unsubFloor = useFloorStore.subscribe(markDirtyAndRebuild)
+  const unsubAP = useAPStore.subscribe(markDirtyAndRebuild)
+  const unsubCable = useCableStore.subscribe(markDirtyAndRebuild)
+  // Viewport only rescales line widths / dash (the `s` factor) — route
+  // geometry is unchanged, so DON'T mark routingDirty (reuse the routing
+  // cache). But the frozen static layer holds scale-baked geometry, so force
+  // it to redraw at the new scale.
+  const unsubViewport = useViewportStore.subscribe(() => { invalidateStatic(); probeEvent('viewport'); rebuild() })
   // Live cable redraw during AP/SW/tray drag. Subscribe gated by checking
   // whether any relevant override key changed so unrelated dragOverlay
   // mutations (e.g. wall drag dx/dy) don't trigger a route recompute.
@@ -464,12 +754,22 @@ export function attachCablesLayer({
     const d = useDragOverlayStore.getState()
     if (d.ap === lastDragAp && d.sw === lastDragSw &&
         d.tray === lastDragTray && d.trayVertex === lastDragTrayVtx) return
+    // A drag of a single AP/SW ENDING (override → null) needs one full
+    // recompute so the frozen incremental result is replaced by the canonical
+    // route; mark dirty so computeRoutesForDraw doesn't serve the stale cache.
+    const apEnded   = lastDragAp && !d.ap
+    const swEnded   = lastDragSw && !d.sw
+    const trayEnded = (lastDragTray && !d.tray) || (lastDragTrayVtx && !d.trayVertex)
+    if (apEnded || swEnded || trayEnded) routingDirty = true
     lastDragAp = d.ap
     lastDragSw = d.sw
     lastDragTray = d.tray
     lastDragTrayVtx = d.trayVertex
+    probeEvent('drag')
     rebuild()
   })
+  // Selection only changes opacity / highlight (not route geometry) — don't
+  // mark routingDirty so the cache is reused (32-E perf A).
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
   const unsubEditor = useEditorStore.subscribe(() => {
@@ -477,6 +777,7 @@ export function attachCablesLayer({
     if (s.selectedId === lastSelectedId && s.selectedType === lastSelectedType) return
     lastSelectedId = s.selectedId
     lastSelectedType = s.selectedType
+    probeEvent('editor/selection')
     rebuild()
   })
   rebuild()
@@ -488,10 +789,16 @@ export function attachCablesLayer({
     unsubEditor()
     unsubViewport()
     unsubDrag()
-    layer.removeChild(g)
-    g.destroy()
-    clearBadges()
-    layer.removeChild(badgeRoot)
-    badgeRoot.destroy({ children: true })
+    clearRoutesCache()  // 32-E shared focus cache — drop on teardown
+    layer.removeChild(gStatic)
+    gStatic.destroy()
+    layer.removeChild(gDynamic)
+    gDynamic.destroy()
+    clearBadges(badgeStatic)
+    layer.removeChild(badgeStatic)
+    badgeStatic.destroy({ children: true })
+    clearBadges(badgeDynamic)
+    layer.removeChild(badgeDynamic)
+    badgeDynamic.destroy({ children: true })
   }
 }

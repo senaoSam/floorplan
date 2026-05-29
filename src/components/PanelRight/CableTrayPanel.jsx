@@ -3,7 +3,7 @@ import { useCableStore, DEFAULT_TRAY, DEFAULT_TRAY_MAGNET_PX, TRAY_MOUNT_PRESETS
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
-import { computeRoutes } from '@/features/cable/computeRoutes'
+import { getCachedRoutes } from '@/features/cable/routesCache'
 import { computeTrayCableLoads, computeTrayFill } from '@/features/cable/computeTrayFill'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { TextInput, NumberInput, Select } from './_shared/PanelControls'
@@ -59,7 +59,7 @@ function CableTrayPanel({ floorId, trayId }) {
 
   const diagnostics = useMemo(() => {
     if (!tray) return null
-    const { routes, switchLinks, warnings } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
+    const { routes, switchLinks, warnings } = getCachedRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
     const loads = computeTrayCableLoads({ routes, switchLinks, traysByFloor })
     const load  = loads.get(`${floorId}|${trayId}`) ?? { count: 0, copperCount: 0, fiberCount: 0, occupants: [] }
     const profile = getCapacityProfile(capacityProfile, customCapacity)

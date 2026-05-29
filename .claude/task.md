@@ -50,7 +50,7 @@ oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap /
 | 32-0 | ✅   | **量測** — `computeRoutes` wall-clock @ 50/150/300/500/1000 AP × {0,1,5,10} tray，已記到 `perf-baseline.md §32-0`。真因：每 pointermove 對全部 AP 跑 Dijkstra（1000 AP / 1 tray = 94ms） |
 | 32-D | ⏸️ 不採用 | **解凍 cable** — 改走 32-C 增量（保留即時精確跟隨）。tray/trayVertex drag 仍凍結（32-C 範圍決策） |
 | 32-C | 🟡 部分 | **增量 routing** — ✅ 拖 AP/SW 只重算動到的路徑（`buildRoutingContext`+`routeOneAP`+`routeOneSwitchLink`，full↔inc byte-identical 已驗）。routing 成本 214ms→1ms（300AP）。**剩第二瓶頸**：cable Graphics 每幀重送（300AP ~8880 段，hover/重繪即卡）— 另開 32-E |
-| 32-E | ⬜   | **Cable 畫圖增量 / 靜動分層** — 拖一物件只重畫變動的那條 cable，其餘凍結；或降低虛線逐段切割成本。真因：cablesLayer 單一 Graphics 裝全部線段，hover 重繪時每幀重送 GPU（使用者實測：移除 tray/SW 即正常）。對應 brief 31-5 mesh 方向 |
+| 32-E | ✅   | **Cable 畫圖效能 — 軟體渲染也達標**。量測推翻多個假設（idle 連續 render、cable 每幀重 raster、selection/drag 多處全量 computeRoutes）。五刀：①render-on-demand（停連續 ticker，store→requestRender，idle 60→0 render/s）②cacheAsTexture on gStatic（cable 背景烤貼圖，hover/drag-move 每幀 ~120ms→~9ms）③apsLayer 逐 AP identity diff（drag commit 重畫 1 marker 非 300：99→1.6ms）④routesCache 增量 + 共享（focus/panel 單顆 AP 變只重算那顆，選取 2-3秒→2-22ms）⑤靜動分層 + drag 期不 invalidateStatic（拖曳每幀 3-13ms，dragEnd append）。300AP+SW+tray：軟體渲染 hover/drag/select 全順，剩 drag 開始/結束各 ~105ms（單張快取貼圖固有，可接受）。routing identity 88/0、視覺無回歸（已對 stash 前後比對）。詳見 perf-baseline.md §32-E |
 
 ### 其他小尾巴
 

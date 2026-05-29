@@ -73,6 +73,10 @@ export function bindViewport({
   apply(store.getState())
   const unsubscribe = store.subscribe(apply)
 
+  // Render-on-demand: the marquee rectangle is drawn imperatively (not via a
+  // store), so it must explicitly request a repaint. Same for clearing it.
+  const requestRender = () => { if (typeof scene.requestRender === 'function') scene.requestRender() }
+
   const drawMarquee = (a, b) => {
     marqueeG.clear()
     const x1 = Math.min(a.x, b.x)
@@ -82,8 +86,9 @@ export function bindViewport({
     marqueeG.rect(x1, y1, x2 - x1, y2 - y1)
       .fill({ color: MARQUEE_FILL, alpha: 1 })
       .stroke({ width: 1, color: MARQUEE_STROKE, alpha: 0.9 })
+    requestRender()
   }
-  const clearMarqueeGraphics = () => marqueeG.clear()
+  const clearMarqueeGraphics = () => { marqueeG.clear(); requestRender() }
 
   const vlog = (...args) => {
     if (typeof window !== 'undefined' && window.__debugWallSelect) {

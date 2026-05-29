@@ -1,4 +1,4 @@
-import { computeRoutes } from '@/features/cable/computeRoutes'
+import { getCachedRoutes } from '@/features/cable/routesCache'
 
 // 17-2 focus halo helper (imperative twin of oldSrc useFocusedDevices).
 // Returns the set of AP / switch ids "related" to the current selection so
@@ -26,7 +26,9 @@ export function computeFocusedDevices({
   }
   const aps = new Set()
   const switches = new Set()
-  const { routes, switchLinks } = computeRoutes({
+  // 32-E: getCachedRoutes memoizes by store-slice identity, so selecting an
+  // AP (which doesn't change route geometry) is a cache hit — no Dijkstra.
+  const { routes, switchLinks } = getCachedRoutes({
     floors, apsByFloor, switchesByFloor, traysByFloor, risers,
   })
   if (selectedType === 'ap') {

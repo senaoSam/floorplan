@@ -57,6 +57,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     if (!el) return
 
     let scene = null
+    let detachRenderOnDemand = null
     let detachViewport = null
     let detachModeAdapter = null
     let detachFloorImage = null
@@ -97,6 +98,21 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         return
       }
       scene = s
+      // Render-on-demand wiring. Every store that can change anything visible
+      // schedules a single coalesced render (see scene.requestRender). Because
+      // the actual render is deferred to the next animation frame, it always
+      // runs AFTER the layers' synchronous store-subscriber redraws in the same
+      // tick — so we don't depend on subscription order. This is the central
+      // safety net: any state change → exactly one repaint, instead of PIXI's
+      // default 60 repaints/sec. (Non-store paint paths — marquee drag, async
+      // heatmap texture upload — call scene.requestRender() directly.)
+      const renderStores = [
+        useViewportStore, useFloorStore, useWallStore, useAPStore, useCableStore,
+        useHeatmapStore, useEditorStore, useDragOverlayStore, useHoverStore,
+        useScopeStore, useFloorHoleStore, useHoverReadoutStore, useDraftStore,
+      ]
+      const reqRender = () => s.requestRender()
+      detachRenderOnDemand = renderStores.map((st) => st.subscribe(reqRender))
       detachViewport = bindViewport({
         app: s.app,
         canvas: s.app.canvas,
@@ -331,6 +347,9 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useEditorStore,
         useFloorStore,
       })
+      // All layers attached and have drawn their initial content into the
+      // (render-on-demand) scene — paint the first real frame.
+      s.requestRender()
       if (import.meta.env.DEV) {
         window.__pixiApp = s.app
         window.__scene = s
@@ -568,6 +587,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (detachFloorImage) detachFloorImage()
       if (detachModeAdapter) detachModeAdapter()
       if (detachViewport) detachViewport()
+      if (detachRenderOnDemand) detachRenderOnDemand.forEach((u) => u())
       if (scene) scene.destroy()
       if (import.meta.env.DEV) {
         delete window.__pixiApp

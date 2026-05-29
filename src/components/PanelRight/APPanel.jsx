@@ -3,7 +3,7 @@ import { useAPStore } from '@/store/useAPStore'
 import { useCableStore } from '@/store/useCableStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
-import { computeRoutes } from '@/features/cable/computeRoutes'
+import { getCachedRoutes } from '@/features/cable/routesCache'
 import { AP_MODEL_LIST, DEFAULT_AP_MODEL_ID, getAPModelById } from '@/constants/apModels'
 import { ANTENNA_PATTERN_LIST, DEFAULT_PATTERN_ID, getPatternById } from '@/constants/antennaPatterns'
 import { channelEntries, isChannelAllowed, allowedChannels } from '@/constants/regulatoryDomains'
@@ -52,7 +52,7 @@ function APPanel({ floorId, apId }) {
   const risers          = useCableStore((s) => s.risers)
 
   const route = useMemo(() => {
-    const { routes } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
+    const { routes } = getCachedRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
     return routes.get(apId)
   }, [floors, apsByFloor, switchesByFloor, traysByFloor, risers, apId])
 

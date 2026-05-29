@@ -3,7 +3,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useCableStore, CAPACITY_PROFILES, getCapacityProfile } from '@/store/useCableStore'
 import { useEditorStore } from '@/store/useEditorStore'
-import { computeRoutes } from '@/features/cable/computeRoutes'
+import { getCachedRoutes } from '@/features/cable/routesCache'
 import { computeTrayBOM } from '@/features/cable/computeTrayBOM'
 import { computeTrayCableLoads, computeTrayFill } from '@/features/cable/computeTrayFill'
 import { buildPlanningBOMCsv, triggerCSVDownload } from '@/features/cable/exportPlanningBOM'
@@ -45,7 +45,7 @@ function CableSummaryPanel() {
   const [exportStatus, setExportStatus] = useState(null)  // null | string while generating
 
   const stats = useMemo(() => {
-    const { routes, switchLinks, warnings } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
+    const { routes, switchLinks, warnings } = getCachedRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
     let totalApM = 0
     let totalS2sM = 0
     const byStatus = { tray: 0, 'fallback-manhattan': 0, unroutable: 0 }
@@ -163,7 +163,7 @@ function CableSummaryPanel() {
   // click rather than caching in the live `stats` memo keeps the panel
   // cheap to re-render.
   const buildPlanningSnapshot = () => {
-    const { routes, switchLinks, warnings } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
+    const { routes, switchLinks, warnings } = getCachedRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
     const trayLoads = computeTrayCableLoads({ routes, switchLinks, traysByFloor })
     const profile = getCapacityProfile(capacityProfile, customCapacity)
     const trayFillByKey = new Map()

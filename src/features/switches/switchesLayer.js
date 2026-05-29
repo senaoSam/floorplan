@@ -7,6 +7,7 @@ import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { computeSwitchSnaps } from '@/features/cable/switchSnapStatus'
 import { computeFocusedDevices, FOCUS_HALO_COLOR, FOCUS_HALO_ALPHA, FOCUS_HALO_WIDTH } from '@/features/focus/focusedDevices'
+import { perfOn, probe, probeEvent } from '@/features/cable/perfProbe'
 import { getChassisSize, getKindLabel, getPortDotCount } from './switchChassis'
 import { getModeCapability } from '@/render/modeCapabilities'
 
@@ -447,19 +448,27 @@ export function attachSwitchesLayer({
     }
   }
 
-  const unsubFloor = useFloorStore.subscribe(() => { reconcile(); applyInverseScale() })
-  const unsubCable = useCableStore.subscribe(() => { reconcile(); applyInverseScale() })
-  const unsubAP = useAPStore.subscribe(() => {
+  // 32-E perf probe — time each store-event's switchesLayer work.
+  const timed = (name, fn) => () => {
+    if (!perfOn()) return fn()
+    probeEvent(`sw:${name}`)
+    const t0 = performance.now()
+    fn()
+    probe(`sw.${name}`, performance.now() - t0)
+  }
+  const unsubFloor = useFloorStore.subscribe(timed('floor', () => { reconcile(); applyInverseScale() }))
+  const unsubCable = useCableStore.subscribe(timed('cable', () => { reconcile(); applyInverseScale() }))
+  const unsubAP = useAPStore.subscribe(timed('ap', () => {
     // AP changes don't affect chassis geometry but do affect focus set
     // (which APs route through this switch).
     if (recomputeFocus()) {
       for (const entry of containers.values()) drawSwitch(entry)
     }
-  })
-  const unsubDrag = useDragOverlayStore.subscribe(applyDragOverlay)
-  const unsubEditor = useEditorStore.subscribe(onEditorChange)
-  const unsubHover = useHoverStore.subscribe(onHoverChange)
-  const unsubViewport = useViewportStore.subscribe(applyInverseScale)
+  }))
+  const unsubDrag = useDragOverlayStore.subscribe(timed('drag', applyDragOverlay))
+  const unsubEditor = useEditorStore.subscribe(timed('editor', onEditorChange))
+  const unsubHover = useHoverStore.subscribe(timed('hover', onHoverChange))
+  const unsubViewport = useViewportStore.subscribe(timed('viewport', applyInverseScale))
   reconcile()
   applyInverseScale()
 

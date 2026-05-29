@@ -9,7 +9,7 @@ import {
 import { useAPStore } from '@/store/useAPStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
-import { computeRoutes } from '@/features/cable/computeRoutes'
+import { getCachedRoutes } from '@/features/cable/routesCache'
 import { getAPPoeWattage } from '@/constants/apModels'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { TextInput, NumberInput, Select, Button } from './_shared/PanelControls'
@@ -55,7 +55,7 @@ function SwitchPanel({ floorId, swId }) {
   // routing (spec §8).
   const connected = useMemo(() => {
     if (!sw) return { aps: [], totalPoe: 0, uplinkUsed: 0, downlinkCount: 0 }
-    const { routes } = computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
+    const { routes } = getCachedRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
     const connAps = []
     let totalPoe = 0
     for (const [fId, list] of Object.entries(apsByFloor)) {

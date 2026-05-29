@@ -5,6 +5,7 @@ import { useDraftStore } from '@/store/useDraftStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { computeFocusedDevices, FOCUS_HALO_COLOR, FOCUS_HALO_ALPHA, FOCUS_HALO_WIDTH } from '@/features/focus/focusedDevices'
+import { perfOn, probe, probeEvent } from '@/features/cable/perfProbe'
 import { getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
 import { getModeCapability } from '@/render/modeCapabilities'
 
@@ -438,6 +439,12 @@ export function attachAPsLayer({
   // ── Reconciler from stores ────────────────────────────────────────────
   let lastFloorId = undefined
   let lastAPs = undefined
+  // Per-AP object identity from the last reconcile. updateAP replaces only the
+  // mutated AP's object (Zustand immutable update), so comparing identity lets
+  // us redraw ONLY changed/new APs instead of all 300. Dragging one AP and
+  // dropping it used to repaint every marker (~99 ms at 300 AP on software
+  // renderers — a chunk of the "放下卡一下"); now it repaints just that one.
+  let lastApById = new Map()
 
   const reconcile = () => {
     const activeFloorId = useFloorStore.getState().activeFloorId
@@ -446,6 +453,7 @@ export function attachAPsLayer({
       applyDragOverlay()
       return
     }
+    const floorChanged = activeFloorId !== lastFloorId
     lastFloorId = activeFloorId
     lastAPs = aps
 
@@ -453,10 +461,16 @@ export function attachAPsLayer({
     for (const id of Array.from(containers.keys())) {
       if (!next.has(id)) removeContainer(id)
     }
+    const nextApById = new Map()
     for (const ap of aps) {
       const entry = ensureContainer(ap, activeFloorId)
-      drawAP(entry)
+      // Redraw only when this AP is new, its data object changed, or the floor
+      // switched (containers are recreated then). Unchanged APs keep their
+      // already-drawn marker — the whole point of the per-AP identity diff.
+      if (floorChanged || lastApById.get(ap.id) !== ap) drawAP(entry)
+      nextApById.set(ap.id, ap)
     }
+    lastApById = nextApById
     applyDragOverlay()
   }
 
@@ -575,13 +589,22 @@ export function attachAPsLayer({
     }
   }
 
-  const unsubFloor = useFloorStore.subscribe(() => { reconcile(); recomputeFocus(); applyInverseScale() })
-  const unsubAP = useAPStore.subscribe(() => { reconcile(); recomputeFocus(); applyInverseScale() })
-  const unsubCable = useCableStore.subscribe(recomputeFocus)
-  const unsubDrag = useDragOverlayStore.subscribe(applyDragOverlay)
-  const unsubEditor = useEditorStore.subscribe(onEditorChange)
-  const unsubHover = useHoverStore.subscribe(onHoverChange)
-  const unsubViewport = useViewportStore.subscribe(applyInverseScale)
+  // 32-E perf probe — time each store-event's apsLayer work so the console
+  // report attributes real per-interaction cost (zero overhead when probe off).
+  const timed = (name, fn) => () => {
+    if (!perfOn()) return fn()
+    probeEvent(`aps:${name}`)
+    const t0 = performance.now()
+    fn()
+    probe(`aps.${name}`, performance.now() - t0)
+  }
+  const unsubFloor = useFloorStore.subscribe(timed('floor', () => { reconcile(); recomputeFocus(); applyInverseScale() }))
+  const unsubAP = useAPStore.subscribe(timed('ap', () => { reconcile(); recomputeFocus(); applyInverseScale() }))
+  const unsubCable = useCableStore.subscribe(timed('cable', recomputeFocus))
+  const unsubDrag = useDragOverlayStore.subscribe(timed('drag', applyDragOverlay))
+  const unsubEditor = useEditorStore.subscribe(timed('editor', onEditorChange))
+  const unsubHover = useHoverStore.subscribe(timed('hover', onHoverChange))
+  const unsubViewport = useViewportStore.subscribe(timed('viewport', applyInverseScale))
   reconcile()
   recomputeFocus()
   applyInverseScale()

@@ -490,3 +490,102 @@ addAP 路徑：
 | 旁支：Dijkstra 換真 binary heap | 砍因子 2 | 低，但治標 |
 
 下一步由使用者決定走 32-D（最便宜，最像 Hamina）還是 32-C（保留即時精確跟隨）。
+
+---
+
+## 32-E — cable 畫圖瓶頸量測（32-C 之後，2026-05-30）
+
+**動機**：32-C 解掉 routing 後使用者實測：50AP 順、150 小卡、**300AP 連純 hover/點選任何東西都大卡**；
+但刪掉 SW 或 Tray 任一個就全順。要在動手前確認真因（記憶與直覺都指向「單一 Graphics 每幀重送 GPU」）。
+
+### 量測方法
+
+瀏覽器內 `window.__stores` + `window.__pixiApp`（DEV 暴露）。場景：DemoLoader example3
+（685×511、scale 22.83 px/m）→ StressLoader 塞 300 AP → 注入 1 switch + 1 條橫貫 tray（magnet 400px）。
+用 `app.ticker` 取 frame time、`performance.now()` 包 store mutation 量同步 rebuild 成本。
+
+### 場景規模
+
+| 指標 | 值 |
+|---|---|
+| 路由數 | 300（全部 `tray` status）|
+| 線段數（active floor）| **23,250 段** |
+| 實際 stroke draw call（虛線逐段切割後）| **~26,850** |
+
+> 記憶寫的「~8880 段」低估了：一條橫貫 tray 把所有 AP 連進**同一張連通圖**，每顆 AP 的路徑都走過整條 tray polyline（平均 ~78 點/route）。
+
+### 關鍵數據
+
+| 場景 | frame / 耗時 | 結論 |
+|---|---|---|
+| **Idle（待機）** | **60 FPS（16.67ms）** | ✅ 建好的 Graphics 每幀重畫**很便宜**——「連續 ticker 每幀重送大 Graphics」**不是**瓶頸（推翻原假設）|
+| 連續 pointermove over canvas | 56 FPS、p95 29ms | 略降但非「大卡」（合成事件未必觸發 PIXI 完整 hit-test）|
+| **點選一顆 AP（select）** | **2,400 – 3,400 ms 凍結** | ❌ `editor` fire → `computeRoutesForDraw` 無 drag → **跑全量 `computeRoutes`**（selection 根本不改 route！）+ 全量重畫 |
+| **拖一顆 AP（incremental）** | **100 – 280 ms / pointermove** | ❌ routing 已增量(~1ms)，但**每幀重畫全部 26,850 stroke** + PIXI tessellation/GC |
+| 純 routing（full computeRoutes）| 136 – 780 ms | 32-C 已在 drag 時繞開；非 drag 觸發仍全跑 |
+| 純畫圖（clear + redraw all）| **~30 – 50 ms** | 32-E 真正畫圖目標 |
+
+### 兩個獨立的畫圖側真因（都不是「每幀重送」）
+
+1. **Select / viewport / 任何非 drag rebuild 都跑全量 `computeRoutes`**（最痛，2-3 秒凍結）。
+   已驗證 routing **純粹**於 selection 與 viewport（同 input 兩次結果結構一致）——selection 只改 alpha/highlight、
+   viewport 只改線寬/dash 的 `s` 係數，**route 幾何零變動**。`computeRoutesForDraw` 卻在每次非 drag rebuild
+   重跑 `computeRoutes(building)`。→ **selection / viewport 路徑應重用 `baseResult` cache，完全不跑 Dijkstra**。
+2. **拖曳每幀重畫全部 cable**（~30-50ms draw + GC）。只有 1 條 route 變，卻 `g.clear()` 重畫 26,850 段。
+   → **靜動分層**：未動的 route 凍結在 static Graphics（drag 開始畫一次），只重畫動到的那條進 dynamic Graphics。
+
+### 32-E 對策（已實作，2026-05-30）
+
+實作過程又挖出**第三、第四個真因**（量測驅動）：點選 AP 的 2-3 秒**不是 cable 畫圖**，
+是 `computeFocusedDevices`（focus halo）+ 右側 panel（APPanel/SwitchPanel）的 useMemo **各自跑全量 computeRoutes**。
+原以為「刪 tray → 點選順」證明是畫圖，其實是這些 computeRoutes 只有 tray 在場才貴。最終四個對策：
+
+| 對策 | 做法 | 結果 |
+|---|---|---|
+| **A. routing cache gate** | cablesLayer `routingDirty` flag：selection/viewport rebuild 重用 baseResult，不跑 Dijkstra | — |
+| **B. 拖曳靜動分層** | gStatic（未動 route 凍結）+ gDynamic（只重畫拖到那條）；splitKey 控制 static 只在 drag 目標/資料/viewport 變時重建 | 拖曳 100-280ms → **3-13ms/幀** |
+| **C. selection 也走分層 + container alpha dim** | 未選 route 留在 gStatic、用 `gStatic.alpha=0.18` 整層 dim（不再 per-route alpha——畫半透明線慢 ~16×）；選中 route 全亮+band 疊在 gDynamic（occlude 掉 static 裡的同一條）。selection **不重建 gStatic** | cable 選取畫圖 2083ms → **1.7ms** |
+| **D. 共享 routes cache** | 新 `routesCache.js`（`getCachedRoutes`，按 store slice identity memoize）。focusedDevices + APPanel + SwitchPanel + CableSummaryPanel + CableTrayPanel 全改用它——同資料只算一次，selection 直接 cache hit | 點選 AP **2083-3400ms → 2-22ms**；點選 SW ~2400ms → **350ms** |
+
+**最終量測（300AP+SW+橫貫tray，瀏覽器 window.__stores/__pixiApp）**
+
+| 操作 | 修前 | 修後 |
+|---|---|---|
+| Idle FPS | 60 | 60 |
+| 點選 AP | 2083–3400ms | **2–22ms** |
+| 點選 SW | ~2400ms | **350ms** |
+| 拖 AP（per-frame）| 100–280ms | **3–13ms** |
+| 拖 AP（drag 第一幀建 static）| — | ~290ms（一次性）|
+
+### 32-E 第二輪 — 軟體渲染（無硬體加速）真因（2026-05-30）
+
+使用者回報：上述 A–D 在**硬體 GPU** 順了，但他**無痕**仍全卡。`chrome://gpu` 顯示
+**WebGL/WebGPU 都 "Software only, hardware acceleration unavailable"** → SwiftShader 軟體渲染。
+**關鍵體悟：不能假設使用者有硬體加速**（無痕 / 企業政策 / VM / 遠端桌面 / 舊機都可能軟體渲染），
+32-E 必須在軟體渲染也跑得動。用 `?renderer=webgl`（scene.js dev override）+ `window.__perf`
+（perfProbe.js，frame ms + span 表 + cache hit/miss）量測，推翻先前「idle 60FPS 不需 render-on-demand」結論：
+
+| 真因（軟體渲染放大）| 量到 | 對策 |
+|---|---|---|
+| PIXI 預設**每秒 render 60 次**（畫面沒變也畫），軟體渲染每次 CPU raster 全場景 | idle 60 render/s | **render-on-demand**：scene.js `app.ticker.stop()` + `requestRender()`（rAF 合併、2 幀預算、resize hook）；FloorplanSystem 把 13 store 一處綁定（rAF 保證在 layer 重畫後）；viewport marquee 補呼叫。idle **60→0 render/s** |
+| cable 背景每幀重 raster 72k instruction | hover/drag-move ~120ms/幀 | **cacheAsTexture on gStatic**：烤成一張貼圖，每幀 blit。~120ms → **~9ms**。zoom 重烤保持清晰，dim 用 container alpha 不受影響 |
+| drag 放下 commit 重畫全部 300 AP marker | `aps.ap` ~99ms | **apsLayer reconcile 逐 AP identity diff**：只重畫 changed/new AP。99 → **1.6ms** |
+| 單顆 AP 變動觸發 focus/panel **全量 computeRoutes** | commit ~400-700ms | **routesCache 增量**（getCachedRoutes：topology 不變 + 少數 AP 變 → 只 routeOneAP 那幾顆）；cablesLayer 同加 `tryIncrementalDirty` |
+| 拖曳 commit 觸發 cablesLayer 全量重建 gStatic | dragEnd ~300-500ms | **drag 期間跳過 invalidateStatic**（dragged route 已在 split 處理，其餘 299 未動）；dragEnd 走 `releasing` append |
+
+**最終量測（300AP+SW+橫貫tray）**
+
+| 操作 | 軟體渲染修前 | 修後 |
+|---|---|---|
+| idle / hover / drag 過程 / select | 全卡 | **全順**（使用者確認）|
+| drag 開始 / 結束 | 卡 | 各剩 **~105ms**（單張快取貼圖重烤的固有成本，使用者接受）|
+
+**驗證**：`scripts/test-incremental-routing.mjs` 88/0（routing 未動）；render-on-demand 各互動都重繪（drag/select/pan/hover/heatmap/marquee 皆 >0 render、idle 0、無 stale frame）；
+focus highlight band + dim 視覺正確；移動 AP 後 route start 對齊新位；**git stash 前後並排確認「AP 在 tray 外時 SW 吸附 stub 看似孤立」是既有行為、非本次回歸**；0 console error。
+
+**檔案**：scene.js、FloorplanSystem.jsx、viewport.js、cablesLayer.js、apsLayer.js、focusedDevices.js、
+routesCache.js(新)、perfProbe.js(新 dev 工具)、APPanel/SwitchPanel/CableSummaryPanel/CableTrayPanel。
+
+> 容器 alpha dim 取捨：cable 線重疊處半透明疊加色略不同，實測 5% tolerance 內。
+> 剩餘 drag 開始/結束 ~105ms：單張快取貼圖內容變要整張重烤的固有代價；分塊快取在「1 tray 線都擠在沿線」場景效果差又有接縫風險（不做）。對應 brief 31-5 mesh 方向（日後仍不夠再評估）。
+> dev 工具：`?renderer=webgl` 強制 WebGL2 重現無硬體加速；`window.__perf.start('x')`→操作→`__perf.report()`。
