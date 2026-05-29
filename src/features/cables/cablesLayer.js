@@ -133,12 +133,21 @@ export function attachCablesLayer({
   // once into gStatic and frozen, while only the dragged route(s) redraw into
   // gDynamic each frame. Each Graphics gets its own badge Container so a frozen
   // static badge isn't wiped when the dynamic layer clears mid-drag.
+  // staticDim wraps gStatic + its badges. The focus dim is applied to THIS
+  // wrapper's alpha — NOT gStatic's — because gStatic is cacheAsTexture'd and
+  // PIXI bakes a Graphics's own alpha INTO the cached texture. Dimming gStatic
+  // directly then re-baking while selected produced a permanently-faint texture
+  // (32-E faint-cable bug). The wrapper isn't cached, so its alpha composites
+  // over the always-full-alpha baked texture and can flip back to 1 cleanly.
+  const staticDim = new Container()
+  staticDim.eventMode = 'none'
+  layer.addChild(staticDim)
   const gStatic = new Graphics()
   gStatic.eventMode = 'none' // pure visual — never intercept clicks
-  layer.addChild(gStatic)
+  staticDim.addChild(gStatic)
   const badgeStatic = new Container()
   badgeStatic.eventMode = 'none'
-  layer.addChild(badgeStatic)
+  staticDim.addChild(badgeStatic)
 
   const gDynamic = new Graphics()
   gDynamic.eventMode = 'none'
@@ -416,8 +425,8 @@ export function attachCablesLayer({
   // Drawing 300 routes at alpha 0.18 was ~16× slower than at alpha 1 (PIXI
   // can't batch translucent strokes the same way) → selecting an AP cost
   // ~2080ms. Instead every route draws at its FULL base alpha and the caller
-  // dims the whole background layer via `gStatic.alpha = DIM_OPACITY` (one
-  // property, no redraw). Per-element effective alpha is identical
+  // dims the whole background layer via `staticDim.alpha = DIM_OPACITY` (one
+  // property, no redraw — on the uncached wrapper so it isn't baked in). Per-element effective alpha is identical
   // (e.g. 0.95 × 0.18); only translucent-overlap blending differs slightly
   // (within the §32-E visual tolerance — cables rarely overlap densely).
   // So `keep` doubles as the focus split: focused routes go to gDynamic
@@ -598,10 +607,11 @@ export function attachCablesLayer({
       gDynamic.clear()
       clearBadges(badgeStatic)
       clearBadges(badgeDynamic)
-      gStatic.alpha = 1
+      staticDim.alpha = 1
       baseResult = null      // stale once there's no floor; force full next time
       routingDirty = false   // !baseResult already forces a full recompute
       splitKey = null
+      staticEpoch = -1       // force a re-bake on the next real rebuild
       lastDragAffected = null
       return
     }
@@ -658,7 +668,8 @@ export function attachCablesLayer({
     const inStatic = (kind, o) =>
       kind === 'route' ? !affected.apIds.has(o.apId) : !affected.linkIds.has(o.srcId)
 
-    gStatic.alpha = hasFocus ? DIM_OPACITY : 1
+    // Dim the WRAPPER (not gStatic — its alpha would bake into the cache texture).
+    staticDim.alpha = hasFocus ? DIM_OPACITY : 1
 
     // staticKey fingerprints what gStatic holds: it changes with the drag
     // target (and is force-nulled by data / viewport changes via
@@ -809,14 +820,12 @@ export function attachCablesLayer({
     unsubViewport()
     unsubDrag()
     clearRoutesCache()  // 32-E shared focus cache — drop on teardown
-    layer.removeChild(gStatic)
-    gStatic.destroy()
+    clearBadges(badgeStatic)
+    clearBadges(badgeDynamic)
+    layer.removeChild(staticDim)            // wraps gStatic + badgeStatic
+    staticDim.destroy({ children: true })
     layer.removeChild(gDynamic)
     gDynamic.destroy()
-    clearBadges(badgeStatic)
-    layer.removeChild(badgeStatic)
-    badgeStatic.destroy({ children: true })
-    clearBadges(badgeDynamic)
     layer.removeChild(badgeDynamic)
     badgeDynamic.destroy({ children: true })
   }
