@@ -258,6 +258,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useFloorStore,
         useWallStore,
         useAPStore,
+        useScopeStore,
+        useFloorHoleStore,
         useHeatmapStore,
       })
       detachSelection = attachSelectionOverlay({
@@ -297,6 +299,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useFloorStore,
         useWallStore,
         useAPStore,
+        useScopeStore,
         useHeatmapStore,
         useHoverReadoutStore,
       })
@@ -392,6 +395,16 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         e.preventDefault()
         useHistoryStore.getState().redo()
         return
+      }
+
+      // ALIGN_FLOOR mode swallows Escape / Delete / Backspace so the
+      // panel stays open and alignment progress isn't accidentally lost.
+      // User must exit via the panel's 「完成」 button (or floor switch
+      // triggers the clear). Matches oldSrc Editor2D line 457-459.
+      if (useEditorStore.getState().editorMode === EDITOR_MODE.ALIGN_FLOOR) {
+        if (e.key === 'Escape' || e.key === 'Delete' || e.key === 'Backspace') {
+          return
+        }
       }
 
       if (e.key === 'Escape') {
@@ -513,6 +526,15 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           s.clearSelected()
         } else if (s.selectedType === 'cable_tray') {
           useCableStore.getState().removeTray(fid, s.selectedId)
+          s.clearSelected()
+        } else if (s.selectedType === 'scope') {
+          useScopeStore.getState().removeScope(fid, s.selectedId)
+          s.clearSelected()
+        } else if (s.selectedType === 'floor_hole') {
+          useFloorHoleStore.getState().removeFloorHole(fid, s.selectedId)
+          s.clearSelected()
+        } else if (s.selectedType === 'cable_riser') {
+          useCableStore.getState().removeRiser(s.selectedId)
           s.clearSelected()
         }
       }

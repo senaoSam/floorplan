@@ -12,6 +12,7 @@ export function bindHeatmapHover({
   useFloorStore,
   useWallStore,
   useAPStore,
+  useScopeStore,
   useHeatmapStore,
   useHoverReadoutStore,
 }) {
@@ -27,10 +28,13 @@ export function bindHeatmapHover({
     const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
     const aps = useAPStore.getState().apsByFloor[activeFloorId] ?? []
     if (aps.length === 0) return null
-    const sig = `${activeFloorId}::${walls.length}::${aps.length}::${floor.scale}`
+    const scopes = useScopeStore
+      ? (useScopeStore.getState().scopesByFloor?.[activeFloorId] ?? [])
+      : []
+    const sig = `${activeFloorId}::${walls.length}::${aps.length}::${scopes.length}::${floor.scale}`
     if (sig === cachedSig && cachedScenario) return cachedScenario
     cachedSig = sig
-    cachedScenario = buildScenario(floor, walls, aps, [], null)
+    cachedScenario = buildScenario(floor, walls, aps, scopes, null)
     return cachedScenario
   }
 
@@ -70,6 +74,7 @@ export function bindHeatmapHover({
   const unsubFloor = useFloorStore.subscribe(invalidate)
   const unsubWall = useWallStore.subscribe(invalidate)
   const unsubAP = useAPStore.subscribe(invalidate)
+  const unsubScope = useScopeStore ? useScopeStore.subscribe(invalidate) : () => {}
 
   stage.on('pointermove', onMove)
 
@@ -77,6 +82,7 @@ export function bindHeatmapHover({
     unsubFloor()
     unsubWall()
     unsubAP()
+    unsubScope()
     stage.off('pointermove', onMove)
     useHoverReadoutStore.getState().setReading(null)
   }

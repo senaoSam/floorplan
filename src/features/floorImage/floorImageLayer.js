@@ -99,9 +99,14 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, 
     const canvas = scene.app.canvas
     const cw = canvas.clientWidth || canvas.width
     const ch = canvas.clientHeight || canvas.height
-    const padding = 32
-    const sx = (cw - padding * 2) / imageWidth
-    const sy = (ch - padding * 2) / imageHeight
+    // Match oldSrc Editor2D FIT_PADDING — 85 % of the canvas covers the
+    // image, leaving a 15 % margin on the shorter axis. Scales with the
+    // canvas (so a wide screen doesn't glue the floor plan to the
+    // edges), rather than a fixed 32 px pad which only matched the old
+    // layout on small canvases.
+    const FIT_PADDING = 0.85
+    const sx = (cw * FIT_PADDING) / imageWidth
+    const sy = (ch * FIT_PADDING) / imageHeight
     const scale = Math.max(useViewportStore.getState().minScale, Math.min(sx, sy))
     useViewportStore.getState().setViewport({
       scale,
@@ -137,6 +142,12 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, 
 
       clearSprite()
       const sprite = new Sprite(texture)
+      // Label lets viewport.js treat a pointerdown on the floor image
+      // sprite as a "background" hit (for pan / marquee / clearSelected
+      // routing). Without this, dragging-to-pan from inside the floor
+      // image extent doesn't trigger pendingDrag because e.target is
+      // the sprite, not the stage.
+      sprite.label = 'floor-image'
       // Pivot on image centre so rotation feels like rotating the
       // page itself (oldSrc Konva Image uses offsetX=cx, offsetY=cy).
       sprite.anchor.set(0.5, 0.5)
@@ -169,10 +180,17 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, 
           return
         }
         if ((e.button ?? 0) !== 0) return
+        // LMB SELECT mode: deferred decision — let the event bubble to
+        // the stage so drag-empty pans the canvas. On pointerup with no
+        // drag, stage's onBackgroundClick will fire `clearSelected`,
+        // which is the right "background click" behaviour. To select
+        // the floor image, use right-click → 「選取」 (or SidebarLeft).
+        // User report: 「選取模式 直接按下非物件的拖曳 會選取平面圖
+        // 底圖物件 這樣我無法直接拖曳」.
         const cap = getModeCapability(editor.editorMode)
         if (!cap.allowSelectClick.meta) return
-        e.stopPropagation()
-        editor.setSelected(floor.id, 'floor_image')
+        // Intentionally NO stopPropagation + NO setSelected — fall
+        // through to stage's pan handling so background drag pans.
       })
       layer.addChild(sprite)
       currentSprite = sprite

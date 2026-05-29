@@ -189,9 +189,14 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
         return
       }
       if ((e.button ?? 0) !== 0) return
-      // DRAW_SCOPE clicks place polygon vertices — body drag is SELECT-only.
-      const cap = getModeCapability(useEditorStore.getState().editorMode)
-      if (!cap.allowSelectClick.struct) return
+      // SELECT or DRAW_SCOPE → click body drags this scope. User wants
+      // own-mode drag to work like DRAW_WALL / PLACE_AP. (DRAW_SCOPE
+      // clicks on empty canvas still place draft polygon points — only
+      // clicks landing INSIDE an existing scope hit this branch.)
+      const editorMode = useEditorStore.getState().editorMode
+      const cap = getModeCapability(editorMode)
+      const isOwnMode = editorMode === EDITOR_MODE.DRAW_SCOPE
+      if (!cap.allowSelectClick.struct && !isOwnMode) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.scope.id, 'scope')
       beginScopeDrag(entry, e)
@@ -200,8 +205,7 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
       if (isAnyBodyDragging()) return
       const mode = useEditorStore.getState().editorMode
       const cap = getModeCapability(mode)
-      // DRAW_SCOPE places polygon points — never grabs an existing scope.
-      const canGrab = mode === EDITOR_MODE.SELECT
+      const canGrab = mode === EDITOR_MODE.SELECT || mode === EDITOR_MODE.DRAW_SCOPE
       container.cursor = canGrab ? 'grab' : ''
       if (!cap.allowSelectHover.struct && !cap.allowCommandHover.struct) return
       useHoverStore.getState().setHover(entry.scope.id, 'scope')
@@ -265,6 +269,7 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
       drawScope(entry)
     }
     applyDragOverlay()
+    applyModeDim()
   }
 
   let lastDragId = null
@@ -301,10 +306,28 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
     if (next) liftToTop(next)
   }
 
+  // Per-container alpha for sibling-type cross-dim. Scopes share the
+  // `scopes` scene layer with floor-holes, so keepLayers can't dim one
+  // without the other. Apply alpha at the container level instead:
+  // DRAW_FLOOR_HOLE mode → all scope containers fade to 0.4 (so the
+  // user focuses on hole-drawing). Other modes → 1.
+  const applyModeDim = () => {
+    const mode = useEditorStore.getState().editorMode
+    const dim = mode === EDITOR_MODE.DRAW_FLOOR_HOLE
+    for (const entry of containers.values()) {
+      entry.container.alpha = dim ? 0.4 : 1
+    }
+  }
+
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
+  let lastModeForDim = useEditorStore.getState().editorMode
   const onEditorChange = () => {
     const s = useEditorStore.getState()
+    if (s.editorMode !== lastModeForDim) {
+      lastModeForDim = s.editorMode
+      applyModeDim()
+    }
     if (s.selectedId === lastSelectedId && s.selectedType === lastSelectedType) return
     const prevId = lastSelectedId
     const prevType = lastSelectedType

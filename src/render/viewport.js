@@ -92,7 +92,13 @@ export function bindViewport({
   }
 
   const onStageDown = (e) => {
-    const isBackground = e.target === stage
+    // Treat both the stage AND the floor image sprite as "background"
+    // for pan / marquee routing — user explicit ask: dragging from the
+    // floor plan area (which is the whole canvas visually) should pan.
+    // Without including the floor image sprite, e.target lands on the
+    // sprite and isBackground stays false, so pendingDrag never sets up
+    // and drag does nothing in SELECT mode.
+    const isBackground = e.target === stage || e.target?.label === 'floor-image'
     const button = e.button ?? 0
     if (typeof window !== 'undefined' && window.__debugRMB === true && button === 2) {
       console.log('[RMB stage] pointerdown isBackground=', isBackground, 'target=', e.target?.label ?? e.target?.constructor?.name, 'global=', `${e.global.x.toFixed(1)},${e.global.y.toFixed(1)}`)

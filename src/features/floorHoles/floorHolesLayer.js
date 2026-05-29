@@ -172,9 +172,12 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
         return
       }
       if ((e.button ?? 0) !== 0) return
-      // DRAW_FLOOR_HOLE clicks place polygon vertices — body drag SELECT-only.
-      const cap = getModeCapability(useEditorStore.getState().editorMode)
-      if (!cap.allowSelectClick.struct) return
+      // SELECT or DRAW_FLOOR_HOLE → click body drags this hole. Mirrors
+      // the scope behaviour — own-mode drag is on by user request.
+      const editorMode = useEditorStore.getState().editorMode
+      const cap = getModeCapability(editorMode)
+      const isOwnMode = editorMode === EDITOR_MODE.DRAW_FLOOR_HOLE
+      if (!cap.allowSelectClick.struct && !isOwnMode) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.hole.id, 'floor_hole')
       beginHoleDrag(entry, e)
@@ -183,7 +186,7 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
       if (isAnyBodyDragging()) return
       const mode = useEditorStore.getState().editorMode
       const cap = getModeCapability(mode)
-      const canGrab = mode === EDITOR_MODE.SELECT
+      const canGrab = mode === EDITOR_MODE.SELECT || mode === EDITOR_MODE.DRAW_FLOOR_HOLE
       container.cursor = canGrab ? 'grab' : ''
       if (!cap.allowSelectHover.struct && !cap.allowCommandHover.struct) return
       useHoverStore.getState().setHover(entry.hole.id, 'floor_hole')
@@ -247,6 +250,19 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
       drawHole(entry)
     }
     applyDragOverlay()
+    applyModeDim()
+  }
+
+  // DRAW_SCOPE → dim all floor-holes (scope+hole share the `scopes`
+  // scene layer so layer-level keepLayers can't isolate them; do alpha
+  // per-container instead). User asked for "切到 scope → hole 變暗,
+  // 反之亦然" mirroring wall/AP behaviour.
+  const applyModeDim = () => {
+    const mode = useEditorStore.getState().editorMode
+    const dim = mode === EDITOR_MODE.DRAW_SCOPE
+    for (const entry of containers.values()) {
+      entry.container.alpha = dim ? 0.4 : 1
+    }
   }
 
   let lastDragId = null
@@ -284,8 +300,13 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
 
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
+  let lastModeForDim = useEditorStore.getState().editorMode
   const onEditorChange = () => {
     const s = useEditorStore.getState()
+    if (s.editorMode !== lastModeForDim) {
+      lastModeForDim = s.editorMode
+      applyModeDim()
+    }
     if (s.selectedId === lastSelectedId && s.selectedType === lastSelectedType) return
     const prevId = lastSelectedId
     const prevType = lastSelectedType
