@@ -243,6 +243,15 @@ export function attachCablesLayer({
   // without re-running Dijkstra. routingDirty is set true by those three
   // subscriptions and on drag end; cleared after a full recompute.
   let routingDirty = true
+  // 32-E: bumped every time baseResult is RECOMPUTED (full or incremental). The
+  // static-layer draw records the epoch it baked; if baseResult changed since,
+  // gStatic must rebuild even when splitKey is unchanged. Without this, a tray
+  // drag commit (which fires while drag.tray is still set → the freeze path
+  // bakes the STALE pre-move routes into gStatic, then the drag-clear rebuild
+  // gets fresh routes but skips the static redraw because splitKey didn't
+  // change) leaves stale cable geometry frozen in the cached texture.
+  let routesEpoch = 0
+  let staticEpoch = -1
   // 32-E: the store-slice refs from the last FULL computeRoutes, so a dirty
   // rebuild can diff what actually changed. A drag COMMIT (updateAP on release)
   // or any single-AP edit changes only that AP's object (Zustand immutable
@@ -325,10 +334,11 @@ export function attachCablesLayer({
         // edit changed only that AP). Falls back to full when topology or the
         // AP set changed.
         const inc = tryIncrementalDirty(building)
-        if (inc) return inc
+        if (inc) { routesEpoch++; return inc }
         baseResult = computeRoutes(building)
         lastInputs = building
         routingDirty = false
+        routesEpoch++
       }
       return baseResult
     }
@@ -338,6 +348,7 @@ export function attachCablesLayer({
       baseResult = computeRoutes(building)
       lastInputs = building
       routingDirty = false
+      routesEpoch++
       return baseResult
     }
 
@@ -665,28 +676,36 @@ export function attachCablesLayer({
     // single-object drag, the background wasn't force-invalidated (splitKey !==
     // null, i.e. no data/viewport change), and we actually know which routes to
     // re-add (lastDragAffected). Anything else → full rebuild.
+    // gStatic is stale if the routes themselves changed since we last baked it
+    // (routesEpoch bump) — even if splitKey is unchanged. This catches the tray-
+    // drag-commit case where the freeze path baked pre-move geometry and the
+    // follow-up rebuild would otherwise skip the static redraw.
+    const routesStale = staticEpoch !== routesEpoch
+
     let staticRedrawn = false
     const releasing =
       nextStaticKey === 'none' &&
       splitKey !== null && splitKey !== 'none' &&
       lastDragAffected &&
       (lastDragAffected.apIds.size + lastDragAffected.linkIds.size) > 0
-    if (releasing) {
+    if (releasing && !routesStale) {
       // Append the dropped route(s) into frozen gStatic (no clear → keep the
-      // other 299). gDynamic is cleared below, handing the route back to static.
+      // other 299). Only safe when the rest of the routes are still current
+      // (routesStale guards the tray-move case where they all changed).
       const a = lastDragAffected
       const onlySettled = (kind, o) =>
         kind === 'route' ? a.apIds.has(o.apId) : a.linkIds.has(o.srcId)
       drawRoutes(gStatic, badgeStatic, routes, switchLinks, dctx, onlySettled)
       splitKey = nextStaticKey
       staticRedrawn = true
-    } else if (splitKey !== nextStaticKey) {
+    } else if (splitKey !== nextStaticKey || routesStale) {
       gStatic.clear()
       clearBadges(badgeStatic)
       drawRoutes(gStatic, badgeStatic, routes, switchLinks, dctx, inStatic)
       splitKey = nextStaticKey
       staticRedrawn = true
     }
+    if (staticRedrawn) staticEpoch = routesEpoch
     // Re-bake the gStatic cache texture only when its content changed (see the
     // cacheAsTexture note in the header). Software renderers re-raster a 72k-
     // instruction Graphics at ~120 ms/frame otherwise.
