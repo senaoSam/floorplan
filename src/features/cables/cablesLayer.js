@@ -727,16 +727,22 @@ export function attachCablesLayer({
     // cacheAsTexture note in the header). Software renderers re-raster a 72k-
     // instruction Graphics at ~120 ms/frame otherwise.
     if (staticRedrawn) {
-      // cacheAsTexture bakes gStatic's WORLD alpha, so the wrapper MUST be at
-      // alpha 1 during the bake or the dim gets baked into the texture (and
-      // stays faint after deselect — the 32-E faint-cable bug). Force alpha 1,
-      // bake SYNCHRONOUSLY (so the texture captures full brightness now), then
-      // apply the desired dim to the sprite afterward — it composites over the
-      // full-bright texture and is fully reversible.
-      staticDim.alpha = 1
+      // cacheAsTexture bakes gStatic's WORLD alpha (its OWN alpha AND every
+      // ancestor's — the staticDim focus-dim, the cables-layer mode-dim from
+      // modeAdapter, etc.). Baking while any ancestor is dimmed bakes the dim
+      // INTO the texture, so it stays faint after the dim is lifted (the 32-E
+      // faint-cable / "切模式回來變暗" bugs). Force the whole ancestor chain to
+      // alpha 1, bake SYNCHRONOUSLY (texture captures full brightness now),
+      // then restore — the dims re-apply as sprite/layer alpha over the full-
+      // bright texture and stay fully reversible.
+      const restore = []
+      for (let node = gStatic; node; node = node.parent) {
+        if (node.alpha !== 1) { restore.push([node, node.alpha]); node.alpha = 1 }
+      }
       if (!gStatic.isCachedAsTexture) gStatic.cacheAsTexture(true)
       else gStatic.updateCacheTexture()
       scene.app.renderer.render(scene.app.stage)
+      for (const [node, a] of restore) node.alpha = a
     }
     staticDim.alpha = wantDim ? DIM_OPACITY : 1
     lastDragAffected = (drag.ap || drag.sw) ? affected : null
