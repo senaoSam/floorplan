@@ -25,13 +25,14 @@ import { attachRefOverlayLayer } from '@/features/refOverlay/refOverlayLayer'
 import { bindAlignTransform } from '@/render/bindAlignTransform'
 import { createDraftModeController } from '@/render/draftModeController'
 import ScaleDialog from '@/components/ScaleDialog/ScaleDialog'
+import Viewer3D from '@/features/viewer3d/Viewer3D'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useCableStore } from '@/store/useCableStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
-import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE, VIEW_MODE } from '@/store/useEditorStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useScopeStore } from '@/store/useScopeStore'
@@ -605,9 +606,24 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     return unsub
   }, [])
 
+  // Subscribe to viewMode so the 2D ↔ 3D switch re-renders the canvas
+  // visibility. The PIXI canvas stays mounted (cheaper than tearing it
+  // down on every toggle); CSS just hides it when 3D is up.
+  const viewMode = useEditorStore((s) => s.viewMode)
+  const is3D = viewMode === VIEW_MODE.THREE_D
+
   return (
     <div className="floorplan-system">
-      <div ref={containerRef} className="floorplan-system__canvas" />
+      <div
+        ref={containerRef}
+        className="floorplan-system__canvas"
+        style={is3D ? { visibility: 'hidden', pointerEvents: 'none' } : null}
+      />
+      {is3D && (
+        <div className="floorplan-system__viewer3d">
+          <Viewer3D />
+        </div>
+      )}
       <MaterialToast />
       {scaleDialog && (
         <ScaleDialog

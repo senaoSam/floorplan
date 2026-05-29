@@ -60,6 +60,9 @@ export const useEditorStore = create((set, get) => ({
   showRisers: true,
   // Per-band AP visibility (gated by showAPs master toggle).
   showAPBand: { 2.4: true, 5: true, 6: true },
+  // 3D viewer — render all floors stacked (true) vs. only the active
+  // floor (false). Toggled from the Viewer3D overlay.
+  show3DAllFloors: true,
   // Per-kind Switch visibility (gated by showSwitches master toggle).
   showSwitchKind: { switch: true, idf: true, mdf: true, router: true },
 

@@ -10,3 +10,11 @@
 .floorplan-system__canvas
   position: absolute
   inset: 0
+
+// Viewer3D mounts on top of (and replaces visually) the PIXI canvas
+// when viewMode === '3d'. The PIXI canvas is hidden but kept mounted so
+// switching back to 2D is instant (no scene re-init).
+.floorplan-system__viewer3d
+  position: absolute
+  inset: 0
+  z-index: 2
