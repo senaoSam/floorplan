@@ -47,14 +47,6 @@ import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 //      cleared and redrawn each frame). Outside a drag everything draws into
 //      gStatic and gDynamic stays empty.
 
-// 32-E: cacheAsTexture the cable background only when it's heavy enough that
-// per-frame re-rasterising on a software renderer hurts. Below this the layer
-// draws crisp vector (a few hundred instructions costs nothing even without
-// GPU accel), avoiding the texture-upsample blur cacheAsTexture causes on large
-// canvases / zoom-in. ~300 AP + a spanning tray is ~70k instructions; a normal
-// scene (a handful of routes) is a few hundred.
-const CACHE_INSTR_THRESHOLD = 3000
-
 const TRAY_COLOR        = '#22d3ee'
 const TRAY_NODE_STROKE  = '#0e7490'
 const FALLBACK_COLOR    = '#9ca3af'
@@ -141,12 +133,12 @@ export function attachCablesLayer({
   // once into gStatic and frozen, while only the dragged route(s) redraw into
   // gDynamic each frame. Each Graphics gets its own badge Container so a frozen
   // static badge isn't wiped when the dynamic layer clears mid-drag.
-  // staticDim wraps gStatic + its badges. The focus dim is applied to THIS
-  // wrapper's alpha — NOT gStatic's — because gStatic is cacheAsTexture'd and
-  // PIXI bakes a Graphics's own alpha INTO the cached texture. Dimming gStatic
-  // directly then re-baking while selected produced a permanently-faint texture
-  // (32-E faint-cable bug). The wrapper isn't cached, so its alpha composites
-  // over the always-full-alpha baked texture and can flip back to 1 cleanly.
+  // staticDim wraps gStatic + its badges; the focus dim sets this wrapper's
+  // alpha to DIM_OPACITY. (gStatic draws as plain vector — no cacheAsTexture —
+  // so the lines stay crisp/full-brightness at any zoom. An earlier version
+  // cached gStatic to a texture for software-render perf, but the static/dynamic
+  // split already avoids per-frame re-tessellation, so the cache was unnecessary
+  // and caused upsample blur + alpha-bake dimming bugs; removed.)
   const staticDim = new Container()
   staticDim.eventMode = 'none'
   layer.addChild(staticDim)
@@ -676,13 +668,10 @@ export function attachCablesLayer({
     const inStatic = (kind, o) =>
       kind === 'route' ? !affected.apIds.has(o.apId) : !affected.linkIds.has(o.srcId)
 
-    // Dim is applied to the WRAPPER (not gStatic) so it isn't baked per-route.
-    // BUT cacheAsTexture bakes using gStatic's WORLD alpha, so if we re-bake
-    // while the wrapper is dimmed the texture itself goes faint (and stays faint
-    // after deselect). So: any frame that re-bakes must do so with the wrapper
-    // at alpha 1; the dim (if focused) is applied on a follow-up render where no
-    // bake happens. `wantDim` is the desired end state; we set the actual alpha
-    // below depending on whether this frame bakes.
+    // Focus dim: drop the whole background to DIM_OPACITY via the staticDim
+    // wrapper's alpha (one property, no per-route alpha → keeps draw cheap; see
+    // drawRoutes header). Applied to the wrapper rather than gStatic just for
+    // tidiness — gStatic is plain vector now so either would work.
     const wantDim = hasFocus
 
     // staticKey fingerprints what gStatic holds: it changes with the drag
@@ -731,37 +720,14 @@ export function attachCablesLayer({
       staticRedrawn = true
     }
     if (staticRedrawn) staticEpoch = routesEpoch
-    if (staticRedrawn) {
-      // cacheAsTexture trades crispness for per-frame draw cost: it bakes the
-      // background to ONE texture (huge win re-rastering 72k instructions on
-      // software renderers), but the texture is resolution-fixed, so on a large
-      // canvas / zoomed in it upsamples and the thin cyan lines blur + look dim
-      // ("蒙了一層遮罩" — visible at 1920 width). So only cache when the layer is
-      // HEAVY enough to need it; light scenes draw crisp vector (cheap anyway).
-      const instr = gStatic.context?.instructions?.length ?? 0
-      const wantCache = instr >= CACHE_INSTR_THRESHOLD
-      if (wantCache) {
-        // cacheAsTexture bakes gStatic's WORLD alpha (its OWN AND every
-        // ancestor's — staticDim focus-dim, the cables-layer mode-dim from
-        // modeAdapter). Baking while dimmed bakes the dim INTO the texture and
-        // it stays faint after the dim lifts (the faint-cable / "切模式回來變暗"
-        // bugs). Force the whole ancestor chain to alpha 1, bake synchronously
-        // so the texture captures full brightness, then restore — the dims
-        // re-apply as sprite/layer alpha over the bright texture, reversibly.
-        const restore = []
-        for (let node = gStatic; node; node = node.parent) {
-          if (node.alpha !== 1) { restore.push([node, node.alpha]); node.alpha = 1 }
-        }
-        if (!gStatic.isCachedAsTexture) gStatic.cacheAsTexture(true)
-        else gStatic.updateCacheTexture()
-        scene.app.renderer.render(scene.app.stage)
-        for (const [node, a] of restore) node.alpha = a
-      } else if (gStatic.isCachedAsTexture) {
-        // Dropped below the threshold (e.g. routes removed) → uncache for crisp
-        // vector rendering again.
-        gStatic.cacheAsTexture(false)
-      }
-    }
+    // gStatic draws as plain vector (no cacheAsTexture). The static/dynamic
+    // split already prevents the per-frame re-tessellation that originally made
+    // drags janky: gStatic is rebuilt only when its content changes (drag
+    // start/end, data, viewport) — NOT per pointermove — and PIXI re-draws an
+    // unchanged Graphics from its cached geometry batch in ~1 ms. Vector keeps
+    // the lines crisp + full-brightness at any canvas size / zoom (cacheAsTexture
+    // baked to a fixed resolution → upsample blur + dim haze, and baked any
+    // ancestor dim into the texture — a whole family of bugs now gone).
     staticDim.alpha = wantDim ? DIM_OPACITY : 1
     lastDragAffected = (drag.ap || drag.sw) ? affected : null
 
