@@ -1,5 +1,5 @@
 import React from 'react'
-import { useEditorStore } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import APPanel from './APPanel'
 import SwitchPanel from './SwitchPanel'
@@ -9,6 +9,7 @@ import WallPanel from './WallPanel'
 import ScopePanel from './ScopePanel'
 import FloorHolePanel from './FloorHolePanel'
 import FloorImagePanel from './FloorImagePanel'
+import AlignFloorPanel from './AlignFloorPanel'
 import BatchPanel from './BatchPanel'
 import './PanelRight.sass'
 
@@ -21,16 +22,23 @@ function PanelRight() {
   const selectedId           = useEditorStore((s) => s.selectedId)
   const selectedType         = useEditorStore((s) => s.selectedType)
   const selectedItems        = useEditorStore((s) => s.selectedItems)
+  const editorMode           = useEditorStore((s) => s.editorMode)
   const panelCollapsed       = useEditorStore((s) => s.panelCollapsed)
   const togglePanelCollapsed = useEditorStore((s) => s.togglePanelCollapsed)
   const activeFloorId        = useFloorStore((s) => s.activeFloorId)
 
   const isBatch      = selectedItems.length > 1
-  const hasSelection = !!selectedId || isBatch
+  // ALIGN_FLOOR forces the panel open regardless of selection — the panel
+  // is the only UI for the mode (oldSrc parity). Always targets the
+  // active floor's transform.
+  const isAlignMode  = editorMode === EDITOR_MODE.ALIGN_FLOOR
+  const hasSelection = !!selectedId || isBatch || isAlignMode
   const isOpen       = hasSelection && !panelCollapsed
 
   let body = null
-  if (isBatch && activeFloorId) {
+  if (isAlignMode && activeFloorId) {
+    body = <AlignFloorPanel floorId={activeFloorId} />
+  } else if (isBatch && activeFloorId) {
     body = <BatchPanel />
   } else if (!isBatch && activeFloorId) {
     switch (selectedType) {

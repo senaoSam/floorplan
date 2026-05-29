@@ -1,6 +1,6 @@
 import { Container, Graphics } from 'pixi.js'
 import { DropShadowFilter } from 'pixi-filters'
-import { useEditorStore } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useDraftStore } from '@/store/useDraftStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
@@ -189,6 +189,7 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
         return
       }
       if ((e.button ?? 0) !== 0) return
+      // DRAW_SCOPE clicks place polygon vertices — body drag is SELECT-only.
       const cap = getModeCapability(useEditorStore.getState().editorMode)
       if (!cap.allowSelectClick.struct) return
       e.stopPropagation()
@@ -197,7 +198,11 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
     })
     container.on('pointerover', () => {
       if (isAnyBodyDragging()) return
-      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      const mode = useEditorStore.getState().editorMode
+      const cap = getModeCapability(mode)
+      // DRAW_SCOPE places polygon points — never grabs an existing scope.
+      const canGrab = mode === EDITOR_MODE.SELECT
+      container.cursor = canGrab ? 'grab' : ''
       if (!cap.allowSelectHover.struct && !cap.allowCommandHover.struct) return
       useHoverStore.getState().setHover(entry.scope.id, 'scope')
     })

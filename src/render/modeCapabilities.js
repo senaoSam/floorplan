@@ -38,7 +38,14 @@ function emptyCap() {
     showMagnet:         { tray: 'never', riser: 'never' },
     cursor:             'default',
     allowContextMenu:   false,
+    // dimOthers: legacy category-based dim list (kept for back-compat).
+    // Layers are now actually dimmed/kept via `keepLayers` below — a more
+    // precise per-layer keep-list so e.g. PLACE_AP doesn't accidentally
+    // keep walls / scopes / floor-holes full just because they share the
+    // 'struct' category with the active draw target. User explicit ask:
+    // strict mode-relevant focus.
     dimOthers:          [],
+    keepLayers:         'all',
   }
 }
 
@@ -59,30 +66,37 @@ const SELECT_CAP = {
   cursor:             'default',
   allowContextMenu:   true,
   dimOthers:          [],
+  keepLayers:         'all',
 }
 
 const PAN_CAP = {
   ...emptyCap(),
   ...COMMAND_OVERLAY,
   cursor: 'grab',
+  keepLayers: 'all',
 }
 
 const MARQUEE_CAP = {
   ...emptyCap(),
   ...COMMAND_OVERLAY,
   cursor: 'crosshair',
+  keepLayers: 'all',
 }
 
+// Strict per-mode keep-lists. floorImage always stays full (background
+// reference) — other categories follow the rule "only my own type stays
+// bright, everything else dims" so the user can focus on the active
+// edit. heatmap only stays full in PLACE_AP since it's purely RF
+// visualisation. scopes layer hosts BOTH scope and floor_hole objects
+// in this codebase, so DRAW_SCOPE and DRAW_FLOOR_HOLE both keep it.
 const DRAW_WALL_CAP = {
   ...emptyCap(),
   ...COMMAND_OVERLAY,
   cursor: 'crosshair',
   dimOthers: ['wireless', 'cable', 'meta'],
+  keepLayers: ['floorImage', 'walls'],
 }
 
-// Shared by DRAW_DOOR + DRAW_WINDOW — both modes drive the same click flow
-// (pick wall, pick second point on the same wall, insert opening); only
-// the openingKind written by wallsLayer differs.
 const DOOR_WINDOW_CAP = (() => {
   const c = emptyCap()
   c.allowSelectClick.struct = true
@@ -91,6 +105,7 @@ const DOOR_WINDOW_CAP = (() => {
   c.allowContextMenu = true
   c.cursor = 'crosshair'
   c.dimOthers = ['wireless', 'cable', 'meta']
+  c.keepLayers = ['floorImage', 'walls']
   return c
 })()
 
@@ -99,6 +114,7 @@ const DRAW_SCOPE_CAP = {
   ...COMMAND_OVERLAY,
   cursor: 'crosshair',
   dimOthers: ['wireless', 'cable', 'meta'],
+  keepLayers: ['floorImage', 'scopes'],
 }
 
 const DRAW_FLOOR_HOLE_CAP = {
@@ -106,6 +122,7 @@ const DRAW_FLOOR_HOLE_CAP = {
   ...COMMAND_OVERLAY,
   cursor: 'crosshair',
   dimOthers: ['wireless', 'cable', 'meta'],
+  keepLayers: ['floorImage', 'scopes'],
 }
 
 const PLACE_AP_CAP = {
@@ -113,7 +130,13 @@ const PLACE_AP_CAP = {
   ...COMMAND_OVERLAY,
   cursor: 'crosshair',
   dimOthers: ['cable', 'meta'],
+  keepLayers: ['floorImage', 'devicesAP', 'heatmap'],
 }
+
+// Cable modes share a keep-list — switches / cable trays / risers are
+// one integrated system and APs are the endpoints those cables land on,
+// so all stay full while structural / scope / floor-hole layers dim.
+const CABLE_KEEP = ['floorImage', 'devicesSW', 'devicesAP', 'cables', 'trays', 'devicesRiser']
 
 const PLACE_SWITCH_CAP = {
   ...emptyCap(),
@@ -121,6 +144,7 @@ const PLACE_SWITCH_CAP = {
   cursor: 'crosshair',
   showMagnet: { tray: 'all', riser: 'never' },
   dimOthers: ['wireless', 'meta'],
+  keepLayers: CABLE_KEEP,
 }
 
 const DRAW_CABLE_TRAY_CAP = {
@@ -129,6 +153,7 @@ const DRAW_CABLE_TRAY_CAP = {
   cursor: 'crosshair',
   showMagnet: { tray: 'all', riser: 'all' },
   dimOthers: ['wireless', 'meta'],
+  keepLayers: CABLE_KEEP,
 }
 
 const PLACE_RISER_CAP = {
@@ -137,6 +162,7 @@ const PLACE_RISER_CAP = {
   cursor: 'crosshair',
   showMagnet: { tray: 'never', riser: 'all' },
   dimOthers: ['wireless', 'meta'],
+  keepLayers: CABLE_KEEP,
 }
 
 const DRAW_SCALE_CAP = {
@@ -144,18 +170,21 @@ const DRAW_SCALE_CAP = {
   ...COMMAND_OVERLAY,
   cursor: 'crosshair',
   dimOthers: ['struct', 'wireless', 'cable'],
+  keepLayers: ['floorImage'],
 }
 
 const CROP_IMAGE_CAP = {
   ...emptyCap(),
   cursor: 'crosshair',
   dimOthers: ['struct', 'wireless', 'cable'],
+  keepLayers: ['floorImage'],
 }
 
 const ALIGN_FLOOR_CAP = {
   ...emptyCap(),
   cursor: 'default',
   dimOthers: [],
+  keepLayers: 'all',
 }
 
 const CAP_BY_MODE = {

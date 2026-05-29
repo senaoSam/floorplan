@@ -1,7 +1,7 @@
 import { Container, Graphics, Rectangle, Text, TextStyle } from 'pixi.js'
 import { getSwitchKindColor } from '@/store/useCableStore'
 import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
-import { useEditorStore } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useDraftStore } from '@/store/useDraftStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
@@ -271,15 +271,22 @@ export function attachSwitchesLayer({
         return
       }
       if ((e.button ?? 0) !== 0) return
-      const cap = getModeCapability(useEditorStore.getState().editorMode)
-      if (!cap.allowSelectClick.cable) return
+      // User-requested: PLACE_SWITCH + pointerdown on existing switch →
+      // drag that switch instead of dropping a new one.
+      const editorMode = useEditorStore.getState().editorMode
+      const cap = getModeCapability(editorMode)
+      const isOwnMode = editorMode === EDITOR_MODE.PLACE_SWITCH
+      if (!cap.allowSelectClick.cable && !isOwnMode) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.sw.id, 'switch')
       beginDrag(entry, e)
     })
     container.on('pointerover', () => {
       if (isAnyBodyDragging()) return
-      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      const mode = useEditorStore.getState().editorMode
+      const cap = getModeCapability(mode)
+      const canGrab = mode === EDITOR_MODE.SELECT || mode === EDITOR_MODE.PLACE_SWITCH
+      container.cursor = canGrab ? 'grab' : ''
       if (!cap.allowSelectHover.cable && !cap.allowCommandHover.cable) return
       useHoverStore.getState().setHover(entry.sw.id, 'switch')
     })

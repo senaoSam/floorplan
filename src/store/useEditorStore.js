@@ -67,6 +67,14 @@ export const useEditorStore = create((set, get) => ({
   regulatoryDomain: 'TW',
   autoChannelOnPlace: true,
 
+  // ALIGN_FLOOR mode reference overlays.
+  // `alignRefFloors` is a list of floor IDs displayed as translucent
+  // tinted overlays while the active floor is being aligned. `null` is
+  // the "uninitialised" sentinel — AlignFloorPanel seeds it on first
+  // mount to "all other floors visible".
+  alignRefFloors: null,
+  alignRefOpacity: 0.3,
+
   setEditorMode: (mode) => set({
     editorMode: mode,
     selectedId: null,
@@ -118,6 +126,14 @@ export const useEditorStore = create((set, get) => ({
 
   setRegulatoryDomain: (id) => set({ regulatoryDomain: id }),
   toggleAutoChannelOnPlace: () => set((s) => ({ autoChannelOnPlace: !s.autoChannelOnPlace })),
+
+  setAlignRefFloors: (ids) => set({ alignRefFloors: ids }),
+  toggleAlignRefFloor: (id) => set((s) => {
+    const current = s.alignRefFloors ?? []
+    const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id]
+    return { alignRefFloors: next }
+  }),
+  setAlignRefOpacity: (v) => set({ alignRefOpacity: v }),
 
   contextMenu: null,
   openContextMenu: (payload) => {

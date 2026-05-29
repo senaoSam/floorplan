@@ -3,6 +3,7 @@ import { MATERIALS } from '@/constants/materials'
 import { DEFAULT_TRAY } from '@/store/useCableStore'
 import { generateId } from '@/utils/id'
 import { snapTrayPoint } from '@/features/draft/traySnap'
+import { isAnyBodyDragging } from '@/store/useDragOverlayStore'
 
 // Owns the draft-mode click / move / commit / cancel flow.
 // Returns the callback set viewport.bindViewport reads, plus a separate
@@ -184,22 +185,37 @@ export function createDraftModeController({
     const mode = useEditorStore.getState().editorMode
     const s = snapDraftPoint(worldPt, mode)
     useDraftStore.getState().setCursor(s.pos)
-    // Wall + parallel snap kinds drive an extra halo overlay. Tray-vertex
-    // snap has its own green halo path already inside draftOverlayLayer
-    // (findVertexAt looks up cursor xy against existing trays).
+    // While a body drag is in flight (e.g. dragging an existing wall in
+    // DRAW_WALL) the per-object drag handler owns snapHint — it knows
+    // which endpoint of the dragged object is snapping to what. Without
+    // this guard our cursor-relative snap and the drag handler's
+    // endpoint-relative snap would race on draftStore.snapHint and the
+    // halo would flicker between two locations.
+    if (isAnyBodyDragging()) return
+    // Snap halos are a "if you click here, snap will happen" cue —
+    // useful BEFORE the 1st click (lets the user position the start of
+    // the wall onto an existing wall's endpoint / segment) as well as
+    // between 1st and 2nd click. parallelWall is the one exception: it
+    // measures angle against an anchor, so it only makes sense after a
+    // 1st point exists.
+    const hasDraft = useDraftStore.getState().points.length > 0
     if (mode === EDITOR_MODE.DRAW_CABLE_TRAY) {
-      const visibleKind = (s.kind === 'wallEndpoint' || s.kind === 'wallSegment' || s.kind === 'parallelWall')
-        ? s
-        : null
+      let visibleKind = null
+      if (s.kind === 'trayVertex' || s.kind === 'wallEndpoint' || s.kind === 'wallSegment') {
+        visibleKind = s
+      } else if (hasDraft && s.kind === 'parallelWall') {
+        visibleKind = s
+      }
       useDraftStore.getState().setSnapHint(visibleKind)
     } else if (mode === EDITOR_MODE.DRAW_WALL) {
       // Wall draw — surface endpoint (cyan ring), wall-segment foot
-      // (orange square), and parallel-wall lock (purple guide).
+      // (orange square) any time the cursor is in range. parallelWall
+      // still needs an anchor point.
       if (s.kind === 'wallEndpoint') {
         useDraftStore.getState().setSnapHint({ kind: 'wallEndpoint', pos: s.pos })
       } else if (s.kind === 'wallSegment') {
         useDraftStore.getState().setSnapHint({ kind: 'wallSegment', pos: s.pos, ref: s.ref })
-      } else if (s.kind === 'parallelWall') {
+      } else if (hasDraft && s.kind === 'parallelWall') {
         useDraftStore.getState().setSnapHint({
           kind: 'parallelWall',
           pos: s.pos,

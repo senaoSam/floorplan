@@ -351,10 +351,11 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     })
 
     container.hitArea = makePolylineHitArea(points, HIT_TOLERANCE_PX / vpScale)
-    // Cursor parity with oldSrc CableTrayLayer 290-292: 'move' once the
-    // tray is selected (drag now translates), 'pointer' otherwise (click
-    // will select). PIXI applies cursor on pointerover automatically.
-    container.cursor = isSelected ? 'move' : 'pointer'
+    // Cursor is now driven solely by pointerover (gated by mode). Setting
+    // it here on every redraw fought the pointerover update — e.g. switch
+    // to DRAW_CABLE_TRAY, the redraw was overwriting cursor back to
+    // 'move' / 'pointer' even though the layer should defer to canvas
+    // crosshair. See bindInteractions below.
   }
 
   const bindInteractions = (entry) => {
@@ -379,6 +380,8 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
         return
       }
       if ((e.button ?? 0) !== 0) return
+      // DRAW_CABLE_TRAY clicks place draft points (snap-to-vertex if
+      // within range). Body drag only in SELECT mode.
       const cap = getModeCapability(useEditorStore.getState().editorMode)
       if (!cap.allowSelectClick.cable) return
       e.stopPropagation()
@@ -395,7 +398,19 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
     })
     container.on('pointerover', () => {
       if (isAnyBodyDragging()) return
-      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      const mode = useEditorStore.getState().editorMode
+      const cap = getModeCapability(mode)
+      // DRAW_CABLE_TRAY never grabs — clicking a tray body / endpoint
+      // there starts a draft point (snap-to-vertex if close). SELECT
+      // 'move' when this tray is already selected (drag translates),
+      // 'pointer' before selection (click will select).
+      if (mode === EDITOR_MODE.SELECT) {
+        const ed = useEditorStore.getState()
+        const isSelected = ed.selectedId === entry.tray.id && ed.selectedType === 'cable_tray'
+        container.cursor = isSelected ? 'move' : 'pointer'
+      } else {
+        container.cursor = ''
+      }
       if (!cap.allowSelectHover.cable && !cap.allowCommandHover.cable) return
       useHoverStore.getState().setHover(entry.tray.id, 'cable_tray')
     })

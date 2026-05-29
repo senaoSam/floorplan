@@ -7,6 +7,7 @@ import { useDraftStore } from '@/store/useDraftStore'
 import { OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 import { getModeCapability } from '@/render/modeCapabilities'
+import { snapToWallForTray } from '@/features/draft/traySnap'
 
 const DRAG_COMMIT_THRESHOLD_PX = 1
 
@@ -88,7 +89,7 @@ function makeSegmentHitArea(ax, ay, bx, by, tolerance, wallId) {
   return obj
 }
 
-export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
+export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawModeClick }) {
   const layer = scene.layers.walls
   layer.eventMode = 'passive'
 
@@ -101,6 +102,42 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
   const dw = { wallId: null, startFrac: null }
   const isDoorWindowMode = (mode) =>
     mode === EDITOR_MODE.DRAW_DOOR || mode === EDITOR_MODE.DRAW_WINDOW
+
+  // DRAW_WALL cursor alternation — user-requested. While the cursor sits
+  // over a wall in DRAW_WALL mode, the canvas cursor flips between
+  // 'grab' and 'crosshair' once per second to signal that both gestures
+  // are available (drag wall body vs. click to place a draft point).
+  // We track hovered wall ids in a Set so moving between walls without
+  // leaving the layer doesn't drop the alternation.
+  const hoveredWallIds = new Set()
+  let cursorTickInterval = null
+  let cursorTickToggle = false
+
+  const updateCursorAlternation = () => {
+    const mode = useEditorStore.getState().editorMode
+    const shouldTick = mode === EDITOR_MODE.DRAW_WALL && hoveredWallIds.size > 0
+    const canvas = scene.app.canvas
+    if (shouldTick && !cursorTickInterval) {
+      cursorTickToggle = true
+      if (canvas) canvas.style.cursor = 'grab'
+      cursorTickInterval = setInterval(() => {
+        const m = useEditorStore.getState().editorMode
+        if (m !== EDITOR_MODE.DRAW_WALL || hoveredWallIds.size === 0) return
+        cursorTickToggle = !cursorTickToggle
+        if (canvas) canvas.style.cursor = cursorTickToggle ? 'grab' : 'crosshair'
+      }, 1000)
+    } else if (!shouldTick && cursorTickInterval) {
+      clearInterval(cursorTickInterval)
+      cursorTickInterval = null
+      // Restore the mode cursor — modeAdapter usually owns this but the
+      // alternation overwrites canvas.style.cursor directly, so on stop
+      // we hand it back to whatever the current mode wants (modeAdapter
+      // may have already written it; we re-apply to be safe in case the
+      // subscriber order put us after it).
+      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      if (canvas) canvas.style.cursor = cap.cursor ?? 'default'
+    }
+  }
 
   const ensureContainer = (wall, floorId) => {
     let entry = containers.get(wall.id)
@@ -295,6 +332,18 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
         handleDoorWindowClick(entry, e, editor.editorMode)
         return
       }
+      // DRAW_WALL pointerdown on a wall — deferred click-or-drag:
+      //   * drag past threshold → translate this wall (body drag)
+      //   * click & release in place → fall through to onDrawModeClick at
+      //     the down position so the wall body acts as a snap target for
+      //     the new draft point (snap-to-wall-foot via snapDraftPoint)
+      // User explicitly asked for both gestures to coexist + cursor 1s
+      // alternation (grab ↔ crosshair) to signal "two actions possible".
+      if (editor.editorMode === EDITOR_MODE.DRAW_WALL) {
+        e.stopPropagation()
+        beginDrawWallDeferredClickOrDrag(entry, e)
+        return
+      }
       const cap = getModeCapability(editor.editorMode)
       if (!cap.allowSelectClick.struct) return
       e.stopPropagation()
@@ -309,11 +358,27 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
       // Endpoint / vertex drags don't set the body-drag flag, so they
       // intentionally keep hover enabled for the drop-target affordance.
       if (isAnyBodyDragging()) return
-      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      const mode = useEditorStore.getState().editorMode
+      const cap = getModeCapability(mode)
+      if (mode === EDITOR_MODE.DRAW_WALL) {
+        // Layer-level alternation owns canvas cursor — leave container
+        // cursor blank so it doesn't fight the interval's writes.
+        hoveredWallIds.add(entry.wall.id)
+        updateCursorAlternation()
+        container.cursor = ''
+      } else {
+        // Only SELECT shows the grab affordance; other modes fall
+        // through to canvas mode cursor.
+        const canGrab = mode === EDITOR_MODE.SELECT
+        container.cursor = canGrab ? 'grab' : ''
+      }
       if (!cap.allowSelectHover.struct && !cap.allowCommandHover.struct) return
       useHoverStore.getState().setHover(entry.wall.id, 'wall')
     })
-    container.on('pointerout',  () => useHoverStore.getState().clearHoverIf(entry.wall.id))
+    container.on('pointerout', () => {
+      useHoverStore.getState().clearHoverIf(entry.wall.id)
+      if (hoveredWallIds.delete(entry.wall.id)) updateCursorAlternation()
+    })
     // DRAW_DOOR / DRAW_WINDOW preview — once the user has placed the first
     // click on THIS wall, drive a live cursorFrac so draftOverlayLayer can
     // paint a coloured band between startFrac and cursorFrac (door brown /
@@ -337,6 +402,109 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
   // Wall-body drag — translate both endpoints by the same delta. Uses the
   // dragOverlay store so the wall geometry isn't rewritten on every move
   // (cable routing + heatmap recompute happen only on dragend).
+  // While body-dragging a wall, check both endpoints against every OTHER
+  // wall's endpoint / segment foot. If the closer endpoint lands within
+  // snap range, adjust dx/dy so it sticks exactly to the target — and
+  // surface the snap kind through draftStore.snapHint so the same cyan
+  // ring / orange square halos that the draw flow uses render under the
+  // dragged wall's endpoint. User explicit request: "移動牆壁時 如果端
+  // 點出現另一個牆壁的端點或牆身 也要有 端點 snap or 方形 snap 提示".
+  const computeWallDragSnap = (entry, startWall, dxRaw, dyRaw) => {
+    const otherWalls = (useWallStore.getState().wallsByFloor[entry.floorId] ?? [])
+      .filter((w) => w.id !== entry.wall.id)
+    if (otherWalls.length === 0) {
+      return { dx: dxRaw, dy: dyRaw, hint: null }
+    }
+    const scale = useViewportStore.getState().scale || 1
+    const newStart = { x: startWall.startX + dxRaw, y: startWall.startY + dyRaw }
+    const newEnd   = { x: startWall.endX   + dxRaw, y: startWall.endY   + dyRaw }
+    const sSnap = snapToWallForTray(newStart, otherWalls, scale)
+    const eSnap = snapToWallForTray(newEnd,   otherWalls, scale)
+    if (!sSnap && !eSnap) {
+      return { dx: dxRaw, dy: dyRaw, hint: null }
+    }
+    // Pick the closer of the two endpoint snaps when both fire.
+    let winner = null, anchor = null
+    if (sSnap && eSnap) {
+      const sD = Math.hypot(newStart.x - sSnap.pos.x, newStart.y - sSnap.pos.y)
+      const eD = Math.hypot(newEnd.x   - eSnap.pos.x, newEnd.y   - eSnap.pos.y)
+      if (sD <= eD) { winner = sSnap; anchor = { x: startWall.startX, y: startWall.startY } }
+      else          { winner = eSnap; anchor = { x: startWall.endX,   y: startWall.endY   } }
+    } else if (sSnap) {
+      winner = sSnap; anchor = { x: startWall.startX, y: startWall.startY }
+    } else {
+      winner = eSnap; anchor = { x: startWall.endX,   y: startWall.endY   }
+    }
+    return {
+      dx: winner.pos.x - anchor.x,
+      dy: winner.pos.y - anchor.y,
+      hint: { kind: winner.kind, pos: winner.pos, ref: winner.wall },
+    }
+  }
+
+  // DRAW_WALL pointerdown on existing wall: defer the click-vs-drag
+  // decision until pointerup so the gesture can resolve into either
+  //   * drag past threshold → body-drag the wall (move it)
+  //   * release without drag → forward a "place draft point at this
+  //     world pos" to draftCtrl.onDrawModeClick (the same path stage
+  //     uses for clicks on empty canvas), letting snapDraftPoint snap
+  //     onto wall endpoint / segment foot.
+  const beginDrawWallDeferredClickOrDrag = (entry, downEvent) => {
+    const stage = scene.app.stage
+    const startGlobal = { x: downEvent.global.x, y: downEvent.global.y }
+    const startWorld = scene.world.toLocal(downEvent.global)
+    const startWall = {
+      startX: entry.wall.startX, startY: entry.wall.startY,
+      endX:   entry.wall.endX,   endY:   entry.wall.endY,
+    }
+    let dragStarted = false
+    let dx = 0, dy = 0
+
+    const onMove = (e) => {
+      if (!dragStarted) {
+        const dist = Math.hypot(e.global.x - startGlobal.x, e.global.y - startGlobal.y)
+        if (dist <= DRAG_COMMIT_THRESHOLD_PX) return
+        dragStarted = true
+        useDragOverlayStore.getState().setWall({ id: entry.wall.id, dx: 0, dy: 0 })
+      }
+      const wp = scene.world.toLocal(e.global)
+      const dxRaw = wp.x - startWorld.x
+      const dyRaw = wp.y - startWorld.y
+      const snap = computeWallDragSnap(entry, startWall, dxRaw, dyRaw)
+      dx = snap.dx
+      dy = snap.dy
+      entry.container.position.set(dx, dy)
+      useDragOverlayStore.getState().setWall({ id: entry.wall.id, dx, dy })
+      useDraftStore.getState().setSnapHint(snap.hint)
+    }
+    const onUp = () => {
+      stage.off('pointermove', onMove)
+      stage.off('pointerup', onUp)
+      stage.off('pointerupoutside', onUp)
+      useDraftStore.getState().setSnapHint(null)
+      if (dragStarted) {
+        entry.container.position.set(0, 0)
+        if (Math.hypot(dx, dy) > DRAG_COMMIT_THRESHOLD_PX) {
+          useWallStore.getState().updateWall(entry.floorId, entry.wall.id, {
+            startX: startWall.startX + dx,
+            startY: startWall.startY + dy,
+            endX:   startWall.endX   + dx,
+            endY:   startWall.endY   + dy,
+          })
+        }
+        useDragOverlayStore.getState().setWall(null)
+      } else if (typeof onDrawModeClick === 'function') {
+        // No drag → click-to-place: forward to draft controller which
+        // applies snapDraftPoint (wall endpoint / segment foot) and
+        // begins / extends the draft.
+        onDrawModeClick({ x: startWorld.x, y: startWorld.y })
+      }
+    }
+    stage.on('pointermove', onMove)
+    stage.on('pointerup', onUp)
+    stage.on('pointerupoutside', onUp)
+  }
+
   const beginDrag = (entry, downEvent) => {
     const startWorld = scene.world.toLocal(downEvent.global)
     const startWall = {
@@ -352,19 +520,29 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
 
     const onMove = (e) => {
       const wp = scene.world.toLocal(e.global)
-      dx = wp.x - startWorld.x
-      dy = wp.y - startWorld.y
+      const dxRaw = wp.x - startWorld.x
+      const dyRaw = wp.y - startWorld.y
+      // Endpoint-onto-wall snap during body drag (user-requested):
+      // hovering an endpoint of the dragged wall onto another wall's
+      // endpoint / segment within snap range nudges dx/dy so the
+      // endpoint lands exactly on the target, and the matching snap
+      // halo (cyan ring / orange square) lights up via draftStore.
+      const snap = computeWallDragSnap(entry, startWall, dxRaw, dyRaw)
+      dx = snap.dx
+      dy = snap.dy
       // Live preview: temporarily shift the wall container so the line
       // moves with the cursor without committing to the store yet.
       entry.container.position.set(dx, dy)
       // Signal "wall body drag in flight" so every layer's pointerover
       // bail (isAnyBodyDragging) suppresses hover during the drag.
       useDragOverlayStore.getState().setWall({ id: entry.wall.id, dx, dy })
+      useDraftStore.getState().setSnapHint(snap.hint)
     }
     const onUp = () => {
       stage.off('pointermove', onMove)
       stage.off('pointerup', onUp)
       stage.off('pointerupoutside', onUp)
+      useDraftStore.getState().setSnapHint(null)
       dlog('  drag onUp wall=', entry.wall.id, 'dx=', dx, 'dy=', dy)
       // Reset transient transform; the store update below will redraw at
       // the new world coords.
@@ -457,6 +635,9 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     const mode = useEditorStore.getState().editorMode
     if (mode !== lastEditorMode) {
       lastEditorMode = mode
+      // Mode change → re-evaluate cursor alternation (stop when leaving
+      // DRAW_WALL so modeAdapter can restore the canvas cursor cleanly).
+      updateCursorAlternation()
       if (!isDoorWindowMode(mode)) {
         dw.wallId = null
         dw.startFrac = null
@@ -575,6 +756,11 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore }) {
     unsubViewport()
     unsubEditor()
     window.removeEventListener('keydown', onKeyDown)
+    if (cursorTickInterval) {
+      clearInterval(cursorTickInterval)
+      cursorTickInterval = null
+    }
+    hoveredWallIds.clear()
     for (const id of Array.from(containers.keys())) removeContainer(id)
   }
 }

@@ -92,7 +92,9 @@ export function attachHandlesLayer({
     const hover = useHoverStore.getState()
     const fid = useFloorStore.getState().activeFloorId
     if (!fid) return null
-    // Hide handles when not in SELECT mode (oldSrc capability.showHandles).
+    // Hide handles outside SELECT — user follow-up: DRAW_WALL is a draw
+    // mode, no selection / no handle interaction. Endpoint extension
+    // happens via snap-to-endpoint when placing draft points.
     if (editor.editorMode !== EDITOR_MODE.SELECT) return null
     const walls = useWallStore.getState().wallsByFloor[fid] ?? []
     // Prefer selected wall; fall back to hovered wall so the handles act

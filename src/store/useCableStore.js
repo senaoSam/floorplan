@@ -315,11 +315,28 @@ export const useCableStore = create((set, get) => ({
         const pick = bestMain ?? bestWarn
         if (pick) finalSw = { ...sw, uplinkTo: pick.id }
       }
+
+      // User-requested: backfill orphan uplinks when a higher-tier switch
+      // is added (oldSrc shipped the same one-direction auto-fill so an
+      // SW→IDF→MDF→RTR placed in that order left every switch's uplinkTo
+      // null, and no S2S lines rendered). Walk all existing switches and
+      // give them this new switch as uplinkTo iff (a) their uplinkTo is
+      // null and (b) finalSw is a 'main' target under their kind's rules.
+      const updatedByFloor = { ...state.switchesByFloor }
+      for (const [fid, list] of Object.entries(updatedByFloor)) {
+        updatedByFloor[fid] = (list ?? []).map((other) => {
+          if (other.uplinkTo != null) return other
+          const otherRules = UPLINK_RULES[other.kind] ?? {}
+          if (otherRules[finalSw.kind] !== 'main') return other
+          return { ...other, uplinkTo: finalSw.id }
+        })
+      }
+
       return {
         globalSwitchCounter: state.globalSwitchCounter + 1,
         switchesByFloor: {
-          ...state.switchesByFloor,
-          [floorId]: [...(state.switchesByFloor[floorId] ?? []), finalSw],
+          ...updatedByFloor,
+          [floorId]: [...(updatedByFloor[floorId] ?? []), finalSw],
         },
       }
     }),

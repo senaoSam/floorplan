@@ -1,4 +1,5 @@
 import { Graphics } from 'pixi.js'
+import { useFloorStore } from '@/store/useFloorStore'
 
 // Wires pointer + wheel events on the PIXI scene to a viewport store, and
 // imperatively applies store updates back to the world Container transform.
@@ -34,6 +35,7 @@ export function bindViewport({
   isMarqueeMode,
   isPanMode,
   isCropMode,
+  isAlignMode,
   onDrawModeClick,
   onDrawModeMove,
   onDrawModeRightClick,
@@ -120,44 +122,72 @@ export function bindViewport({
       return
     }
     if (button === 0) {
-      // Place / Draw modes consume the LMB regardless of whether the
-      // cursor was over an object or empty canvas. Object layers' own
-      // pointerdown handlers return early in non-SELECT modes WITHOUT
-      // stopPropagation, so the event bubbles up to here. Without this
-      // change the user couldn't drop an AP or extend a draft point on
-      // top of an existing wall / tray / scope etc.
-      if (typeof isPlaceMode === 'function' && isPlaceMode()) {
+      const isPlace = typeof isPlaceMode === 'function' && isPlaceMode()
+      const isDraw  = typeof isDrawMode  === 'function' && isDrawMode()
+      const isCrop  = typeof isCropMode  === 'function' && isCropMode()
+
+      // CROP_IMAGE keeps its existing flow (Bundle 49 drag-to-select).
+      // pointerdown sets pt0, pointerup-with-drag commits pt1.
+      if (isDraw && isCrop) {
         const wp = world.toLocal(e.global)
-        if (typeof onPlaceModeClick === 'function') {
-          onPlaceModeClick({ x: wp.x, y: wp.y })
-        }
+        if (typeof onDrawModeClick === 'function') onDrawModeClick({ x: wp.x, y: wp.y })
+        cropDragDownGlobal = { x: e.global.x, y: e.global.y }
         return
       }
-      if (typeof isDrawMode === 'function' && isDrawMode()) {
+
+      // Place / non-crop draw modes — defer the commit to pointerup so
+      // dragging on an empty area pans the canvas instead of dropping an
+      // object (user request: "按下去放開 才算放AP；按著拖曳就是拖曳；
+      // 拖曳空白處應該也要能移動"). The per-object layers handle their
+      // own pointerdown for the "drag existing same-type object" path,
+      // stopping propagation before we get here.
+      if (isPlace || isDraw) {
         const wp = world.toLocal(e.global)
-        if (typeof onDrawModeClick === 'function') {
-          onDrawModeClick({ x: wp.x, y: wp.y })
+        const handler = isPlace ? onPlaceModeClick : onDrawModeClick
+        pendingDrag = {
+          startGlobal: { x: e.global.x, y: e.global.y },
+          startWorld: { ...wp },
+          mode: 'click-or-pan',
+          onClick: typeof handler === 'function' ? handler : null,
         }
-        // CROP_IMAGE: record the down-position so onStageUp can promote
-        // a drag gesture into a commit (Q1 — drag-to-select consistency
-        // with MARQUEE_SELECT).
-        if (typeof isCropMode === 'function' && isCropMode()) {
-          cropDragDownGlobal = { x: e.global.x, y: e.global.y }
-        }
+        marqueeActive = false
         return
       }
+
       // Background LMB:
+      //   ALIGN_FLOOR     → drag-translate the active floor's
+      //                     alignOffsetX/Y (Figma-like direct manipulation
+      //                     — sliders still work for precise edits, but
+      //                     dragging the canvas now moves *just the active
+      //                     floor*, not the whole viewport. Without this,
+      //                     dragging in align mode pans world which shifts
+      //                     BOTH active and ref floors together — the user
+      //                     correctly flagged that as confusing).
       //   MARQUEE_SELECT  → click-or-marquee (oldSrc Editor2D 783-787).
       //   SELECT / other  → click-or-pan: pointerup with no drag clears
       //                     the selection; drag past the threshold
       //                     upgrades the gesture to a pan (matches the
       //                     "拖曳畫布移動視角" affordance the user expects).
       if (isBackground) {
+        const inAlign = typeof isAlignMode === 'function' && isAlignMode()
         const inMarquee = typeof isMarqueeMode === 'function' && isMarqueeMode()
-        pendingDrag = {
-          startGlobal: { x: e.global.x, y: e.global.y },
-          startWorld: { ...world.toLocal(e.global) },
-          mode: inMarquee ? 'marquee' : 'pan',
+        if (inAlign) {
+          const { floors, activeFloorId } = useFloorStore.getState()
+          const floor = floors.find((f) => f.id === activeFloorId)
+          pendingDrag = {
+            startGlobal: { x: e.global.x, y: e.global.y },
+            startWorld: { ...world.toLocal(e.global) },
+            mode: 'align-translate',
+            floorId: activeFloorId,
+            startAlignOx: floor?.alignOffsetX ?? 0,
+            startAlignOy: floor?.alignOffsetY ?? 0,
+          }
+        } else {
+          pendingDrag = {
+            startGlobal: { x: e.global.x, y: e.global.y },
+            startWorld: { ...world.toLocal(e.global) },
+            mode: inMarquee ? 'marquee' : 'pan',
+          }
         }
         marqueeActive = false
       }
@@ -204,15 +234,31 @@ export function bindViewport({
           const cur = world.toLocal(e.global)
           drawMarquee(pendingDrag.startWorld, cur)
         }
-      } else if (pendingDrag.mode === 'pan' && dist > MARQUEE_DRAG_THRESHOLD_PX) {
-        // Upgrade click-or-pan to an active pan now that the user has
-        // dragged past the threshold. Subsequent moves are handled by the
-        // panActive branch above on the next tick.
+      } else if ((pendingDrag.mode === 'pan' || pendingDrag.mode === 'click-or-pan') && dist > MARQUEE_DRAG_THRESHOLD_PX) {
+        // Upgrade click-or-pan (background or place / draw mode) to an
+        // active pan now that the user has dragged past the threshold.
+        // Subsequent moves are handled by the panActive branch above on
+        // the next tick.
         panActive = true
         panLastX = e.global.x
         panLastY = e.global.y
         stage.cursor = 'grabbing'
         pendingDrag = null
+      } else if (pendingDrag.mode === 'align-translate' && dist > MARQUEE_DRAG_THRESHOLD_PX) {
+        // ALIGN_FLOOR drag-translate — convert cursor world-delta into
+        // active floor's alignOffsetX/Y. Assumes alignRotation = 0 and
+        // alignScale = 1 (worldDelta == imageDelta in that case). Users
+        // doing rotated/scaled alignment should still fall back to the
+        // sliders.
+        const cur = world.toLocal(e.global)
+        const dx = cur.x - pendingDrag.startWorld.x
+        const dy = cur.y - pendingDrag.startWorld.y
+        if (pendingDrag.floorId) {
+          useFloorStore.getState().setAlignTransform(pendingDrag.floorId, {
+            alignOffsetX: pendingDrag.startAlignOx + dx,
+            alignOffsetY: pendingDrag.startAlignOy + dy,
+          })
+        }
       }
     }
   }
@@ -250,6 +296,16 @@ export function bindViewport({
           maxY: Math.max(pendingDrag.startWorld.y, end.y),
         }
         if (typeof onMarqueeCommit === 'function') onMarqueeCommit(rect)
+      } else if (pendingDrag.mode === 'align-translate') {
+        // Drag-translate writes were applied live on each move; nothing
+        // to commit here. Don't fall through to onBackgroundClick — that
+        // would clear selection unrelated to the align gesture.
+      } else if (pendingDrag.mode === 'click-or-pan' && pendingDrag.onClick) {
+        // Place / non-crop draw mode: pointerup without drag fires the
+        // deferred click handler at the down position so the new object
+        // / draft point lands where the user pressed (not where they
+        // released — feels less jittery on imprecise mice).
+        pendingDrag.onClick(pendingDrag.startWorld)
       } else if (typeof onBackgroundClick === 'function') {
         // Diagnostic: include click world position so a user reporting
         // "click missed the wall" can confirm whether their cursor was

@@ -1,6 +1,6 @@
 import { Container, Graphics, Rectangle, Text, TextStyle } from 'pixi.js'
 import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
-import { useEditorStore } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useDraftStore } from '@/store/useDraftStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
@@ -150,15 +150,22 @@ export function attachRisersLayer({ scene, useFloorStore, useCableStore }) {
         return
       }
       if ((e.button ?? 0) !== 0) return
-      const cap = getModeCapability(useEditorStore.getState().editorMode)
-      if (!cap.allowSelectClick.cable) return
+      // User-requested: PLACE_RISER + pointerdown on existing riser →
+      // drag that riser instead of placing a new one.
+      const editorMode = useEditorStore.getState().editorMode
+      const cap = getModeCapability(editorMode)
+      const isOwnMode = editorMode === EDITOR_MODE.PLACE_RISER
+      if (!cap.allowSelectClick.cable && !isOwnMode) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.riser.id, 'cable_riser')
       beginDrag(entry, e)
     })
     container.on('pointerover', () => {
       if (isAnyBodyDragging()) return
-      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      const mode = useEditorStore.getState().editorMode
+      const cap = getModeCapability(mode)
+      const canGrab = mode === EDITOR_MODE.SELECT || mode === EDITOR_MODE.PLACE_RISER
+      container.cursor = canGrab ? 'grab' : ''
       if (!cap.allowSelectHover.cable && !cap.allowCommandHover.cable) return
       useHoverStore.getState().setHover(entry.riser.id, 'cable_riser')
     })

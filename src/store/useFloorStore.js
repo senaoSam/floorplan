@@ -40,6 +40,21 @@ export const useFloorStore = create((set, get) => ({
       floors: state.floors.map((f) => (f.id === id ? { ...f, scale } : f)),
     })),
 
+  // Inter-floor alignment transform — patch keys live on the floor record
+  // (alignOffsetX/Y, alignScale, alignRotation). Applied as a Container
+  // transform during ALIGN_FLOOR mode; object coords are not rewritten.
+  setAlignTransform: (id, patch) =>
+    set((state) => ({
+      floors: state.floors.map((f) => (f.id === id ? { ...f, ...patch } : f)),
+    })),
+
+  resetAlignTransform: (id) =>
+    set((state) => ({
+      floors: state.floors.map((f) =>
+        f.id === id ? { ...f, alignOffsetX: 0, alignOffsetY: 0, alignScale: 1, alignRotation: 0 } : f,
+      ),
+    })),
+
   reorderFloors: (from, to) =>
     set((state) => {
       if (from === to || from < 0 || from >= state.floors.length) return {}

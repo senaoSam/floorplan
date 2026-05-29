@@ -21,6 +21,8 @@ import { attachHeatmapLayer } from '@/render/heatmapAdapter'
 import { bindHeatmapHover } from '@/render/heatmapHoverBinder'
 import { attachDraftOverlay } from '@/features/draft/draftOverlayLayer'
 import { attachHandlesLayer } from '@/features/handles/handlesLayer'
+import { attachRefOverlayLayer } from '@/features/refOverlay/refOverlayLayer'
+import { bindAlignTransform } from '@/render/bindAlignTransform'
 import { createDraftModeController } from '@/render/draftModeController'
 import ScaleDialog from '@/components/ScaleDialog/ScaleDialog'
 import { useViewportStore } from '@/store/useViewportStore'
@@ -72,6 +74,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachHeatmapHover = null
     let detachDraftOverlay = null
     let detachHandles = null
+    let detachRefOverlay = null
+    let detachAlignTransform = null
     let cancelled = false
 
     const draftCtrl = createDraftModeController({
@@ -136,6 +140,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         isMarqueeMode: () => useEditorStore.getState().editorMode === EDITOR_MODE.MARQUEE_SELECT,
         isPanMode:     () => useEditorStore.getState().editorMode === EDITOR_MODE.PAN,
         isCropMode:    () => useEditorStore.getState().editorMode === EDITOR_MODE.CROP_IMAGE,
+        isAlignMode:   () => useEditorStore.getState().editorMode === EDITOR_MODE.ALIGN_FLOOR,
         onDrawModeClick: draftCtrl.onDrawModeClick,
         onDrawModeMove: draftCtrl.onDrawModeMove,
         onDrawModeRightClick: draftCtrl.onDrawModeRightClick,
@@ -218,6 +223,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         scene: s,
         useFloorStore,
         useWallStore,
+        onDrawModeClick: draftCtrl.onDrawModeClick,
       })
       detachAPs = attachAPsLayer({
         scene: s,
@@ -306,6 +312,20 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useWallStore,
         useCableStore,
         useEditorStore,
+      })
+      detachRefOverlay = attachRefOverlayLayer({
+        scene: s,
+        useFloorStore,
+        useEditorStore,
+        useWallStore,
+        useAPStore,
+        useScopeStore,
+        useFloorHoleStore,
+      })
+      detachAlignTransform = bindAlignTransform({
+        scene: s,
+        useEditorStore,
+        useFloorStore,
       })
       if (import.meta.env.DEV) {
         window.__pixiApp = s.app
@@ -506,6 +526,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       window.removeEventListener('keyup',   onShiftUp)
       unsubModeForDraft()
       if (detachLayerVisibility) detachLayerVisibility()
+      if (detachAlignTransform) detachAlignTransform()
+      if (detachRefOverlay) detachRefOverlay()
       if (detachHandles) detachHandles()
       if (detachDraftOverlay) detachDraftOverlay()
       if (detachHeatmapHover) detachHeatmapHover()

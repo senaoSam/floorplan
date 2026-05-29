@@ -1,14 +1,12 @@
 import { getModeCapability } from '@/render/modeCapabilities'
 
 // Wires editor mode → canvas-side side-effects:
-//   * stage cursor (oldSrc capability.cursor)
-//   * per-layer dim opacity (oldSrc capability.dimOthers — fade non-
-//     target object categories to ~0.4 so the canvas visually reads
-//     "you are in X mode")
-//
-// Ports the oldSrc `useEffect` blocks in Editor2D.jsx that set
-// container.style.cursor and layer.opacity. Centralised here so
-// every layer doesn't need its own subscription.
+//   * canvas cursor (oldSrc capability.cursor)
+//   * per-layer dim opacity (cap.keepLayers — layers in the keep-list
+//     stay at full opacity, everything else dims to 0.4). Replaces the
+//     prior category-based dim so e.g. PLACE_AP correctly dims walls
+//     even though the user might want to see scopes (different layer
+//     but same 'struct' category).
 //
 // Pan-mode override: when a viewport pan is in flight, stage.cursor is
 // 'grabbing' / 'grab' — that wins over the mode cursor because
@@ -16,28 +14,32 @@ import { getModeCapability } from '@/render/modeCapabilities'
 // instead, so the two cursors don't collide (canvas.style is the
 // default; stage.cursor overrides only while a pointer event is active).
 
-export function attachModeAdapter({ scene, canvas, useEditorStore }) {
-  const layerCategoryMap = [
-    { layer: scene.layers.walls,    cat: 'struct'   },
-    { layer: scene.layers.scopes,   cat: 'struct'   },   // FloorHole rides on scopes layer
-    { layer: scene.layers.cables,   cat: 'cable'    },
-    { layer: scene.layers.trays,    cat: 'cable'    },
-    { layer: scene.layers.devicesAP,    cat: 'wireless' },
-    { layer: scene.layers.devicesSW,    cat: 'cable'    },
-    { layer: scene.layers.devicesRiser, cat: 'cable'    },
-    { layer: scene.layers.floorImage,   cat: 'meta'     },
-  ]
+// Every scene layer that participates in dim/keep. heatmap included so
+// PLACE_AP can keep it bright while every other mode fades it.
+const DIMMABLE_LAYER_KEYS = [
+  'floorImage',
+  'heatmap',
+  'walls',
+  'scopes',
+  'cables',
+  'trays',
+  'devicesAP',
+  'devicesSW',
+  'devicesRiser',
+]
 
+export function attachModeAdapter({ scene, canvas, useEditorStore }) {
   const apply = () => {
     const mode = useEditorStore.getState().editorMode
     const cap = getModeCapability(mode)
-    // Cursor — set on the actual canvas element so it takes effect even
-    // when no pointer is over a PIXI interactive container.
     if (canvas) canvas.style.cursor = cap.cursor ?? 'default'
-    // Dim non-target categories. opacity 1 (visible) / 0.4 (faded).
-    for (const { layer, cat } of layerCategoryMap) {
+    const keep = cap.keepLayers
+    const keepAll = keep === 'all'
+    for (const key of DIMMABLE_LAYER_KEYS) {
+      const layer = scene.layers[key]
       if (!layer) continue
-      layer.alpha = cap.dimOthers.includes(cat) ? 0.4 : 1
+      const isKept = keepAll || (Array.isArray(keep) && keep.includes(key))
+      layer.alpha = isKept ? 1 : 0.4
     }
   }
 

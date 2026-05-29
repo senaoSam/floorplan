@@ -49,12 +49,34 @@ export async function initScene({ container, background = '#1e1e2e' }) {
   world.label = 'world'
   app.stage.addChild(world)
 
+  // refOverlay sits BELOW all per-active-floor content so that ALIGN_FLOOR
+  // mode's tinted reference floors paint underneath the active floor (the
+  // active floor is the "anchor" the user is aligning to). It receives
+  // only the viewport transform (via world) — each ref floor's per-floor
+  // alignTransform is applied to a sub-Container inside refOverlay by
+  // attachRefOverlayLayer. Outside ALIGN_FLOOR mode this Container is
+  // empty / hidden.
+  const refOverlay = new Container()
+  refOverlay.label = 'refOverlay'
+  refOverlay.visible = false
+  world.addChild(refOverlay)
+
+  // contentWrap is the parent of every per-active-floor layer. Outside
+  // ALIGN_FLOOR mode it's the identity (so the layers render at their
+  // natural world position); in ALIGN_FLOOR mode bindAlignTransform sets
+  // its position/pivot/rotation/scale to the active floor's align
+  // transform so the active floor's preview moves alongside the
+  // reference floors as the user adjusts the panel sliders.
+  const contentWrap = new Container()
+  contentWrap.label = 'contentWrap'
+  world.addChild(contentWrap)
+
   const layers = {}
   for (const key of LAYER_KEYS) {
     const c = new Container()
     c.label = key
     layers[key] = c
-    world.addChild(c)
+    contentWrap.addChild(c)
   }
 
   // Cables are pure visual — disable hit-test entirely.
@@ -63,6 +85,8 @@ export async function initScene({ container, background = '#1e1e2e' }) {
   return {
     app,
     world,
+    refOverlay,
+    contentWrap,
     layers,
     destroy() {
       app.destroy(true, { children: true, texture: false })

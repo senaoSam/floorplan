@@ -1,6 +1,6 @@
 import { Container, Graphics, Circle, Text, TextStyle } from 'pixi.js'
 import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
-import { useEditorStore } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useDraftStore } from '@/store/useDraftStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
@@ -65,6 +65,17 @@ const INFO_TEXT_STYLE = new TextStyle({
   align: 'center',
   lineHeight: 14.3,
 })
+// User-requested: show frequency label INSIDE the AP body circle ("2.4" /
+// "5" / "6") so the band is identifiable at a glance, not only via the
+// info pill below. fill colour is set per-state in drawAP so the text
+// stays readable against hover-invert and selected states.
+const FREQ_INSIDE_LABEL = { 2.4: '2.4', 5: '5', 6: '6' }
+const FREQ_INSIDE_BASE_STYLE = {
+  fontFamily: 'system-ui, sans-serif',
+  fontSize: 9,
+  fontWeight: '700',
+  align: 'center',
+}
 const FREQ_LABEL_LONG = { 2.4: '2.4G', 5: '5G', 6: '6G' }
 // oldSrc Rect width:80 height:44 cornerRadius:4, Group offsetX:40 y:19.
 const INFO_PILL_W = 80
@@ -157,12 +168,21 @@ export function attachAPsLayer({
       infoText.y = INFO_TEXT_Y
       infoText.eventMode = 'none'
       infoText.visible = false
+      // Frequency label inside the body circle (omni-only — directional /
+      // custom APs already show an orientation arrow there).
+      const freqInsideText = new Text({
+        text: '',
+        style: new TextStyle({ ...FREQ_INSIDE_BASE_STYLE, fill: BODY_STROKE_NORMAL }),
+      })
+      freqInsideText.anchor.set(0.5, 0.5)
+      freqInsideText.eventMode = 'none'
       c.addChild(g)
       c.addChild(infoBg)
+      c.addChild(freqInsideText)
       c.addChild(nameText)
       c.addChild(infoText)
       layer.addChild(c)
-      entry = { container: c, graphics: g, infoBg, nameText, infoText, ap, floorId }
+      entry = { container: c, graphics: g, infoBg, nameText, infoText, freqInsideText, ap, floorId }
       containers.set(ap.id, entry)
       bindInteractions(entry)
     } else {
@@ -268,6 +288,21 @@ export function attachAPsLayer({
       .fill({ color: bodyFill, alpha: 1 })
       .stroke({ width: bodyWidth, color: bodyStroke, alpha: 1 })
 
+    // Frequency label inside the body — omni only (directional / custom
+    // already use the centre for their orientation arrow). User-requested
+    // addition beyond oldSrc parity. Text colour follows stroke colour so
+    // it stays readable against the white / inverted / selected body.
+    const showFreqInside = !isOriented
+    entry.freqInsideText.visible = showFreqInside
+    if (showFreqInside) {
+      const label = FREQ_INSIDE_LABEL[ap.frequency] ?? ''
+      if (entry.freqInsideText.text !== label) entry.freqInsideText.text = label
+      const desiredFill = bodyStroke
+      if (entry.freqInsideText.style.fill !== desiredFill) {
+        entry.freqInsideText.style = new TextStyle({ ...FREQ_INSIDE_BASE_STYLE, fill: desiredFill })
+      }
+    }
+
     // Orientation arrow (bar + tip) — for directional / custom only.
     // oldSrc: Group{rotation: azimuth}, bar [-4,0]-[4,0] stroke 1.5,
     // tip [7,0]-[3,-3]-[3,3] closed filled. Rotated manually here.
@@ -336,8 +371,14 @@ export function attachAPsLayer({
       // matrix (oldSrc modeCapabilities). In draw / place modes the
       // user clicking an existing object should fall through to the
       // stage handler (add draft point / drop a new device).
-      const cap = getModeCapability(useEditorStore.getState().editorMode)
-      if (!cap.allowSelectClick.wireless) return
+      // User-requested: drag own type in own place mode. PLACE_AP +
+      // pointerdown on existing AP → drag that AP, not place a new one.
+      // (viewport's place-click now fires on pointerup-no-drag, so the
+      // place flow only kicks in when the user clicks empty.)
+      const editorMode = useEditorStore.getState().editorMode
+      const cap = getModeCapability(editorMode)
+      const isOwnMode = editorMode === EDITOR_MODE.PLACE_AP
+      if (!cap.allowSelectClick.wireless && !isOwnMode) return
       e.stopPropagation()
       useEditorStore.getState().setSelected(entry.ap.id, 'ap')
       beginDrag(entry, e)
@@ -347,7 +388,14 @@ export function attachAPsLayer({
     // affordance so the user knows what right-click would target.
     container.on('pointerover', () => {
       if (isAnyBodyDragging()) return
-      const cap = getModeCapability(useEditorStore.getState().editorMode)
+      const mode = useEditorStore.getState().editorMode
+      const cap = getModeCapability(mode)
+      // Cursor rule: ONLY SELECT mode or own PLACE mode shows the grab
+      // affordance. DRAW modes always fall through to the canvas mode
+      // cursor (crosshair) — clicking in draw modes places a draft
+      // point, never grabs an existing object.
+      const canGrab = mode === EDITOR_MODE.SELECT || mode === EDITOR_MODE.PLACE_AP
+      container.cursor = canGrab ? 'grab' : ''
       if (!cap.allowSelectHover.wireless && !cap.allowCommandHover.wireless) return
       useHoverStore.getState().setHover(entry.ap.id, 'ap')
     })
