@@ -668,8 +668,14 @@ export function attachCablesLayer({
     const inStatic = (kind, o) =>
       kind === 'route' ? !affected.apIds.has(o.apId) : !affected.linkIds.has(o.srcId)
 
-    // Dim the WRAPPER (not gStatic — its alpha would bake into the cache texture).
-    staticDim.alpha = hasFocus ? DIM_OPACITY : 1
+    // Dim is applied to the WRAPPER (not gStatic) so it isn't baked per-route.
+    // BUT cacheAsTexture bakes using gStatic's WORLD alpha, so if we re-bake
+    // while the wrapper is dimmed the texture itself goes faint (and stays faint
+    // after deselect). So: any frame that re-bakes must do so with the wrapper
+    // at alpha 1; the dim (if focused) is applied on a follow-up render where no
+    // bake happens. `wantDim` is the desired end state; we set the actual alpha
+    // below depending on whether this frame bakes.
+    const wantDim = hasFocus
 
     // staticKey fingerprints what gStatic holds: it changes with the drag
     // target (and is force-nulled by data / viewport changes via
@@ -721,9 +727,18 @@ export function attachCablesLayer({
     // cacheAsTexture note in the header). Software renderers re-raster a 72k-
     // instruction Graphics at ~120 ms/frame otherwise.
     if (staticRedrawn) {
+      // cacheAsTexture bakes gStatic's WORLD alpha, so the wrapper MUST be at
+      // alpha 1 during the bake or the dim gets baked into the texture (and
+      // stays faint after deselect — the 32-E faint-cable bug). Force alpha 1,
+      // bake SYNCHRONOUSLY (so the texture captures full brightness now), then
+      // apply the desired dim to the sprite afterward — it composites over the
+      // full-bright texture and is fully reversible.
+      staticDim.alpha = 1
       if (!gStatic.isCachedAsTexture) gStatic.cacheAsTexture(true)
       else gStatic.updateCacheTexture()
+      scene.app.renderer.render(scene.app.stage)
     }
+    staticDim.alpha = wantDim ? DIM_OPACITY : 1
     lastDragAffected = (drag.ap || drag.sw) ? affected : null
 
     // Foreground overlay — redrawn every rebuild (cheap: focused + dragged only).
