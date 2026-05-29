@@ -1,5 +1,10 @@
 import { Container, Graphics, Text, TextStyle } from 'pixi.js'
-import { computeRoutes } from '@/features/cable/computeRoutes'
+import {
+  computeRoutes,
+  buildRoutingContext,
+  routeOneAP,
+  routeOneSwitchLink,
+} from '@/features/cable/computeRoutes'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
@@ -195,6 +200,78 @@ export function attachCablesLayer({
     return out
   }
 
+  // 32-C incremental routing cache. `baseResult` holds the last FULL
+  // computeRoutes output. While dragging a single AP / switch we rebuild the
+  // graph (~1ms) but run Dijkstra for ONLY the dragged object (the other
+  // ~999 routes are reused from baseResult), dropping per-frame cost from
+  // ~93ms to ~1ms at 1000 APs. See .claude/perf-baseline.md §32-0.
+  //
+  // Identity guarantee: the incremental path derives from the SAME graph +
+  // the SAME routeOneAP / routeOneSwitchLink helpers computeRoutes uses, so
+  // the drag-time route equals what dragend's full recompute produces — the
+  // cable never jumps on release (verified by scripts/test-incremental-routing.mjs).
+  let baseResult = null  // { routes: Map, switchLinks: Map }
+
+  // Produce { routes, switchLinks } for drawing, choosing full vs incremental
+  // based on what (if anything) is being dragged. `building` already has the
+  // drag overlay applied to the relevant store slice.
+  const computeRoutesForDraw = (building, drag) => {
+    const draggingAP   = !!drag.ap
+    const draggingSW   = !!drag.sw
+    // Tray / trayVertex drag mutates the shared graph topology — safe
+    // incremental isn't worth it, so we FREEZE: keep drawing baseResult
+    // unchanged until dragend triggers a full recompute. (User-approved 32-C
+    // scope decision.)
+    const freezing     = !!drag.tray || !!drag.trayVertex
+
+    if (freezing && baseResult) {
+      return baseResult
+    }
+
+    // No single-object drag in flight, OR no cache yet → full recompute and
+    // refresh the cache. This is also the dragend path (overlay back to null).
+    if ((!draggingAP && !draggingSW) || !baseResult) {
+      baseResult = computeRoutes(building)
+      return baseResult
+    }
+
+    // Incremental: rebuild the graph from the overlayed building data, then
+    // recompute only the dragged object's route(s).
+    const ctx = buildRoutingContext(building)
+    const routes = new Map(baseResult.routes)
+    const switchLinks = new Map(baseResult.switchLinks)
+
+    if (draggingAP) {
+      // Find the dragged AP (with overlayed coords) and its home floor.
+      for (const [floorId, list] of Object.entries(building.apsByFloor ?? {})) {
+        const ap = (list ?? []).find((a) => a.id === drag.ap.id)
+        if (ap) { routes.set(ap.id, routeOneAP(ctx, ap, floorId)); break }
+      }
+    }
+
+    if (draggingSW) {
+      // The moved switch's own S2S uplink changes...
+      const movedSw = ctx.swById.get(drag.sw.id)
+      if (movedSw) {
+        const link = routeOneSwitchLink(ctx, movedSw)
+        if (link) switchLinks.set(movedSw.id, link)
+        else switchLinks.delete(movedSw.id)
+      }
+      // ...and every AP route that lands on this switch (its drop endpoint
+      // moved). Recompute those from the cached set.
+      for (const [floorId, list] of Object.entries(building.apsByFloor ?? {})) {
+        for (const ap of list ?? []) {
+          const prior = baseResult.routes.get(ap.id)
+          if (prior && prior.switchId === drag.sw.id) {
+            routes.set(ap.id, routeOneAP(ctx, ap, floorId))
+          }
+        }
+      }
+    }
+
+    return { routes, switchLinks }
+  }
+
   const rebuild = () => {
     const { floors, activeFloorId } = useFloorStore.getState()
     let apsByFloor = useAPStore.getState().apsByFloor
@@ -211,15 +288,15 @@ export function attachCablesLayer({
 
     g.clear()
     clearBadges()
-    if (!activeFloorId || floors.length === 0) return
+    if (!activeFloorId || floors.length === 0) {
+      baseResult = null  // stale once there's no floor; force full next time
+      return
+    }
 
-    const { routes, switchLinks } = computeRoutes({
-      floors,
-      apsByFloor,
-      switchesByFloor,
-      traysByFloor,
-      risers,
-    })
+    const { routes, switchLinks } = computeRoutesForDraw(
+      { floors, apsByFloor, switchesByFloor, traysByFloor, risers },
+      drag,
+    )
 
     const hasFocus = editor.selectedId && (editor.selectedType === 'ap' || editor.selectedType === 'switch')
     const isRouteRelevant = (r) => {

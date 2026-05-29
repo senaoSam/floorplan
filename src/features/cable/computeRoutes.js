@@ -97,14 +97,15 @@ function makeTierWeightFn(tier) {
 // (spec §6 "graph route 含跨樓層 riser"). Callers that only care about a
 // single floor (CableLayer, SwitchPanel) can filter by route.homeFloorId
 // or by point.floorId.
-export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = {}, traysByFloor = {}, risers = [] }) {
-  const out = new Map()
-  const switchLinks = new Map()
-  if (floors.length === 0) return { routes: out, switchLinks, warnings: [] }
-
+// Shared routing context — builds the building graph + the switch flattening
+// + union-find ONCE. Both computeRoutes (full) and the incremental routing path
+// (32-C: drag a single AP / switch and recompute only the affected routes)
+// derive from this so they produce byte-identical results. The split exists
+// purely so the drag path can rebuild the graph (~1ms) but run Dijkstra for
+// just the dragged object instead of all 1000 APs (~93ms → ~1ms; see
+// .claude/perf-baseline.md §32-0).
+export function buildRoutingContext({ floors = [], apsByFloor = {}, switchesByFloor = {}, traysByFloor = {}, risers = [] }) {
   const floorById = new Map(floors.map((f) => [f.id, f]))
-
-  // Build the single building-wide graph.
   const g = buildBuildingGraph({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
 
   // Flatten all switches into one list with floor reference for fallback +
@@ -113,13 +114,13 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
   // terminate on. Phase 23 rule: AP drops only land on access switches
   // (`kind === 'switch'`); IDF/MDF/Router never accept AP drops in real
   // enterprise topology, even when geometrically closer.
-  const allSwitches    = []
   const accessSwitches = []
   const swById         = new Map()
+  const swByFloor      = new Map()  // swId → floorId
   for (const [floorId, list] of Object.entries(switchesByFloor)) {
     for (const sw of list ?? []) {
-      allSwitches.push({ sw, floorId })
       swById.set(sw.id, sw)
+      swByFloor.set(sw.id, floorId)
       if ((sw.kind ?? 'switch') === 'switch') accessSwitches.push({ sw, floorId })
     }
   }
@@ -128,187 +129,206 @@ export function computeRoutes({ floors = [], apsByFloor = {}, switchesByFloor = 
   // graph component (e.g. no trays / risers at all — every node is alone).
   const uf = unionFind([...g.nodes.keys()], g.adj)
 
-  for (const [floorId, list] of Object.entries(apsByFloor)) {
-    const floor = floorById.get(floorId)
-    if (!floor) continue
-    const ceilingHeight = floor.floorHeight ?? 3.0
-    const pxPerM        = floor.scale
+  return { g, uf, floorById, accessSwitches, swById, swByFloor, switchesByFloor }
+}
 
-    for (const ap of list ?? []) {
-      const zDropM = Math.max(0, ceilingHeight - (ap.z ?? 0))
+// Compute the route for ONE AP against a prepared context. Mirrors the per-AP
+// body of computeRoutes exactly so full and incremental agree. `floorId` is the
+// AP's home floor. Returns the route object (never sets into a map).
+export function routeOneAP(ctx, ap, floorId) {
+  const { g, uf, floorById, accessSwitches, switchesByFloor } = ctx
+  const floor = floorById.get(floorId)
+  const ceilingHeight = floor?.floorHeight ?? 3.0
+  const pxPerM        = floor?.scale
+  const zDropM = Math.max(0, ceilingHeight - (ap.z ?? 0))
 
-      // ── Path 1: building-wide graph route ───────────────────────────────
-      // Restrict targets to access switches — AP drops never terminate on
-      // IDF/MDF/Router in real topology (Phase 23 rule).
-      const apNodeId = g.endpointNodeIds.aps.get(ap.id)?.nodeId
-      if (apNodeId && accessSwitches.length > 0) {
-        const apRoot = uf.find(apNodeId)
-        const reachable = []
-        for (const { sw, floorId: swFloorId } of accessSwitches) {
-          const swNodeId = g.endpointNodeIds.switches.get(sw.id)?.nodeId
-          if (swNodeId && uf.find(swNodeId) === apRoot) {
-            reachable.push({ sw, swNodeId, swFloorId })
-          }
-        }
-        if (reachable.length > 0) {
-          const { dist, prev } = dijkstra(g.adj, apNodeId)
-          let bestSw = null, bestSwNode = null, bestDist = Infinity
-          for (const r of reachable) {
-            const d = dist.get(r.swNodeId) ?? Infinity
-            if (d < bestDist) { bestDist = d; bestSw = r.sw; bestSwNode = r.swNodeId }
-          }
-          if (bestSw && bestDist !== Infinity) {
-            const nodePath = reconstructPath(prev, apNodeId, bestSwNode) ?? [apNodeId, bestSwNode]
-            const points = nodePath.map((id) => {
-              const n = g.nodes.get(id)
-              return { x: n.xy.x, y: n.xy.y, kind: n.kind, floorId: n.floorId }
-            })
-            const cableM = bestDist + zDropM
-            out.set(ap.id, {
-              apId: ap.id,
-              switchId: bestSw.id,
-              points,
-              cableM,
-              zDropM,
-              routeStatus: 'tray',
-              homeFloorId: floorId,
-              cableType: resolveCableType(bestSw, cableM),
-            })
-            continue
-          }
-        }
+  // ── Path 1: building-wide graph route ───────────────────────────────
+  // Restrict targets to access switches — AP drops never terminate on
+  // IDF/MDF/Router in real topology (Phase 23 rule).
+  const apNodeId = g.endpointNodeIds.aps.get(ap.id)?.nodeId
+  if (apNodeId && accessSwitches.length > 0) {
+    const apRoot = uf.find(apNodeId)
+    const reachable = []
+    for (const { sw } of accessSwitches) {
+      const swNodeId = g.endpointNodeIds.switches.get(sw.id)?.nodeId
+      if (swNodeId && uf.find(swNodeId) === apRoot) {
+        reachable.push({ sw, swNodeId })
       }
-
-      // ── Path 2 / 3: fallback Manhattan or unroutable ─────────────────────
-      // Fallback is strictly same-floor (spec §6) AND only to access switches.
-      // A floor with only IDF/MDF/Router and no access switch → AP unroutable;
-      // the user needs to add an access switch.
-      const sameFloorAccess = (switchesByFloor[floorId] ?? [])
-        .filter((sw) => (sw.kind ?? 'switch') === 'switch')
-      if (sameFloorAccess.length === 0) {
-        out.set(ap.id, {
-          apId: ap.id, switchId: null, points: null,
-          cableM: null, zDropM: null,
-          routeStatus: 'unroutable',
-          homeFloorId: floorId,
-        })
-        continue
-      }
-
-      let best = sameFloorAccess[0]
-      let bestD = Math.abs(ap.x - best.x) + Math.abs(ap.y - best.y)
-      for (let i = 1; i < sameFloorAccess.length; i++) {
-        const d = Math.abs(ap.x - sameFloorAccess[i].x) + Math.abs(ap.y - sameFloorAccess[i].y)
-        if (d < bestD) { bestD = d; best = sameFloorAccess[i] }
-      }
-      const cableM = pxPerM && pxPerM > 0
-        ? (bestD / pxPerM) * (1 + SLACK_DIRECT) + zDropM
-        : null
-
-      out.set(ap.id, {
-        apId: ap.id,
-        switchId: best.id,
-        points: [
-          { x: ap.x,    y: ap.y,    kind: 'endpoint', floorId },
-          { x: best.x,  y: ap.y,    kind: 'corner',   floorId },
-          { x: best.x,  y: best.y,  kind: 'endpoint', floorId },
-        ],
-        cableM,
-        zDropM,
-        routeStatus: 'fallback-manhattan',
-        homeFloorId: floorId,
-        cableType: resolveCableType(best, cableM),
-      })
     }
-  }
-
-  // ── Switch-to-switch links (14-2) ──────────────────────────────────────
-  // Same graph + Dijkstra recipe as AP→switch; only the source/target node
-  // pair changes. No Z drop (both endpoints already at mount height).
-  const swByFloor = new Map()  // swId → floorId
-  for (const [floorId, list] of Object.entries(switchesByFloor)) {
-    for (const sw of list ?? []) swByFloor.set(sw.id, floorId)
-  }
-
-  for (const [srcId, sw] of swById) {
-    const targetId = sw.uplinkTo
-    if (!targetId) continue
-    const target = swById.get(targetId)
-    if (!target) continue                  // dangling reference
-
-    const srcFloorId    = swByFloor.get(srcId)
-    const targetFloorId = swByFloor.get(targetId)
-    const srcNodeId     = g.endpointNodeIds.switches.get(srcId)?.nodeId
-    const tgtNodeId     = g.endpointNodeIds.switches.get(targetId)?.nodeId
-
-    // 29-4 / 29-5 — classify tier up-front so we can both (a) bias Dijkstra
-    // toward the preferred tray.system and (b) tag the resulting link with
-    // its tier for downstream BOM grouping.
-    const tier = classifyLinkTier(sw.kind, target.kind)
-    const weightFn = makeTierWeightFn(tier)
-
-    let link = null
-    if (srcNodeId && tgtNodeId && uf.find(srcNodeId) === uf.find(tgtNodeId)) {
-      const { dist, prev } = dijkstra(g.adj, srcNodeId, weightFn)
-      const d = dist.get(tgtNodeId)
-      if (d !== undefined && d !== Infinity) {
-        const nodePath = reconstructPath(prev, srcNodeId, tgtNodeId) ?? [srcNodeId, tgtNodeId]
+    if (reachable.length > 0) {
+      const { dist, prev } = dijkstra(g.adj, apNodeId)
+      let bestSw = null, bestSwNode = null, bestDist = Infinity
+      for (const r of reachable) {
+        const d = dist.get(r.swNodeId) ?? Infinity
+        if (d < bestDist) { bestDist = d; bestSw = r.sw; bestSwNode = r.swNodeId }
+      }
+      if (bestSw && bestDist !== Infinity) {
+        const nodePath = reconstructPath(prev, apNodeId, bestSwNode) ?? [apNodeId, bestSwNode]
         const points = nodePath.map((id) => {
           const n = g.nodes.get(id)
           return { x: n.xy.x, y: n.xy.y, kind: n.kind, floorId: n.floorId }
         })
-        // When weightFn applies a tier discount the Dijkstra distance is the
-        // *biased* total — not the real cable length. Re-walk the chosen path
-        // summing each edge's true weightM for the BOM number.
-        let trueCableM = d
-        if (weightFn) {
-          trueCableM = 0
-          for (let i = 0; i < nodePath.length - 1; i++) {
-            const from = nodePath[i], to = nodePath[i + 1]
-            const e = (g.adj.get(from) ?? []).find((edge) => edge.to === to)
-            if (e) trueCableM += e.weightM
-          }
-        }
-        link = {
-          srcId, targetId, points,
-          cableM: trueCableM, routeStatus: 'tray',
-          srcFloorId, targetFloorId,
+        const cableM = bestDist + zDropM
+        return {
+          apId: ap.id,
+          switchId: bestSw.id,
+          points,
+          cableM,
+          zDropM,
+          routeStatus: 'tray',
+          homeFloorId: floorId,
+          cableType: resolveCableType(bestSw, cableM),
         }
       }
     }
+  }
 
-    // Fallback Manhattan — same floor only (spec §6 applies to S2S too).
-    if (!link && srcFloorId === targetFloorId) {
-      const floor = floorById.get(srcFloorId)
-      const pxPerM = floor?.scale
-      const dPx = Math.abs(sw.x - target.x) + Math.abs(sw.y - target.y)
-      const cableM = pxPerM && pxPerM > 0
-        ? (dPx / pxPerM) * (1 + SLACK_DIRECT)
-        : null
+  // ── Path 2 / 3: fallback Manhattan or unroutable ─────────────────────
+  // Fallback is strictly same-floor (spec §6) AND only to access switches.
+  // A floor with only IDF/MDF/Router and no access switch → AP unroutable;
+  // the user needs to add an access switch.
+  const sameFloorAccess = (switchesByFloor[floorId] ?? [])
+    .filter((sw) => (sw.kind ?? 'switch') === 'switch')
+  if (sameFloorAccess.length === 0) {
+    return {
+      apId: ap.id, switchId: null, points: null,
+      cableM: null, zDropM: null,
+      routeStatus: 'unroutable',
+      homeFloorId: floorId,
+    }
+  }
+
+  let best = sameFloorAccess[0]
+  let bestD = Math.abs(ap.x - best.x) + Math.abs(ap.y - best.y)
+  for (let i = 1; i < sameFloorAccess.length; i++) {
+    const d = Math.abs(ap.x - sameFloorAccess[i].x) + Math.abs(ap.y - sameFloorAccess[i].y)
+    if (d < bestD) { bestD = d; best = sameFloorAccess[i] }
+  }
+  const cableM = pxPerM && pxPerM > 0
+    ? (bestD / pxPerM) * (1 + SLACK_DIRECT) + zDropM
+    : null
+
+  return {
+    apId: ap.id,
+    switchId: best.id,
+    points: [
+      { x: ap.x,    y: ap.y,    kind: 'endpoint', floorId },
+      { x: best.x,  y: ap.y,    kind: 'corner',   floorId },
+      { x: best.x,  y: best.y,  kind: 'endpoint', floorId },
+    ],
+    cableM,
+    zDropM,
+    routeStatus: 'fallback-manhattan',
+    homeFloorId: floorId,
+    cableType: resolveCableType(best, cableM),
+  }
+}
+
+// Compute the S2S uplink for ONE source switch against a prepared context.
+// Mirrors the per-switch body of computeRoutes. Returns the link object, or
+// null when the switch has no uplinkTo / dangling target (caller skips it).
+export function routeOneSwitchLink(ctx, sw) {
+  const { g, uf, floorById, swById, swByFloor } = ctx
+  const srcId = sw.id
+  const targetId = sw.uplinkTo
+  if (!targetId) return null
+  const target = swById.get(targetId)
+  if (!target) return null                  // dangling reference
+
+  const srcFloorId    = swByFloor.get(srcId)
+  const targetFloorId = swByFloor.get(targetId)
+  const srcNodeId     = g.endpointNodeIds.switches.get(srcId)?.nodeId
+  const tgtNodeId     = g.endpointNodeIds.switches.get(targetId)?.nodeId
+
+  // 29-4 / 29-5 — classify tier up-front so we can both (a) bias Dijkstra
+  // toward the preferred tray.system and (b) tag the resulting link with
+  // its tier for downstream BOM grouping.
+  const tier = classifyLinkTier(sw.kind, target.kind)
+  const weightFn = makeTierWeightFn(tier)
+
+  let link = null
+  if (srcNodeId && tgtNodeId && uf.find(srcNodeId) === uf.find(tgtNodeId)) {
+    const { dist, prev } = dijkstra(g.adj, srcNodeId, weightFn)
+    const d = dist.get(tgtNodeId)
+    if (d !== undefined && d !== Infinity) {
+      const nodePath = reconstructPath(prev, srcNodeId, tgtNodeId) ?? [srcNodeId, tgtNodeId]
+      const points = nodePath.map((id) => {
+        const n = g.nodes.get(id)
+        return { x: n.xy.x, y: n.xy.y, kind: n.kind, floorId: n.floorId }
+      })
+      // When weightFn applies a tier discount the Dijkstra distance is the
+      // *biased* total — not the real cable length. Re-walk the chosen path
+      // summing each edge's true weightM for the BOM number.
+      let trueCableM = d
+      if (weightFn) {
+        trueCableM = 0
+        for (let i = 0; i < nodePath.length - 1; i++) {
+          const from = nodePath[i], to = nodePath[i + 1]
+          const e = (g.adj.get(from) ?? []).find((edge) => edge.to === to)
+          if (e) trueCableM += e.weightM
+        }
+      }
       link = {
-        srcId, targetId,
-        points: [
-          { x: sw.x,     y: sw.y,     kind: 'endpoint', floorId: srcFloorId },
-          { x: target.x, y: sw.y,     kind: 'corner',   floorId: srcFloorId },
-          { x: target.x, y: target.y, kind: 'endpoint', floorId: srcFloorId },
-        ],
-        cableM, routeStatus: 'fallback-manhattan',
+        srcId, targetId, points,
+        cableM: trueCableM, routeStatus: 'tray',
         srcFloorId, targetFloorId,
       }
     }
+  }
 
-    if (!link) {
-      link = {
-        srcId, targetId, points: null, cableM: null,
-        routeStatus: 'unroutable',
-        srcFloorId, targetFloorId,
-      }
+  // Fallback Manhattan — same floor only (spec §6 applies to S2S too).
+  if (!link && srcFloorId === targetFloorId) {
+    const floor = floorById.get(srcFloorId)
+    const pxPerM = floor?.scale
+    const dPx = Math.abs(sw.x - target.x) + Math.abs(sw.y - target.y)
+    const cableM = pxPerM && pxPerM > 0
+      ? (dPx / pxPerM) * (1 + SLACK_DIRECT)
+      : null
+    link = {
+      srcId, targetId,
+      points: [
+        { x: sw.x,     y: sw.y,     kind: 'endpoint', floorId: srcFloorId },
+        { x: target.x, y: sw.y,     kind: 'corner',   floorId: srcFloorId },
+        { x: target.x, y: target.y, kind: 'endpoint', floorId: srcFloorId },
+      ],
+      cableM, routeStatus: 'fallback-manhattan',
+      srcFloorId, targetFloorId,
     }
+  }
 
-    link.cableType = resolveCableType(sw, link.cableM)
-    link.tier = tier  // 29-5 — backbone / distribution / access
+  if (!link) {
+    link = {
+      srcId, targetId, points: null, cableM: null,
+      routeStatus: 'unroutable',
+      srcFloorId, targetFloorId,
+    }
+  }
 
-    switchLinks.set(srcId, link)
+  link.cableType = resolveCableType(sw, link.cableM)
+  link.tier = tier  // 29-5 — backbone / distribution / access
+  return link
+}
+
+export function computeRoutes(buildingData) {
+  const { floors = [] } = buildingData
+  const out = new Map()
+  const switchLinks = new Map()
+  if (floors.length === 0) return { routes: out, switchLinks, warnings: [] }
+
+  const ctx = buildRoutingContext(buildingData)
+  const { g, floorById, swById } = ctx
+
+  for (const [floorId, list] of Object.entries(buildingData.apsByFloor ?? {})) {
+    if (!floorById.get(floorId)) continue
+    for (const ap of list ?? []) {
+      out.set(ap.id, routeOneAP(ctx, ap, floorId))
+    }
+  }
+
+  // ── Switch-to-switch links (14-2) ──────────────────────────────────────
+  for (const [srcId, sw] of swById) {
+    const link = routeOneSwitchLink(ctx, sw)
+    if (link) switchLinks.set(srcId, link)
   }
 
   return { routes: out, switchLinks, warnings: g.warnings ?? [] }

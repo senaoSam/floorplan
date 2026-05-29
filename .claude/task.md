@@ -47,9 +47,10 @@ oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap /
 
 | #    | 狀態 | Task |
 |------|------|------|
-| 32-0 | ⬜   | **量測** — `computeRoutes` wall-clock @ 50/150/300/500/1000 AP × {0,1,5,10} tray，記到 `perf-baseline.md` |
-| 32-D | ⬜   | **解凍 cable** — 移除 Tray/AP/SW dragOverlay 凍結，拖曳即時重算（量測 < 16ms 時走這條最便宜） |
-| 32-C | ⬜   | **增量 routing** — graph topology cache + endpoint snap spatial index 重用 + per-AP single-source Dijkstra（量測 > 16ms 才需要，否則是預先優化） |
+| 32-0 | ✅   | **量測** — `computeRoutes` wall-clock @ 50/150/300/500/1000 AP × {0,1,5,10} tray，已記到 `perf-baseline.md §32-0`。真因：每 pointermove 對全部 AP 跑 Dijkstra（1000 AP / 1 tray = 94ms） |
+| 32-D | ⏸️ 不採用 | **解凍 cable** — 改走 32-C 增量（保留即時精確跟隨）。tray/trayVertex drag 仍凍結（32-C 範圍決策） |
+| 32-C | 🟡 部分 | **增量 routing** — ✅ 拖 AP/SW 只重算動到的路徑（`buildRoutingContext`+`routeOneAP`+`routeOneSwitchLink`，full↔inc byte-identical 已驗）。routing 成本 214ms→1ms（300AP）。**剩第二瓶頸**：cable Graphics 每幀重送（300AP ~8880 段，hover/重繪即卡）— 另開 32-E |
+| 32-E | ⬜   | **Cable 畫圖增量 / 靜動分層** — 拖一物件只重畫變動的那條 cable，其餘凍結；或降低虛線逐段切割成本。真因：cablesLayer 單一 Graphics 裝全部線段，hover 重繪時每幀重送 GPU（使用者實測：移除 tray/SW 即正常）。對應 brief 31-5 mesh 方向 |
 
 ### 其他小尾巴
 

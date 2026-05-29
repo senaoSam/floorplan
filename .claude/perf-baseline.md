@@ -433,3 +433,60 @@ addAP 路徑：
 - Konva `Layer.batchDraw` 改 `Layer.draw()` 用 dirty rect — Konva 8 支援度未驗
 
 這些都不在這次 26-2 範圍。
+
+---
+
+## 32-0 — computeRoutes wall-clock baseline（PixiJS 時代，2026-05-29）
+
+**動機**：使用者回報「多 AP + SW + tray 即時拖曳很卡」。Phase 25 已換 PixiJS，
+[cablesLayer.js](src/features/cables/cablesLayer.js) 拖曳時**解凍 cable**（每 pointermove 重算），
+不再是 Konva 時代的 P3b 凍結。要確認瓶頸是 routing 計算還是畫線。
+
+**結論：瓶頸是 `computeRoutes`，不是畫虛線。** 拖曳一個物件 → `useDragOverlayStore` 變 →
+`cablesLayer.rebuild()` → `computeRoutes(整棟建築)` → `buildBuildingGraph` 重建整張圖 +
+**每個 AP 各跑一次 Dijkstra**。1000 AP × 1 tray = **94 ms/call**，遠超 16.7ms/frame 預算。
+
+### 量測方法
+
+`scripts/bench-routing.mjs`（純函數 bench，`npx vite-node scripts/bench-routing.mjs`）。
+合成單樓層場景：N AP 網格 + M 條水平 tray（magnet 400px）+ switch grid（每 250 AP 一個）。
+矩陣 AP ∈ {50,150,300,500,1000} × tray ∈ {0,1,5,10}。
+
+### 數據（ms / computeRoutes call）
+
+| AP | 0 tray | 1 tray | 5 tray | 10 tray |
+|----|--------|--------|--------|---------|
+| 50   | 0.14 | 0.47  | 0.43  | 0.51  |
+| 150  | 0.29 | 0.69  | 1.02  | 1.00  |
+| 300  | 0.38 | 9.15  | 3.04  | 3.05  |
+| 500  | 0.84 | 21.39 | 9.15  | 8.13  |
+| 1000 | 1.08 | **94.44** | 42.32 | 38.53 |
+
+### 三個關鍵發現
+
+1. **「1 條 tray」比「10 條」更慢**（1000 AP：94ms vs 38ms）。一條貫穿全場的大 tray 把幾乎
+   所有 AP + switch 連進**同一個圖元件**，每個 AP 的 Dijkstra 都在這張巨大連通圖上跑。
+   10 條 tray 把 AP 切成小群，單次 Dijkstra 反而更小更快。→ 使用者真實場景（多物件互連）正落在最慢區。
+2. **0 tray 永遠很快**（1000 AP 僅 1ms）——無 tray 時走 fallback Manhattan，不跑 Dijkstra。
+   證明成本全在 graph + Dijkstra。
+3. **`routing.js` 的 Dijkstra 用 `pq.sort()` 劣質 priority queue**（[routing.js:53](src/features/cable/routing.js#L53)）——
+   每次 pop 前重排整個 queue，O(E²) 而非 O(E log V)。註解寫「adequate for <1000 nodes」，
+   但 1000 AP 的圖節點數遠超 1000 且要跑 1000 次。
+
+### 三個獨立放大因子（按影響排序）
+
+| 因子 | 證據 | 複雜度 |
+|---|---|---|
+| 1. 每個 AP 都跑完整 Dijkstra | 1000 AP × 1 Dijkstra | O(AP數 × Dijkstra) |
+| 2. Dijkstra 劣質 pq.sort queue | routing.js:53 | O(E²) per Dijkstra |
+| 3. 每幀重建整張圖 | computeRoutes.js:108 | 固定大成本 |
+
+### 對策（task.md Phase 26）
+
+| 對策 | 預期 | 風險 |
+|---|---|---|
+| **32-D 拖曳凍結 cable** | 拖曳中不重算，dragend 才算一次 → drag FPS 直接救回 | 低（cable 短暫不跟手，Figma/Hamina 同模式）|
+| **32-C 增量 routing** | graph cache + 只重算動到的 AP；保留每幀精確 | 高（topology cache + dirty 追蹤）|
+| 旁支：Dijkstra 換真 binary heap | 砍因子 2 | 低，但治標 |
+
+下一步由使用者決定走 32-D（最便宜，最像 Hamina）還是 32-C（保留即時精確跟隨）。
