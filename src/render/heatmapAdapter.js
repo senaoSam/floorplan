@@ -324,7 +324,8 @@ export function attachHeatmapLayer({
     const opts = isSoloAP
       ? {
           // Single AP — keep refl/diff at user settings (cheap for 1 AP and
-          // most visible when positioning near walls).
+          // most visible when positioning near walls). Stays on the per-AP
+          // path; the drag speedup for solo comes from the coarser grid below.
           maxReflOrder: hm.reflections ? 1 : 0,
           enableDiffraction: hm.diffraction,
           padding,
@@ -338,16 +339,29 @@ export function attachHeatmapLayer({
           ...(lodActive ? { cullFloorDbm: -95 } : {}),
         }
 
+    // Coarsen the sample grid while dragging (任務 1). 0.5 m → 1.0 m drops the
+    // grid point count ~3.9× (nx×ny), the dominant per-frame cost on a software
+    // renderer (per-AP readback + the host aggregate loop both scale with
+    // nx×ny). 1.0 m is the visual sweet spot — near-indistinguishable from
+    // 0.5 m once the blur upsample runs, while 1.5/2.0 visibly coarsen contours;
+    // coarser values trade clarity for diminishing SW speedups (verified the
+    // point-count drop is the lever, exact ms is SW-machine-dependent). Drag end
+    // recomputes at the user's full gridStepM. max() so a user who already chose
+    // a coarser grid via the HeatmapControl slider is never refined.
+    const DRAG_GRID_STEP_M = 1.0
+    const isDragRender = isSoloAP || lodActive
+    const stepM = isDragRender ? Math.max(hm.gridStepM, DRAG_GRID_STEP_M) : hm.gridStepM
+
     let field
     if (hm.engine === 'shader') {
       try {
-        field = sampleFieldGL(renderScenario, hm.gridStepM, opts)
+        field = sampleFieldGL(renderScenario, stepM, opts)
       } catch (e) {
         console.warn('[heatmap] shader engine failed, falling back to JS:', e.message)
-        field = sampleField(renderScenario, hm.gridStepM, opts)
+        field = sampleField(renderScenario, stepM, opts)
       }
     } else {
-      field = sampleField(renderScenario, hm.gridStepM, opts)
+      field = sampleField(renderScenario, stepM, opts)
     }
 
     // Solo-AP always renders in RSSI (a single AP has no SINR / CCI). Live LOD
