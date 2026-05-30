@@ -586,6 +586,24 @@ focus highlight band + dim 視覺正確；移動 AP 後 route start 對齊新位
 **檔案**：scene.js、FloorplanSystem.jsx、viewport.js、cablesLayer.js、apsLayer.js、focusedDevices.js、
 routesCache.js(新)、perfProbe.js(新 dev 工具)、APPanel/SwitchPanel/CableSummaryPanel/CableTrayPanel。
 
-> 容器 alpha dim 取捨：cable 線重疊處半透明疊加色略不同，實測 5% tolerance 內。
-> 剩餘 drag 開始/結束 ~105ms：單張快取貼圖內容變要整張重烤的固有代價；分塊快取在「1 tray 線都擠在沿線」場景效果差又有接縫風險（不做）。對應 brief 31-5 mesh 方向（日後仍不夠再評估）。
 > dev 工具：`?renderer=webgl` 強制 WebGL2 重現無硬體加速；`window.__perf.start('x')`→操作→`__perf.report()`。
+
+### 32-E 最終修正（上表的 cacheAsTexture 已被推翻，2026-05-30）
+
+⚠️ **上面那欄「cacheAsTexture on gStatic」已經整個移除**（commit a33dc14）。後續發現它是一串視覺 bug 的元凶，
+且根本不必要——量測證實「靜動分層」已讓 gStatic 拖曳時凍結，PIXI 重畫**沒變的** Graphics 是從快取好的幾何批次
+直接畫（~1ms），**不會重新 tessellate**；原本的 120ms 是「每幀重建（重 tessellate）」，那已被靜動分層解掉，
+cacheAsTexture 多餘。
+
+cacheAsTexture 衍生並修補又最終放棄的 bug（時間順）：
+- 選取後 cable 變淡（dim 烤進貼圖）→ c52edea/b52c7e4（祖先鏈 alpha 強制 1 烤）
+- 大畫布/縮放下整體模糊變暗（貼圖固定解析度上採樣）→ 60022d5（只重場景才快取）仍不夠
+- → **a33dc14 直接移除 cacheAsTexture，cable 全程 vector**（任何尺寸/縮放清晰全亮）。
+
+**最終架構（取代上表）**：vector cable + render-on-demand + 靜動分層 + routesCache 增量 + apsLayer 逐 AP diff。
+另修：477887d（SW↔tray snap stub 構不到 tray：world delta × viewport.scale 補正）、
+3f9a3f6（focus+拖曳後切選取的殘影：gStatic 排除前景 + focus 納入 splitKey，選取改變即重建 gStatic）。
+代價：300AP 點選現在 ~110-200ms（gStatic vector 重建，使用者接受正確優先），仍遠優於 32-E 前 2-3 秒。
+
+**殘影 bug 交接**：架構 + 6 個待測高風險殘影情境見 memory `project_cable_render_architecture_32e`。
+殘影與 renderer（WebGL/WebGPU）無關，是 gStatic/gDynamic 該重建沒重建（splitKey 涵蓋不足）。

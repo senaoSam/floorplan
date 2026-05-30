@@ -50,7 +50,7 @@ oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap /
 | 32-0 | ✅   | **量測** — `computeRoutes` wall-clock @ 50/150/300/500/1000 AP × {0,1,5,10} tray，已記到 `perf-baseline.md §32-0`。真因：每 pointermove 對全部 AP 跑 Dijkstra（1000 AP / 1 tray = 94ms） |
 | 32-D | ⏸️ 不採用 | **解凍 cable** — 改走 32-C 增量（保留即時精確跟隨）。tray/trayVertex drag 仍凍結（32-C 範圍決策） |
 | 32-C | 🟡 部分 | **增量 routing** — ✅ 拖 AP/SW 只重算動到的路徑（`buildRoutingContext`+`routeOneAP`+`routeOneSwitchLink`，full↔inc byte-identical 已驗）。routing 成本 214ms→1ms（300AP）。**剩第二瓶頸**：cable Graphics 每幀重送（300AP ~8880 段，hover/重繪即卡）— 另開 32-E |
-| 32-E | ✅   | **Cable 畫圖效能 — 軟體渲染也達標**。量測推翻多個假設（idle 連續 render、cable 每幀重 raster、selection/drag 多處全量 computeRoutes）。五刀：①render-on-demand（停連續 ticker，store→requestRender，idle 60→0 render/s）②cacheAsTexture on gStatic（cable 背景烤貼圖，hover/drag-move 每幀 ~120ms→~9ms）③apsLayer 逐 AP identity diff（drag commit 重畫 1 marker 非 300：99→1.6ms）④routesCache 增量 + 共享（focus/panel 單顆 AP 變只重算那顆，選取 2-3秒→2-22ms）⑤靜動分層 + drag 期不 invalidateStatic（拖曳每幀 3-13ms，dragEnd append）。300AP+SW+tray：軟體渲染 hover/drag/select 全順，剩 drag 開始/結束各 ~105ms（單張快取貼圖固有，可接受）。routing identity 88/0、視覺無回歸（已對 stash 前後比對）。詳見 perf-baseline.md §32-E |
+| 32-E | 🟡 大致完成 | **Cable 畫圖效能 — 軟體渲染也達標**（vector，非烤貼圖）。最終四刀：①render-on-demand（停連續 ticker，13 store→requestRender，idle 60→0 render/s）②靜動分層 gStatic/gDynamic（拖曳凍結 gStatic、PIXI 重畫凍結幾何 ~1ms 不重 tessellate——這才是真解）③routesCache 增量+共享（單顆 AP 變只重算那顆，選取 2-3秒→ms 級）④apsLayer 逐 AP diff（drag commit 重畫 1 marker 非 300）。**cacheAsTexture 試過但移除**（a33dc14：模糊/變暗一串 bug + 靜動分層已使其多餘）。另修 SW↔tray snap stub（477887d）、focus+拖曳殘影（3f9a3f6）。routing 88/0。**剩**：殘影回歸（6 情境，最可疑：選 SW 多條前景、marquee 多選）見 memory `project_cable_render_architecture_32e`。詳見 perf-baseline.md §32-E（含最終修正段）|
 
 ### 其他小尾巴
 
