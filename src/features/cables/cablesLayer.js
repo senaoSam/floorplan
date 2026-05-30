@@ -624,7 +624,23 @@ export function attachCablesLayer({
       drag,
     )
 
-    const hasFocus = editor.selectedId && (editor.selectedType === 'ap' || editor.selectedType === 'switch')
+    // hasFocus requires the selected object to still EXIST. A dangling
+    // selectedId — e.g. undo/redo removes the selected AP/switch from the store
+    // without touching editor selection (useHistoryStore doesn't snapshot
+    // selection) — would otherwise keep hasFocus true with no route to focus,
+    // dimming the whole layer to DIM_OPACITY forever (stuck-dim residue). The
+    // panel already tolerates this (APPanel returns null when the AP is gone);
+    // mirror that here so the cable layer reads as "nothing selected" too.
+    const selExists =
+      editor.selectedType === 'ap'
+        ? Object.values(apsByFloor).some((list) => list.some((a) => a.id === editor.selectedId))
+        : editor.selectedType === 'switch'
+          ? Object.values(switchesByFloor).some((list) => list.some((sw) => sw.id === editor.selectedId))
+          : false
+    const hasFocus =
+      editor.selectedId &&
+      (editor.selectedType === 'ap' || editor.selectedType === 'switch') &&
+      selExists
     const isRouteFocused = (r) => {
       if (!hasFocus) return false
       if (editor.selectedType === 'ap')     return r.apId     === editor.selectedId
