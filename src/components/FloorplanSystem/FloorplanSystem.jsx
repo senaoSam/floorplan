@@ -279,7 +279,6 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useScopeStore,
         useFloorHoleStore,
         useHeatmapStore,
-        useDragOverlayStore,
       })
       detachSelection = attachSelectionOverlay({
         scene: s,
