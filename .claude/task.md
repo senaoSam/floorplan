@@ -30,7 +30,7 @@ oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap /
 | ⬜ | ALIGN_FLOOR 切 toolbar 工具無確認對話框 | missing |
 | ⬜ | PNG 平面圖匯出 production 壞（DEV-only window.__pixiApp/__scene） | partial |
 | ⬜ | PDF 規劃報告匯出 production 壞（同上 DEV-only globals） | partial |
-| ↩️ 已回歸 | Heatmap dragMode(Solo/Live)：`853eeef` 補上後造成「無硬體加速機器拖曳 AP 每幀重算熱圖→卡」回歸。已還原 heatmapAdapter 到 853eeef 前（拖曳中不重算、放手才更新）。dragMode 下拉保留但 inert。詳見 memory `project_heatmap_drag_lag_softwarerender` | partial |
+| ✅ 已修 | Heatmap dragMode(Solo/Live)：restore 853eeef(完整 live/solo，預設 solo=old)。先前「無硬體加速拖曳卡」真因經使用者實測=缺 rAF 節流(apsLayer setAP)+缺 setTimeout defer(heatmapAdapter compute)，非 gl.render。兩刀對齊 old，6 場景 old↔now dragend 對齊。詳見 memory `project_heatmap_drag_lag_softwarerender` | partial |
 | ⏸️ 使用者不做 | #/vectorize 獨立頁、Gemini 清理圖預覽鈕、#/ai-walls-debug OpenCV 頁 | — |
 
 ---

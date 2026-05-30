@@ -16,9 +16,21 @@ import { computeFloorElevations } from '@/utils/floorStacking'
 //   ✓ padding margin (PAD_M / EDGE_TOL_M heuristic, ported below)
 //   ✓ hover readout (driven by heatmapHoverBinder + useHoverReadoutStore)
 //
-// Performance optimisations still deferred — drag-LOD / solo mode /
-// fingerprint skip. They land later as a separate perf pass; the 50-300
-// AP scenes we have today don't need them.
+// Drag-aware render (HeatmapStore.dragMode, oldSrc HeatmapLayer 307-516):
+//   live — recompute every frame with LOD compromises (reflections/diffraction
+//          off, blur/contours off, cull faraway APs at -95 dBm). Position-
+//          accurate; cheaper per frame than full quality.
+//   solo — Hamina style. On drag start, snapshot the current heatmap canvas
+//          into a frozen sprite shown underneath. While dragging an AP, render
+//          ONLY that AP into the live sprite over the dimmed snapshot (single
+//          AP is already 1/N work, no LOD needed). While dragging a wall/scope
+//          (no AP), FREEZE — skip recompute entirely and just show the
+//          snapshot. On drag end the normal store-driven recompute restores
+//          full quality.
+//
+// (Fingerprint-skip from oldSrc is NOT ported — render-on-demand already
+// coalesces redundant repaints, so re-running compute() on an unchanged scene
+// is the cost of one field sample, not a wasted GPU frame loop.)
 //
 // The shader → JS fallback mirrors oldSrc HeatmapLayer.
 
@@ -60,11 +72,22 @@ export function attachHeatmapLayer({
   useScopeStore,
   useFloorHoleStore,
   useHeatmapStore,
+  useDragOverlayStore,
 }) {
   const layer = scene.layers.heatmap
   let gl = null
   let sprite = null
   let texture = null
+  // Solo-drag snapshot: a 2nd sprite holding a frozen copy of the heatmap as
+  // it looked when the drag began. Shown dimmed under the single-AP overlay
+  // (solo-ap) or at full alpha alone (solo-frozen). Its canvas is a plain 2D
+  // copy of gl.canvas taken on drag start.
+  let snapSprite = null
+  let snapTexture = null
+  let snapCanvas = null
+  // Tracks whether we are mid-solo-drag so we snapshot exactly once per drag
+  // (on the transition idle→solo) and restore on the transition back.
+  let soloActive = false
   // The padded sample grid extends past the floor image extent. Without
   // a clip the padded region bleeds into the canvas background outside
   // the floor plan, which looked wrong to the user. mask is a Graphics
@@ -99,12 +122,49 @@ export function attachHeatmapLayer({
 
   const hide = () => {
     if (sprite) sprite.visible = false
+    if (snapSprite) snapSprite.visible = false
+  }
+
+  // Copy the current heatmap pixels into the snapshot sprite and show it. Used
+  // on the idle→solo transition so the pre-drag field stays visible (frozen)
+  // while the live sprite is repurposed for the single-AP overlay / left alone.
+  const takeSnapshot = () => {
+    if (!gl || !gl.canvas || !sprite) return
+    const w = gl.canvas.width, h = gl.canvas.height
+    if (w <= 0 || h <= 0) return
+    if (!snapCanvas || snapCanvas.width !== w || snapCanvas.height !== h) {
+      snapCanvas = document.createElement('canvas')
+      snapCanvas.width = w
+      snapCanvas.height = h
+      if (snapTexture) { snapTexture.destroy(); snapTexture = null }
+    }
+    const ctx = snapCanvas.getContext('2d')
+    ctx.clearRect(0, 0, w, h)
+    ctx.drawImage(gl.canvas, 0, 0)
+    if (!snapSprite) {
+      snapTexture = Texture.from(snapCanvas)
+      snapSprite = new Sprite(snapTexture)
+      snapSprite.eventMode = 'none'
+      // Insert directly under the live sprite, sharing the same mask.
+      layer.addChildAt(snapSprite, layer.getChildIndex(sprite))
+      snapSprite.mask = maskG
+    } else if (!snapTexture) {
+      snapTexture = Texture.from(snapCanvas)
+      snapSprite.texture = snapTexture
+    }
+    // Match the live sprite's placement/scale so the frozen copy registers
+    // exactly over the floor.
+    snapSprite.x = sprite.x
+    snapSprite.y = sprite.y
+    snapSprite.scale.set(sprite.scale.x, sprite.scale.y)
+    snapTexture.source.update()
   }
 
   const compute = () => {
     const hm = useHeatmapStore.getState()
     if (!hm.enabled) {
       hide()
+      soloActive = false
       return
     }
 
@@ -115,8 +175,26 @@ export function attachHeatmapLayer({
       return
     }
 
+    // Drag state (heatmap reacts to ap / wall / scope drags only — oldSrc
+    // HeatmapLayer 317-320). The canonical AP store doesn't update until
+    // dragend, so apply the live overlay onto the dragged AP so the field
+    // follows it during the drag.
+    const drag = useDragOverlayStore ? useDragOverlayStore.getState() : {}
+    const dragAP = drag.ap || null
+    const dragWall = drag.wall || null
+    const dragScope = drag.scope || null
+    const isDragging = !!(dragAP || dragWall || dragScope)
+    const dragMode = hm.dragMode || 'solo'
+    const isSolo = dragMode === 'solo' && isDragging
+    const isSoloAP = isSolo && !!dragAP && !dragWall && !dragScope
+    const isSoloFreeze = isSolo && (!!dragWall || !!dragScope) && !dragAP
+    const lodActive = dragMode === 'live' && isDragging
+
+    const applyApOverlay = (list) =>
+      dragAP ? list.map((a) => (a.id === dragAP.id ? { ...a, x: dragAP.x, y: dragAP.y } : a)) : list
+
     const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
-    const aps = useAPStore.getState().apsByFloor[activeFloorId] ?? []
+    const aps = applyApOverlay(useAPStore.getState().apsByFloor[activeFloorId] ?? [])
     // Cross-floor: even when the ACTIVE floor has no APs, other floors'
     // APs can still cast attenuated signal through the slab. Check the
     // building-wide AP count, not just the active floor's.
@@ -172,7 +250,7 @@ export function attachHeatmapLayer({
       }))
       const apsAcrossFloors = []
       for (const f of allFloors) {
-        const floorAPs = apsByFloor[f.id] ?? []
+        const floorAPs = applyApOverlay(apsByFloor[f.id] ?? [])
         const floorElev = elevations[f.id] ?? 0
         for (const ap of floorAPs) {
           apsAcrossFloors.push({
@@ -212,28 +290,73 @@ export function attachHeatmapLayer({
     const s = ensureSprite()
     if (!s) return
 
-    const padding = computePadding(scenario)
-    const opts = {
-      maxReflOrder: hm.reflections ? 1 : 0,
-      enableDiffraction: hm.diffraction,
-      padding,
+    // Solo-drag snapshot transitions. Snapshot once on idle→solo so the frozen
+    // pre-drag field is available; restore on solo→idle.
+    if (isSolo && !soloActive) {
+      takeSnapshot()
+      soloActive = true
+    } else if (!isSolo && soloActive) {
+      soloActive = false
+      if (snapSprite) snapSprite.visible = false
     }
+
+    // ----- Solo freeze (dragging wall / scope, no AP) -----
+    // Don't recompute — show the frozen snapshot, hide the live sprite. The
+    // next non-freeze compute() (drag end, store change) restores full quality.
+    if (isSoloFreeze && snapSprite && snapCanvas) {
+      snapSprite.visible = true
+      snapSprite.alpha = 1
+      s.visible = false
+      return
+    }
+
+    const padding = computePadding(scenario)
+
+    // Solo-AP: render ONLY the dragged AP at full quality over a dimmed
+    // snapshot. Live-drag (lodActive): full recompute with LOD compromises
+    // (reflections/diffraction/blur/contours off, faraway APs culled at
+    // -95 dBm). Idle: full quality. (oldSrc HeatmapLayer 322-495.)
+    const soloScenario = isSoloAP
+      ? { ...scenario, aps: scenario.aps.filter((a) => a.id === dragAP.id) }
+      : scenario
+    const renderScenario = isSoloAP ? soloScenario : scenario
+
+    const opts = isSoloAP
+      ? {
+          // Single AP — keep refl/diff at user settings (cheap for 1 AP and
+          // most visible when positioning near walls).
+          maxReflOrder: hm.reflections ? 1 : 0,
+          enableDiffraction: hm.diffraction,
+          padding,
+        }
+      : {
+          maxReflOrder: lodActive ? 0 : (hm.reflections ? 1 : 0),
+          enableDiffraction: lodActive ? false : hm.diffraction,
+          padding,
+          // Cull faraway APs to the noise floor during a live drag — lossless
+          // within colormap resolution, skips their per-fragment work.
+          ...(lodActive ? { cullFloorDbm: -95 } : {}),
+        }
 
     let field
     if (hm.engine === 'shader') {
       try {
-        field = sampleFieldGL(scenario, hm.gridStepM, opts)
+        field = sampleFieldGL(renderScenario, hm.gridStepM, opts)
       } catch (e) {
         console.warn('[heatmap] shader engine failed, falling back to JS:', e.message)
-        field = sampleField(scenario, hm.gridStepM, opts)
+        field = sampleField(renderScenario, hm.gridStepM, opts)
       }
     } else {
-      field = sampleField(scenario, hm.gridStepM, opts)
+      field = sampleField(renderScenario, hm.gridStepM, opts)
     }
 
-    const modeCfg = getModeConfig(hm.mode)
+    // Solo-AP always renders in RSSI (a single AP has no SINR / CCI). Live LOD
+    // drops blur + contours; idle and solo-AP keep the user settings.
+    const modeCfg = isSoloAP ? getModeConfig('rssi') : getModeConfig(hm.mode)
     const activeField = field[modeCfg.field] ?? field.rssi
     const renderField = { rssi: activeField, nx: field.nx, ny: field.ny }
+    const useBlur     = isSoloAP ? hm.blur         : (lodActive ? 0     : hm.blur)
+    const useContours = isSoloAP ? hm.showContours : (lodActive ? false : hm.showContours)
 
     // The padded region IS sampled (so the kernel resolves correctly at
     // the floor-plan edge) but spills past the image extent — sprite
@@ -245,7 +368,7 @@ export function attachHeatmapLayer({
     const outW = Math.max(1, Math.round(totalWm * floor.scale))
     const outH = Math.max(1, Math.round(totalHm * floor.scale))
 
-    gl.render(renderField, outW, outH, 1 / floor.scale, hm.blur, hm.showContours, {
+    gl.render(renderField, outW, outH, 1 / floor.scale, useBlur, useContours, {
       anchors: modeCfg.anchors,
     })
 
@@ -268,6 +391,17 @@ export function attachHeatmapLayer({
     s.y = -padTpx
     s.scale.set(fullW / gl.canvas.width, fullH / gl.canvas.height)
     s.visible = true
+    // Solo-AP: dim the frozen snapshot underneath to 0.3 so the single moving
+    // AP reads clearly on top (oldSrc displayMode 'solo-ap'). Otherwise the
+    // snapshot is hidden (idle / live both show only the live sprite).
+    if (snapSprite) {
+      if (isSoloAP && snapCanvas) {
+        snapSprite.visible = true
+        snapSprite.alpha = 0.3
+      } else {
+        snapSprite.visible = false
+      }
+    }
     // Clip the padded sprite to the floor image rect so the padding
     // sample region — which we WANT for kernel correctness near edges
     // — never bleeds visually past the floor extent.
@@ -278,12 +412,38 @@ export function attachHeatmapLayer({
     }
   }
 
-  const unsubHM = useHeatmapStore.subscribe(compute)
-  const unsubFloor = useFloorStore.subscribe(compute)
-  const unsubWall = useWallStore.subscribe(compute)
-  const unsubAP = useAPStore.subscribe(compute)
-  const unsubScope = useScopeStore ? useScopeStore.subscribe(compute) : () => {}
-  const unsubHole  = useFloorHoleStore ? useFloorHoleStore.subscribe(compute) : () => {}
+  // Defer + coalesce compute (oldSrc HeatmapLayer.jsx 508: `setTimeout(run, 0)`).
+  // Two reasons, both observed against oldSrc:
+  //   1. Coalescing — a single user action often mutates several stores in the
+  //      same synchronous task (e.g. drag-end fires setAP(null) on the overlay
+  //      store AND updateAP() on the AP store back-to-back). With direct
+  //      subscribers that's TWO full recomputes in one task; the macrotask
+  //      hop collapses them into one.
+  //   2. Task separation — running the recompute synchronously inside the
+  //      pointerup handler bills its whole cost (sampleFieldGL + gl.render +
+  //      the AP-marker redraw + the full-scene PIXI render that follows) to
+  //      one [pointerup] long-task, blocking the release. oldSrc's setTimeout
+  //      lets pointerup return and the browser paint the marker move first,
+  //      then the heavy recompute runs in its own task — so the same work is
+  //      split across tasks instead of stacked, which is why oldSrc's drag-end
+  //      stall reads markedly lower than the synchronous path did.
+  let pendingComputeId = 0
+  const scheduleCompute = () => {
+    if (pendingComputeId !== 0) return // already queued; coalesce
+    pendingComputeId = setTimeout(() => {
+      pendingComputeId = 0
+      compute()
+    }, 0)
+  }
+  const unsubHM = useHeatmapStore.subscribe(scheduleCompute)
+  const unsubFloor = useFloorStore.subscribe(scheduleCompute)
+  const unsubWall = useWallStore.subscribe(scheduleCompute)
+  const unsubAP = useAPStore.subscribe(scheduleCompute)
+  const unsubScope = useScopeStore ? useScopeStore.subscribe(scheduleCompute) : () => {}
+  const unsubHole  = useFloorHoleStore ? useFloorHoleStore.subscribe(scheduleCompute) : () => {}
+  // Drag overlay drives the live / solo drag render (AP follow, freeze,
+  // single-AP overlay). Without this the dragMode control is inert.
+  const unsubDrag = useDragOverlayStore ? useDragOverlayStore.subscribe(scheduleCompute) : () => {}
   compute()
 
   return () => {
@@ -293,6 +453,16 @@ export function attachHeatmapLayer({
     unsubAP()
     unsubScope()
     unsubHole()
+    unsubDrag()
+    if (pendingComputeId !== 0) { clearTimeout(pendingComputeId); pendingComputeId = 0 }
+    if (snapSprite) {
+      snapSprite.mask = null
+      layer.removeChild(snapSprite)
+      snapSprite.destroy()
+      snapSprite = null
+    }
+    if (snapTexture) { snapTexture.destroy(); snapTexture = null }
+    snapCanvas = null
     if (maskG) {
       if (sprite) sprite.mask = null
       layer.removeChild(maskG)

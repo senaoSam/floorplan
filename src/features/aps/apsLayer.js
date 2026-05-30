@@ -419,13 +419,36 @@ export function attachAPsLayer({
     const startAPY = entry.ap.y
     const stage = scene.app.stage
 
+    // rAF-coalesce the drag-overlay write (oldSrc Editor2D onAPDragMove
+    // 1878-1895). pointermove can fire several times per frame, and every
+    // setAP synchronously reruns the heatmap compute() (a single dragged AP
+    // with refl/diff on takes the per-AP sampleFieldGL path — ~40ms/frame on
+    // a software renderer). Without coalescing, those moves pile up: while the
+    // main thread is blocked in compute(), the OS queues more pointermoves,
+    // each triggering another 40ms compute() — an avalanche that locks the
+    // drag. Holding only the latest position and flushing it once per rAF
+    // bounds it to one compute() per frame and never lets the queue grow
+    // (exactly what kept oldSrc smooth here).
+    let pending = null
+    let rafId = 0
+    const flush = () => {
+      rafId = 0
+      if (pending) useDragOverlayStore.getState().setAP(pending)
+    }
     const onMove = (e) => {
       const wp = scene.world.toLocal(e.global)
-      const nextX = startAPX + (wp.x - startWorld.x)
-      const nextY = startAPY + (wp.y - startWorld.y)
-      useDragOverlayStore.getState().setAP({ id: entry.ap.id, x: nextX, y: nextY })
+      pending = {
+        id: entry.ap.id,
+        x: startAPX + (wp.x - startWorld.x),
+        y: startAPY + (wp.y - startWorld.y),
+      }
+      if (rafId === 0) rafId = requestAnimationFrame(flush)
     }
     const onUp = () => {
+      if (rafId !== 0) { cancelAnimationFrame(rafId); rafId = 0 }
+      // Commit the last pending position even if its rAF hadn't fired yet, so
+      // a fast release doesn't drop the final move.
+      if (pending) { useDragOverlayStore.getState().setAP(pending); pending = null }
       const overlay = useDragOverlayStore.getState().ap
       stage.off('pointermove', onMove)
       stage.off('pointerup', onUp)
