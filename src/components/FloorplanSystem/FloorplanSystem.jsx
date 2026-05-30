@@ -24,6 +24,7 @@ import { attachHandlesLayer } from '@/features/handles/handlesLayer'
 import { attachRefOverlayLayer } from '@/features/refOverlay/refOverlayLayer'
 import { bindAlignTransform } from '@/render/bindAlignTransform'
 import { createDraftModeController } from '@/render/draftModeController'
+import { setActiveScene, clearActiveScene } from '@/render/sceneRegistry'
 import ScaleDialog from '@/components/ScaleDialog/ScaleDialog'
 import Viewer3D from '@/features/viewer3d/Viewer3D'
 import { useViewportStore } from '@/store/useViewportStore'
@@ -278,6 +279,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useScopeStore,
         useFloorHoleStore,
         useHeatmapStore,
+        useDragOverlayStore,
       })
       detachSelection = attachSelectionOverlay({
         scene: s,
@@ -350,6 +352,10 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       // All layers attached and have drawn their initial content into the
       // (render-on-demand) scene — paint the first real frame.
       s.requestRender()
+      // Register the live scene so production export paths (PNG / PDF) can
+      // read {app, world} — works in ALL build modes (the DEV window.* bridge
+      // below is only for the MCP / devtools console). See sceneRegistry.js.
+      setActiveScene(s)
       if (import.meta.env.DEV) {
         window.__pixiApp = s.app
         window.__scene = s
@@ -601,6 +607,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (detachModeAdapter) detachModeAdapter()
       if (detachViewport) detachViewport()
       if (detachRenderOnDemand) detachRenderOnDemand.forEach((u) => u())
+      clearActiveScene(scene)
       if (scene) scene.destroy()
       if (import.meta.env.DEV) {
         delete window.__pixiApp

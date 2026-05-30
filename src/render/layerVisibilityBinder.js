@@ -13,6 +13,7 @@ const MAP = [
   ['showCableTrays', 'trays'],
   ['showCables',     'cables'],
   ['showScopes',     'scopes'],
+  ['showFloorHoles', 'floorHoles'],
 ]
 
 export function bindLayerVisibility({ scene, useEditorStore }) {

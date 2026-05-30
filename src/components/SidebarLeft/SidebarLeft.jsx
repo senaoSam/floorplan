@@ -15,6 +15,7 @@ import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorImport } from '@/features/importer/useFloorImport'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import { capturePlanPng, triggerImageDownload } from '@/features/exportPng/exportPlanView'
+import { getSceneRefs } from '@/render/sceneRegistry'
 import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
 import './SidebarLeft.sass'
 
@@ -127,19 +128,17 @@ function SidebarLeft() {
     setMenuOpenId(null)
     if (!floor.imageUrl || !floor.imageWidth || !floor.imageHeight) return
     const doExport = () => {
-      // window.__pixiApp + window.__scene are exposed in DEV by
-      // FloorplanSystem; in production the FloorplanSystem will hand us
-      // these refs directly via a future prop. For now MVP relies on
-      // the DEV bridge — matches how exportPng runs anyway (debug tool).
-      const app = window.__pixiApp
-      const world = window.__scene?.world
-      if (!app || !world) {
+      // Read the live scene from the production-safe registry (works in all
+      // build modes; the old window.__pixiApp / __scene path was DEV-only and
+      // broke PNG export in production). See render/sceneRegistry.js.
+      const refs = getSceneRefs()
+      if (!refs) {
         // eslint-disable-next-line no-alert
         alert('PIXI scene 還沒就緒，請等載入完再試一次。')
         return
       }
       const png = capturePlanPng({
-        app, world,
+        app: refs.app, world: refs.world,
         imageWidth: floor.imageWidth,
         imageHeight: floor.imageHeight,
         pixelRatio: 2,

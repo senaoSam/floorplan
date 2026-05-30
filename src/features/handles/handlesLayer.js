@@ -57,6 +57,42 @@ function makeHandleDot(x, y, fill, stroke, radius, strokeWidth) {
   return c
 }
 
+// Hover-shown red × badge to delete a tray vertex (oldSrc CableTrayLayer
+// 215-227): black shadow r7 @0.35, red disc r6 stroke #fff 1.2, white × of
+// two 6px strokes. Positioned upper-right of the vertex (offset 11). Added as
+// a child of the handle Container so it inverse-scales with it. `onClick`
+// fires the delete. Returned hidden; caller toggles `.visible` on hover.
+// Offset of the delete × badge from its vertex (upper-right), in handle-local
+// units (inverse-scaled with the handle so it's screen-constant). Badge disc
+// radius 6 (+1 shadow) → the badge spans roughly [OFF-7 .. OFF+7].
+const BADGE_OFFSET = 11
+const BADGE_RADIUS = 7
+// Enlarged grab region for an interior vertex handle so the cursor can travel
+// dot→badge without ever leaving the hitArea (which would flicker the badge
+// off). Covers the dot and the badge's upper-right zone in one circle.
+const VERTEX_HIT_RADIUS = BADGE_OFFSET + BADGE_RADIUS + 2  // ≈ 20
+
+function makeDeleteBadge(onClick) {
+  const badge = new Container()
+  badge.position.set(BADGE_OFFSET, -BADGE_OFFSET)
+  badge.eventMode = 'static'
+  badge.cursor = 'pointer'
+  badge.visible = false
+  badge.hitArea = new Circle(0, 0, BADGE_RADIUS)
+  const g = new Graphics()
+  g.circle(0, 0, 7).fill({ color: 0x000000, alpha: 0.35 })
+  g.circle(0, 0, 6).fill({ color: 0xe74c3c, alpha: 1 }).stroke({ width: 1.2, color: 0xffffff, alpha: 1 })
+  g.moveTo(-3, -3).lineTo(3, 3).stroke({ width: 1.5, color: 0xffffff, alpha: 1, cap: 'round' })
+  g.moveTo(3, -3).lineTo(-3, 3).stroke({ width: 1.5, color: 0xffffff, alpha: 1, cap: 'round' })
+  badge.addChild(g)
+  badge.on('pointerdown', (e) => {
+    if ((e.button ?? 0) !== 0) return
+    e.stopPropagation()
+    onClick()
+  })
+  return badge
+}
+
 export function attachHandlesLayer({
   scene,
   useFloorStore,
@@ -168,8 +204,21 @@ export function attachHandlesLayer({
         // 6→8 px when hovered. We implement that via a per-handle scale
         // multiplier read by applyInverseScale.
         h._hoverScaleMul = TRAY_HANDLE_RADIUS_HOVER / TRAY_HANDLE_RADIUS
-        h.on('pointerover', () => { h._hovered = true; applyInverseScale() })
-        h.on('pointerout',  () => { h._hovered = false; applyInverseScale() })
+        // Hover × badge to delete this vertex — interior vertices only, and
+        // only while the tray would keep >= 2 points (oldSrc canDelete).
+        const canDelete = idx > 0 && idx < tray.points.length - 1 && tray.points.length > 2
+        const badge = canDelete ? makeDeleteBadge(() => deleteTrayVertex(tray, idx)) : null
+        if (badge) {
+          h.addChild(badge)
+          // Enlarge the handle's hit region to also cover the badge's upper-
+          // right zone so the cursor can travel dot→badge without leaving the
+          // handle (otherwise pointerout fires in the gap and the badge
+          // flickers off before it can be clicked). The dot still renders at
+          // its small radius — only the invisible hit region grows.
+          h.hitArea = new Circle(0, 0, VERTEX_HIT_RADIUS)
+        }
+        h.on('pointerover', () => { h._hovered = true; if (badge) badge.visible = true; applyInverseScale() })
+        h.on('pointerout',  () => { h._hovered = false; if (badge) badge.visible = false; applyInverseScale() })
         root.addChild(h)
         inverseScaleNodes.add(h)
       })
@@ -582,10 +631,55 @@ export function attachHandlesLayer({
     })
   }
 
+  // Delete a single interior tray vertex (oldSrc CableTrayLayer onDeleteVertex
+  // 691-695): only when the tray keeps >= 2 points afterwards. Surfaced as a
+  // hover × badge on each interior vertex handle.
+  const deleteTrayVertex = (tray, vertexIdx) => {
+    const fid = useFloorStore.getState().activeFloorId
+    if (!fid) return
+    const fresh = useCableStore.getState().traysByFloor[fid]?.find((t) => t.id === tray.id)
+    if (!fresh || fresh.points.length <= 2) return
+    const newPoints = fresh.points.filter((_, j) => j !== vertexIdx)
+    useCableStore.getState().updateTray(fid, tray.id, { points: newPoints })
+    useEditorStore.getState().setSelected(tray.id, 'cable_tray')
+    rebuild()
+    applyInverseScale()
+  }
+
+  // Split a tray AT an existing interior vertex (oldSrc CableTrayLayer
+  // onSplitVertex 696-709): two new trays share the exact vertex xy so the
+  // graph builder coincidence-merges them (cable-spec §10). Endpoints (idx 0 /
+  // last) can't split. Surfaced as Shift+click on an interior vertex handle.
+  const splitTrayAtVertex = (tray, vertexIdx) => {
+    const fid = useFloorStore.getState().activeFloorId
+    if (!fid) return
+    const cable = useCableStore.getState()
+    const fresh = cable.traysByFloor[fid]?.find((t) => t.id === tray.id)
+    if (!fresh) return
+    if (vertexIdx <= 0 || vertexIdx >= fresh.points.length - 1) return
+    const floor = useFloorStore.getState().floors.find((f) => f.id === fid)
+    const ptsA = fresh.points.slice(0, vertexIdx + 1)
+    const ptsB = fresh.points.slice(vertexIdx)
+    cable.removeTray(fid, fresh.id)
+    cable.addTray(fid, { ...fresh, id: generateId('tray'), name: cable.nextTrayName({ floor }), points: ptsA })
+    cable.addTray(fid, { ...fresh, id: generateId('tray'), name: cable.nextTrayName({ floor }), points: ptsB })
+    useEditorStore.getState().clearSelected()  // old tray gone; selection would dangle
+    rebuild()
+    applyInverseScale()
+  }
+
   const bindTrayVertexDrag = (handle, tray, vertexIdx) => {
     handle.on('pointerdown', (e) => {
       if ((e.button ?? 0) !== 0) return
       e.stopPropagation()
+      // Shift+click on an INTERIOR vertex splits the tray there instead of
+      // dragging (oldSrc VertexHandle onClick 200-203). Endpoints fall through
+      // to a normal drag.
+      const isInterior = vertexIdx > 0 && vertexIdx < tray.points.length - 1
+      if (e.shiftKey && isInterior) {
+        splitTrayAtVertex(tray, vertexIdx)
+        return
+      }
       isDragging = true
       const stage = scene.app.stage
       const startWorld = scene.world.toLocal(e.global)

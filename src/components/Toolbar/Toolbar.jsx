@@ -5,14 +5,18 @@ import { useFloorStore } from '@/store/useFloorStore'
 import Icon from '@/components/Icon/Icon'
 import Tooltip from '@/components/Tooltip/Tooltip'
 import AIWallsModal from '@/components/AIWallsModal/AIWallsModal'
+import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import './Toolbar.sass'
 
 // Phase 18 + 24-2 floating toolbar — top-center icon strip with hover-
 // expand group dropdowns. Phase 25 port:
-//   - Align-mode "are you sure" confirm dialog removed (align mode not
-//     implemented in Phase 25 yet)
 //   - Undo / Redo wired up to the real useHistoryStore as of Bundle 18.
 //   - AI walls action wired Bundle 24.
+//   - Align-mode "are you sure" confirm dialog restored (oldSrc Toolbar
+//     155-161 + 284-293): clicking a tool while in ALIGN_FLOOR stashes the
+//     pending mode and prompts before leaving align mode, so alignment work
+//     isn't dropped by a stray tool click. (The floor-switch path has its own
+//     guard in SidebarLeft; this covers the toolbar tool-switch path.)
 
 const GROUPS = [
   {
@@ -105,7 +109,10 @@ function Toolbar() {
 
   const [openGroupId, setOpenGroupId] = useState(null)
   const [aiOpen, setAiOpen] = useState(false)
+  const [pendingMode, setPendingMode] = useState(null)
   const closeTimerRef = useRef(null)
+
+  const isAlignMode = editorMode === EDITOR_MODE.ALIGN_FLOOR
 
   const cancelClose = () => {
     if (closeTimerRef.current) {
@@ -151,6 +158,13 @@ function Toolbar() {
     }
     if (item.band != null) setPlaceApBand(item.band)
     if (item.switchKind != null) setPlaceSwitchKind(item.switchKind)
+    // In ALIGN_FLOOR, switching to any other tool would silently end align
+    // mode — stash it and prompt instead (oldSrc handleModeClick 155-161).
+    if (isAlignMode && item.mode !== EDITOR_MODE.ALIGN_FLOOR) {
+      setPendingMode(item.mode)
+      closeImmediate()
+      return
+    }
     setEditorMode(item.mode)
     closeImmediate()
   }
@@ -245,6 +259,17 @@ function Toolbar() {
         })}
       </div>
       <AIWallsModal open={aiOpen} onClose={() => setAiOpen(false)} />
+
+      {pendingMode && (
+        <ConfirmDialog
+          title="離開樓層對齊？"
+          message="你正在對齊樓層，切換工具會結束對齊模式（已調整的偏移/縮放/旋轉會保留）。確定要離開嗎？"
+          confirmLabel="離開對齊"
+          cancelLabel="繼續對齊"
+          onConfirm={() => { const m = pendingMode; setPendingMode(null); setEditorMode(m) }}
+          onCancel={() => setPendingMode(null)}
+        />
+      )}
     </div>
   )
 }

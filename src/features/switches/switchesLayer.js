@@ -138,7 +138,9 @@ export function attachSwitchesLayer({
     const color = getSwitchKindColor(kind)
     container.hitArea = new Rectangle(-w / 2 - 6, -h / 2 - 10, w + 12, h + 16)
 
-    const isSelected = editorState.selectedId === sw.id && editorState.selectedType === 'switch'
+    const isSelected = (editorState.selectedId === sw.id && editorState.selectedType === 'switch')
+      || (editorState.selectedItems.length > 1
+        && editorState.selectedItems.some((it) => it.id === sw.id && it.type === 'switch'))
     const isHovered  = hoverState.id === sw.id && hoverState.type === 'switch'
     const isFocused  = focusedSwitchIds.has(sw.id) && !isSelected
     const isInvert   = isHovered && !isSelected
@@ -286,6 +288,11 @@ export function attachSwitchesLayer({
       const isOwnMode = editorMode === EDITOR_MODE.PLACE_SWITCH
       if (!cap.allowSelectClick.cable && !isOwnMode) return
       e.stopPropagation()
+      // Ctrl/Cmd+click → additive multi-select (oldSrc Editor2D 1832), no drag.
+      if (e.ctrlKey || e.metaKey || e.originalEvent?.ctrlKey || e.originalEvent?.metaKey) {
+        useEditorStore.getState().toggleSelectedItem(entry.sw.id, 'switch')
+        return
+      }
       useEditorStore.getState().setSelected(entry.sw.id, 'switch')
       beginDrag(entry, e)
     })
@@ -415,14 +422,18 @@ export function attachSwitchesLayer({
   let lastShowSwitchKind = useEditorStore.getState().showSwitchKind
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
+  let lastSelectedItems = useEditorStore.getState().selectedItems
   const onEditorChange = () => {
     const s = useEditorStore.getState()
     const filterChanged = s.showSwitchKind !== lastShowSwitchKind
+    // Include selectedItems so marquee / Ctrl+click batch highlight redraws.
     const selectionChanged = s.selectedId !== lastSelectedId || s.selectedType !== lastSelectedType
+      || s.selectedItems !== lastSelectedItems
     if (!filterChanged && !selectionChanged) return
     lastShowSwitchKind = s.showSwitchKind
     lastSelectedId = s.selectedId
     lastSelectedType = s.selectedType
+    lastSelectedItems = s.selectedItems
     if (selectionChanged) recomputeFocus()
     for (const entry of containers.values()) drawSwitch(entry)
     if (selectionChanged && s.selectedType === 'switch' && s.selectedId) {

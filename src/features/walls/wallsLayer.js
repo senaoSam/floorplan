@@ -182,7 +182,9 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
     const { graphics, wall } = entry
     const editorState = useEditorStore.getState()
     const hoverState = useHoverStore.getState()
-    const isSelected = editorState.selectedId === wall.id && editorState.selectedType === 'wall'
+    const isSelected = (editorState.selectedId === wall.id && editorState.selectedType === 'wall')
+      || (editorState.selectedItems.length > 1
+        && editorState.selectedItems.some((it) => it.id === wall.id && it.type === 'wall'))
     const isHovered  = hoverState.id === wall.id && hoverState.type === 'wall'
     const hoverInvert = isHovered && !isSelected
 
@@ -347,6 +349,11 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
       const cap = getModeCapability(editor.editorMode)
       if (!cap.allowSelectClick.struct) return
       e.stopPropagation()
+      // Ctrl/Cmd+click → additive multi-select (oldSrc Editor2D 1771), no drag.
+      if (e.ctrlKey || e.metaKey || e.originalEvent?.ctrlKey || e.originalEvent?.metaKey) {
+        editor.toggleSelectedItem(entry.wall.id, 'wall')
+        return
+      }
       dlog('  → setSelected', entry.wall.id)
       editor.setSelected(entry.wall.id, 'wall')
       beginDrag(entry, e)
@@ -692,8 +699,15 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
 
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
+  let lastSelectedItems = useEditorStore.getState().selectedItems
   const onSelectionChange = () => {
     const s = useEditorStore.getState()
+    // Multi-select (marquee / Ctrl+click) only moves selectedItems — redraw
+    // all walls so batch highlight paints / clears.
+    if (s.selectedItems !== lastSelectedItems) {
+      lastSelectedItems = s.selectedItems
+      for (const e of containers.values()) drawWall(e)
+    }
     if (s.selectedId === lastSelectedId && s.selectedType === lastSelectedType) return
     const prevId = lastSelectedId
     const prevType = lastSelectedType

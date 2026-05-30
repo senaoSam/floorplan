@@ -8,6 +8,7 @@ import { computeTrayBOM } from '@/features/cable/computeTrayBOM'
 import { computeTrayCableLoads, computeTrayFill } from '@/features/cable/computeTrayFill'
 import { buildPlanningBOMCsv, triggerCSVDownload } from '@/features/cable/exportPlanningBOM'
 import { buildPlanningPdf, triggerPdfDownload } from '@/features/cable/exportPlanningPdf'
+import { getSceneRefs } from '@/render/sceneRegistry'
 // Phase 25 — PIXI scene replaces Konva stage
 import './CableSummaryPanel.sass'
 
@@ -205,7 +206,10 @@ function CableSummaryPanel() {
     setExportStatus('準備中...')
     try {
       const snap = buildPlanningSnapshot()
-      const stage = (typeof window !== 'undefined' && window.__pixiApp && window.__scene) ? { app: window.__pixiApp, world: window.__scene.world } : null
+      // Live scene from the production-safe registry (the old window.__pixiApp
+      // / __scene read was DEV-only → PDF silently no-op'd in production).
+      // capturePlanPng inside buildPlanningPdf accepts this { app, world }.
+      const stage = getSceneRefs()
       if (!stage) { setExportStatus(null); return }
       const blob = await buildPlanningPdf({
         stage,

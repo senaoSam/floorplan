@@ -83,7 +83,9 @@ export function attachRisersLayer({ scene, useFloorStore, useCableStore }) {
     container.position.set(x, y)
     const editor = useEditorStore.getState()
     const hover = useHoverStore.getState()
-    const isSelected = editor.selectedId === riser.id && editor.selectedType === 'cable_riser'
+    const isSelected = (editor.selectedId === riser.id && editor.selectedType === 'cable_riser')
+      || (editor.selectedItems.length > 1
+        && editor.selectedItems.some((it) => it.id === riser.id && it.type === 'cable_riser'))
     const isHovered  = hover.id === riser.id && hover.type === 'cable_riser'
     const isInvert   = isHovered && !isSelected
     const cap = getModeCapability(editor.editorMode)
@@ -157,6 +159,11 @@ export function attachRisersLayer({ scene, useFloorStore, useCableStore }) {
       const isOwnMode = editorMode === EDITOR_MODE.PLACE_RISER
       if (!cap.allowSelectClick.cable && !isOwnMode) return
       e.stopPropagation()
+      // Ctrl/Cmd+click → additive multi-select (oldSrc Editor2D 1855), no drag.
+      if (e.ctrlKey || e.metaKey || e.originalEvent?.ctrlKey || e.originalEvent?.metaKey) {
+        useEditorStore.getState().toggleSelectedItem(entry.riser.id, 'cable_riser')
+        return
+      }
       useEditorStore.getState().setSelected(entry.riser.id, 'cable_riser')
       beginDrag(entry, e)
     })
@@ -254,14 +261,17 @@ export function attachRisersLayer({ scene, useFloorStore, useCableStore }) {
   let lastSelId = useEditorStore.getState().selectedId
   let lastSelType = useEditorStore.getState().selectedType
   let lastMode = useEditorStore.getState().editorMode
+  let lastSelItems = useEditorStore.getState().selectedItems
   const onEditorChange = () => {
     const s = useEditorStore.getState()
     const sel = s.selectedId !== lastSelId || s.selectedType !== lastSelType
     const mode = s.editorMode !== lastMode
-    if (!sel && !mode) return
+    const items = s.selectedItems !== lastSelItems
+    if (!sel && !mode && !items) return
     const prevId = lastSelId, prevType = lastSelType
-    lastSelId = s.selectedId; lastSelType = s.selectedType; lastMode = s.editorMode
-    if (mode) {
+    lastSelId = s.selectedId; lastSelType = s.selectedType; lastMode = s.editorMode; lastSelItems = s.selectedItems
+    // Mode change OR marquee / Ctrl+click multi-select → redraw all risers.
+    if (mode || items) {
       for (const e of containers.values()) drawRiser(e)
       return
     }

@@ -209,7 +209,12 @@ export function attachAPsLayer({
 
     const editorState = useEditorStore.getState()
     const hoverState = useHoverStore.getState()
-    const isSelected = editorState.selectedId === ap.id && editorState.selectedType === 'ap'
+    // Selected when this is the single selection OR a member of a marquee /
+    // Ctrl+click multi-selection (oldSrc APLayer batchSelectedIds 380-381) —
+    // so multi-selected APs get the same emphasis as a single pick.
+    const isSelected = (editorState.selectedId === ap.id && editorState.selectedType === 'ap')
+      || (editorState.selectedItems.length > 1
+        && editorState.selectedItems.some((it) => it.id === ap.id && it.type === 'ap'))
     const isHovered  = hoverState.id === ap.id && hoverState.type === 'ap'
     const isFocused  = focusedAPIds.has(ap.id) && !isSelected
     const isInvert   = isHovered && !isSelected
@@ -381,6 +386,11 @@ export function attachAPsLayer({
       const isOwnMode = editorMode === EDITOR_MODE.PLACE_AP
       if (!cap.allowSelectClick.wireless && !isOwnMode) return
       e.stopPropagation()
+      // Ctrl/Cmd+click → additive multi-select (oldSrc Editor2D 1874), no drag.
+      if (e.ctrlKey || e.metaKey || e.originalEvent?.ctrlKey || e.originalEvent?.metaKey) {
+        useEditorStore.getState().toggleSelectedItem(entry.ap.id, 'ap')
+        return
+      }
       useEditorStore.getState().setSelected(entry.ap.id, 'ap')
       beginDrag(entry, e)
     })
@@ -522,8 +532,20 @@ export function attachAPsLayer({
   let lastShowAPInfo = useEditorStore.getState().showAPInfo
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
+  let lastSelectedItems = useEditorStore.getState().selectedItems
   const onEditorChange = () => {
     const s = useEditorStore.getState()
+    // Marquee / Ctrl+click multi-selection changes selectedItems while
+    // selectedId/Type stay null — redraw every marker so batch highlight
+    // paints / clears (the single-select branch below misses this entirely).
+    if (s.selectedItems !== lastSelectedItems) {
+      lastSelectedItems = s.selectedItems
+      for (const entry of containers.values()) {
+        const drag = useDragOverlayStore.getState().ap
+        if (drag && drag.id === entry.ap.id) drawAP(entry, drag.x, drag.y)
+        else drawAP(entry)
+      }
+    }
     if (s.showAPBand !== lastShowAPBand || s.showAPInfo !== lastShowAPInfo) {
       lastShowAPBand = s.showAPBand
       lastShowAPInfo = s.showAPInfo

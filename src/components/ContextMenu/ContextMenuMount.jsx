@@ -40,6 +40,16 @@ function ContextMenuMount() {
 
   const { targetType, targetId, screenX, screenY } = ctx
 
+  // Right-click is a command channel DISJOINT from selection (oldSrc Editor2D
+  // 2166-2172 clearIfTargetSelected): deleting an object via its context menu
+  // clears the current selection ONLY when that object IS the current
+  // selection. Otherwise a user with A selected who right-clicks + deletes a
+  // different object B keeps A selected (the right panel keeps showing A).
+  const clearIfTargetSelected = () => {
+    const s = useEditorStore.getState()
+    if (s.selectedId === targetId && s.selectedType === targetType) clearSelected()
+  }
+
   let target = null
   let title = ''
   let onRename = null
@@ -52,7 +62,7 @@ function ContextMenuMount() {
     onRename = (name) => useAPStore.getState().updateAP(activeFloorId, targetId, { name })
     onDelete = () => {
       useAPStore.getState().removeAP(activeFloorId, targetId)
-      clearSelected()
+      clearIfTargetSelected()
     }
   } else if (targetType === 'switch') {
     target = (switchesByFloor[activeFloorId] ?? []).find((s) => s.id === targetId)
@@ -60,7 +70,7 @@ function ContextMenuMount() {
     onRename = (name) => useCableStore.getState().updateSwitch(activeFloorId, targetId, { name })
     onDelete = () => {
       useCableStore.getState().removeSwitch(activeFloorId, targetId)
-      clearSelected()
+      clearIfTargetSelected()
     }
   } else if (targetType === 'cable_tray') {
     target = (traysByFloor[activeFloorId] ?? []).find((t) => t.id === targetId)
@@ -68,7 +78,7 @@ function ContextMenuMount() {
     onRename = (name) => useCableStore.getState().updateTray(activeFloorId, targetId, { name })
     onDelete = () => {
       useCableStore.getState().removeTray(activeFloorId, targetId)
-      clearSelected()
+      clearIfTargetSelected()
     }
   } else if (targetType === 'wall') {
     target = (wallsByFloor[activeFloorId] ?? []).find((w) => w.id === targetId)
@@ -76,7 +86,7 @@ function ContextMenuMount() {
     onRename = (name) => useWallStore.getState().updateWall(activeFloorId, targetId, { name })
     onDelete = () => {
       useWallStore.getState().removeWall(activeFloorId, targetId)
-      clearSelected()
+      clearIfTargetSelected()
     }
   } else if (targetType === 'scope') {
     target = (scopesByFloor[activeFloorId] ?? []).find((s) => s.id === targetId)
@@ -84,7 +94,7 @@ function ContextMenuMount() {
     onRename = (name) => useScopeStore.getState().updateScope(activeFloorId, targetId, { name })
     onDelete = () => {
       useScopeStore.getState().removeScope(activeFloorId, targetId)
-      clearSelected()
+      clearIfTargetSelected()
     }
   } else if (targetType === 'floor_hole') {
     target = (floorHolesByFloor[activeFloorId] ?? []).find((h) => h.id === targetId)
@@ -92,7 +102,7 @@ function ContextMenuMount() {
     onRename = (name) => useFloorHoleStore.getState().updateFloorHole(activeFloorId, targetId, { name })
     onDelete = () => {
       useFloorHoleStore.getState().removeFloorHole(activeFloorId, targetId)
-      clearSelected()
+      clearIfTargetSelected()
     }
   } else if (targetType === 'cable_riser') {
     // Risers are global (cross-floor); look up against the entire risers
@@ -103,7 +113,7 @@ function ContextMenuMount() {
     onRename = (name) => useCableStore.getState().updateRiser(targetId, { name })
     onDelete = () => {
       useCableStore.getState().removeRiser(targetId)
-      clearSelected()
+      clearIfTargetSelected()
     }
   } else if (targetType === 'floor_image') {
     // Bundle 30: floor image is interactive again (capability-gated)
@@ -124,7 +134,7 @@ function ContextMenuMount() {
         cropWidth: null,
         cropHeight: null,
       })
-      clearSelected()
+      clearIfTargetSelected()
     }
   }
 

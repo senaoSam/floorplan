@@ -283,7 +283,9 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
 
     const editorState = useEditorStore.getState()
     const hoverState = useHoverStore.getState()
-    const isSelected = editorState.selectedId === tray.id && editorState.selectedType === 'cable_tray'
+    const isSelected = (editorState.selectedId === tray.id && editorState.selectedType === 'cable_tray')
+      || (editorState.selectedItems.length > 1
+        && editorState.selectedItems.some((it) => it.id === tray.id && it.type === 'cable_tray'))
     const isHovered  = hoverState.id === tray.id && hoverState.type === 'cable_tray'
     const isInvert   = isHovered && !isSelected
 
@@ -386,6 +388,12 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
       if (!cap.allowSelectClick.cable) return
       e.stopPropagation()
       const ed = useEditorStore.getState()
+      // Ctrl/Cmd+click → additive multi-select (oldSrc Editor2D 1808), no
+      // drag / vertex-insert.
+      if (e.ctrlKey || e.metaKey || e.originalEvent?.ctrlKey || e.originalEvent?.metaKey) {
+        ed.toggleSelectedItem(entry.tray.id, 'cable_tray')
+        return
+      }
       const wasSelected = ed.selectedId === entry.tray.id && ed.selectedType === 'cable_tray'
       const shiftKey = !!e.originalEvent?.shiftKey
       ed.setSelected(entry.tray.id, 'cable_tray')
@@ -664,17 +672,21 @@ export function attachTraysLayer({ scene, useFloorStore, useCableStore }) {
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
   let lastEditorMode = useEditorStore.getState().editorMode
+  let lastSelectedItems = useEditorStore.getState().selectedItems
   const onEditorChange = () => {
     const s = useEditorStore.getState()
     const modeChanged = s.editorMode !== lastEditorMode
     const selectionChanged = s.selectedId !== lastSelectedId || s.selectedType !== lastSelectedType
-    if (!modeChanged && !selectionChanged) return
+    const itemsChanged = s.selectedItems !== lastSelectedItems
+    if (!modeChanged && !selectionChanged && !itemsChanged) return
     const prevId = lastSelectedId
     const prevType = lastSelectedType
     lastSelectedId = s.selectedId
     lastSelectedType = s.selectedType
     lastEditorMode = s.editorMode
-    if (modeChanged) {
+    lastSelectedItems = s.selectedItems
+    // Mode change OR a marquee / Ctrl+click multi-select → redraw all trays.
+    if (modeChanged || itemsChanged) {
       for (const entry of containers.values()) drawTray(entry)
       return
     }

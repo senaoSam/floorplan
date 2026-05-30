@@ -129,7 +129,9 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
     const isOut = scope.type === 'out'
     const editorState = useEditorStore.getState()
     const hoverState = useHoverStore.getState()
-    const isSelected = editorState.selectedId === scope.id && editorState.selectedType === 'scope'
+    const isSelected = (editorState.selectedId === scope.id && editorState.selectedType === 'scope')
+      || (editorState.selectedItems.length > 1
+        && editorState.selectedItems.some((it) => it.id === scope.id && it.type === 'scope'))
     const isHovered  = hoverState.id === scope.id && hoverState.type === 'scope'
     const isInvert   = isHovered && !isSelected
 
@@ -198,6 +200,11 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
       const isOwnMode = editorMode === EDITOR_MODE.DRAW_SCOPE
       if (!cap.allowSelectClick.struct && !isOwnMode) return
       e.stopPropagation()
+      // Ctrl/Cmd+click → additive multi-select (oldSrc Editor2D 1720), no drag.
+      if (e.ctrlKey || e.metaKey || e.originalEvent?.ctrlKey || e.originalEvent?.metaKey) {
+        useEditorStore.getState().toggleSelectedItem(entry.scope.id, 'scope')
+        return
+      }
       useEditorStore.getState().setSelected(entry.scope.id, 'scope')
       beginScopeDrag(entry, e)
     })
@@ -322,11 +329,17 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
   let lastModeForDim = useEditorStore.getState().editorMode
+  let lastSelectedItems = useEditorStore.getState().selectedItems
   const onEditorChange = () => {
     const s = useEditorStore.getState()
     if (s.editorMode !== lastModeForDim) {
       lastModeForDim = s.editorMode
       applyModeDim()
+    }
+    // Multi-select only moves selectedItems — redraw all scopes for batch highlight.
+    if (s.selectedItems !== lastSelectedItems) {
+      lastSelectedItems = s.selectedItems
+      for (const e of containers.values()) drawScope(e)
     }
     if (s.selectedId === lastSelectedId && s.selectedType === lastSelectedType) return
     const prevId = lastSelectedId

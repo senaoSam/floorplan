@@ -106,6 +106,26 @@ export const useEditorStore = create((set, get) => ({
     selectedType: items.length === 1 ? items[0].type : null,
     panelCollapsed: false,
   }),
+  // Ctrl/Cmd+click additive selection (oldSrc useEditorStore 97-113). Adds or
+  // removes one object from the multi-selection, seeding from the current
+  // single selection so the first Ctrl+click accumulates onto it rather than
+  // dropping it. Keeps selectedId/selectedType in sync when the set collapses
+  // back to one item (so single-object panels still render).
+  toggleSelectedItem: (id, type) => set((s) => {
+    const base = s.selectedItems.length > 0
+      ? s.selectedItems
+      : (s.selectedId && s.selectedType ? [{ id: s.selectedId, type: s.selectedType }] : [])
+    const exists = base.find((it) => it.id === id && it.type === type)
+    const next = exists
+      ? base.filter((it) => !(it.id === id && it.type === type))
+      : [...base, { id, type }]
+    return {
+      selectedItems: next,
+      selectedId: next.length === 1 ? next[0].id : null,
+      selectedType: next.length === 1 ? next[0].type : null,
+      panelCollapsed: false,
+    }
+  }),
   isItemSelected: (id) => {
     const s = get()
     if (s.selectedId === id) return true

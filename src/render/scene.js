@@ -8,7 +8,9 @@ import { Application, Container } from 'pixi.js'
 //   1  floorImage    — floor PNG / JPG / multi-floor stack
 //   2  heatmap       — raw WebGL2 canvas wrapped in PIXI.Sprite
 //   3  walls         — PIXI.Mesh + custom line shader
-//   4  scopes        — Graphics for Scope / FloorHole / RefWall / RefVector
+//   4  scopes        — Graphics for Scope / RefWall / RefVector
+//   4b floorHoles    — Graphics for FloorHole (own layer so the 中庭 layer
+//                      toggle can hide it independently of scopes)
 //   5  cables        — PIXI.Mesh + dashed line shader (eventMode='none')
 //   6  trays         — Container + Graphics + vertex handles
 //   7a devicesAP     — Sprite atlas batch
@@ -22,6 +24,7 @@ const LAYER_KEYS = [
   'heatmap',
   'walls',
   'scopes',
+  'floorHoles',
   'cables',
   'trays',
   'devicesAP',

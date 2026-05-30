@@ -7,10 +7,12 @@ import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlaySt
 import { getModeCapability } from '@/render/modeCapabilities'
 
 // Floor-hole adapter — per-hole interactive Container with click-select +
-// right-click context menu. Per spec §3.3 the scopes / floorHoles / refWall
-// / refVector all share layer 5. Colours match oldSrc FloorHoleLayer:
-// violet fill + solid purple stroke. Distinguishes "void / atrium" from
-// scope evaluation regions (green/red).
+// right-click context menu. Floor-holes render into their OWN scene layer
+// (scene.layers.floorHoles) so the 中庭 LayerToggle can hide them
+// independently of scopes (they used to share scene.layers.scopes, which left
+// the 中庭 toggle inert and coupled hole visibility to showScopes). Colours
+// match oldSrc FloorHoleLayer: violet fill + solid purple stroke.
+// Distinguishes "void / atrium" from scope evaluation regions (green/red).
 
 // Visual constants ported 1:1 from oldSrc/features/editor/layers/FloorHoleLayer.jsx
 //   normal: violet stroke 3 px, dashed [10, 4], low-alpha violet fill
@@ -80,7 +82,7 @@ function makePolygonHitArea(flat) {
 }
 
 export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore }) {
-  const layer = scene.layers.scopes
+  const layer = scene.layers.floorHoles
   layer.eventMode = 'passive'
 
   const containers = new Map()
@@ -125,7 +127,9 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
     if (flat.length < 6) return
     const editorState = useEditorStore.getState()
     const hoverState = useHoverStore.getState()
-    const isSelected = editorState.selectedId === hole.id && editorState.selectedType === 'floor_hole'
+    const isSelected = (editorState.selectedId === hole.id && editorState.selectedType === 'floor_hole')
+      || (editorState.selectedItems.length > 1
+        && editorState.selectedItems.some((it) => it.id === hole.id && it.type === 'floor_hole'))
     const isHovered  = hoverState.id === hole.id && hoverState.type === 'floor_hole'
     const isInvert   = isHovered && !isSelected
 
@@ -179,6 +183,11 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
       const isOwnMode = editorMode === EDITOR_MODE.DRAW_FLOOR_HOLE
       if (!cap.allowSelectClick.struct && !isOwnMode) return
       e.stopPropagation()
+      // Ctrl/Cmd+click → additive multi-select (oldSrc Editor2D 1750), no drag.
+      if (e.ctrlKey || e.metaKey || e.originalEvent?.ctrlKey || e.originalEvent?.metaKey) {
+        useEditorStore.getState().toggleSelectedItem(entry.hole.id, 'floor_hole')
+        return
+      }
       useEditorStore.getState().setSelected(entry.hole.id, 'floor_hole')
       beginHoleDrag(entry, e)
     })
@@ -253,10 +262,10 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
     applyModeDim()
   }
 
-  // DRAW_SCOPE → dim all floor-holes (scope+hole share the `scopes`
-  // scene layer so layer-level keepLayers can't isolate them; do alpha
-  // per-container instead). User asked for "切到 scope → hole 變暗,
-  // 反之亦然" mirroring wall/AP behaviour.
+  // DRAW_SCOPE → dim all floor-holes. User asked for "切到 scope → hole
+  // 變暗,反之亦然" mirroring wall/AP behaviour. Done per-container (alpha)
+  // rather than at the layer level so it composes with the independent 中庭
+  // visibility toggle (layer.visible) without the two fighting.
   const applyModeDim = () => {
     const mode = useEditorStore.getState().editorMode
     const dim = mode === EDITOR_MODE.DRAW_SCOPE
@@ -301,11 +310,17 @@ export function attachFloorHolesLayer({ scene, useFloorStore, useFloorHoleStore 
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
   let lastModeForDim = useEditorStore.getState().editorMode
+  let lastSelectedItems = useEditorStore.getState().selectedItems
   const onEditorChange = () => {
     const s = useEditorStore.getState()
     if (s.editorMode !== lastModeForDim) {
       lastModeForDim = s.editorMode
       applyModeDim()
+    }
+    // Multi-select only moves selectedItems — redraw all holes for batch highlight.
+    if (s.selectedItems !== lastSelectedItems) {
+      lastSelectedItems = s.selectedItems
+      for (const e of containers.values()) drawHole(e)
     }
     if (s.selectedId === lastSelectedId && s.selectedType === lastSelectedType) return
     const prevId = lastSelectedId
