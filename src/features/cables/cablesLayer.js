@@ -584,9 +584,11 @@ export function attachCablesLayer({
   // so we only rebuild gStatic when the selection or drag target actually
   // changes — continuous drag of the same object touches gDynamic only.
   let splitKey = null
-  // 32-E dragend fast path — the affected set from the last in-drag frame, so
-  // release can append just those route(s) to gStatic instead of rebuilding all.
+  // 32-E dragend fast path — the affected set + drag key from the last in-drag
+  // frame, so release can append just those route(s) to gStatic instead of
+  // rebuilding all (only when unfocused; focus forces a full rebuild).
   let lastDragAffected = null
+  let lastDragKey = ''
 
   const rebuildImpl = () => {
     const { floors, activeFloorId } = useFloorStore.getState()
@@ -611,8 +613,9 @@ export function attachCablesLayer({
       baseResult = null      // stale once there's no floor; force full next time
       routingDirty = false   // !baseResult already forces a full recompute
       splitKey = null
-      staticEpoch = -1       // force a re-bake on the next real rebuild
+      staticEpoch = -1       // force a full rebuild on the next real rebuild
       lastDragAffected = null
+      lastDragKey = ''
       return
     }
 
@@ -663,22 +666,27 @@ export function attachCablesLayer({
       if (kind === 'route') return isRouteFocused(o) || affected.apIds.has(o.apId)
       return isLinkFocused(o) || affected.linkIds.has(o.srcId)
     }
-    // The static layer must omit ONLY drag-affected routes (stale-duplicate
-    // problem). Focused-but-not-dragged routes stay (occluded by gDynamic).
-    const inStatic = (kind, o) =>
-      kind === 'route' ? !affected.apIds.has(o.apId) : !affected.linkIds.has(o.srcId)
+    // gStatic = everything NOT in the foreground. Foreground (focused + drag-
+    // affected) lives only in gDynamic at full alpha. We deliberately do NOT
+    // leave focused routes in gStatic-and-occlude-them: that invariant broke
+    // when a focused route was also drag-excluded (after moving a selected AP
+    // then changing selection, its route vanished / double-dimmed). Excluding
+    // foreground from gStatic outright + rebuilding gStatic on selection change
+    // (focus is in the split key below) keeps it always correct.
+    const inStatic = (kind, o) => !inForeground(kind, o)
 
     // Focus dim: drop the whole background to DIM_OPACITY via the staticDim
     // wrapper's alpha (one property, no per-route alpha → keeps draw cheap; see
-    // drawRoutes header). Applied to the wrapper rather than gStatic just for
-    // tidiness — gStatic is plain vector now so either would work.
+    // drawRoutes header).
     const wantDim = hasFocus
 
-    // staticKey fingerprints what gStatic holds: it changes with the drag
-    // target (and is force-nulled by data / viewport changes via
-    // invalidateStatic), but NOT with selection. While unchanged the heavy
-    // background isn't redrawn.
-    const nextStaticKey = drag.ap ? `ap:${drag.ap.id}` : drag.sw ? `sw:${drag.sw.id}` : 'none'
+    // splitKey fingerprints what gStatic holds. It now includes the FOCUS
+    // target (not just the drag target), so changing selection rebuilds gStatic
+    // — the dragged-then-reselected residue fix. Data / viewport changes
+    // force-null it via invalidateStatic.
+    const focusKey = hasFocus ? `${editor.selectedType}:${editor.selectedId}` : ''
+    const dragKey = drag.ap ? `ap:${drag.ap.id}` : drag.sw ? `sw:${drag.sw.id}` : ''
+    const nextStaticKey = `${focusKey}|${dragKey}`
 
     // 32-E dragend fast path. When a single-object drag RELEASES (splitKey was
     // 'ap:X'/'sw:X', now 'none') the only diff between the current gStatic and
@@ -697,9 +705,15 @@ export function attachCablesLayer({
     const routesStale = staticEpoch !== routesEpoch
 
     let staticRedrawn = false
+    // dragend append fast-path — when an UNFOCUSED single-object drag releases,
+    // the only gStatic diff is the dropped route rejoining it, so append just
+    // that instead of rebuilding all ~299. Guarded to: no drag now, no focus
+    // (focus would need the full rebuild to re-dim correctly), the prior frame
+    // was a single drag (lastDragAffected), routes not stale, and gStatic was
+    // actually holding the un-dragged set (splitKey was a drag key).
     const releasing =
-      nextStaticKey === 'none' &&
-      splitKey !== null && splitKey !== 'none' &&
+      !drag.ap && !drag.sw && !hasFocus &&
+      splitKey === `|${lastDragKey}` && lastDragKey !== '' &&
       lastDragAffected &&
       (lastDragAffected.apIds.size + lastDragAffected.linkIds.size) > 0
     if (releasing && !routesStale) {
@@ -730,6 +744,7 @@ export function attachCablesLayer({
     // ancestor dim into the texture — a whole family of bugs now gone).
     staticDim.alpha = wantDim ? DIM_OPACITY : 1
     lastDragAffected = (drag.ap || drag.sw) ? affected : null
+    lastDragKey = dragKey
 
     // Foreground overlay — redrawn every rebuild (cheap: focused + dragged only).
     gDynamic.clear()
