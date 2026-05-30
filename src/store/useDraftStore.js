@@ -49,6 +49,11 @@ export const useDraftStore = create((set) => ({
     snapHint: null,
   }),
   addPoint: (p) => set((s) => ({ points: [...s.points, p] })),
+  // Remove the last placed draft vertex (Backspace step-back during a draw).
+  // No-op on an empty draft; the cursor preview keeps following the pointer.
+  popPoint: () => set((s) => (s.points.length > 0
+    ? { points: s.points.slice(0, -1) }
+    : s)),
   setCursor: (p) => set({ cursor: p }),
   setSnapHint: (h) => set({ snapHint: h }),
   setDoorWindowDraft: (d) => set({ doorWindowDraft: d }),

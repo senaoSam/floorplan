@@ -401,6 +401,19 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       const tag = e.target.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
 
+      // Backspace during a draw steps back the last placed vertex / wall
+      // segment (draftCtrl decides per mode). Must run BEFORE the Delete/
+      // Backspace delete branch below so it isn't swallowed as a delete, and
+      // before global undo so a mid-draw Backspace never triggers history
+      // undo. (Ctrl+Z is intentionally NOT a step-back — it stays global undo;
+      // oldSrc bound both, but we keep undo unambiguous.)
+      if (e.key === 'Backspace' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (draftCtrl.handleDraftBackspace()) {
+          e.preventDefault()
+          return
+        }
+      }
+
       // Ctrl/Cmd+Z = undo, Ctrl/Cmd+Shift+Z OR Ctrl+Y = redo. Matches
       // oldSrc keyboard shortcuts. Trigger BEFORE the per-key branches
       // so editing chords don't fall through into the mode logic.

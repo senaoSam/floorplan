@@ -18,6 +18,13 @@ const DRAW_MODES = new Set([
   EDITOR_MODE.CROP_IMAGE,
 ])
 
+// Screen-px radius for the "click back on the first vertex to close the
+// polygon" gesture in DRAW_SCOPE / DRAW_FLOOR_HOLE (oldSrc Editor2D SNAP_PX
+// = 12, applied as SNAP_PX / viewport.scale so it stays a constant on-screen
+// distance at any zoom). The close-suggestion ring is drawn by
+// draftOverlayLayer once points.length >= 3.
+const CLOSE_SNAP_PX = 12
+
 export function createDraftModeController({
   useEditorStore,
   useFloorStore,
@@ -178,6 +185,25 @@ export function createDraftModeController({
       if (fid) useEditorStore.getState().setSelected(fid, 'floor_image')
       return
     }
+    // DRAW_SCOPE / DRAW_FLOOR_HOLE: clicking back on (or near) the first
+    // vertex closes & commits the polygon — the gesture the close-ring at
+    // points[0] advertises (oldSrc Editor2D 1237-1276). Needs >= 3 points so a
+    // real polygon exists; threshold is CLOSE_SNAP_PX / scale (constant screen
+    // distance). Falls through to addPoint when the click isn't near the start.
+    if (mode === EDITOR_MODE.DRAW_SCOPE || mode === EDITOR_MODE.DRAW_FLOOR_HOLE) {
+      if (draft.points.length >= 3) {
+        const scale = useViewportStore?.getState?.()?.scale ?? 1
+        const snapDist = CLOSE_SNAP_PX / scale
+        const first = draft.points[0]
+        if (Math.hypot(snapped.x - first.x, snapped.y - first.y) < snapDist) {
+          if (mode === EDITOR_MODE.DRAW_SCOPE) commitScope(draft.points, 'in')
+          else commitHole(draft.points)
+          useDraftStore.getState().clearDraft()
+          return
+        }
+      }
+    }
+
     useDraftStore.getState().addPoint(snapped)
   }
 
@@ -262,6 +288,50 @@ export function createDraftModeController({
     return false
   }
 
+  // Backspace step-back during a draw (oldSrc Editor2D tray draft 417-426,
+  // here generalised to every multi-point draw mode). Returns true when it
+  // consumed the key so FloorplanSystem skips its global undo / delete paths.
+  //   - DRAW_SCOPE / DRAW_FLOOR_HOLE / DRAW_CABLE_TRAY accumulate vertices in
+  //     the draft store, so step-back just pops the last draft point.
+  //   - DRAW_WALL commits each segment to the wall store immediately and keeps
+  //     a 1-point draft anchor at the last vertex, so step-back removes the
+  //     most-recently-drawn wall and rewinds the anchor to that wall's start —
+  //     the chain continues from the previous vertex.
+  // Single-click modes (DRAW_SCALE, CROP_IMAGE) and modes with no draft in
+  // flight return false (Backspace falls through to the delete handler).
+  const handleDraftBackspace = () => {
+    const draft = useDraftStore.getState()
+    const mode = useEditorStore.getState().editorMode
+
+    if (mode === EDITOR_MODE.DRAW_SCOPE
+      || mode === EDITOR_MODE.DRAW_FLOOR_HOLE
+      || mode === EDITOR_MODE.DRAW_CABLE_TRAY) {
+      if (draft.mode === mode && draft.points.length > 0) {
+        useDraftStore.getState().popPoint()
+        return true
+      }
+      return false
+    }
+
+    if (mode === EDITOR_MODE.DRAW_WALL && draft.mode === mode && draft.points.length > 0) {
+      const fid = useFloorStore.getState().activeFloorId
+      const walls = fid ? (useWallStore.getState().wallsByFloor[fid] ?? []) : []
+      const last = walls[walls.length - 1]
+      if (last) {
+        useWallStore.getState().removeWall(fid, last.id)
+        // Rewind the anchor to the removed segment's start so the next click
+        // continues the chain from the previous vertex.
+        useDraftStore.getState().beginDraft(EDITOR_MODE.DRAW_WALL, { x: last.startX, y: last.startY })
+      } else {
+        // No committed wall yet (only the anchor exists) — drop the anchor.
+        useDraftStore.getState().clearDraft()
+      }
+      return true
+    }
+
+    return false
+  }
+
   return {
     isDrawMode,
     onDrawModeClick,
@@ -269,5 +339,6 @@ export function createDraftModeController({
     onDrawModeRightClick,
     onDrawModeDoubleClick,
     handleKey,
+    handleDraftBackspace,
   }
 }

@@ -10,9 +10,28 @@
 
 ## 現況一句話
 
-**Phase 25 PixiJS hybrid 重構 — 純功能對等已完成（Bundle 52「closes pure-feature parity gap」）。**
-oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap / 3D viewer / Crop / Align / Scale / Undo-Redo / Marquee / AI walls / AutoPower / PNG·CSV·PDF export / BOM）都已 port 到新 `src`。
-**剩下的是「達到 1000 AP 規格的效能實作」+ 驗收。**
+**Phase 25 PixiJS hybrid 重構 — 大致功能對等，但 2026-05-30 審計發現 15 條 parity gap（Bundle 52「對等完成」聲稱不可靠）。**
+oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap / 3D viewer / Crop / Align / Scale / Undo-Redo / Marquee / AI walls / AutoPower / PNG·CSV·PDF export / BOM）大多已 port 到新 `src`，但有漏接（見下「Parity gaps」）。
+**剩下的是「補回 parity gaps」+「達到 1000 AP 規格的效能實作」+ 驗收。**
+
+### Parity gaps（2026-05-30 workflow 審計，oldSrc vs current，已對抗式驗證）
+
+> 細節 + oldSrc 出處見 memory `project_konva_pixi_parity_gaps`。
+
+| 狀態 | Gap | 嚴重度 |
+|------|-----|--------|
+| ✅ 已修 | Scope/Hole 點回起點閉合（保留畫3點顯示閉合圈） | missing |
+| ✅ 已修 | 繪製途中 Backspace 退一步（Tray/Scope/Hole 退頂點、Wall 退上一段）；Ctrl+Z 維持全域 undo | missing |
+| ⬜ | BatchPanel 批次編輯整組消失（只剩計數 stub；batch-mutation actions 其實早有） | missing |
+| ⬜ | 中庭(floor-holes)圖層開關在 2D 失效（畫進 scopes 層、binder 無此 key） | missing |
+| ⬜ | 右鍵刪除無條件清空選取（缺 clearIfTargetSelected） | partial |
+| ⬜ | Tray 頂點 hover × 刪單一頂點 | missing |
+| ⬜ | Tray 頂點 Shift+click 就地切割（只剩 shift 點線段中段） | partial |
+| ⬜ | ALIGN_FLOOR 切 toolbar 工具無確認對話框 | missing |
+| ⬜ | PNG 平面圖匯出 production 壞（DEV-only window.__pixiApp/__scene） | partial |
+| ⬜ | PDF 規劃報告匯出 production 壞（同上 DEV-only globals） | partial |
+| ⬜ | Heatmap dragMode(Solo/Live)完全失效（adapter 不讀 dragMode） | partial |
+| ⏸️ 使用者不做 | #/vectorize 獨立頁、Gemini 清理圖預覽鈕、#/ai-walls-debug OpenCV 頁 | — |
 
 ---
 
