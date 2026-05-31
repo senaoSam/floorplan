@@ -134,15 +134,23 @@
     input[type="range"]
       flex: 1
 
-  // 任務 4: amber notice shown when a large scene auto-disables refl/diff.
+  // 任務 4: amber notice shown when a large scene auto-disables refl/diff, and
+  // the draw-wall freeze notice. Sits ON TOP of the full-bleed heatmap, so it
+  // needs an opaque dark fill (matching __readout / __panel) — a translucent
+  // amber wash let the colourful field bleed through and made the text
+  // unreadable. Amber border + text keep the warning semantics; max-width keeps
+  // the line from spanning the whole canvas.
   &__notice
-    background: rgba(245, 158, 11, 0.12)
-    border: 1px solid rgba(245, 158, 11, 0.4)
+    background: rgba(15, 23, 42, 0.95)
+    border: 1px solid rgba(245, 158, 11, 0.7)
     border-radius: 6px
-    padding: 6px 8px
-    font-size: 10px
+    padding: 6px 9px
+    font-size: 11px
     line-height: 1.4
     color: #fcd34d
+    max-width: 240px
+    backdrop-filter: blur(6px)
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4)
 
   // Mirrors RegulatorySelector's __select: half-transparent fill, thin border,
   // accent on focus. Used for engine + drag-mode dropdowns inside the panel.
