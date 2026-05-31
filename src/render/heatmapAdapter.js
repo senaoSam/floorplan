@@ -165,6 +165,9 @@ export function attachHeatmapLayer({
     if (!hm.enabled) {
       hide()
       soloActive = false
+      // 任務 4: clear the large-scene notice when the heatmap is off so it
+      // can't linger stale into the next enable.
+      useHeatmapStore.getState().setSimplifiedLargeScene(false)
       return
     }
 
@@ -321,18 +324,42 @@ export function attachHeatmapLayer({
       : scenario
     const renderScenario = isSoloAP ? soloScenario : scenario
 
+    // 任務 4 (b): large-scene downgrade. The per-AP path cost scales with
+    // wall×AP (each AP's pass scans the walls for penetration + reflection +
+    // diffraction), so once the product crosses a threshold we drop refl/diff
+    // for the WHOLE compute — idle and drag alike — forcing the cheap
+    // aggregated single-pass (canUseAggregated becomes true). The threshold is
+    // far lower on a software renderer (single-core shader) than on a real GPU.
+    // 任務 4 (a): isSoftwareRender (probed once at store init) picks which.
+    //
+    // NOTE: the two thresholds below are PLACEHOLDERS. They must be calibrated
+    // on the user's software-render machine by measuring full-quality single
+    // compute time across (wall, AP) combinations and finding the largest
+    // product that still feels acceptable. HW GPU can tolerate a much higher
+    // product. Until calibrated, these are conservative guesses.
+    const SW_WALL_AP_THRESHOLD = 1500   // PLACEHOLDER — calibrate on SW machine
+    const HW_WALL_AP_THRESHOLD = 20000  // PLACEHOLDER — calibrate on HW machine
+    const wallApProduct = walls.length * scenario.aps.length
+    const threshold = hm.isSoftwareRender ? SW_WALL_AP_THRESHOLD : HW_WALL_AP_THRESHOLD
+    const forceAggregated = wallApProduct > threshold
+    // Surface to the UI (no-op setter when unchanged, so it won't loop the
+    // store subscription that drives compute).
+    useHeatmapStore.getState().setSimplifiedLargeScene(forceAggregated)
+
     const opts = isSoloAP
       ? {
           // Single AP — keep refl/diff at user settings (cheap for 1 AP and
           // most visible when positioning near walls). Stays on the per-AP
           // path; the drag speedup for solo comes from the coarser grid below.
-          maxReflOrder: hm.reflections ? 1 : 0,
-          enableDiffraction: hm.diffraction,
+          // forceAggregated overrides even here: a huge scene's snapshot/
+          // single-AP overlay should also skip the expensive refl/diff scan.
+          maxReflOrder: forceAggregated ? 0 : (hm.reflections ? 1 : 0),
+          enableDiffraction: forceAggregated ? false : hm.diffraction,
           padding,
         }
       : {
-          maxReflOrder: lodActive ? 0 : (hm.reflections ? 1 : 0),
-          enableDiffraction: lodActive ? false : hm.diffraction,
+          maxReflOrder: (lodActive || forceAggregated) ? 0 : (hm.reflections ? 1 : 0),
+          enableDiffraction: (lodActive || forceAggregated) ? false : hm.diffraction,
           padding,
           // Cull faraway APs to the noise floor during a live drag — lossless
           // within colormap resolution, skips their per-fragment work.

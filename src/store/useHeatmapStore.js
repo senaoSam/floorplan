@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { detectSoftwareRender } from '@/utils/detectSoftwareRender'
 
 // Supported heatmap visualisation modes.
 // - rssi: strongest AP power in dBm (default)
@@ -46,6 +47,17 @@ export const useHeatmapStore = create((set) => ({
   //   { at:{x,y}, rssiDbm, sinrDb, snrDb, cciDbm, perAp:number[], apList:AP[] }
   hoverReading: null,
 
+  // 任務 4 (a): true when WebGL2 is backed by a software rasteriser (SwiftShader
+  // etc). Probed once at store-creation; drives the lower large-scene downgrade
+  // threshold in heatmapAdapter. Read-only after init.
+  isSoftwareRender: detectSoftwareRender(),
+
+  // 任務 4 (b): set by heatmapAdapter when the active scene's wall×AP product
+  // exceeds the downgrade threshold, so reflections/diffraction are forced off
+  // for the WHOLE compute (idle + drag). HeatmapControl surfaces this as a
+  // "large scene simplified" notice so the user knows the field is approximate.
+  simplifiedLargeScene: false,
+
   setEnabled:     (v) => set({ enabled: v }),
   setMode:        (v) => set({ mode: v }),
   setEngine:      (v) => set({ engine: v }),
@@ -56,4 +68,7 @@ export const useHeatmapStore = create((set) => ({
   setBlur:        (v) => set({ blur: v }),
   setShowContours:(v) => set({ showContours: v }),
   setHoverReading:(v) => set({ hoverReading: v }),
+  // 任務 4 (b): adapter calls this each compute; guarded to a no-op when the
+  // value is unchanged so it never triggers an extra subscriber recompute loop.
+  setSimplifiedLargeScene: (v) => set((s) => (s.simplifiedLargeScene === v ? s : { simplifiedLargeScene: v })),
 }))

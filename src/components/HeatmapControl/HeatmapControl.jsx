@@ -37,6 +37,9 @@ function HeatmapControl() {
   const setEngine    = useHeatmapStore((s) => s.setEngine)
   const dragMode     = useHeatmapStore((s) => s.dragMode)
   const setDragMode  = useHeatmapStore((s) => s.setDragMode)
+  // 任務 4: when the active scene's wall×AP exceeds the downgrade threshold,
+  // heatmapAdapter forces reflections/diffraction off for the whole compute.
+  const simplifiedLargeScene = useHeatmapStore((s) => s.simplifiedLargeScene)
   const hover        = useHoverReadoutStore((s) => s.reading)
 
   const [panelOpen, setPanelOpen] = useState(false)
@@ -163,6 +166,16 @@ function HeatmapControl() {
             <input type="checkbox" checked={diffraction} onChange={(e) => setDiffraction(e.target.checked)} />
             <span>繞射 (UTD / knife edge)</span>
           </label>
+          {/* 任務 4: large scenes auto-disable refl/diff for performance. The
+              checkboxes above still reflect the user's preference, but the
+              actual compute ignores them until the scene shrinks below the
+              threshold — tell the user so the simplified field isn't a
+              surprise. */}
+          {simplifiedLargeScene && (
+            <div className="heatmap-control__notice">
+              ⚡ 大場景已簡化：暫時關閉反射 / 繞射以維持效能（縮小場景後自動恢復）
+            </div>
+          )}
           <label className="heatmap-control__line">
             <span>網格精度: {gridStepM.toFixed(2)} m</span>
             <input
