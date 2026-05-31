@@ -2004,6 +2004,15 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
 
   const losCache = new Map()
   let wallsVersion = 0
+  // 任務 2 (C): content signature of the last uploaded wall set. uploadWalls is
+  // called every sampleFieldGL frame, but the walls usually haven't changed
+  // (AP drag, viewport, mode toggle). Skipping the re-upload + buildGrid + cache
+  // bust on an unchanged wall set is what lets losCache / apGeoCache /
+  // outGridCache actually survive across frames — without this they were
+  // cleared and rebuilt every frame (a latent miss-every-time bug). null forces
+  // the first call to run.
+  let wallsSig = null
+  let cornersSig = null
 
   // HM-F5k: per-AP precomputed corner / wall geometry cache. Mirrors losCache
   // semantics — invalidated when walls change (uploadWalls bumps
@@ -2011,6 +2020,35 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // Cache shape: Map<apKey, { cornersTex, mirrorTex, hash, cornerCount, wallCount }>
   // The textures are owned by the cache; callers must not delete them.
   const apGeoCache = new Map()
+
+  // 任務 2 (C): per-AP output-grid cache. renderAp's biggest cost is the
+  // drawArrays + readPixels round-trip (a GPU→CPU sync stall, expensive on
+  // SwiftShader); the JS custom-pattern path is an nx×ny rssiFromAp loop. Both
+  // produce a Float32Array that only depends on that AP's inputs + the shared
+  // geometry. When one AP is dragged the other N-1 APs are unchanged, so their
+  // grids can be reused verbatim instead of re-rendered.
+  //
+  // The cache stores final per-AP grids keyed by a host-supplied hash. The
+  // host (sampleFieldGL) owns the hash because it sees every input (AP fields,
+  // grid params, opts, custom patternId); we own the container + invalidation
+  // so it stays in lockstep with losCache/apGeoCache — any uploadWalls /
+  // uploadCorners bumps wallsVersion and clears all three. Callers must include
+  // wallsVersion (via getWallsVersion) in their hash so a wall edit that races
+  // a cache write can't leave a stale entry. Cache shape:
+  //   Map<apKey, { grid: Float32Array, hash, nx, ny }>
+  const outGridCache = new Map()
+  function getWallsVersion() { return wallsVersion }
+  function getCachedGrid(apKey, hash) {
+    const e = outGridCache.get(apKey)
+    return (e && e.hash === hash) ? e : null
+  }
+  function setCachedGrid(apKey, hash, grid, nx, ny) {
+    // Store a copy — renderAp returns a fresh array per call today, but copying
+    // is cheap insurance against any future buffer reuse leaking a mutation
+    // into the cache. The grid is read-only from the cache's perspective.
+    outGridCache.set(apKey, { grid: grid.slice(), hash, nx, ny })
+  }
+
   // 1×1 placeholder so the FS sampler bindings stay valid even when host
   // didn't bake (uApGeoEnabled=0 then short-circuits all reads).
   const apGeoPlaceholderTex = gl.createTexture()
@@ -2046,6 +2084,19 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     return { data, w, h }
   }
 
+  // 任務 2 (C): FNV-1a over a Float32Array's raw bytes. Used as a cheap content
+  // signature to skip redundant wall/corner re-uploads (and the cache busts
+  // they trigger) when the geometry is unchanged across frames.
+  function fnv32(f32) {
+    const bytes = new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength)
+    let h = 0x811c9dc5
+    for (let i = 0; i < bytes.length; i++) {
+      h ^= bytes[i]
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0
+    }
+    return h.toString(16)
+  }
+
   // walls: array of { a:{x,y}, b:{x,y}, lossDb, lossB, zLoM, zHiM, itu, roughnessM }
   // Packs 4 texels per wall (16 floats):
   //   t0 = (ax, ay, bx, by)
@@ -2058,7 +2109,6 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // override the grid extent when the scenario size doesn't match the wall
   // bounds (e.g. cross-floor walls extending beyond active floor).
   function uploadWalls(walls, opts = {}) {
-    bakeWalls = walls.map((w) => ({ ax: w.a.x, ay: w.a.y, bx: w.b.x, by: w.b.y }))
     const flat = new Float32Array(walls.length * 16)
     for (let i = 0; i < walls.length; i++) {
       const w = walls[i]
@@ -2083,6 +2133,18 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       flat[o + 12] = w.lossB ?? 0
       flat[o + 13] = 0; flat[o + 14] = 0; flat[o + 15] = 0
     }
+
+    // 任務 2 (C): bail out when the wall content is byte-for-byte unchanged.
+    // `flat` already contains every wall field the texture (and thus every
+    // downstream grid) depends on, so a matching signature means the GPU
+    // texture, accel grid, and all geometry caches are still valid — re-running
+    // any of it would be wasted work AND would needlessly invalidate the
+    // caches. opts.bbox feeds buildGrid, so fold it in too.
+    const sig = fnv32(flat) + '|' + walls.length + '|' + (opts.bbox ? `${opts.bbox.minX},${opts.bbox.minY},${opts.bbox.maxX},${opts.bbox.maxY}` : '')
+    if (sig === wallsSig) return
+    wallsSig = sig
+
+    bakeWalls = walls.map((w) => ({ ax: w.a.x, ay: w.a.y, bx: w.b.x, by: w.b.y }))
     const { data, w, h } = pack4096(flat)
     gl.bindTexture(gl.TEXTURE_2D, wallsTex)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, data)
@@ -2107,6 +2169,10 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       gl.deleteTexture(entry.mirrorTex)
     }
     apGeoCache.clear()
+    // 任務 2 (C): walls feed every per-AP grid (wall penetration + refl/diff),
+    // so a wall edit invalidates the whole output-grid cache too. Just plain
+    // Float32Arrays — no GL handles to delete.
+    outGridCache.clear()
   }
 
   // HM-F5g: pack APs into a 4-texel-per-AP RGBA32F image. Layout matches the
@@ -2159,17 +2225,26 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // corner. Empty list still uploads a 1×1 placeholder so the sampler binding
   // stays valid; uCornerCount = 0 makes the shader skip the loop entirely.
   function uploadCorners(corners) {
-    cornerCount = corners?.length ?? 0
-    bakeCorners = (corners ?? []).map((c) => ({ x: c.x, y: c.y }))
-    const totalTexels = Math.max(1, cornerCount)
+    const n = corners?.length ?? 0
+    const totalTexels = Math.max(1, n)
     const tw = Math.min(4096, totalTexels)
     const th = Math.ceil(totalTexels / 4096)
     const data = new Float32Array(tw * th * 4)
-    for (let i = 0; i < cornerCount; i++) {
+    for (let i = 0; i < n; i++) {
       const c = corners[i]
       data[i * 4    ] = c.x
       data[i * 4 + 1] = c.y
     }
+
+    // 任務 2 (C): skip the re-upload + apGeo/outGrid invalidation when the
+    // corner set is unchanged (same reason as uploadWalls — called every frame
+    // but corners rarely move). `data` holds every corner coordinate.
+    const sig = fnv32(data) + '|' + n
+    if (sig === cornersSig) return
+    cornersSig = sig
+
+    cornerCount = n
+    bakeCorners = (corners ?? []).map((c) => ({ x: c.x, y: c.y }))
     gl.bindTexture(gl.TEXTURE_2D, cornersTex)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, tw, th, 0, gl.RGBA, gl.FLOAT, data)
     // HM-F5k: corner topology is a per-AP cache key dimension (same AP, more
@@ -2179,6 +2254,11 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       gl.deleteTexture(entry.mirrorTex)
     }
     apGeoCache.clear()
+    // 任務 2 (C): corners feed diffraction, so a corner change alters per-AP
+    // grids when enableDiffraction is on. wallsVersion is NOT bumped here (that
+    // would wrongly invalidate losCache, which depends only on walls), so we
+    // clear the output-grid cache directly instead.
+    outGridCache.clear()
   }
 
   // Build the uniform acceleration grid:
@@ -2836,10 +2916,11 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       gl.deleteTexture(e.mirrorTex)
     }
     apGeoCache.clear()
+    outGridCache.clear()
     gl.deleteFramebuffer(outFbo)
     gl.deleteFramebuffer(outFieldFbo)
     gl.deleteFramebuffer(maskFbo)
   }
 
-  return { uploadWalls, uploadCorners, uploadSlabs, uploadAps, bakeLos, bakeApGeo, renderAp, renderField, setUseGrid, dispose, gl }
+  return { uploadWalls, uploadCorners, uploadSlabs, uploadAps, bakeLos, bakeApGeo, renderAp, renderField, getWallsVersion, getCachedGrid, setCachedGrid, setUseGrid, dispose, gl }
 }

@@ -155,6 +155,39 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
     ? gl.bakeApGeo(scenario.aps.map((ap, i) => ({ ap, key: ap.id ?? `_idx_${i}` })))
     : null
 
+  // 任務 2 (C): per-AP output-grid cache. The cache container + invalidation
+  // live in propagationGL (in lockstep with losCache/apGeoCache via
+  // wallsVersion); here we build the hash from every input that affects this
+  // AP's grid and consult it before paying for renderAp / the custom JS loop.
+  // Opt out with opts.gridCacheEnabled === false (parity-check path).
+  const gridCacheOn =
+    opts.gridCacheEnabled !== false &&
+    typeof gl.getCachedGrid === 'function' &&
+    typeof gl.setCachedGrid === 'function'
+  // Geometry/grid/opts signature shared by all APs this frame. wallsVersion
+  // covers walls (and bumps on wall edits); corners + boundaries are folded in
+  // explicitly because corner/slab edits clear the cache but don't bump
+  // wallsVersion. Everything that changes a grid value without changing the AP
+  // record itself must appear here, or a cache hit could serve a stale grid.
+  const geomSig = gridCacheOn
+    ? [
+        gl.getWallsVersion(),
+        scenario.corners?.length ?? 0,
+        boundaries.length,
+        // boundary elevations + slab dB (count alone is insufficient: same
+        // count, different elevation/attenuation changes the cross-floor leg).
+        boundaries.map((b) => `${b.elevationM ?? b.yM ?? 0}:${b.slabDb ?? b.slabAttenuationDb ?? 0}`).join(','),
+        rxZM, gridStepM, nx, ny, originX, originY,
+        opts.maxReflOrder ?? 0,
+        opts.enableDiffraction ? 1 : 0,
+        opts.freqOverrideN ?? 0,
+        opts.cullFloorDbm ?? '',
+        opts.losFastMode ? 1 : 0,
+      ].join('|')
+    : null
+
+  let cacheHits = 0, cacheMisses = 0
+
   const perApGrids = []
   for (let k = 0; k < scenario.aps.length; k++) {
     const ap = scenario.aps[k]
@@ -164,6 +197,31 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
       _rxGainDbi: RX_ANT_GAIN_DBI,
     }
     const apKey = ap.id ?? `_idx_${k}`
+
+    // Per-AP hash: every AP field the shader (uploadAps t0-t3) or the custom
+    // JS lobe (patternId/azimuth/beamwidth) reads, plus the gains baked in
+    // apForGL, plus the shared geomSig. _idx_<k> keys also fold in k so two
+    // id-less APs at different list positions never collide.
+    let hash = null
+    if (gridCacheOn) {
+      const apSig = [
+        ap.id ?? `idx${k}`,
+        ap.pos?.x ?? ap.x, ap.pos?.y ?? ap.y, ap.zM ?? 0,
+        ap.txDbm, ap.centerMHz ?? '', ap.channelWidth ?? '',
+        ap.antennaMode ?? 'omni', ap.azimuthDeg ?? 0, ap.beamwidthDeg ?? 0,
+        ap.patternId ?? '',
+        AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI,
+      ].join('|')
+      hash = apSig + '#' + geomSig
+      const cached = gl.getCachedGrid(apKey, hash)
+      if (cached) {
+        cacheHits++
+        perApGrids.push(cached.grid)
+        continue
+      }
+    }
+    cacheMisses++
+
     const losEntry = losMap?.get(apKey)
     const apGeoEntry = apGeoMap?.get(apKey)
     const { rssi: shaderGrid } = gl.renderAp(
@@ -177,6 +235,7 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
       },
     )
 
+    let grid
     if (ap.antennaMode === 'custom') {
       // Custom-pattern AP fallback to JS for the antenna lobe — opts are
       // forwarded verbatim so refl/diff/freqN stay in sync with the shader's
@@ -195,11 +254,16 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
           corrected[idx] = rssiDbm
         }
       }
-      perApGrids.push(corrected)
+      grid = corrected
     } else {
-      perApGrids.push(shaderGrid)
+      grid = shaderGrid
     }
+    if (gridCacheOn) gl.setCachedGrid(apKey, hash, grid, nx, ny)
+    perApGrids.push(grid)
   }
+
+  // Debug hook: surface cache effectiveness without changing the field output.
+  if (opts.__gridCacheStats) opts.__gridCacheStats({ hits: cacheHits, misses: cacheMisses, total: scenario.aps.length })
 
   const rssi = new Float32Array(nx * ny)
   const sinr = new Float32Array(nx * ny)
