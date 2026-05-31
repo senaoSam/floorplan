@@ -58,6 +58,13 @@ export const useHeatmapStore = create((set) => ({
   // "large scene simplified" notice so the user knows the field is approximate.
   simplifiedLargeScene: false,
 
+  // Set by heatmapAdapter while editorMode === DRAW_WALL: the heatmap is frozen
+  // (showing the pre-draw field) and not recomputing, because each drawn wall
+  // segment commits immediately and would otherwise fire a full recompute per
+  // segment. HeatmapControl surfaces this as a notice so the stale field isn't
+  // mistaken for live. Cleared when the user leaves DRAW_WALL.
+  drawWallFrozen: false,
+
   setEnabled:     (v) => set({ enabled: v }),
   setMode:        (v) => set({ mode: v }),
   setEngine:      (v) => set({ engine: v }),
@@ -71,4 +78,8 @@ export const useHeatmapStore = create((set) => ({
   // 任務 4 (b): adapter calls this each compute; guarded to a no-op when the
   // value is unchanged so it never triggers an extra subscriber recompute loop.
   setSimplifiedLargeScene: (v) => set((s) => (s.simplifiedLargeScene === v ? s : { simplifiedLargeScene: v })),
+  // Same no-op-when-unchanged guard: adapter calls it every compute, but the
+  // heatmap store is one of its own compute triggers, so an unconditional set
+  // would loop.
+  setDrawWallFrozen: (v) => set((s) => (s.drawWallFrozen === v ? s : { drawWallFrozen: v })),
 }))

@@ -40,6 +40,8 @@ function HeatmapControl() {
   // 任務 4: when the active scene's wall×AP exceeds the downgrade threshold,
   // heatmapAdapter forces reflections/diffraction off for the whole compute.
   const simplifiedLargeScene = useHeatmapStore((s) => s.simplifiedLargeScene)
+  // Frozen while drawing walls — the field shown is from before the draw.
+  const drawWallFrozen = useHeatmapStore((s) => s.drawWallFrozen)
   const hover        = useHoverReadoutStore((s) => s.reading)
 
   const [panelOpen, setPanelOpen] = useState(false)
@@ -52,6 +54,15 @@ function HeatmapControl() {
 
   return (
     <div className="heatmap-control">
+      {/* Drawing walls freezes the heatmap (each segment commits immediately,
+          so recomputing per segment would stutter). Tell the user the field is
+          a snapshot from before drawing and will refresh on exit. Top-level so
+          it's visible even with the settings panel collapsed. */}
+      {enabled && drawWallFrozen && (
+        <div className="heatmap-control__notice">
+          ❄️ 畫牆中：熱圖已暫停更新（畫完離開畫牆模式後自動重新計算）
+        </div>
+      )}
       {/* Readout — stacked above the button. Shows all four metrics so the
           user can compare without flipping modes. */}
       {enabled && hover && (

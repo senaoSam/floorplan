@@ -5,6 +5,7 @@ import { sampleFieldGL } from '@/features/heatmap/sampleFieldGL'
 import { sampleField } from '@/features/heatmap/sampleField'
 import { getModeConfig } from '@/features/heatmap/modes'
 import { computeFloorElevations } from '@/utils/floorStacking'
+import { EDITOR_MODE } from '@/store/useEditorStore'
 
 // Heatmap adapter — keeps the existing raw WebGL2 heatmap engine intact and
 // wraps its offscreen canvas as a PIXI.Sprite mounted in scene.layers.heatmap.
@@ -73,6 +74,7 @@ export function attachHeatmapLayer({
   useFloorHoleStore,
   useHeatmapStore,
   useDragOverlayStore,
+  useEditorStore,
 }) {
   const layer = scene.layers.heatmap
   let gl = null
@@ -168,8 +170,26 @@ export function attachHeatmapLayer({
       // 任務 4: clear the large-scene notice when the heatmap is off so it
       // can't linger stale into the next enable.
       useHeatmapStore.getState().setSimplifiedLargeScene(false)
+      // Also clear the draw-wall freeze notice — heatmap off, nothing frozen.
+      useHeatmapStore.getState().setDrawWallFrozen(false)
       return
     }
+
+    // Freeze during wall drawing. DRAW_WALL commits each segment to the wall
+    // store immediately (draftModeController), so drawing a chain of N walls
+    // would otherwise fire N full recomputes — each a per-AP refl/diff pass.
+    // While in DRAW_WALL we leave the existing heatmap sprite untouched (shows
+    // the pre-draw field as a reference) and skip recompute entirely; leaving
+    // the mode triggers an editor-store change → a normal recompute restores
+    // the live field. A store flag drives a HeatmapControl notice so the user
+    // knows the field is stale. Exception: if the heatmap was never rendered
+    // (no sprite yet) we don't freeze — compute once so there's a base image.
+    const editorMode = useEditorStore ? useEditorStore.getState().editorMode : null
+    if (editorMode === EDITOR_MODE.DRAW_WALL && sprite) {
+      useHeatmapStore.getState().setDrawWallFrozen(true)
+      return
+    }
+    useHeatmapStore.getState().setDrawWallFrozen(false)
 
     const { floors, activeFloorId } = useFloorStore.getState()
     const floor = floors.find((f) => f.id === activeFloorId)
@@ -485,6 +505,11 @@ export function attachHeatmapLayer({
   // Drag overlay drives the live / solo drag render (AP follow, freeze,
   // single-AP overlay). Without this the dragMode control is inert.
   const unsubDrag = useDragOverlayStore ? useDragOverlayStore.subscribe(scheduleCompute) : () => {}
+  // Editor mode drives the DRAW_WALL freeze: entering it freezes (compute
+  // early-returns), leaving it triggers a recompute that restores the live
+  // field. Without this subscription the heatmap would stay frozen until some
+  // other store changed.
+  const unsubEditor = useEditorStore ? useEditorStore.subscribe(scheduleCompute) : () => {}
   compute()
 
   return () => {
@@ -495,6 +520,7 @@ export function attachHeatmapLayer({
     unsubScope()
     unsubHole()
     unsubDrag()
+    unsubEditor()
     if (pendingComputeId !== 0) { clearTimeout(pendingComputeId); pendingComputeId = 0 }
     if (snapSprite) {
       snapSprite.mask = null
