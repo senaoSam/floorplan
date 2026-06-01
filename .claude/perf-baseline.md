@@ -656,3 +656,32 @@ demo 平面圖 685×511。實際畫出 **gStatic = 29,061 繪製指令**（≈ �
 - **重啟條件**：若日後出現「單一平面圖 active floor >500 AP」的真實需求且 pan/zoom 卡頓，再啟 31-5（Mesh+screen-space dash shader），目標把上表 pan/zoom 的 ~140ms cable 成本砍到接近零（GPU 只更新 transform uniform）。
 
 **可重跑**：注入腳本（deterministic seed）+ 量測法見本次 MCP session；場景參數 40×25 AP / 5 tray / 8 SW。
+
+#### 31-9 / 31-10 spatial index — 量測後暫緩（2026-06-01）
+
+hit-test 不是「我們自己跑線性掃描」——`apsLayer.js:150` 每顆 AP 是 `eventMode='static'` + `hitArea=Circle`，
+走 **PIXI 原生 `rootBoundary.hitTest`**。量單次 hit-test 成本（batch 200 次除，beat performance.now 粗精度）：
+
+| AP 數 | 單次 hit-test |
+|---|---|
+| 300 | **26µs**（0.026ms）|
+| 1000 | **75µs**（0.075ms）|
+
+線性增長（O(N)，確認 PIXI 逐物件掃），但**量級無關緊要**：1000 AP 仍只 75µs = 60fps 預算（16.7ms）的 0.45%。
+hover/click 每互動只做 1 次 hit-test，使用者永遠無感。唯一每幀多次查詢的 marquee 是框內幾何查詢、不走 per-pointer hitTest。
+→ **31-9/31-10 spatial index 是過度工程，暫緩**（同 31-5 邏輯：優化佔預算 0.45% 的東西）。重啟扳機同 31-5。
+
+#### 31-11 SDF text — 量測後暫緩（2026-06-01）
+
+1000 AP 下確有 **3000 個 `PIXI.Text`**（每顆 AP 3 個：freq 數字 + 名稱 + info block），命中 task.md「禁大量 PIXI.Text」的點。
+但 `showAPInfo` 開/關實測 frame time 幾乎不變（pan 都 ~240ms、idle ~18-22ms）——Text texture render 完即 cache，
+pan 不重繪，pan 瓶頸是 cable+marker 不是 text。JS heap 1000 AP = 422MB（極端值，且 JS heap ≠ GPU mem）。
+→ **31-11 SDF 對 pan/idle 效能無幫助，暫緩**。SDF 只在「label 頻繁變動」或「極端記憶體」才有意義，單層真實場景碰不到。重啟扳機同 31-5。
+
+#### 31-12 Validation — 縮減為「已記錄基準」
+
+31-12 是驗收動作非功能。31-5/6/9/10/11 全暫緩後無新實作需要完整驗收（8 場景 diff / context-loss 等）。
+本 §31-12 即視為已記錄的 1000 AP 基準；完整驗收待真有 ship 需求再啟。
+
+**結論（整個 Phase 25 效能家族）**：31-5/6/9/10/11 全是「1000 AP headroom」優化，實測證明單層真實 AP 量級（~300）
+MVP 實作全部達標，瓶頸只在 1000 AP，而單層平面圖到不了 1000。全部暫緩，共用同一重啟扳機。

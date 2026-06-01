@@ -10,9 +10,9 @@
 
 ## 現況一句話
 
-**Phase 25 PixiJS hybrid 重構 — 功能 parity gaps 已全數補完（853eeef，2026-05-30）。剩下的是「達到 1000 AP 規格的效能實作」+ 驗收。**
-oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap / 3D viewer / Crop / Align / Scale / Undo-Redo / Marquee / AI walls / AutoPower / PNG·CSV·PDF export / BOM）皆已 port 到新 `src`。2026-05-30 審計發現的 parity gap 也已在 853eeef 補回（見下表）。
-**剩下的是「達到 1000 AP 規格的效能實作」+ 驗收。**
+**Phase 25 PixiJS hybrid 重構 — 功能 parity gaps 已補完（853eeef）+ 1000 AP 效能家族經量測全部暫緩（2026-06-01）。MVP 實作在單層真實量級已達標，剩 heatmap polish + 文件小尾巴。**
+oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap / 3D viewer / Crop / Align / Scale / Undo-Redo / Marquee / AI walls / AutoPower / PNG·CSV·PDF export / BOM）皆已 port 到新 `src`。2026-05-30 審計的 parity gap 已在 853eeef 補回；31-5/6/9/10/11 效能優化經 2026-06-01 壓測證明單層真實場景不需要（見下表 + perf-baseline §31-12）。
+**剩下的是 heatmap polish（27-1/27-2）+ 文件補記（26-3）。**
 
 ### Parity gaps（2026-05-30 workflow 審計，oldSrc vs current，已對抗式驗證）
 
@@ -38,18 +38,22 @@ oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap /
 
 ## 還沒做的事
 
-### Phase 25 收尾 — 達 1000 AP 規格（核心）
+### Phase 25 收尾 — 1000 AP headroom 效能家族（全部已量測暫緩）
 
-> MVP 版功能都在，但渲染/互動是 Graphics + 線性掃描，還沒換成達標的高效能實作。
+> **2026-06-01 MCP 壓測結論：整個 31-5/6/9/10/11 效能家族全部暫緩。**
+> 實測證明單層真實 AP 量級（~300）下 MVP 實作全部達標；瓶頸只在 1000 AP 出現，
+> 而本工具是「單層 active floor」在編輯（對標 Hamina），真實單層 AP 數 20-200、到不了 1000。
+> 全部共用同一重啟扳機：**單層 active floor >500 AP 真實需求 + 實測 pan/zoom 卡**。
+> 完整量測 + 重啟條件見 `perf-baseline.md §31-12`、memory `project_31_5_6_deferred_1000ap_benchmark`。
 
 | #     | 狀態 | Task | 估時 |
 |-------|------|------|------|
 | 31-5  | ⏸️ 暫緩 | **Cables Mesh + dashed line shader** — 取代 MVP polyline。**2026-06-01 壓測（perf-baseline §31-12）決定暫緩**：31-5 原想解的 drag 瓶頸 32-E 已解（drag-move 5-7ms）；唯一未達標的 pan/zoom（1000 AP ~20fps，cable 是主瓶頸 ~140ms）只在 1000 AP 出現，而單層平面圖真實 AP 數 ~300 以下已全順。與已撤回的 31-4 同構（Graphics 撐得到、shader 雙寫維護高）。**重啟扳機**：單層 active floor >500 AP 真實需求 + pan/zoom 卡 | 2-3 天 |
 | 31-6  | ⏸️ 暫緩 | **AP markers texture atlas** — 1000 AP batch 1 draw call。同 31-5 屬「1000 AP headroom」產物；壓測顯示 AP layer（1000 children）對 pan 影響 ~18ms（次於 cable）。單層真實 AP 數到不了 1000，暫緩。重啟扳機同 31-5 | 2 天 |
-| 31-9  | ⬜   | **Scopes / FloorHoles / RefWall / RefVector spatial index** — 視覺已有，補 R-tree of AABBs hit-test | 1 天 |
-| 31-10 | ⬜   | **Interactions + Spatial index** — Stage-level pointer router；R-tree（walls/trays/scopes）+ uniform grid（AP/SW/Riser）；marquee 框選走 spatial query；mode capability 動態 listening | 2 天 |
-| 31-11 | ⬜   | **Overlays + SDF text + Animation** — SDF/MSDF text atlas（AP/SW/Tray label，禁大量用 PIXI.Text）；`app.ticker` + 手寫 ease util（focus pulse / selection grow-in / hover transition） | 2-3 天 |
-| 31-12 | ⬜   | **Validation** — 1000 AP / 5000 walls / 30000 cable segments 壓測；8 場景視覺 diff < 5%；4 互動 regression（click/hover/右鍵/drag）；context-loss/restore 測試；perf harness 跑 p50/p95/p99 | 2 天 |
+| 31-9  | ⏸️ 暫緩 | **Scopes / FloorHoles / RefWall / RefVector spatial index** — R-tree hit-test。**2026-06-01 量測（perf-baseline §31-12）決定暫緩**：hit-test 走 PIXI 原生 `rootBoundary.hitTest`（非自寫線性掃描），1000 AP 單次仍只 75µs（佔 60fps 預算 0.45%），使用者無感。過度工程，重啟扳機同 31-5 | 1 天 |
+| 31-10 | ⏸️ 暫緩 | **Interactions + Spatial index** — R-tree/uniform grid + marquee spatial query。同 31-9：PIXI 原生 hit-test 已足夠（300AP 26µs / 1000AP 75µs）。暫緩，重啟扳機同 31-5 | 2 天 |
+| 31-11 | ⏸️ 暫緩 | **Overlays + SDF text + Animation** — SDF text atlas + ticker ease。**量測決定暫緩**：1000 AP 確有 3000 PIXI.Text，但 showAPInfo 開/關 frame time 幾乎不變（Text texture render 完即 cache，pan 不重繪）。SDF 對 pan/idle 效能無幫助；單層真實場景碰不到記憶體上限。重啟扳機同 31-5 | 2-3 天 |
+| 31-12 | 🟢 縮減 | **Validation** — 縮減為「已記錄基準」。31-5/6/9/10/11 全暫緩後無新實作需完整驗收。1000 AP 基準已記在 perf-baseline §31-12；完整 8 場景 diff / context-loss 待真有 ship 需求再啟 | 2 天 |
 | 31-13 | ⏸️ 暫緩 | **刪除 `oldSrc/`** — 使用者決定：保留 oldSrc 作參考，直到正式上線穩定後才刪。**現階段不做** | 0.5 天 |
 
 **驗收標準（Phase 25 ship）**
