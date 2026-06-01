@@ -10,9 +10,9 @@
 
 ## 現況一句話
 
-**Phase 25 PixiJS hybrid 重構 — 大致功能對等，但 2026-05-30 審計發現 15 條 parity gap（Bundle 52「對等完成」聲稱不可靠）。**
-oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap / 3D viewer / Crop / Align / Scale / Undo-Redo / Marquee / AI walls / AutoPower / PNG·CSV·PDF export / BOM）大多已 port 到新 `src`，但有漏接（見下「Parity gaps」）。
-**剩下的是「補回 parity gaps」+「達到 1000 AP 規格的效能實作」+ 驗收。**
+**Phase 25 PixiJS hybrid 重構 — 功能 parity gaps 已全數補完（853eeef，2026-05-30）。剩下的是「達到 1000 AP 規格的效能實作」+ 驗收。**
+oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap / 3D viewer / Crop / Align / Scale / Undo-Redo / Marquee / AI walls / AutoPower / PNG·CSV·PDF export / BOM）皆已 port 到新 `src`。2026-05-30 審計發現的 parity gap 也已在 853eeef 補回（見下表）。
+**剩下的是「達到 1000 AP 規格的效能實作」+ 驗收。**
 
 ### Parity gaps（2026-05-30 workflow 審計，oldSrc vs current，已對抗式驗證）
 
@@ -22,14 +22,15 @@ oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap /
 |------|-----|--------|
 | ✅ 已修 | Scope/Hole 點回起點閉合（保留畫3點顯示閉合圈） | missing |
 | ✅ 已修 | 繪製途中 Backspace 退一步（Tray/Scope/Hole 退頂點、Wall 退上一段）；Ctrl+Z 維持全域 undo | missing |
-| ⬜ | BatchPanel 批次編輯整組消失（只剩計數 stub；batch-mutation actions 其實早有） | missing |
-| ⬜ | 中庭(floor-holes)圖層開關在 2D 失效（畫進 scopes 層、binder 無此 key） | missing |
-| ⬜ | 右鍵刪除無條件清空選取（缺 clearIfTargetSelected） | partial |
-| ⬜ | Tray 頂點 hover × 刪單一頂點 | missing |
-| ⬜ | Tray 頂點 Shift+click 就地切割（只剩 shift 點線段中段） | partial |
-| ⬜ | ALIGN_FLOOR 切 toolbar 工具無確認對話框 | missing |
-| ⬜ | PNG 平面圖匯出 production 壞（DEV-only window.__pixiApp/__scene） | partial |
-| ⬜ | PDF 規劃報告匯出 production 壞（同上 DEV-only globals） | partial |
+| ✅ 已修 853eeef | BatchPanel 批次編輯整組消失（只剩計數 stub）→ per-type 編輯器 1:1 port oldSrc（wall/AP/scope + delete-all + AutoPower 鈕） | missing |
+| ✅ 已修 853eeef | 中庭(floor-holes)圖層開關在 2D 失效 → 改畫進 scene.layers.floorHoles，binder 補 `['showFloorHoles','floorHoles']` key | missing |
+| ✅ 已修 853eeef | 右鍵刪除無條件清空選取 → 補 clearIfTargetSelected（只在刪到的物件 == 當前選取時才清） | partial |
+| ✅ 已修 853eeef | Tray 頂點 hover × 刪單一頂點 → handlesLayer × badge + 放大 hit region | missing |
+| ✅ 已修 853eeef | Tray 頂點 Shift+click 就地切割 → onSplitVertex | partial |
+| ✅ 已修 853eeef | ALIGN_FLOOR 切 toolbar 工具無確認對話框 → Toolbar + ConfirmDialog（portal 置中） | missing |
+| ✅ 已修 853eeef | PNG 平面圖匯出 production 壞 → 新增 render/sceneRegistry.js（全 build mode 註冊），SidebarLeft 改用 getSceneRefs() 取代 DEV-only globals | partial |
+| ✅ 已修 853eeef | PDF 規劃報告匯出 production 壞 → 同上（getSceneRefs） | partial |
+| ✅ 已修 853eeef | 多選 highlight + Ctrl/Cmd+click 加選 → 復原 toggleSelectedItem，每個物件 layer 訂閱 selectedItems 重畫 | missing |
 | ✅ 已修 | Heatmap dragMode(Solo/Live)：restore 853eeef(完整 live/solo，預設 solo=old)。先前「無硬體加速拖曳卡」真因經使用者實測=缺 rAF 節流(apsLayer setAP)+缺 setTimeout defer(heatmapAdapter compute)，非 gl.render。兩刀對齊 old，6 場景 old↔now dragend 對齊。詳見 memory `project_heatmap_drag_lag_softwarerender` | partial |
 | ⏸️ 使用者不做 | #/vectorize 獨立頁、Gemini 清理圖預覽鈕、#/ai-walls-debug OpenCV 頁 | — |
 
