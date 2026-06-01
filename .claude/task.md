@@ -44,8 +44,8 @@ oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap /
 
 | #     | 狀態 | Task | 估時 |
 |-------|------|------|------|
-| 31-5  | ⬜   | **Cables Mesh + dashed line shader** — 取代 MVP polyline；screen-space dash + per-route color/dash semantics + focus halo 2nd pass；`eventMode='none'`。技術風險最高，建議早做 | 2-3 天 |
-| 31-6  | ⬜   | **AP markers texture atlas** — PIXI.Sprite + atlas，1000 AP batch 1 draw call；frequency color / direction 透過 frame 或 tint；uniform grid hit-test | 2 天 |
+| 31-5  | ⏸️ 暫緩 | **Cables Mesh + dashed line shader** — 取代 MVP polyline。**2026-06-01 壓測（perf-baseline §31-12）決定暫緩**：31-5 原想解的 drag 瓶頸 32-E 已解（drag-move 5-7ms）；唯一未達標的 pan/zoom（1000 AP ~20fps，cable 是主瓶頸 ~140ms）只在 1000 AP 出現，而單層平面圖真實 AP 數 ~300 以下已全順。與已撤回的 31-4 同構（Graphics 撐得到、shader 雙寫維護高）。**重啟扳機**：單層 active floor >500 AP 真實需求 + pan/zoom 卡 | 2-3 天 |
+| 31-6  | ⏸️ 暫緩 | **AP markers texture atlas** — 1000 AP batch 1 draw call。同 31-5 屬「1000 AP headroom」產物；壓測顯示 AP layer（1000 children）對 pan 影響 ~18ms（次於 cable）。單層真實 AP 數到不了 1000，暫緩。重啟扳機同 31-5 | 2 天 |
 | 31-9  | ⬜   | **Scopes / FloorHoles / RefWall / RefVector spatial index** — 視覺已有，補 R-tree of AABBs hit-test | 1 天 |
 | 31-10 | ⬜   | **Interactions + Spatial index** — Stage-level pointer router；R-tree（walls/trays/scopes）+ uniform grid（AP/SW/Riser）；marquee 框選走 spatial query；mode capability 動態 listening | 2 天 |
 | 31-11 | ⬜   | **Overlays + SDF text + Animation** — SDF/MSDF text atlas（AP/SW/Tray label，禁大量用 PIXI.Text）；`app.ticker` + 手寫 ease util（focus pulse / selection grow-in / hover transition） | 2-3 天 |

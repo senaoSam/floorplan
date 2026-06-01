@@ -621,3 +621,38 @@ focus 時 gDynamic 25/107/22/16/18、無 focus 時 gDynamic 恆 0；gStatic 穩�
 「選 SW 多條前景」= gStatic 0 / gDynamic 107（所有 route 進前景，無背景雙重 dim）。
 「marquee 多選」= alpha 1 / gDynamic 0（乾淨全亮——cablesLayer hasFocus 只認單一 selectedId，
 多選不 dim/不高亮，是設計現狀非殘影；oldSrc 多選 cable 強調行為若要對齊另開項目）。
+
+### §31-12 聚焦壓測 — 1000 AP cable 效能（2026-06-01 MCP）
+
+**目的**：用數據判斷 31-5（Cables Mesh + shader）該不該做。**結論：暫緩**（見下）。
+
+**場景**：MCP store 注入 1000 AP（40×25 jitter grid）+ 5 橫貫 tray + 8 switch（1 MDF + 7 IDF），
+demo 平面圖 685×511。實際畫出 **gStatic = 29,061 繪製指令**（≈ 規格的 30000 cable segments 量級）。
+硬體加速渲染（非強制軟體）。量「每操作的同步 CPU 成本」（performance.now 夾 store action）。
+
+| 操作 | 同步成本 | 16.7ms(60fps) / 33ms(30fps) |
+|---|---|---|
+| **drag 一顆 AP（連續每幀）** | p50 **5ms** / p95 16ms / max 47 | ✅ 32-E 靜動分層生效（每幀只重畫 gDynamic 一條 route）|
+| drag start / end | 5ms / 42ms | ✅ 一次性可接受 |
+| select AP / SW（focus 重建 gStatic）| 42–72ms | 🟡 一次性，邊緣 |
+| **pan（連續）** | p50 26ms / p95 44ms | ❌ 未達標 |
+| **zoom（連續）** | p50 28ms / p95 55ms | ❌ 未達標 |
+
+**瓶頸定位（關圖層一刀切，pan avg）**：
+| 場景 | pan avg | pan p95 |
+|---|---|---|
+| 全圖層 | 182ms | 223ms |
+| 關 AP layer | 164ms | 189ms |
+| **關 AP + 關 cable** | **21ms** | **25ms** |
+
+→ **cable 是 pan/zoom 主瓶頸（~140ms）**，AP layer（1000 children）次之（~18ms）。
+即使 gStatic 是凍結批次，pan/zoom 時 PIXI 仍要對 29k 線段 Graphics 做 transform/重提交，這是 vector 的固有成本。
+
+**為何暫緩 31-5（重啟扳機）**：
+- 31-5 原本要解的「drag 30000 段每幀重畫」→ **32-E 已解**（drag-move 5-7ms）。
+- 壓測新揭露的 pan/zoom 瓶頸 **只在 1000 AP 才出現**；對標 Hamina，單一平面圖（active floor）真實 AP 數
+  通常 20-200，~300 以下已全順（perf-baseline 既有實測）。1000 AP 是規格 headroom 目標，非單層真實需求。
+- 與已撤回的 31-4（Wall Mesh+shader）同構：Graphics 撐得到、shader 維護成本高（GLSL/WGSL 雙寫）。
+- **重啟條件**：若日後出現「單一平面圖 active floor >500 AP」的真實需求且 pan/zoom 卡頓，再啟 31-5（Mesh+screen-space dash shader），目標把上表 pan/zoom 的 ~140ms cable 成本砍到接近零（GPU 只更新 transform uniform）。
+
+**可重跑**：注入腳本（deterministic seed）+ 量測法見本次 MCP session；場景參數 40×25 AP / 5 tray / 8 SW。
