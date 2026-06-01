@@ -605,5 +605,19 @@ cacheAsTexture 衍生並修補又最終放棄的 bug（時間順）：
 3f9a3f6（focus+拖曳後切選取的殘影：gStatic 排除前景 + focus 納入 splitKey，選取改變即重建 gStatic）。
 代價：300AP 點選現在 ~110-200ms（gStatic vector 重建，使用者接受正確優先），仍遠優於 32-E 前 2-3 秒。
 
-**殘影 bug 交接**：架構 + 6 個待測高風險殘影情境見 memory `project_cable_render_architecture_32e`。
-殘影與 renderer（WebGL/WebGPU）無關，是 gStatic/gDynamic 該重建沒重建（splitKey 涵蓋不足）。
+**殘影 bug — 已驗證消除（2026-06-01 MCP）**：架構見 memory `project_cable_render_architecture_32e`。
+殘影與 renderer（WebGL/WebGPU）無關，是 gStatic/gDynamic 該重建沒重建（splitKey 涵蓋不足）；
+3f9a3f6（focus 納入 splitKey + gStatic 排除前景）+ 9a226ec（hasFocus guard 選取存在性）修掉後，
+用量化探針驗證 6 高風險情境全 pass。
+
+驗證法（可重跑）：`window.__scene.layers.cables` 三 child = `[staticDim(含 gStatic), gDynamic, badgeDynamic]`。
+讀 `g.context.instructions.length`（繪製指令數）+ `staticDim.alpha`。不變量：
+- 有單一 focus（selectedId 存在）：`staticDim.alpha === 0.18`（DIM_OPACITY）且 `gDynamic.instructions > 0`
+- 無 focus（清選取 / 多選 selectedItems 無單一 selectedId）：`staticDim.alpha === 1` 且 `gDynamic.instructions === 0`
+- gStatic instruction 數在反覆 select/drag/clear 後穩定（無 append 路徑堆積洩漏）
+
+10 步序列（cleared→AP→SW→AP→clear→drag-drop→reselect→clear→multi→clear）全 pass：
+focus 時 gDynamic 25/107/22/16/18、無 focus 時 gDynamic 恆 0；gStatic 穩定 86~88（demo 5AP/1SW/1tray）。
+「選 SW 多條前景」= gStatic 0 / gDynamic 107（所有 route 進前景，無背景雙重 dim）。
+「marquee 多選」= alpha 1 / gDynamic 0（乾淨全亮——cablesLayer hasFocus 只認單一 selectedId，
+多選不 dim/不高亮，是設計現狀非殘影；oldSrc 多選 cable 強調行為若要對齊另開項目）。

@@ -69,8 +69,8 @@ oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap /
 |------|------|------|
 | 32-0 | ✅   | **量測** — `computeRoutes` wall-clock @ 50/150/300/500/1000 AP × {0,1,5,10} tray，已記到 `perf-baseline.md §32-0`。真因：每 pointermove 對全部 AP 跑 Dijkstra（1000 AP / 1 tray = 94ms） |
 | 32-D | ⏸️ 不採用 | **解凍 cable** — 改走 32-C 增量（保留即時精確跟隨）。tray/trayVertex drag 仍凍結（32-C 範圍決策） |
-| 32-C | 🟡 部分 | **增量 routing** — ✅ 拖 AP/SW 只重算動到的路徑（`buildRoutingContext`+`routeOneAP`+`routeOneSwitchLink`，full↔inc byte-identical 已驗）。routing 成本 214ms→1ms（300AP）。**剩第二瓶頸**：cable Graphics 每幀重送（300AP ~8880 段，hover/重繪即卡）— 另開 32-E |
-| 32-E | 🟡 大致完成 | **Cable 畫圖效能 — 軟體渲染也達標**（vector，非烤貼圖）。最終四刀：①render-on-demand（停連續 ticker，13 store→requestRender，idle 60→0 render/s）②靜動分層 gStatic/gDynamic（拖曳凍結 gStatic、PIXI 重畫凍結幾何 ~1ms 不重 tessellate——這才是真解）③routesCache 增量+共享（單顆 AP 變只重算那顆，選取 2-3秒→ms 級）④apsLayer 逐 AP diff（drag commit 重畫 1 marker 非 300）。**cacheAsTexture 試過但移除**（a33dc14：模糊/變暗一串 bug + 靜動分層已使其多餘）。另修 SW↔tray snap stub（477887d）、focus+拖曳殘影（3f9a3f6）。routing 88/0。**剩**：殘影回歸（6 情境，最可疑：選 SW 多條前景、marquee 多選）見 memory `project_cable_render_architecture_32e`。詳見 perf-baseline.md §32-E（含最終修正段）|
+| 32-C | ✅   | **增量 routing** — ✅ 拖 AP/SW 只重算動到的路徑（`buildRoutingContext`+`routeOneAP`+`routeOneSwitchLink`，full↔inc byte-identical 已驗）。routing 成本 214ms→1ms（300AP）。第二瓶頸（cable Graphics 每幀重送）由 32-E 解決 |
+| 32-E | ✅   | **Cable 畫圖效能 — 軟體渲染也達標**（vector，非烤貼圖）。最終四刀：①render-on-demand（停連續 ticker，13 store→requestRender，idle 60→0 render/s）②靜動分層 gStatic/gDynamic（拖曳凍結 gStatic、PIXI 重畫凍結幾何 ~1ms 不重 tessellate——這才是真解）③routesCache 增量+共享（單顆 AP 變只重算那顆，選取 2-3秒→ms 級）④apsLayer 逐 AP diff（drag commit 重畫 1 marker 非 300）。**cacheAsTexture 試過但移除**（a33dc14：模糊/變暗一串 bug + 靜動分層已使其多餘）。另修 SW↔tray snap stub（477887d）、focus+拖曳殘影（3f9a3f6）。routing 88/0。**殘影回歸已驗證消除**（2026-06-01 MCP）：6 高風險情境（含選 SW 多條前景、marquee 多選、拖曳後切選取）用量化探針（gStatic/gDynamic instruction 數 + staticDim.alpha）跑 10 步全 pass——focus↔無focus 不變量從不混雜。詳見 perf-baseline.md §32-E + memory `project_cable_render_architecture_32e` |
 
 ### 其他小尾巴
 
