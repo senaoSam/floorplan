@@ -25,10 +25,11 @@
 - **使用者決定（2026-06-02）**：不修物理、**也不加 user 標註**。hover readout 維持「快速直線估算」定位，精確值看熱圖本身。
 - 位置記錄：[hoverProbe.js](src/features/heatmap/hoverProbe.js)、[heatmapHoverBinder.js](src/render/heatmapHoverBinder.js)（throttle 33ms @ :8）。
 
-### A-2 🟡 Contour（等高線）antialiasing — 放大後邊緣鋸齒
-- **現象**：fit 視角下 contour 還算平滑；放大 3× 後黑色等高線邊緣出現階梯狀鋸齒、線偏粗。
-- **位置**：contour 在 shader 路徑繪製，查 [heatmapGL.js](src/features/heatmap/heatmapGL.js) / [sampleFieldGL.js](src/features/heatmap/sampleFieldGL.js)（待 27-2 開工時定位確切 contour pass）。
-- **27-2 方向**：contour line 做 screen-space AA（smoothstep on iso-distance）或提高 contour 取樣解析度。
+### A-2 ✅ 複測後不需做（2026-06-02）— Contour antialiasing
+- **複測**：5× / 9× 高倍率重看，contour 線實際**平滑、有柔邊、轉折圓滑，無像素階梯**。
+  shader 已做 screen-space line AA（[heatmapGL.js:168](src/features/heatmap/heatmapGL.js#L168) `screen-space aware`）。
+- 先前 3× 判斷的「鋸齒」是 JPEG 壓縮 + 低解析截圖錯覺。高倍率唯一可挑剔的是線在放大時相對偏粗，那是「螢幕空間固定線寬」的設計、非缺陷。
+- **結論**：無實際缺陷可修，不做。
 
 ### A-3 ⛔ 跳過（2026-06-02 使用者決定不做）— Colormap preset toggle
 - 使用者決定不做換配色功能。現有綠-黃-紅預設合理、未壞，視為足夠。以下為原始觀察存查。
@@ -68,9 +69,12 @@
 
 ## 27-2 建議施作順序
 
-- ~~A-1 hover 物理一致~~ → **⛔ won't-fix**（量測後決定不做，見上）
+- ~~A-1 hover 物理一致~~ → **⛔ won't-fix**（量測後決定不做）
 - ~~A-3 colormap toggle~~ → **⛔ 跳過**（使用者決定不做換配色功能）
-1. **A-2 contour AA**（純視覺，唯一還可能做的）
-2. B-1 / B-2 視使用者意願再評
+- ~~A-2 contour AA~~ → **✅ 複測後不需做**（高倍率實際平滑、shader 已 AA）
+- B-1 / B-2 → 視使用者意願（未提出做的需求）
+
+**27-2 結論**：audit 列出的視覺項逐一實測後，全部 won't-fix / 跳過 / 不需做。
+熱圖在真實使用場景已達品質要求，27 系列 polish 告一段落。
 
 > 每項動手前若涉及配色/裁切預期行為（A-3、B-1），依 CLAUDE.md「不確定就問」先跟使用者確認。
