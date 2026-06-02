@@ -82,7 +82,7 @@ oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap /
 |------|------|------|
 | 26-3 | ⬜   | Phase 20 bench 結果補記到 `perf-baseline.md`（before/after FPS + frame time） |
 | 27-1 | ✅   | Heatmap polish audit — 已寫 `.claude/heatmap-audit.md`（A-1 hover 物理不一致 🔴 / A-2 contour 鋸齒 🟡 / A-3 colormap 寫死無 toggle 🟡 / B-1 填色溢出邊界 / B-2 SINR contour 過密；C 區確認 OK）|
-| 27-2 | ⬜   | 依 audit 動手（建議序）：① A-3 colormap preset toggle（需先確認 preset 清單）② A-2 contour AA。**A-1 hover 物理已 won't-fix**（2026-06-02 量測：真實 50-150 AP 差 <1.3dB、肉眼無感，AP 多時反而貴；不修物理也不加標註）。詳見 `heatmap-audit.md` |
+| 27-2 | ⬜   | 依 audit 動手：剩 A-2 contour AA（純視覺）+ B-1/B-2 視意願。**A-1 hover 物理 won't-fix**（量測後）、**A-3 colormap toggle 跳過**（使用者決定不做換配色）。詳見 `heatmap-audit.md` |
 
 ---
 

@@ -30,7 +30,10 @@
 - **位置**：contour 在 shader 路徑繪製，查 [heatmapGL.js](src/features/heatmap/heatmapGL.js) / [sampleFieldGL.js](src/features/heatmap/sampleFieldGL.js)（待 27-2 開工時定位確切 contour pass）。
 - **27-2 方向**：contour line 做 screen-space AA（smoothstep on iso-distance）或提高 contour 取樣解析度。
 
-### A-3 🟡 Colormap 寫死一套，無國際標/自訂 toggle
+### A-3 ⛔ 跳過（2026-06-02 使用者決定不做）— Colormap preset toggle
+- 使用者決定不做換配色功能。現有綠-黃-紅預設合理、未壞，視為足夠。以下為原始觀察存查。
+
+#### （原）Colormap 寫死一套，無國際標/自訂 toggle
 - **現象**：四模式（RSSI/SINR/SNR/CCI）共用同一組 5-anchor 配色（灰→綠→黃→橙→紅），
   使用者無法切換成業界常見配色或自訂。
 - **位置**：[modes.js:14-49](src/features/heatmap/modes.js#L14)（`*_ANCHORS` 寫死）。
@@ -66,8 +69,8 @@
 ## 27-2 建議施作順序
 
 - ~~A-1 hover 物理一致~~ → **⛔ won't-fix**（量測後決定不做，見上）
-1. **A-3 colormap toggle**（需先跟使用者確認 preset 清單）
-2. **A-2 contour AA**（純視覺）
-3. B-1 / B-2 視使用者意願再評
+- ~~A-3 colormap toggle~~ → **⛔ 跳過**（使用者決定不做換配色功能）
+1. **A-2 contour AA**（純視覺，唯一還可能做的）
+2. B-1 / B-2 視使用者意願再評
 
 > 每項動手前若涉及配色/裁切預期行為（A-3、B-1），依 CLAUDE.md「不確定就問」先跟使用者確認。
