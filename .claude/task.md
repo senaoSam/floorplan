@@ -80,7 +80,7 @@ oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap /
 
 | #    | 狀態 | Task |
 |------|------|------|
-| 26-3 | ⬜   | Phase 20 bench 結果補記到 `perf-baseline.md`（before/after FPS + frame time） |
+| 26-3 | ✅   | Phase 20 bench before/after 數據其實當時已完整記在 `perf-baseline.md`（After 26-2 P1/P2/P3a 各段）。本次（2026-06-02）發現那是已汰換的 Konva 架構數據，補一段開頭脈絡警示標明「§1~P3a 是 Konva 歷史紀錄，當前 PixiJS 基準看 §31-12/§32」即收尾 |
 | 27-1 | ✅   | Heatmap polish audit — 已寫 `.claude/heatmap-audit.md`（A-1 hover 物理不一致 🔴 / A-2 contour 鋸齒 🟡 / A-3 colormap 寫死無 toggle 🟡 / B-1 填色溢出邊界 / B-2 SINR contour 過密；C 區確認 OK）|
 | 27-2 | ✅   | audit 視覺項逐一實測後全部不做：A-1 hover 物理 ⛔won't-fix（量測差<1.3dB）、A-3 colormap toggle ⛔跳過（使用者決定）、A-2 contour AA ✅複測平滑不需做、B-1/B-2 無做的需求。熱圖在真實場景已達品質要求，27 系列告一段落。詳見 `heatmap-audit.md` |
 

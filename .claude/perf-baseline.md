@@ -1,4 +1,14 @@
-# Perf Baseline — Phase 20 Task 26-1
+# Perf Baseline
+
+> ⚠️ **架構脈絡（2026-06-02 補）**：本檔 §1 ~「After 26-2 P3a」段是 **Phase 20 / Konva 時代**的量測
+> （react-konva `src/features/editor/layers/APLayer.jsx`，**該檔已於 Phase 25 全面汰換、不存在**）。
+> 這些 before/after 數據保留作歷史紀錄與決策脈絡，**不是當前架構的基準**。
+> **當前架構（Phase 25 PixiJS hybrid）的效能基準看 §31-12（1000 AP 壓測）與 §32-C/§32-E（cable 增量 + vector 渲染）。**
+> 26-3 原列「補記 Phase 20 bench」——數據其實當時已完整記在下方各 After 段，本次僅補這段脈絡警示即收尾。
+
+---
+
+## Phase 20 Task 26-1（Konva 時代，歷史紀錄）
 
 > 2026-05-24 量測。場景：DemoLoader 載入 example3.png 樓層（單樓層、無 switch/tray/riser；牆面 8 段；heatmap shader engine, rssi mode, refl+diff 開）。
 > 環境：Windows 11、Chromium via Playwright MCP、`pnpm dev`、本機 1080p。
