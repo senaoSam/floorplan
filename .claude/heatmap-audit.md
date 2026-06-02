@@ -8,16 +8,22 @@
 
 ## A. 27-2 已點名的三項（確認現況）
 
-### A-1 🔴 Hover readout 與熱圖顏色用「不同物理」→ 讀數對不上顏色
-- **現象**：hover readout 顯示的 RSSI/SINR 跟游標所在位置的熱圖顏色不一致。
-- **真因**：hover probe 寫死 `reflections:false, diffraction:false`
-  （[heatmapHoverBinder.js:69](src/render/heatmapHoverBinder.js#L69) `probeAt(scenario, rx, { reflections: false, diffraction: false })`），
-  而熱圖場 sample 用使用者當前設定（demo 預設 refl+diff **ON**）。兩者同點可差數 dB。
-- **註**：`hoverProbe.js` 註解說明這是「per-mousemove 成本考量」刻意關閉反射/繞射。
-- **27-2 方向**：讓 hover probe 跟隨當前 `reflections`/`diffraction` 設定（或至少在 readout 標註「直線估算」以免誤導）。
-  成本評估需量 per-mousemove probe 開 refl/diff 後是否仍流暢（hover 已有節流）。
-- 位置：[hoverProbe.js](src/features/heatmap/hoverProbe.js)、[heatmapHoverBinder.js](src/render/heatmapHoverBinder.js)、
-  readout 顯示格式 [HeatmapControl.jsx:53](src/components/HeatmapControl/HeatmapControl.jsx#L53)（`toFixed(1)` dB、座標 `toFixed(2)` m，格式本身 OK）。
+### A-1 ⛔ won't-fix — Hover readout 與熱圖用「不同物理」（2026-06-02 量測後決定不做）
+- **現象**：hover probe 寫死 `reflections:false, diffraction:false`
+  （[heatmapHoverBinder.js:69](src/render/heatmapHoverBinder.js#L69)），熱圖場用使用者設定（預設 refl+diff ON），同點讀數可差。
+- **量測（refl/diff OFF vs ON 的 RSSI 差，依 AP 密度，同 floor 45 牆）**：
+
+  | AP 數 | 平均差 | 差>5dB 點佔比 | 開 refl/diff 單次 probe |
+  |---|---|---|---|
+  | 5（稀疏）| 3.15 dB | 23% | 0.6ms |
+  | 50（中等）| **0.43 dB** | **0%** | 5.2ms |
+  | 150（密集）| 1.27 dB | 2% | 14.4ms |
+
+- **結論**：影響隨 AP 密度遞減。真實使用密度（50-150 AP）差 <1.3 dB、肉眼無感；只有 5 AP 稀疏早期規劃才明顯，
+  但那階段對 hover 精度要求也最低。且 AP 多時開 refl/diff 反而貴（150 AP=14.4ms，逼近 33ms throttle，再多會卡）——
+  「最需要精確時最便宜、開了沒差時最貴」的反向權衡。修物理 = 過度工程。
+- **使用者決定（2026-06-02）**：不修物理、**也不加 user 標註**。hover readout 維持「快速直線估算」定位，精確值看熱圖本身。
+- 位置記錄：[hoverProbe.js](src/features/heatmap/hoverProbe.js)、[heatmapHoverBinder.js](src/render/heatmapHoverBinder.js)（throttle 33ms @ :8）。
 
 ### A-2 🟡 Contour（等高線）antialiasing — 放大後邊緣鋸齒
 - **現象**：fit 視角下 contour 還算平滑；放大 3× 後黑色等高線邊緣出現階梯狀鋸齒、線偏粗。
@@ -59,9 +65,9 @@
 
 ## 27-2 建議施作順序
 
-1. **A-1 hover 物理一致**（🔴 正確性，且改動小）
-2. **A-3 colormap toggle**（需先跟使用者確認 preset 清單）
-3. **A-2 contour AA**（純視覺）
-4. B-1 / B-2 視使用者意願再評
+- ~~A-1 hover 物理一致~~ → **⛔ won't-fix**（量測後決定不做，見上）
+1. **A-3 colormap toggle**（需先跟使用者確認 preset 清單）
+2. **A-2 contour AA**（純視覺）
+3. B-1 / B-2 視使用者意願再評
 
 > 每項動手前若涉及配色/裁切預期行為（A-3、B-1），依 CLAUDE.md「不確定就問」先跟使用者確認。
