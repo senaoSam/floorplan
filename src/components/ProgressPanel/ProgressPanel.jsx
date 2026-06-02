@@ -411,7 +411,7 @@ const PHASES = [
           { id: '26-2-P3c', done: true,  text: 'HM dragMode 預設 solo（150 AP drag 0.98 → 60 FPS）' },
           { id: '26-2-P3b', done: true,  text: 'CableLayer 拖曳時凍結 cable（300 AP drag ×215）' },
           { id: '26-2-P3a', done: true,  text: 'APLayer imperative Konva（click commit 5.8s → 0.56s）' },
-          { id: '26-3', done: false, text: '`.claude/perf-baseline.md` 紀錄 before / after FPS' },
+          { id: '26-3', done: true, text: '`.claude/perf-baseline.md` 紀錄 before / after FPS' },
         ],
       },
     ],
@@ -422,8 +422,8 @@ const PHASES = [
       {
         layer: 'Layer 27 — Heatmap polish',
         items: [
-          { id: '27-1', done: false, text: 'Audit — `.claude/heatmap-audit.md` 列出 bug / 視覺缺陷' },
-          { id: '27-2', done: false, text: '根據 audit 結果動手（hover readout / contour AA / colormap toggle）' },
+          { id: '27-1', done: true, text: 'Audit — `.claude/heatmap-audit.md` 列出 bug / 視覺缺陷' },
+          { id: '27-2', done: true, text: '根據 audit 結果動手（實測後全項不修 / 跳過 / 不需做）' },
         ],
       },
     ],

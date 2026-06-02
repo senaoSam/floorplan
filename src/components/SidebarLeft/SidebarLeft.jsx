@@ -20,9 +20,10 @@ import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
 import './SidebarLeft.sass'
 
 // Ported from oldSrc; trimmed against the PIXI port:
-//   * 匯出 PNG ↘ ported Bundle 22 via PIXI renderer.extract.canvas.
-//   * 自動規劃整層 AP 功率 ↘ requires AutoPowerModal (heatmap-driven
-//     greedy planner) — not ported yet. Button kept but stubs an alert.
+//   * 匯出 PNG ↘ ported Bundle 22 via PIXI renderer.extract.canvas
+//     (scene refs via getSceneRefs(); alert below is only the not-ready guard).
+//   * 自動規劃整層 AP 功率 ↘ AutoPowerModal (heatmap-driven greedy planner)
+//     ported Bundle 23 — button opens the modal (setAutoPowerOpen).
 // Everything else (add / collapse / rename / align switch / inline floor
 // properties / reorder / remove) is identical to oldSrc.
 
