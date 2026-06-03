@@ -186,6 +186,17 @@ const ICONS = {
       strokeLinecap="round" strokeLinejoin="round" />
   ),
 
+  // Client view — a person/device head+shoulders with a small signal arc,
+  // reading as "the network from a client's point of view".
+  client: (
+    <>
+      <circle cx="12" cy="8" r="3" fill="none" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M5.5 20a6.5 6.5 0 0 1 13 0" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M16.5 5.2a4 4 0 0 1 2.6 2.6 M18.2 3.3a7 7 0 0 1 4 4"
+        fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </>
+  ),
+
   // AI Walls — wand-like sparkle on a wall segment
   aiWalls: (
     <>

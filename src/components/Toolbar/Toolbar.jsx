@@ -53,6 +53,14 @@ const GROUPS = [
     ],
   },
   {
+    id: 'experience',
+    label: '體驗',
+    representativeIcon: 'client',
+    items: [
+      { mode: EDITOR_MODE.CLIENT_VIEW,     icon: 'client', label: 'Client 視角（從裝置看網路）' },
+    ],
+  },
+  {
     id: 'cable',
     label: '網路布線',
     representativeIcon: 'switch',

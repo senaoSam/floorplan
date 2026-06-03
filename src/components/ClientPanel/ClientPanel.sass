@@ -1,0 +1,115 @@
+@use '@/styles/variables' as *
+
+.client-panel
+  position: absolute
+  top: 12px
+  right: 12px
+  z-index: 400
+  width: 248px
+  // The advanced params make this tall; cap it to the viewport and scroll.
+  max-height: calc(100vh - 24px)
+  overflow-y: auto
+  display: flex
+  flex-direction: column
+  gap: 8px
+  padding: 12px
+  background: rgba(15, 23, 42, 0.92)
+  border: 1px solid rgba(255, 255, 255, 0.15)
+  border-radius: 10px
+  backdrop-filter: blur(6px)
+  color: $text-primary
+  font-size: 12px
+  pointer-events: auto
+  font-variant-numeric: tabular-nums
+  // Theme the SHARED panel controls (Select / NumberInput / Checkbox) to the
+  // wireless cyan, so focus rings + checkboxes match the AP panel.
+  --panel-accent: #4fc3f7
+  --panel-accent-soft: rgba(79, 195, 247, 0.15)
+
+  &__title
+    font-size: 13px
+    font-weight: 600
+    color: #93c5fd
+
+  // Labelled control row — same label-left / control-right shape as the AP
+  // panel's PanelField, so every control aligns identically.
+  &__field
+    display: flex
+    align-items: center
+    justify-content: space-between
+    gap: 8px
+
+  &__field-label
+    color: $text-secondary
+    flex-shrink: 0
+
+  &__field-value
+    display: flex
+    align-items: center
+    justify-content: flex-end
+    min-width: 0
+    // shared Select stretches; let it fill the row.
+    .pnl-select
+      width: 100%
+
+  &__divider
+    height: 1px
+    background: rgba(255, 255, 255, 0.12)
+    margin: 2px 0
+
+  &__hint
+    font-size: 11px
+    color: #94a3b8
+    line-height: 1.5
+
+    &--warn
+      color: #fca5a5
+
+  &__readout
+    display: flex
+    flex-direction: column
+    gap: 3px
+
+  &__row
+    display: flex
+    justify-content: space-between
+    gap: 10px
+    line-height: 1.5
+
+    b
+      color: #93c5fd
+      font-weight: 600
+
+    span
+      color: $text-primary
+
+    &--head
+      font-size: 13px
+
+      span
+        font-weight: 600
+
+    &--rate span
+      color: #5eead4
+      font-weight: 600
+
+    &--cand
+      font-size: 11px
+
+      b
+        color: #cbd5e1
+        font-weight: 500
+
+      span
+        color: #94a3b8
+
+  &__sep
+    height: 1px
+    background: rgba(255, 255, 255, 0.08)
+    margin: 3px 0
+
+  &__cand-title
+    font-size: 10px
+    color: #64748b
+    text-transform: uppercase
+    letter-spacing: 0.04em

@@ -21,7 +21,7 @@
 //     band + overlapping frequency range).
 
 import {
-  AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, NOISE_FLOOR_DBM,
+  AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, NOISE_FLOOR_DBM, indoorLossPerMeter,
 } from './rfConstants.js'
 import {
   sub, dot, len, dist, norm, segSegIntersect,
@@ -34,13 +34,16 @@ const C = 299792458
 const dbToLin = (db) => Math.pow(10, db / 10)
 const linToDb = (lin) => 10 * Math.log10(Math.max(lin, 1e-30))
 
-// Free-space (Friis) path loss, parameterised by frequency.
-// Indoor attenuation comes from explicit per-wall dbLoss accumulated along the
-// ray; we do NOT layer an ITU-R P.1238 site-general term on top, because that
-// model already averages in wall losses - stacking them would double-count.
+// Free-space (Friis) path loss + a small indoor distance-loss term. Explicit
+// per-wall dbLoss is still accumulated separately along the ray; the indoor
+// term models the diffuse environmental attenuation pure Friis omits (Friis ≈
+// log-distance n=2, too optimistic indoors), lifting the effective exponent
+// toward ~2.5. Negligible near the AP, grows with distance. We do NOT add an
+// ITU-R P.1238 site-general term on top — that would double-count wall losses.
 function pathLossDb(d, freqMhz) {
   const dEff = Math.max(d, 0.5)
   return 20 * Math.log10(dEff) + 20 * Math.log10(freqMhz) - 27.55
+    + indoorLossPerMeter(freqMhz) * dEff
 }
 
 // HM-F8: per-AP centre frequency drives wall loss. lossDb is the 2.4 GHz

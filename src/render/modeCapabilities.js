@@ -12,6 +12,7 @@
 //   - 'meta'     : FloorImage
 
 import { EDITOR_MODE } from '@/store/useEditorStore'
+import { CLIENT_CURSOR } from '@/features/clientView/clientCursor'
 
 export const OBJ_CATEGORY = {
   wall:         'struct',
@@ -173,6 +174,21 @@ const DRAW_SCALE_CAP = {
   keepLayers: ['floorImage'],
 }
 
+// CLIENT_VIEW — "see the network from a client's perspective". A virtual
+// client is placed / dragged on the canvas; the only RF context that matters
+// is the floor image + the APs it might associate to (+ the heatmap when the
+// user wants the coverage backdrop). All editing affordances are off: this is
+// a read-only simulation mode (no select / drag / handles / context-menu).
+// The client marker + association lines paint on the overlays layer, driven
+// by clientViewBinder (not a hit-tested object), so no per-object capability
+// is needed here.
+const CLIENT_VIEW_CAP = {
+  ...emptyCap(),
+  cursor: CLIENT_CURSOR,
+  dimOthers: ['struct', 'cable'],
+  keepLayers: ['floorImage', 'devicesAP', 'heatmap'],
+}
+
 const CROP_IMAGE_CAP = {
   ...emptyCap(),
   cursor: 'crosshair',
@@ -203,6 +219,7 @@ const CAP_BY_MODE = {
   [EDITOR_MODE.DRAW_SCALE]:       DRAW_SCALE_CAP,
   [EDITOR_MODE.CROP_IMAGE]:       CROP_IMAGE_CAP,
   [EDITOR_MODE.ALIGN_FLOOR]:      ALIGN_FLOOR_CAP,
+  [EDITOR_MODE.CLIENT_VIEW]:      CLIENT_VIEW_CAP,
 }
 
 export function getModeCapability(mode) {

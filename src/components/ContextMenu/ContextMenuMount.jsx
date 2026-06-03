@@ -1,5 +1,6 @@
 import React from 'react'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
+import { getModeCapability } from '@/render/modeCapabilities'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useWallStore } from '@/store/useWallStore'
@@ -19,6 +20,7 @@ import ObjectContextMenu from './ObjectContextMenu'
 // wall add opening) defer to dedicated bundles.
 function ContextMenuMount() {
   const ctx = useEditorStore((s) => s.contextMenu)
+  const editorMode = useEditorStore((s) => s.editorMode)
   const closeContextMenu = useEditorStore((s) => s.closeContextMenu)
   const setSelected = useEditorStore((s) => s.setSelected)
   const clearSelected = useEditorStore((s) => s.clearSelected)
@@ -37,6 +39,11 @@ function ContextMenuMount() {
     console.log('[RMB ContextMenuMount] render ctx=', ctx, 'activeFloorId=', activeFloorId)
   }
   if (!ctx || !activeFloorId) return null
+  // Modes whose capability disallows the context menu suppress it entirely —
+  // e.g. CLIENT_VIEW is a read-only simulation mode where everything else is
+  // dimmed, so right-clicking an object shouldn't pop a rename/delete menu.
+  // (A layer may still fire openContextMenu; we just don't render it here.)
+  if (!getModeCapability(editorMode).allowContextMenu) return null
 
   const { targetType, targetId, screenX, screenY } = ctx
 

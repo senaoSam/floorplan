@@ -76,6 +76,32 @@ oldSrc 的功能（AP / Wall / Switch / Tray / Scope / Riser / Cable / Heatmap /
 | 32-C | ✅   | **增量 routing** — ✅ 拖 AP/SW 只重算動到的路徑（`buildRoutingContext`+`routeOneAP`+`routeOneSwitchLink`，full↔inc byte-identical 已驗）。routing 成本 214ms→1ms（300AP）。第二瓶頸（cable Graphics 每幀重送）由 32-E 解決 |
 | 32-E | ✅   | **Cable 畫圖效能 — 軟體渲染也達標**（vector，非烤貼圖）。最終四刀：①render-on-demand（停連續 ticker，13 store→requestRender，idle 60→0 render/s）②靜動分層 gStatic/gDynamic（拖曳凍結 gStatic、PIXI 重畫凍結幾何 ~1ms 不重 tessellate——這才是真解）③routesCache 增量+共享（單顆 AP 變只重算那顆，選取 2-3秒→ms 級）④apsLayer 逐 AP diff（drag commit 重畫 1 marker 非 300）。**cacheAsTexture 試過但移除**（a33dc14：模糊/變暗一串 bug + 靜動分層已使其多餘）。另修 SW↔tray snap stub（477887d）、focus+拖曳殘影（3f9a3f6）。routing 88/0。**殘影回歸已驗證消除**（2026-06-01 MCP）：6 高風險情境（含選 SW 多條前景、marquee 多選、拖曳後切選取）用量化探針（gStatic/gDynamic instruction 數 + staticDim.alpha）跑 10 步全 pass——focus↔無focus 不變量從不混雜。詳見 perf-baseline.md §32-E + memory `project_cable_render_architecture_32e` |
 
+### Phase 33 — Client View / Client Experience（討論定案，待實作）
+
+> 對標 Hamina「Client experience / Client view」。完整設計共識見 `.claude/client-view-spec.md`。
+> 引擎核心 `probeAt`（hoverProbe.js）已存在，主要工作量在互動層＋面板＋裝置 profile＋MCS 表。
+
+| #    | 狀態 | Task |
+|------|------|------|
+| 33-0 | ✅   | 研究 Hamina + 推測用處 + 與使用者討論定案（範圍＝完整版、漫遊＝hysteresis、裝置＝手寫 mock）。共識寫進 `.claude/client-view-spec.md` |
+| 33-1 | ✅   | 裝置 profile（`src/constants/clientDevices.js`，5 顆 mock：旗艦/筆電/平板/舊手機/IoT）＋ SNR→MCS→data rate 對照（`src/features/clientView/dataRate.js`，11ac/ax/be MCS ladder） |
+| 33-2 | ✅   | 互動層：新 EDITOR_MODE `CLIENT_VIEW` ＋ cap ＋ `useClientViewStore` ＋ `simulate.js`（band 過濾＋hysteresis＋data rate）＋ `clientViewBinder`（放置/拖曳 probeAt）＋ `clientViewLayer` overlay（serving 藍線＋候選灰線＋client marker）。viewport 加 isClientViewMode 守衛不 pan |
+| 33-3 | ✅   | `ClientPanel`（右側浮動面板：裝置下拉＋6E toggle＋association toggle＋RSSI/SNR/SINR/band/data rate/MCS/串流/頻寬/serving AP/距離/候選清單）；CanvasArea 依 mode 掛載 |
+| 33-4 | ✅   | Association area（`association.js` 粗網格 1m 掃 serving AP，binder 在 toggle 開時算＋cache 進 store，client 移動清除重算；layer 畫藍色半透明 cells） |
+| 33-5 | ✅   | Toolbar 新增「體驗」群組＋`client` icon＋ActiveModeBadge hint。**MCP 全功能驗證通過**（旗艦 1494Mbps↔IoT 143Mbps band 差異、association area、拖曳跟隨、hysteresis 不抖、0 console error）|
+| 33-6 | ✅   | **client marker 改 Google-Maps 小人**（黑底白邊、腳底錨點、連線從心臟出發）＋同款 SVG cursor（`personGeometry.js` 共用幾何，cursor 縮 50%）。詳見 `clientViewLayer.drawPerson` / `clientCursor.js` |
+| 33-7 | ✅   | **CLIENT_VIEW 右鍵不跳 context menu**（`ContextMenuMount` 讀 `cap.allowContextMenu`，CLIENT_VIEW 的 emptyCap=false；binder 切換時 closeContextMenu 清殘留）|
+| 33-8 | ✅   | **Client Experience 進階參數對齊 Hamina**（使用者比對官方面板要求補齊）：Wi-Fi 7 toggle（11be→11ax 降速）、Link direction（down/up/worst，uplink 用互易性 `down−apTx+clientTx` 不重跑傳播）、Client height、per-band Noise floor（2.4/5/6）、Min interfering RSSI、Client tx power。**association↔heatmap 互斥**（勾 association 自動隱藏熱圖、取消/離開恢復；binder 加 re-entrancy guard 防遞迴）。simulate.js 抽 `buildCandidates` 共用 helper，association.js 同步吃全部參數。**MCP 驗證**：link direction 數字精確（up=down−10）、noise±15→SNR±15、Wi-Fi7 MCS13↔11、min-interfering 門檻過濾 SINR、互斥三路徑（開/關/離開）全對、0 error |
+| 33-9 | ✅   | **association = coverage 重做（語意修正）**。原把藍色塗「會離開的外側」做反了；經 Hamina heatmap-vs-association 並排比對證實：**藍色 = 涵蓋區（任一可用 AP RSSI ≥ 門檻）、白色 = 無訊號**，多台聯集越大。改成「coverage 門檻聯集填色」（不挖洞、不塞外側），輪廓用 `contour.js` 有向邊追蹤（修好之前 stitchLoops 破碎 bug）+ Chaikin + 形態學 open/close。門檻常數 `COVERAGE_THRESHOLD_DBM` 在 association.js（暫 -72，待實測定）。MCP 驗證 1/2/3 台涵蓋對齊 Hamina |
+| 33-10 | ✅ 重做 | **只加 indoorLoss（不動牆損）**。經 2-AP 無牆對照確認：Friis(n=2) 室內太樂觀、訊號傳太遠（無牆也全藍、無 Hamina 那種邊角白）；真因是**距離模型**非牆。加 `indoorLossPerMeter`（2.4/5/6 = 0.15/0.25/0.35 dB/m）到 `pathLossDb`（JS propagation.js + GLSL propagationGL.js 三處 + indoorLossPerM helper），等效 n→~2.5。**sec cap 維持原 3.5 沒動**（上次連 cap 一起改才改壞 heatmap，這次只加 indoorLoss 這刀）。`fOver24` 不動。**MCP 量化驗證**：10m 多衰 2.5dB、近 AP 3m 等高線只移 0.2m（看不出）、遠處 5-10m 移 0.7-2m（明顯，因 Friis 遠處斜率平→同 dB 位移大，物理正確）。heatmap 近核心不變、遠處收斂。coverage 自然出現 Hamina 邊角白邊 |
+
+| 33-11 | ✅   | **client 位置記憶**（切換模式回來自動放回上次位置）。store `reset()` 拆成 `leave()`（保留 pos、只清暫態 serving/reading/associationArea）+ `reset()`（硬清，保留給 floor switch）；binder 離開呼叫 leave()、進入時 pos 存在就 recompute 自動還原；layer 加 `useEditorStore` 守衛只在 CLIENT_VIEW 畫（pos 跨模式保留，否則小人殘留其他 mode）。MCP 驗證：放置→切 SELECT（小人消失、pos 留）→切回（小人自動回原位、serving 重算） |
+| 33-12 | ✅   | **association padding 修正 + coverage 語意/門檻**。①移除形態學 close（`cleanMask` 只留 open）——close 的膨脹把外緣外推一圈造成 padding 環；open 只移除孤立小塊不外擴。②**藍色語意確立＝「良好訊號涵蓋」非「連不連得到」**（業界慣例：coverage 門檻設在可正常使用品質，非可關聯門檻 -85）。門檻改 store 狀態 `coverageThresholdDbm`（預設 -67 業界 good，可調），面板加 slider（-85~-55）+ 文案「藍色＝訊號達標；藍色外仍可能連得到只是弱」。MCP：覆蓋率 -80→89% / -67→72% / -55→37% 單調正確 |
+
+> **引擎架構決策（2026-06-02）**：JS 傳播引擎（propagation.js）**不可移除**。原規劃「heatmap 穩定後刪 JS、只留 shader」已失效——Client View 落地後，**JS 升級為「單點查詢主力」**（probeAt / coverage 逐格 / hover readout 都走 JS；shader 只擅長整張圖、單點查要 readback 慢且要加裝置視角參數）。shader=heatmap 整圖、JS=Client View 單點，各司其職。基礎物理常數（牆損 cap 等）兩邊須一致。詳見 memory `project_clientview_js_engine_role`。
+
+> **association/coverage 語意（2026-06-03 確立）**：association area 的藍色 = **「良好訊號涵蓋」（RSSI ≥ coverageThresholdDbm，預設 -67）**，是「訊號強不強」不是「連不連得到」。裝置實際可關聯到 -85（simulate.js `MIN_USABLE_RSSI_DBM`），所以**藍色外仍可能連得到、只是訊號弱**——這是業界 coverage 圖慣例（門檻設在可用品質，非關聯極限）。多台 AP 取涵蓋聯集。
+
 ### 其他小尾巴
 
 | #    | 狀態 | Task |

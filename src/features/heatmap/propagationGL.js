@@ -226,10 +226,18 @@ vec4 fresnelGamma(float cosI, vec2 epsC, bool isMetal) {
   return vec4(perp, para);
 }
 
-// Free-space (Friis) path loss in dB.
+// Indoor distance loss (dB/m) by band — mirrors JS indoorLossPerMeter().
+float indoorLossPerM(float freqMhz) {
+  if (freqMhz < 3000.0) return 0.15;
+  if (freqMhz < 5925.0) return 0.25;
+  return 0.35;
+}
+
+// Free-space (Friis) path loss + indoor distance-loss term (dB).
 float pathLossDb(float d, float freqMhz) {
   float dEff = max(d, 0.5);
-  return 20.0 * log(dEff)/log(10.0) + 20.0 * log(freqMhz)/log(10.0) - 27.55;
+  return 20.0 * log(dEff)/log(10.0) + 20.0 * log(freqMhz)/log(10.0) - 27.55
+    + indoorLossPerM(freqMhz) * dEff;
 }
 
 // Read a wall record (4 texels at base index w*4). HM-F8 added texel 3 for
@@ -1412,9 +1420,16 @@ float accumulateSlabLossField(vec2 ap, float apZ, vec2 rx, float rxZ) {
   return loss;
 }
 
+float indoorLossPerM(float freqMhz) {
+  if (freqMhz < 3000.0) return 0.15;
+  if (freqMhz < 5925.0) return 0.25;
+  return 0.35;
+}
+
 float pathLossDbField(float d, float freqMhz) {
   float dEff = max(d, 0.5);
-  return 20.0 * log(dEff)/log(10.0) + 20.0 * log(freqMhz)/log(10.0) - 27.55;
+  return 20.0 * log(dEff)/log(10.0) + 20.0 * log(freqMhz)/log(10.0) - 27.55
+    + indoorLossPerM(freqMhz) * dEff;
 }
 
 // Per-AP gain at the fragment. apMode: 0 omni, 1 directional. azimuth/beamwidth
@@ -1611,9 +1626,16 @@ uniform float uCullFloorDbm;
 uniform sampler2D uAps;
 uniform int uApCount;
 
+float indoorLossPerM(float freqMhz) {
+  if (freqMhz < 3000.0) return 0.15;
+  if (freqMhz < 5925.0) return 0.25;
+  return 0.35;
+}
+
 float pathLossDbField(float d, float freqMhz) {
   float dEff = max(d, 0.5);
-  return 20.0 * log(dEff)/log(10.0) + 20.0 * log(freqMhz)/log(10.0) - 27.55;
+  return 20.0 * log(dEff)/log(10.0) + 20.0 * log(freqMhz)/log(10.0) - 27.55
+    + indoorLossPerM(freqMhz) * dEff;
 }
 
 void main() {

@@ -8,6 +8,7 @@ import ActiveModeBadge from '@/components/Toolbar/ActiveModeBadge'
 import LayerToggle from '@/components/LayerToggle/LayerToggle'
 import RegulatorySelector from '@/components/RegulatorySelector/RegulatorySelector'
 import DevicePlanningPanel from '@/components/DevicePlanningPanel/DevicePlanningPanel'
+import ClientPanelMount from '@/components/ClientPanel/ClientPanel'
 import ScaleBarMount from '@/components/ScaleBar/ScaleBarMount'
 import './CanvasArea.sass'
 
@@ -33,6 +34,7 @@ function CanvasArea() {
       </div>
       {hasFloor && <HeatmapControl />}
       {hasFloor && <CableSummaryPanel />}
+      <ClientPanelMount />
       <ScaleBarMount />
     </div>
   )

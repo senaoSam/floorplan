@@ -19,6 +19,8 @@ import { attachFloorHolesLayer } from '@/features/floorHoles/floorHolesLayer'
 import { bindLayerVisibility } from '@/render/layerVisibilityBinder'
 import { attachHeatmapLayer } from '@/render/heatmapAdapter'
 import { bindHeatmapHover } from '@/render/heatmapHoverBinder'
+import { bindClientView } from '@/features/clientView/clientViewBinder'
+import { attachClientViewLayer } from '@/features/clientView/clientViewLayer'
 import { attachDraftOverlay } from '@/features/draft/draftOverlayLayer'
 import { attachHandlesLayer } from '@/features/handles/handlesLayer'
 import { attachRefOverlayLayer } from '@/features/refOverlay/refOverlayLayer'
@@ -39,6 +41,7 @@ import { useHoverStore } from '@/store/useHoverStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
+import { useClientViewStore } from '@/store/useClientViewStore'
 import { useDraftStore } from '@/store/useDraftStore'
 import { useMaterialToastStore } from '@/store/useMaterialToastStore'
 import { MATERIAL_LIST } from '@/constants/materials'
@@ -75,6 +78,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachScopes = null
     let detachFloorHoles = null
     let detachHeatmapHover = null
+    let detachClientView = null
+    let detachClientViewLayer = null
     let detachDraftOverlay = null
     let detachHandles = null
     let detachRefOverlay = null
@@ -111,6 +116,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useViewportStore, useFloorStore, useWallStore, useAPStore, useCableStore,
         useHeatmapStore, useEditorStore, useDragOverlayStore, useHoverStore,
         useScopeStore, useFloorHoleStore, useHoverReadoutStore, useDraftStore,
+        useClientViewStore,
       ]
       const reqRender = () => s.requestRender()
       detachRenderOnDemand = renderStores.map((st) => st.subscribe(reqRender))
@@ -159,6 +165,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         isPanMode:     () => useEditorStore.getState().editorMode === EDITOR_MODE.PAN,
         isCropMode:    () => useEditorStore.getState().editorMode === EDITOR_MODE.CROP_IMAGE,
         isAlignMode:   () => useEditorStore.getState().editorMode === EDITOR_MODE.ALIGN_FLOOR,
+        isClientViewMode: () => useEditorStore.getState().editorMode === EDITOR_MODE.CLIENT_VIEW,
         onDrawModeClick: draftCtrl.onDrawModeClick,
         onDrawModeMove: draftCtrl.onDrawModeMove,
         onDrawModeRightClick: draftCtrl.onDrawModeRightClick,
@@ -322,6 +329,23 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useScopeStore,
         useHeatmapStore,
         useHoverReadoutStore,
+      })
+      detachClientView = bindClientView({
+        scene: s,
+        useEditorStore,
+        useFloorStore,
+        useWallStore,
+        useAPStore,
+        useScopeStore,
+        useClientViewStore,
+        useHeatmapStore,
+      })
+      detachClientViewLayer = attachClientViewLayer({
+        scene: s,
+        useClientViewStore,
+        useFloorStore,
+        useAPStore,
+        useEditorStore,
       })
       detachDraftOverlay = attachDraftOverlay({
         scene: s,
@@ -592,6 +616,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (detachRefOverlay) detachRefOverlay()
       if (detachHandles) detachHandles()
       if (detachDraftOverlay) detachDraftOverlay()
+      if (detachClientViewLayer) detachClientViewLayer()
+      if (detachClientView) detachClientView()
       if (detachHeatmapHover) detachHeatmapHover()
       if (detachFloorHoles) detachFloorHoles()
       if (detachScopes) detachScopes()

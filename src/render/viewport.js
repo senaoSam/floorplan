@@ -36,6 +36,7 @@ export function bindViewport({
   isPanMode,
   isCropMode,
   isAlignMode,
+  isClientViewMode,
   onDrawModeClick,
   onDrawModeMove,
   onDrawModeRightClick,
@@ -179,7 +180,11 @@ export function bindViewport({
       //                     the selection; drag past the threshold
       //                     upgrades the gesture to a pan (matches the
       //                     "拖曳畫布移動視角" affordance the user expects).
-      if (isBackground) {
+      // CLIENT_VIEW owns the whole stage for client placement / drag (handled
+      // by clientViewBinder). Skip pan/marquee/align setup so the canvas
+      // doesn't pan out from under the client drag.
+      const inClientView = typeof isClientViewMode === 'function' && isClientViewMode()
+      if (isBackground && !inClientView) {
         const inAlign = typeof isAlignMode === 'function' && isAlignMode()
         const inMarquee = typeof isMarqueeMode === 'function' && isMarqueeMode()
         if (inAlign) {
