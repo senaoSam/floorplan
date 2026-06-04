@@ -72,3 +72,24 @@
 - Link direction（uplink/downlink/worstlink）—— Hamina Plus 才有，可暫不做。
 - Wi-Fi 7 capable toggle —— profile 已含 phy，可由 profile 表達，不一定要獨立 toggle。
 - 具體視覺色值/marker 樣式 —— 動工畫第一版後 MCP 截圖給使用者定。
+
+---
+
+## 手動鎖定 AP（2026-06-03 討論定案，待實作）
+
+> 補在自動連線（最強＋漫遊遲滯）之外的「手動指定連某台 AP」——設計師 what-if 工具。
+> **定位**：真實裝置使用者無法選 AP（driver 自動決定），所以這是「設計驗證」非「模擬真實使用者」。介面須標明（非真實漫遊行為）。
+
+| 項目 | 決定 |
+|---|---|
+| 互動 | **右鍵選單**（專屬 client-view 選單，跟一般物件選單重命名/刪除分開） |
+| 右鍵 AP | 選單「手動連接此 AP」 |
+| 右鍵空白/其他 | 選單「解除手動連接」（僅已鎖定時顯示） |
+| 鎖定效果 | **只改 serving**（cyan 線 + 面板 RSSI/速率/MCS/SNR…）；**藍色 association 維持全網聯集不變**（語意一致：藍色＝全網品質圖，永遠與連哪台無關） |
+| 狀態顯示 | 面板標「🔒 已鎖定 AP-XX」 |
+
+實作要點：
+- `useClientViewStore` 加 `lockedApId`（null=自動）；`leave()`/`reset()` 要清。
+- `simulate.js` 的 `pickServing`：若 `lockedApId` 有值且該 AP 仍在 candidates（支援頻段＋≥-85 可關聯），serving 強制＝它；**否則回 `{serving:null, lockUnreachable:true}`——不 fall back 連別台**（使用者明確選了就尊重：連不到 → 明確報「鎖定的 AP 在此無法連線」、不畫線、保留鎖定）。決策 2026-06-04：靜默 fall back 會讓人困惑（鎖 A 卻連 B 且無提示）。
+- 右鍵：目前 CLIENT_VIEW 的 context menu 被 `ContextMenuMount` 關掉（cap.allowContextMenu=false）。**不要**重開那條；做**專屬 client-view 選單**（新元件 or clientViewBinder 偵測右鍵打 AP hit-test → 開輕量選單）。hit-test 哪顆 AP：複用 apsLayer 的 hit 或在 binder 算最近 AP（marker 半徑內）。
+- 鎖定的 AP 若 client 移動到它涵蓋外，面板仍顯示鎖定那台（RSSI 可能很低/顯示弱），這正是 what-if 的點；但若 < -85 完全不可關聯，顯示「鎖定的 AP 在此無法連線」。

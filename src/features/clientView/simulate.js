@@ -65,17 +65,25 @@ export function buildCandidates(scenario, rx, opts) {
   return { probe, candidates }
 }
 
-// Decide the serving AP among `candidates` (strongest-first by effective RSSI),
-// applying hysteresis against `priorServingId`.
-function pickServing(candidates, priorServingId) {
-  if (candidates.length === 0) return null
+// Decide the serving AP among `candidates` (strongest-first by effective RSSI).
+// Returns { serving } where serving is the chosen candidate, or null. When a
+// manual `lockedApId` is set but that AP isn't a usable candidate here, returns
+// { serving: null, lockUnreachable: true } — we do NOT silently fall back to
+// another AP (the user explicitly picked one; honour it or report it can't be
+// reached). Without a lock, applies roaming hysteresis against `priorServingId`.
+function pickServing(candidates, priorServingId, lockedApId) {
+  if (lockedApId != null) {
+    const locked = candidates.find((c) => c.ap.id === lockedApId)
+    return locked ? { serving: locked } : { serving: null, lockUnreachable: true }
+  }
+  if (candidates.length === 0) return { serving: null }
   const strongest = candidates[0]
-  if (priorServingId == null) return strongest
+  if (priorServingId == null) return { serving: strongest }
   const incumbent = candidates.find((c) => c.ap.id === priorServingId)
-  if (!incumbent) return strongest                       // incumbent out of range → roam
-  if (strongest.ap.id === incumbent.ap.id) return strongest
-  if (strongest.rssiDbm - incumbent.rssiDbm >= ROAM_HYSTERESIS_DB) return strongest
-  return incumbent                                        // sticky
+  if (!incumbent) return { serving: strongest }          // incumbent out of range → roam
+  if (strongest.ap.id === incumbent.ap.id) return { serving: strongest }
+  if (strongest.rssiDbm - incumbent.rssiDbm >= ROAM_HYSTERESIS_DB) return { serving: strongest }
+  return { serving: incumbent }                          // sticky
 }
 
 // Effective PHY for the data-rate ladder: an 11be device with Wi-Fi 7 disabled
@@ -91,22 +99,33 @@ function effectivePhy(device, wifi7On) {
 //   rx       — { x, y } in meters
 //   opts     — { device, sixGHzOn, wifi7On, linkDirection, clientTxDbm,
 //                clientHeightM, noiseFloor:{2.4,5,6}, minInterferingRssiDbm,
-//                priorServingId }
+//                priorServingId, lockedApId }
 // Returns: { reading, servingApId }.
 export function simulateClient(scenario, rx, opts) {
   const empty = { reading: null, servingApId: null }
   if (!scenario || !scenario.aps.length) return empty
 
-  const { device, wifi7On, linkDirection, noiseFloor, minInterferingRssiDbm, priorServingId } = opts
+  const { device, wifi7On, linkDirection, noiseFloor, minInterferingRssiDbm, priorServingId, lockedApId } = opts
   const { probe, candidates } = buildCandidates(scenario, rx, opts)
   if (!probe) return empty
 
-  const serving = pickServing(candidates, priorServingId)
+  const { serving, lockUnreachable } = pickServing(candidates, priorServingId, lockedApId)
   if (!serving) {
-    return { reading: { servingApId: null, outOfRange: true, deviceName: device.name, linkDirection }, servingApId: null }
+    // No serving AP. Either nothing usable here, OR a manual lock whose AP isn't
+    // reachable at this point (lockUnreachable) — the panel shows a specific
+    // message and we keep the lock (no silent fall-back to another AP).
+    return {
+      reading: {
+        servingApId: null, outOfRange: true, deviceName: device.name, linkDirection,
+        lockedApId: lockedApId ?? null, lockUnreachable: !!lockUnreachable,
+      },
+      servingApId: null,
+    }
   }
 
   const servingAp = serving.ap
+  // Whether the served AP is the manual lock (so the panel shows the 🔒 badge).
+  const isLocked = lockedApId != null && servingAp.id === lockedApId
   const rssiDbm = serving.rssiDbm           // effective (link-direction-aware)
   const band = servingAp.frequency
   const noiseDbm = (noiseFloor && noiseFloor[band] != null) ? noiseFloor[band] : -95
@@ -156,6 +175,7 @@ export function simulateClient(scenario, rx, opts) {
     candidates: roamCandidates,
     deviceName: device.name,
     linkDirection,
+    isLocked,
     outOfRange: false,
   }
   return { reading, servingApId: servingAp.id }

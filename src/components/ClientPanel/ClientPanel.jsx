@@ -68,6 +68,8 @@ function ClientPanel() {
   const setShowAssociationArea = useClientViewStore((s) => s.setShowAssociationArea)
   const coverageThresholdDbm = useClientViewStore((s) => s.coverageThresholdDbm)
   const setCoverageThresholdDbm = useClientViewStore((s) => s.setCoverageThresholdDbm)
+  const lockedApId = useClientViewStore((s) => s.lockedApId)
+  const setLockedApId = useClientViewStore((s) => s.setLockedApId)
 
   const device = getClientDeviceById(deviceId)
   const sixGHzAvailable = device.sixGHzCapable
@@ -169,16 +171,28 @@ function ClientPanel() {
         <div className="client-panel__hint">點一下平面圖放置 client；拖曳可移動觀察漫遊。</div>
       )}
 
+      {/* Manual-lock status — shown whenever a lock is active, with an unlock
+          button. (Lock is set via right-click menu on an AP.) */}
+      {placed && lockedApId != null && (
+        <div className="client-panel__lock">
+          <span>🔒 手動連線（非真實漫遊）</span>
+          <button type="button" onClick={() => setLockedApId(null)}>解除</button>
+        </div>
+      )}
+
       {placed && outOfRange && (
         <div className="client-panel__hint client-panel__hint--warn">
-          此位置沒有 {device.name} 可關聯的 AP（超出範圍 / 不支援的頻段）。
+          {reading?.lockUnreachable
+            ? '手動鎖定的 AP 在此位置無法連線（超出範圍 / 不支援的頻段）。'
+            : `此位置沒有 ${device.name} 可關聯的 AP（超出範圍 / 不支援的頻段）。`}
         </div>
       )}
 
       {placed && !outOfRange && reading && (
         <div className="client-panel__readout">
           <div className="client-panel__row client-panel__row--head">
-            <b>連線 AP</b><span>{reading.servingApName ?? '—'}</span>
+            <b>連線 AP</b>
+            <span>{reading.isLocked ? '🔒 ' : ''}{reading.servingApName ?? '—'}</span>
           </div>
           <div className="client-panel__row">
             <b>距離</b><span>{fmt(reading.distanceM, 'm', 1)}</span>

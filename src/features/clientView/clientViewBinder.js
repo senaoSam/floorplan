@@ -1,6 +1,6 @@
 import { buildScenario } from '@/features/heatmap/buildScenario'
 import { getClientDeviceById } from '@/constants/clientDevices'
-import { simulateClient } from './simulate'
+import { simulateClient, buildCandidates } from './simulate'
 import { computeAssociationArea } from './association'
 import { EDITOR_MODE } from '@/store/useEditorStore'
 
@@ -67,6 +67,7 @@ export function bindClientView({
     minInterferingRssiDbm: cv.minInterferingRssiDbm,
     coverageThresholdDbm: cv.coverageThresholdDbm,
     priorServingId: cv.servingApId,
+    lockedApId: cv.lockedApId,
   })
 
   // Re-run the simulation for the current client position. Called on drag-move
@@ -105,9 +106,31 @@ export function bindClientView({
     recompute()
   }
 
+  // Nearest active-floor AP to a world (canvas-px) point, within `screenPx` of
+  // it on screen. Returns the AP id or null. Used by the right-click menu to
+  // decide "right-clicked an AP" vs "right-clicked empty space".
+  const apIdNear = (wp, screenPx = 22) => {
+    const fid = useFloorStore.getState().activeFloorId
+    const aps = useAPStore.getState().apsByFloor[fid] ?? []
+    const worldScale = scene.world.scale?.x || 1
+    const tol = screenPx / worldScale            // canvas-px tolerance
+    let best = null, bestD = tol
+    for (const a of aps) {
+      const d = Math.hypot(a.x - wp.x, a.y - wp.y)
+      if (d <= bestD) { bestD = d; best = a.id }
+    }
+    return best
+  }
+
   const onDown = (e) => {
     if (!isActive()) return
-    if ((e.button ?? 0) !== 0) return
+    if ((e.button ?? 0) !== 0) return     // right-click handled via native contextmenu below
+    // Menu open → this left-click only dismisses it; it does NOT place/move the
+    // client. The client moves only when a click lands with no menu open.
+    if (useClientViewStore.getState().cvMenu) {
+      useClientViewStore.getState().closeCvMenu()
+      return
+    }
     dragging = true
     const wp = scene.world.toLocal(e.global)
     placeAt(wp)
@@ -121,6 +144,52 @@ export function bindClientView({
     placeAt(wp)
   }
   const onUp = () => { dragging = false }
+
+  // Right-click menu via the NATIVE contextmenu event. PIXI v8's federated
+  // layer does not emit pointerdown for the secondary (right) button, so a
+  // stage 'pointerdown' handler never sees button===2 — we listen on the canvas
+  // DOM element instead. Convert clientX/Y → world (canvas-px) for the AP
+  // hit-test, then open the lightweight client-view menu.
+  const canvasEl = scene.app.canvas
+  const onContextMenu = (e) => {
+    if (!isActive()) return
+    e.preventDefault()                    // suppress the browser menu
+    // Menu already open → this right-click only dismisses it (same as left).
+    // The user must right-click again to open a fresh menu elsewhere.
+    if (useClientViewStore.getState().cvMenu) {
+      useClientViewStore.getState().closeCvMenu()
+      return
+    }
+    const rect = canvasEl.getBoundingClientRect()
+    const wp = scene.world.toLocal({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+    const apId = apIdNear(wp)
+    // Reachability of the right-clicked AP FROM THE CLIENT'S current position:
+    // "manual connect" means "make the client use this AP", so the client's
+    // location decides whether it's reachable (RSSI ≥ usable floor + band).
+    // Reuse buildCandidates (already band-filtered + usable-floor-filtered):
+    // the AP is reachable iff it's among the candidates at the client point.
+    // null when no client placed → menu disables connect with a "place first" hint.
+    let apReachable = null
+    if (apId != null) {
+      const cv = useClientViewStore.getState()
+      const { scenario, floor } = getScenario()
+      if (cv.pos != null && scenario && floor?.scale) {
+        const rx = { x: cv.pos.x / floor.scale, y: cv.pos.y / floor.scale }
+        const { candidates } = buildCandidates(scenario, rx, buildOpts(cv))
+        apReachable = candidates.some((c) => c.ap.id === apId)
+      } else {
+        apReachable = false // no client placed yet → can't connect
+      }
+    }
+    useClientViewStore.getState().openCvMenu({
+      screenX: e.clientX,
+      screenY: e.clientY,
+      apId,
+      apReachable,
+      clientPlaced: useClientViewStore.getState().pos != null,
+    })
+  }
+  canvasEl.addEventListener('contextmenu', onContextMenu)
 
   stage.on('pointerdown', onDown)
   stage.on('pointermove', onMove)
@@ -155,6 +224,7 @@ export function bindClientView({
       clientHeightM: s.clientHeightM, noiseFloor: s.noiseFloor,
       minInterferingRssiDbm: s.minInterferingRssiDbm,
       coverageThresholdDbm: s.coverageThresholdDbm,
+      lockedApId: s.lockedApId,
       showAssociationArea: s.showAssociationArea,
     }
   }
@@ -177,6 +247,7 @@ export function bindClientView({
       || cur.noiseFloor !== prev.noiseFloor
       || cur.minInterferingRssiDbm !== prev.minInterferingRssiDbm
       || cur.coverageThresholdDbm !== prev.coverageThresholdDbm
+      || cur.lockedApId !== prev.lockedApId
       || assocChanged
     prev = cur                              // advance BEFORE any store writes
     if (!simChanged && !assocChanged) return
@@ -254,6 +325,7 @@ export function bindClientView({
     stage.off('pointermove', onMove)
     stage.off('pointerup', onUp)
     stage.off('pointerupoutside', onUp)
+    canvasEl.removeEventListener('contextmenu', onContextMenu)
     unsubAP()
     unsubWall()
     unsubScope()

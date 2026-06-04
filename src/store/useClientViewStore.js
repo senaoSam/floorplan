@@ -58,6 +58,11 @@ export const useClientViewStore = create((set) => ({
   // poor quality. -67 is the common industry "good" coverage design target.
   coverageThresholdDbm: -67,
   servingApId: null,
+  // Manually-locked serving AP id (null = automatic: strongest + hysteresis).
+  // A what-if tool — real device users can't pick an AP, so the UI labels this
+  // as "manual" (non-real-roaming). Only forces `serving`; the coverage blue
+  // stays the whole-network union. Cleared on leave/reset.
+  lockedApId: null,
   reading: null,
   // Default ON — entering Client View shows the device's association area first
   // (Hamina-style device-perspective default). The binder applies the heatmap
@@ -66,6 +71,11 @@ export const useClientViewStore = create((set) => ({
   // Remembers whether the heatmap was on before association area hid it, so the
   // binder can restore it when association area is turned off / mode exits.
   heatmapWasEnabled: false,
+  // Lightweight right-click menu for CLIENT_VIEW (separate from the generic
+  // object context menu, which stays suppressed in this mode). Shape:
+  //   { screenX, screenY, apId: string|null }  — apId set when the right-click
+  //   landed on an AP marker; null for empty space. null when closed.
+  cvMenu: null,
   // Association-area render data: { bounds:{x,y,w,h}, polygons:[flat[x,y,…]] }
   // in canvas px. The blue fill covers `bounds` with the association region
   // (polygons) cut out — Hamina shades the OUTSIDE. Computed on demand and
@@ -90,6 +100,11 @@ export const useClientViewStore = create((set) => ({
   // cached associationArea so the binder recomputes it.
   setCoverageThresholdDbm: (coverageThresholdDbm) => set({ coverageThresholdDbm, associationArea: null }),
   setServingApId: (servingApId) => set({ servingApId }),
+  // Lock/unlock the serving AP. Clearing servingApId forces a fresh serving
+  // pick (so unlocking immediately re-runs the automatic choice).
+  setLockedApId: (lockedApId) => set({ lockedApId, servingApId: null }),
+  openCvMenu: (cvMenu) => set({ cvMenu }),
+  closeCvMenu: () => set((s) => (s.cvMenu ? { cvMenu: null } : {})),
   setReading: (reading) => set({ reading }),
   setShowAssociationArea: (showAssociationArea) => set({ showAssociationArea }),
   setHeatmapWasEnabled: (heatmapWasEnabled) => set({ heatmapWasEnabled }),
@@ -104,8 +119,10 @@ export const useClientViewStore = create((set) => ({
   // over too).
   leave: () => set({
     servingApId: null,
+    lockedApId: null,
     reading: null,
     associationArea: null,
+    cvMenu: null,
   }),
 
   // Hard reset — fully clears the placed client (e.g. floor switch where the
@@ -113,9 +130,11 @@ export const useClientViewStore = create((set) => ({
   reset: () => set({
     pos: null,
     servingApId: null,
+    lockedApId: null,
     reading: null,
     showAssociationArea: true,
     associationArea: null,
+    cvMenu: null,
   }),
 }))
 
