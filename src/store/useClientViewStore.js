@@ -63,6 +63,13 @@ export const useClientViewStore = create((set) => ({
   // as "manual" (non-real-roaming). Only forces `serving`; the coverage blue
   // stays the whole-network union. Cleared on leave/reset.
   lockedApId: null,
+  // Single-AP coverage outline. `singleApAreaId` is the MANUALLY-chosen AP whose
+  // good-signal outline is shown (null = none chosen manually). The AP actually
+  // outlined = singleApAreaId ?? servingApId (manual wins; otherwise follow the
+  // serving AP automatically). Only one single-AP outline at a time.
+  // `singleApArea` caches the computed outline { polygons } for the layer.
+  singleApAreaId: null,
+  singleApArea: null,
   reading: null,
   // Default ON — entering Client View shows the device's association area first
   // (Hamina-style device-perspective default). The binder applies the heatmap
@@ -84,25 +91,30 @@ export const useClientViewStore = create((set) => ({
   associationArea: null,
 
   setPos: (pos) => set({ pos, associationArea: null }),
-  setDevice: (deviceId) => set({ deviceId, servingApId: null, associationArea: null }),
-  setSixGHzOn: (sixGHzOn) => set({ sixGHzOn, servingApId: null, associationArea: null }),
-  setWifi7On: (wifi7On) => set({ wifi7On, servingApId: null, associationArea: null }),
-  setLinkDirection: (linkDirection) => set({ linkDirection, servingApId: null, associationArea: null }),
-  setClientHeightM: (clientHeightM) => set({ clientHeightM, servingApId: null, associationArea: null }),
-  setClientTxDbm: (clientTxDbm) => set({ clientTxDbm, servingApId: null, associationArea: null }),
+  setDevice: (deviceId) => set({ deviceId, servingApId: null, associationArea: null, singleApArea: null }),
+  setSixGHzOn: (sixGHzOn) => set({ sixGHzOn, servingApId: null, associationArea: null, singleApArea: null }),
+  setWifi7On: (wifi7On) => set({ wifi7On, servingApId: null, associationArea: null, singleApArea: null }),
+  setLinkDirection: (linkDirection) => set({ linkDirection, servingApId: null, associationArea: null, singleApArea: null }),
+  setClientHeightM: (clientHeightM) => set({ clientHeightM, servingApId: null, associationArea: null, singleApArea: null }),
+  setClientTxDbm: (clientTxDbm) => set({ clientTxDbm, servingApId: null, associationArea: null, singleApArea: null }),
   setNoiseFloorBand: (band, dbm) => set((s) => ({
     noiseFloor: { ...s.noiseFloor, [band]: dbm },
     servingApId: null,
     associationArea: null,
+    singleApArea: null,
   })),
-  setMinInterferingRssiDbm: (minInterferingRssiDbm) => set({ minInterferingRssiDbm, servingApId: null, associationArea: null }),
-  // Only affects the coverage blob (not serving / reading) → just invalidate the
-  // cached associationArea so the binder recomputes it.
-  setCoverageThresholdDbm: (coverageThresholdDbm) => set({ coverageThresholdDbm, associationArea: null }),
+  setMinInterferingRssiDbm: (minInterferingRssiDbm) => set({ minInterferingRssiDbm, servingApId: null, associationArea: null, singleApArea: null }),
+  // Affects both coverage blobs (whole-network + single-AP outline) → invalidate
+  // both caches so the binder recomputes them.
+  setCoverageThresholdDbm: (coverageThresholdDbm) => set({ coverageThresholdDbm, associationArea: null, singleApArea: null }),
   setServingApId: (servingApId) => set({ servingApId }),
   // Lock/unlock the serving AP. Clearing servingApId forces a fresh serving
   // pick (so unlocking immediately re-runs the automatic choice).
   setLockedApId: (lockedApId) => set({ lockedApId, servingApId: null }),
+  // Manually choose / clear the single-AP outline AP. Invalidate the cached
+  // outline so the binder recomputes for the new target.
+  setSingleApAreaId: (singleApAreaId) => set({ singleApAreaId, singleApArea: null }),
+  setSingleApArea: (singleApArea) => set({ singleApArea }),
   openCvMenu: (cvMenu) => set({ cvMenu }),
   closeCvMenu: () => set((s) => (s.cvMenu ? { cvMenu: null } : {})),
   setReading: (reading) => set({ reading }),
@@ -122,6 +134,8 @@ export const useClientViewStore = create((set) => ({
     lockedApId: null,
     reading: null,
     associationArea: null,
+    singleApAreaId: null,
+    singleApArea: null,
     cvMenu: null,
   }),
 
@@ -134,6 +148,8 @@ export const useClientViewStore = create((set) => ({
     reading: null,
     showAssociationArea: true,
     associationArea: null,
+    singleApAreaId: null,
+    singleApArea: null,
     cvMenu: null,
   }),
 }))

@@ -4,6 +4,7 @@ import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useDraftStore } from '@/store/useDraftStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
+import { useClientViewStore } from '@/store/useClientViewStore'
 import { computeFocusedDevices, FOCUS_HALO_COLOR, FOCUS_HALO_ALPHA, FOCUS_HALO_WIDTH } from '@/features/focus/focusedDevices'
 import { perfOn, probe, probeEvent } from '@/features/cable/perfProbe'
 import { getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
@@ -44,7 +45,17 @@ const AXIS_LEN        = 32
 const SELECT_STROKE = '#e74c3c'
 const BODY_STROKE_NORMAL = '#1e3a8a'
 const BODY_FILL_NORMAL   = '#ffffff'
+const CV_HIGHLIGHT_FILL  = '#ef4444'   // Client View single-AP-range highlight (red body)
 const DRAG_COMMIT_THRESHOLD_PX = 1
+
+// The AP whose single-AP coverage range is currently shown in Client View
+// (manual choice, else serving). Only in CLIENT_VIEW mode. That AP's marker
+// body is filled red so it's obvious which AP the red outline belongs to.
+function clientViewHighlightApId() {
+  if (useEditorStore.getState().editorMode !== EDITOR_MODE.CLIENT_VIEW) return null
+  const cv = useClientViewStore.getState()
+  return cv.singleApAreaId ?? cv.reading?.servingApId ?? null
+}
 
 const NAME_TEXT_STYLE = new TextStyle({
   fill: '#ffffff',
@@ -286,9 +297,23 @@ export function attachAPsLayer({
     // Marker body — oldSrc convention: white fill / dark-blue stroke;
     // hovered + non-selected inverts to dark fill / white stroke;
     // selected → red stroke.
-    const bodyFill   = isInvert ? BODY_STROKE_NORMAL : BODY_FILL_NORMAL
-    const bodyStroke = isSelected ? SELECT_STROKE : (isInvert ? BODY_FILL_NORMAL : BODY_STROKE_NORMAL)
-    const bodyWidth  = isSelected ? 3 : (isHovered ? 2.5 : 2)
+    //   Client View highlight (this AP's range is shown): solid red fill.
+    //   Client View hover (read-only mode affordance): white fill + thick RED
+    //     stroke — a "red preview" that hints right-click shows this AP's red
+    //     range, distinct from the solid-red highlighted AP.
+    const inClientView = useEditorStore.getState().editorMode === EDITOR_MODE.CLIENT_VIEW
+    const isCvHighlight = clientViewHighlightApId() === ap.id
+    const isCvHover = inClientView && isHovered && !isCvHighlight
+    let bodyFill, bodyStroke, bodyWidth
+    if (isCvHighlight) {
+      bodyFill = CV_HIGHLIGHT_FILL; bodyStroke = '#ffffff'; bodyWidth = isHovered ? 3 : 2
+    } else if (isCvHover) {
+      bodyFill = BODY_FILL_NORMAL; bodyStroke = CV_HIGHLIGHT_FILL; bodyWidth = 3
+    } else {
+      bodyFill = isInvert ? BODY_STROKE_NORMAL : BODY_FILL_NORMAL
+      bodyStroke = isSelected ? SELECT_STROKE : (isInvert ? BODY_FILL_NORMAL : BODY_STROKE_NORMAL)
+      bodyWidth = isSelected ? 3 : (isHovered ? 2.5 : 2)
+    }
     graphics
       .circle(0, 0, AP_RADIUS)
       .fill({ color: bodyFill, alpha: 1 })
@@ -407,7 +432,12 @@ export function attachAPsLayer({
       // point, never grabs an existing object.
       const canGrab = mode === EDITOR_MODE.SELECT || mode === EDITOR_MODE.PLACE_AP
       container.cursor = canGrab ? 'grab' : ''
-      if (!cap.allowSelectHover.wireless && !cap.allowCommandHover.wireless) return
+      // CLIENT_VIEW: the cap disables hover (read-only mode), but we still want
+      // a hover affordance so the user discovers each AP is interactive (right-
+      // click → manual connect / show range). Keep the client cursor (don't
+      // grab); just light up the marker via the hover-invert path.
+      const cvHoverable = mode === EDITOR_MODE.CLIENT_VIEW
+      if (!cvHoverable && !cap.allowSelectHover.wireless && !cap.allowCommandHover.wireless) return
       useHoverStore.getState().setHover(entry.ap.id, 'ap')
     })
     container.on('pointerout', () => useHoverStore.getState().clearHoverIf(entry.ap.id))
@@ -623,6 +653,21 @@ export function attachAPsLayer({
     if (next) liftToTop(next)
   }
 
+  // Client View single-AP-range highlight: when the highlighted AP changes
+  // (manual pick / serving change / entering-leaving CLIENT_VIEW), redraw the
+  // previously- and newly-highlighted markers so the red body paints / clears.
+  let lastCvHighlightId = clientViewHighlightApId()
+  const onClientViewChange = () => {
+    const id = clientViewHighlightApId()
+    if (id === lastCvHighlightId) return
+    const prevId = lastCvHighlightId
+    lastCvHighlightId = id
+    const prev = prevId ? containers.get(prevId) : null
+    const next = id ? containers.get(id) : null
+    if (prev) drawAP(prev)
+    if (next && next !== prev) drawAP(next)
+  }
+
   // Screen-space marker sizing (oldSrc convention): container.scale =
   // 1 / viewport.scale so the AP body + name label + info pill render at
   // a constant on-screen size regardless of zoom. Position remains world.
@@ -647,9 +692,10 @@ export function attachAPsLayer({
   const unsubAP = useAPStore.subscribe(timed('ap', () => { reconcile(); recomputeFocus(); applyInverseScale() }))
   const unsubCable = useCableStore.subscribe(timed('cable', recomputeFocus))
   const unsubDrag = useDragOverlayStore.subscribe(timed('drag', applyDragOverlay))
-  const unsubEditor = useEditorStore.subscribe(timed('editor', onEditorChange))
+  const unsubEditor = useEditorStore.subscribe(timed('editor', () => { onEditorChange(); onClientViewChange() }))
   const unsubHover = useHoverStore.subscribe(timed('hover', onHoverChange))
   const unsubViewport = useViewportStore.subscribe(timed('viewport', applyInverseScale))
+  const unsubClientView = useClientViewStore.subscribe(timed('clientView', onClientViewChange))
   reconcile()
   recomputeFocus()
   applyInverseScale()
@@ -662,6 +708,7 @@ export function attachAPsLayer({
     unsubEditor()
     unsubHover()
     unsubViewport()
+    unsubClientView()
     for (const id of Array.from(containers.keys())) removeContainer(id)
   }
 }

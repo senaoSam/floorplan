@@ -23,6 +23,8 @@ function ClientViewMenuInner({ menu }) {
   const closeCvMenu = useClientViewStore((s) => s.closeCvMenu)
   const lockedApId = useClientViewStore((s) => s.lockedApId)
   const setLockedApId = useClientViewStore((s) => s.setLockedApId)
+  const singleApAreaId = useClientViewStore((s) => s.singleApAreaId)
+  const setSingleApAreaId = useClientViewStore((s) => s.setSingleApAreaId)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
   const apsByFloor = useAPStore((s) => s.apsByFloor)
 
@@ -92,6 +94,31 @@ function ClientViewMenuInner({ menu }) {
       id: 'unlock',
       label: '解除手動連接（回自動）',
       onClick: () => setLockedApId(null),
+    })
+  }
+  // Single-AP coverage outline. On an AP that's currently the manually-shown
+  // one → "hide range"; on any other AP → "show this AP's range" (replaces the
+  // current single outline, since only one shows at a time).
+  if (ap) {
+    if (singleApAreaId === ap.id) {
+      items.push({
+        id: 'hideArea',
+        label: `隱藏 ${apName} 範圍`,
+        onClick: () => setSingleApAreaId(null),
+      })
+    } else {
+      items.push({
+        id: 'showArea',
+        label: `顯示 ${apName} 範圍`,
+        onClick: () => setSingleApAreaId(ap.id),
+      })
+    }
+  } else if (singleApAreaId != null) {
+    // Right-clicked empty space but a manual outline is active → offer to clear.
+    items.push({
+      id: 'hideAreaEmpty',
+      label: '隱藏單台 AP 範圍',
+      onClick: () => setSingleApAreaId(null),
     })
   }
   // Nothing actionable (right-clicked empty space with no active lock).

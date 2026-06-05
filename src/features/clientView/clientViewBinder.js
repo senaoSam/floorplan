@@ -1,7 +1,7 @@
 import { buildScenario } from '@/features/heatmap/buildScenario'
 import { getClientDeviceById } from '@/constants/clientDevices'
 import { simulateClient, buildCandidates } from './simulate'
-import { computeAssociationArea } from './association'
+import { computeAssociationArea, computeSingleApArea } from './association'
 import { EDITOR_MODE } from '@/store/useEditorStore'
 
 // Owns Client View pointer interaction + simulation. Active only while the
@@ -98,6 +98,15 @@ export function bindClientView({
       const area = computeAssociationArea(scenario, floor.scale, opts)
       cv.setAssociationArea(area)
     }
+
+    // Single-AP coverage outline: the AP whose good-signal region is outlined =
+    // manual choice if set, else the serving AP (auto-follow). Recompute its
+    // outline so it tracks serving changes / param changes. Null target → clear.
+    const outlineApId = cv.singleApAreaId ?? servingApId
+    const singleArea = outlineApId
+      ? computeSingleApArea(scenario, floor.scale, outlineApId, opts)
+      : null
+    cv.setSingleApArea(singleArea)
   }
 
   // Move the client to a world (canvas px) point and resimulate.
@@ -225,6 +234,7 @@ export function bindClientView({
       minInterferingRssiDbm: s.minInterferingRssiDbm,
       coverageThresholdDbm: s.coverageThresholdDbm,
       lockedApId: s.lockedApId,
+      singleApAreaId: s.singleApAreaId,
       showAssociationArea: s.showAssociationArea,
     }
   }
@@ -248,6 +258,7 @@ export function bindClientView({
       || cur.minInterferingRssiDbm !== prev.minInterferingRssiDbm
       || cur.coverageThresholdDbm !== prev.coverageThresholdDbm
       || cur.lockedApId !== prev.lockedApId
+      || cur.singleApAreaId !== prev.singleApAreaId
       || assocChanged
     prev = cur                              // advance BEFORE any store writes
     if (!simChanged && !assocChanged) return

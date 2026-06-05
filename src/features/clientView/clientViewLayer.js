@@ -22,6 +22,7 @@ const CANDIDATE_COLOR = '#9ca3af' // roaming candidate — grey
 const HALO_COLOR = '#000000'
 const CLIENT_FILL = '#ffffff'
 const ASSOC_FILL = '#3b82f6'
+const SINGLE_AREA_COLOR = '#ef4444'  // single-AP coverage outline + AP highlight (red)
 // Client figure colours + geometry (PERSON) live in personGeometry.js so the
 // canvas marker and the SVG cursor stay identical. Feet anchor the sampled
 // point; association lines emanate from the heart, not the feet.
@@ -95,6 +96,23 @@ export function attachClientViewLayer({
       }
       for (const poly of (area.polygons ?? [])) {
         if (poly.length >= 6) g.poly(poly).stroke({ width: 1.5 * s, color: ASSOC_FILL, alpha: 0.55 })
+      }
+    }
+
+    // Single-AP coverage (the serving AP, or a manually-chosen AP) — a RED
+    // shaded region + red edge, over the whole-network blue, so that one AP's
+    // good-signal area stands out clearly. The fill alpha is a touch higher
+    // than the blue so it reads red even where it overlaps blue. (The AP whose
+    // range is shown is also highlighted by apsLayer with a red marker body.)
+    const single = cv.singleApArea
+    if (single) {
+      for (const poly of (single.polygons ?? [])) {
+        if (poly.length >= 6) g.poly(poly).fill({ color: SINGLE_AREA_COLOR, alpha: 0.3 })
+      }
+      for (const poly of (single.polygons ?? [])) {
+        if (poly.length < 6) continue
+        g.poly(poly).stroke({ width: 3.5 * s, color: HALO_COLOR, alpha: 0.3 })
+        g.poly(poly).stroke({ width: 2 * s, color: SINGLE_AREA_COLOR, alpha: 1 })
       }
     }
 

@@ -71,3 +71,35 @@ export function computeAssociationArea(scenario, floorScale, opts) {
     polygons,
   }
 }
+
+// Coverage outline for ONE specific AP — the good-signal region of just that AP
+// (RSSI ≥ threshold), regardless of the other APs. Same coarse-grid + smoothing
+// as computeAssociationArea, but the per-cell test is "this AP clears the
+// threshold" instead of "any AP does". Returns { polygons } (canvas px) for the
+// layer to stroke as an outline, or null when the AP isn't usable anywhere.
+export function computeSingleApArea(scenario, floorScale, apId, opts) {
+  if (!scenario || !floorScale || apId == null) return null
+  const { w, h } = scenario.size
+  const threshold = opts?.coverageThresholdDbm ?? DEFAULT_COVERAGE_THRESHOLD_DBM
+
+  let step = GRID_STEP_M
+  while ((w / step) * (h / step) > MAX_CELLS) step *= 1.4
+
+  const cols = Math.ceil(w / step)
+  const rows = Math.ceil(h / step)
+  const mask = new Uint8Array(cols * rows)
+  let any = false
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const rx = { x: (c + 0.5) * step, y: (r + 0.5) * step }
+      if (scenario.scopeMaskFn && !scenario.scopeMaskFn(rx.x, rx.y)) continue
+      const { candidates } = buildCandidates(scenario, rx, opts)
+      const hit = candidates.find((cd) => cd.ap.id === apId)
+      if (hit && hit.rssiDbm >= threshold) { mask[r * cols + c] = 1; any = true }
+    }
+  }
+  if (!any) return { polygons: [] }
+  const cleaned = cleanMask(mask, cols, rows)
+  const stepPx = step * floorScale
+  return { polygons: maskToSmoothPolygons(cleaned, cols, rows, stepPx, 0, 0) }
+}
