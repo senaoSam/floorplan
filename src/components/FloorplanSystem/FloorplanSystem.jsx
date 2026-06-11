@@ -11,6 +11,12 @@ import { attachAPsLayer } from '@/features/aps/apsLayer'
 import { attachSwitchesLayer } from '@/features/switches/switchesLayer'
 import { attachTraysLayer } from '@/features/trays/traysLayer'
 import { attachRisersLayer } from '@/features/risers/risersLayer'
+import { attachCamerasLayer } from '@/features/cameras/camerasLayer'
+import { attachTracksLayer } from '@/features/cameras/tracksLayer'
+import { attachOccupancyLayer } from '@/features/cameras/occupancyLayer'
+import { attachBlindSpotLayer } from '@/features/cameras/blindSpotLayer'
+import { attachAnalyticsLayer } from '@/features/cameras/analyticsLayer'
+import { bindTracking } from '@/features/cameras/trackingBinder'
 import { attachCablesLayer } from '@/features/cables/cablesLayer'
 import { attachSelectionOverlay } from '@/features/selection/selectionOverlayLayer'
 import { attachHoverOverlay } from '@/features/selection/hoverOverlayLayer'
@@ -42,9 +48,12 @@ import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
 import { useClientViewStore } from '@/store/useClientViewStore'
+import { useCameraStore } from '@/store/useCameraStore'
+import { useTrackingStore } from '@/store/useTrackingStore'
 import { useDraftStore } from '@/store/useDraftStore'
 import { useMaterialToastStore } from '@/store/useMaterialToastStore'
 import { MATERIAL_LIST } from '@/constants/materials'
+import { generateId } from '@/utils/id'
 import MaterialToast from '@/components/MaterialToast/MaterialToast'
 import './FloorplanSystem.sass'
 
@@ -70,6 +79,12 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachSwitches = null
     let detachTrays = null
     let detachRisers = null
+    let detachCameras = null
+    let detachTracks = null
+    let detachOccupancy = null
+    let detachBlindSpots = null
+    let analyticsCtl = null
+    let detachTracking = null
     let detachCables = null
     let detachHeatmap = null
     let detachSelection = null
@@ -116,7 +131,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useViewportStore, useFloorStore, useWallStore, useAPStore, useCableStore,
         useHeatmapStore, useEditorStore, useDragOverlayStore, useHoverStore,
         useScopeStore, useFloorHoleStore, useHoverReadoutStore, useDraftStore,
-        useClientViewStore,
+        useClientViewStore, useCameraStore, useTrackingStore,
       ]
       const reqRender = () => s.requestRender()
       detachRenderOnDemand = renderStores.map((st) => st.subscribe(reqRender))
@@ -159,6 +174,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           return m === EDITOR_MODE.PLACE_AP
               || m === EDITOR_MODE.PLACE_SWITCH
               || m === EDITOR_MODE.PLACE_RISER
+              || m === EDITOR_MODE.CAMERA
         },
         isDrawMode: draftCtrl.isDrawMode,
         isMarqueeMode: () => useEditorStore.getState().editorMode === EDITOR_MODE.MARQUEE_SELECT,
@@ -220,6 +236,24 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
             })
             return
           }
+          if (editor.editorMode === EDITOR_MODE.CAMERA) {
+            const cams = useCameraStore.getState()
+            // An armed tripwire/zone draw tool claims the click (two-click
+            // draw); only an idle tool places a camera.
+            if (cams.drawTool && analyticsCtl) {
+              analyticsCtl.commitDrawClick({ x, y })
+              return
+            }
+            cams.addCamera(fid, {
+              id: generateId('cam'),
+              name: cams.nextCameraName(),
+              x, y, z: 2.5,
+              azimuth: 0,
+              fovDeg: 90,
+              rangeM: 12,
+            })
+            return
+          }
           if (editor.editorMode === EDITOR_MODE.PLACE_RISER) {
             // Riser is global (cross-floor). For MVP just stash a single-
             // floor entry on the active floor's id list.
@@ -272,6 +306,37 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useFloorStore,
         useCableStore,
       })
+      detachCameras = attachCamerasLayer({
+        scene: s,
+        useFloorStore,
+        useWallStore,
+        useCameraStore,
+      })
+      detachTracks = attachTracksLayer({
+        scene: s,
+        useFloorStore,
+        useWallStore,
+        useCameraStore,
+        useTrackingStore,
+      })
+      detachOccupancy = attachOccupancyLayer({
+        scene: s,
+        useFloorStore,
+        useTrackingStore,
+      })
+      detachBlindSpots = attachBlindSpotLayer({
+        scene: s,
+        useFloorStore,
+        useWallStore,
+        useCameraStore,
+      })
+      analyticsCtl = attachAnalyticsLayer({
+        scene: s,
+        useFloorStore,
+        useCameraStore,
+        useTrackingStore,
+      })
+      detachTracking = bindTracking({ useEditorStore })
       detachCables = attachCablesLayer({
         scene: s,
         useFloorStore,
@@ -399,6 +464,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           hoverReadout: useHoverReadoutStore,
           draft: useDraftStore,
           history: useHistoryStore,
+          camera: useCameraStore,
+          tracking: useTrackingStore,
         }
       }
     })
@@ -474,6 +541,12 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (e.key === 'Escape') {
         const s = useEditorStore.getState()
         const draft = useDraftStore.getState()
+        // CAMERA mode with an armed tripwire/zone tool: first Esc cancels the
+        // tool (and its draft point); a second Esc exits the mode as usual.
+        if (s.editorMode === EDITOR_MODE.CAMERA && useCameraStore.getState().drawTool) {
+          useCameraStore.getState().setDrawTool(null)
+          return
+        }
         const inNonSelectMode = s.editorMode !== EDITOR_MODE.SELECT
                               && s.editorMode !== EDITOR_MODE.PAN
         // Drawing / placing / cropping / aligning modes — Esc fully aborts.
@@ -600,6 +673,15 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         } else if (s.selectedType === 'cable_riser') {
           useCableStore.getState().removeRiser(s.selectedId)
           s.clearSelected()
+        } else if (s.selectedType === 'camera') {
+          useCameraStore.getState().removeCamera(fid, s.selectedId)
+          s.clearSelected()
+        } else if (s.selectedType === 'tripwire') {
+          useCameraStore.getState().removeTripwire(fid, s.selectedId)
+          s.clearSelected()
+        } else if (s.selectedType === 'camera_zone') {
+          useCameraStore.getState().removeZone(fid, s.selectedId)
+          s.clearSelected()
         }
       }
     }
@@ -626,6 +708,12 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (detachHeatmap) detachHeatmap()
       if (detachCables) detachCables()
       if (detachTrays) detachTrays()
+      if (detachTracking) detachTracking()
+      if (analyticsCtl) analyticsCtl.detach()
+      if (detachBlindSpots) detachBlindSpots()
+      if (detachOccupancy) detachOccupancy()
+      if (detachTracks) detachTracks()
+      if (detachCameras) detachCameras()
       if (detachRisers) detachRisers()
       if (detachSwitches) detachSwitches()
       if (detachAPs) detachAPs()

@@ -10,6 +10,7 @@ const FEATURES = [
   { icon: '🟩', text: '範圍區域：繪製建築覆蓋範圍多邊形，區分涵蓋內／外區域' },
   { icon: '⬛', text: '挑高區域：標記中庭、挑高等信號可跨樓層穿透的區域' },
   { icon: '🖱', text: '右鍵操作：對任意物件按下右鍵可顯示屬性面板（停止繪製），按住右鍵可拖曳物件' },
+  { icon: '📹', text: 'Camera 模式：放置監視器（FOV 被牆遮擋、玻璃可穿透）、模擬人車軌跡與偵測、人流熱圖、盲區圖、計數線、分析區域、回放時間軸' },
 ]
 
 const PHASES = [
@@ -454,6 +455,37 @@ const PHASES = [
           { id: '29-4', done: true, text: 'Routing 階層偏好 — backbone link 優先走指定 tray system' },
           { id: '29-5', done: true, text: 'BOM 細分 — S2S link 加 tier（backbone / distribution）；panel 三段顯示' },
           { id: '29-6', done: true, text: 'UI / 顏色 polish — 各 kind 顯示專屬欄位，對齊 color-legend' },
+        ],
+      },
+    ],
+  },
+  {
+    phase: 'Phase 34 — Camera 模式（監視器規劃 + 人流可視化）',
+    groups: [
+      {
+        layer: 'Layer 30 — Camera 基礎',
+        items: [
+          { id: '34-1a', done: true, text: 'CAMERA 編輯模式 — 畫布只剩底圖+牆，RF/cable 圖層與浮動面板全部隱藏' },
+          { id: '34-1b', done: true, text: 'Camera 放置 / 拖曳 / 旋轉 handle（hover 變色、Shift 15° 吸附）+ CameraPanel' },
+          { id: '34-1c', done: true, text: 'FOV visibility polygon — 牆遮擋視野、玻璃牆/窗可穿透、360° 環景' },
+        ],
+      },
+      {
+        layer: 'Layer 31 — 模擬人流與回放',
+        items: [
+          { id: '34-2a', done: true, text: 'Mock 軌跡產生器 — 一天 08:00–22:00、POI 吸引、避牆（門可通行）、seedable' },
+          { id: '34-2b', done: true, text: 'Live 偵測 icon — FOV 內實色（人橘/車形）、外灰 ghost、漸淡 trail、hover 資訊' },
+          { id: '34-4', done: true, text: '回放時間軸 — scrubber / 播放暫停 / 1x10x60x 倍速 / 日循環' },
+        ],
+      },
+      {
+        layer: 'Layer 32 — 分析可視化',
+        items: [
+          { id: '34-3', done: true, text: '人流熱圖 — 人流量 / 停留時間兩指標 + 統計時段篩選（冷清處透明）' },
+          { id: '34-5a', done: true, text: '盲區圖 — 所有 camera 視野聯集取反的暗色遮罩' },
+          { id: '34-5b', done: true, text: '計數線 — 兩擊繪製、分方向穿越人次、端點/整條可拖曳' },
+          { id: '34-5c', done: true, text: '分析區域 — 進入人次 / 平均停留 / 尖峰時段 + 逐時長條圖、全區可選可拖' },
+          { id: '34-5d', done: true, text: '動線圖 — 每格平均行進方向箭頭場' },
         ],
       },
     ],

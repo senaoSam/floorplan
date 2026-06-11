@@ -197,6 +197,15 @@ const ICONS = {
     </>
   ),
 
+  // Camera — video camera body with a lens cone pointing right
+  camera: (
+    <>
+      <rect x="2.5" y="7" width="12.5" height="10" rx="2" fill="none" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M15 11 L21 8 V16 L15 13 Z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <circle cx="8.5" cy="12" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    </>
+  ),
+
   // AI Walls — wand-like sparkle on a wall segment
   aiWalls: (
     <>

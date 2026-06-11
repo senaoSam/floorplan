@@ -1,5 +1,6 @@
 import React from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import FloorplanSystem from '@/components/FloorplanSystem/FloorplanSystem'
 import HeatmapControl from '@/components/HeatmapControl/HeatmapControl'
 import CableSummaryPanel from '@/components/CableSummaryPanel/CableSummaryPanel'
@@ -11,6 +12,7 @@ import DevicePlanningPanel from '@/components/DevicePlanningPanel/DevicePlanning
 import ClientPanelMount from '@/components/ClientPanel/ClientPanel'
 import ClientViewMenuMount from '@/components/ClientPanel/ClientViewMenu'
 import ScaleBarMount from '@/components/ScaleBar/ScaleBarMount'
+import CameraTimelineBar from '@/components/CameraTimeline/CameraTimelineBar'
 import './CanvasArea.sass'
 
 // Standalone-mode canvas pane — wraps the embeddable FloorplanSystem
@@ -19,6 +21,10 @@ import './CanvasArea.sass'
 // RegulatorySelector dropdown below them.
 function CanvasArea() {
   const hasFloor = useFloorStore((s) => s.floors.length > 0)
+  // CAMERA mode is walls-only — the RF/cable floating panels (heatmap control
+  // + hover readout, cable BOM, AP planning, regulatory domain) are all
+  // irrelevant there and would float over a canvas that hides their subject.
+  const inCameraMode = useEditorStore((s) => s.editorMode === EDITOR_MODE.CAMERA)
   return (
     <div className="canvas-area">
       <div className="canvas-area__pane">
@@ -29,14 +35,15 @@ function CanvasArea() {
       <div className="canvas-area__top-left">
         <div className="canvas-area__top-left-row">
           <LayerToggle />
-          <DevicePlanningPanel />
+          {!inCameraMode && <DevicePlanningPanel />}
         </div>
-        <RegulatorySelector />
+        {!inCameraMode && <RegulatorySelector />}
       </div>
-      {hasFloor && <HeatmapControl />}
-      {hasFloor && <CableSummaryPanel />}
+      {hasFloor && !inCameraMode && <HeatmapControl />}
+      {hasFloor && !inCameraMode && <CableSummaryPanel />}
       <ClientPanelMount />
       <ClientViewMenuMount />
+      <CameraTimelineBar />
       <ScaleBarMount />
     </div>
   )

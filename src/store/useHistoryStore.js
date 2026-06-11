@@ -19,6 +19,7 @@ import { useAPStore } from './useAPStore'
 import { useScopeStore } from './useScopeStore'
 import { useFloorHoleStore } from './useFloorHoleStore'
 import { useCableStore } from './useCableStore'
+import { useCameraStore } from './useCameraStore'
 
 const MAX_HISTORY = 50
 const DEBOUNCE_MS = 300
@@ -38,12 +39,15 @@ function takeSnapshot(floorId) {
     switches: structuredClone(useCableStore.getState().switchesByFloor[floorId] ?? []),
     trays:    structuredClone(useCableStore.getState().traysByFloor[floorId] ?? []),
     risers:   structuredClone(useCableStore.getState().risers ?? []),
+    cameras:  structuredClone(useCameraStore.getState().camerasByFloor[floorId] ?? []),
+    tripwires: structuredClone(useCameraStore.getState().tripwiresByFloor[floorId] ?? []),
+    camZones:  structuredClone(useCameraStore.getState().zonesByFloor[floorId] ?? []),
   }
 }
 
 function restoreSnapshot(snapshot) {
   if (!snapshot) return
-  const { floorId, walls, aps, scopes, floorHoles, switches, trays, risers } = snapshot
+  const { floorId, walls, aps, scopes, floorHoles, switches, trays, risers, cameras, tripwires, camZones } = snapshot
   _restoring = true
   useWallStore.getState().setWalls(floorId, walls)
   useAPStore.getState().setAPs(floorId, aps)
@@ -56,6 +60,9 @@ function restoreSnapshot(snapshot) {
   useCableStore.getState().setSwitches(floorId, switches ?? [])
   useCableStore.getState().setTrays(floorId, trays ?? [])
   useCableStore.getState().setRisers(risers ?? [])
+  useCameraStore.getState().setCameras(floorId, cameras ?? [])
+  useCameraStore.getState().setTripwires(floorId, tripwires ?? [])
+  useCameraStore.getState().setZones(floorId, camZones ?? [])
   _restoring = false
 }
 
@@ -140,6 +147,9 @@ function commitPending() {
     switches: structuredClone(raw.switches),
     trays:    structuredClone(raw.trays),
     risers:   structuredClone(raw.risers ?? []),
+    cameras:  structuredClone(raw.cameras ?? []),
+    tripwires: structuredClone(raw.tripwires ?? []),
+    camZones:  structuredClone(raw.camZones ?? []),
   })
 }
 
@@ -175,6 +185,9 @@ let _prevHoles    = useFloorHoleStore.getState().floorHolesByFloor
 let _prevSwitches = useCableStore.getState().switchesByFloor
 let _prevTrays    = useCableStore.getState().traysByFloor
 let _prevRisers   = useCableStore.getState().risers
+let _prevCameras  = useCameraStore.getState().camerasByFloor
+let _prevTripwires = useCameraStore.getState().tripwiresByFloor
+let _prevCamZones  = useCameraStore.getState().zonesByFloor
 
 function onStoreChange(storeName, prevRef, currentRef) {
   if (_restoring) return
@@ -198,6 +211,9 @@ function onStoreChange(storeName, prevRef, currentRef) {
     switches:   storeName === 'switches' ? (prevRef[floorId] ?? []) : (useCableStore.getState().switchesByFloor[floorId] ?? []),
     trays:      storeName === 'trays'    ? (prevRef[floorId] ?? []) : (useCableStore.getState().traysByFloor[floorId] ?? []),
     risers:     storeName === 'risers'   ? (prevRef ?? [])           : (useCableStore.getState().risers ?? []),
+    cameras:    storeName === 'cameras'  ? (prevRef[floorId] ?? []) : (useCameraStore.getState().camerasByFloor[floorId] ?? []),
+    tripwires:  storeName === 'tripwires' ? (prevRef[floorId] ?? []) : (useCameraStore.getState().tripwiresByFloor[floorId] ?? []),
+    camZones:   storeName === 'camZones'  ? (prevRef[floorId] ?? []) : (useCameraStore.getState().zonesByFloor[floorId] ?? []),
   }
   schedulePushRaw(raw)
 }
@@ -217,6 +233,14 @@ useScopeStore.subscribe((state) => {
 useFloorHoleStore.subscribe((state) => {
   const cur = state.floorHolesByFloor
   if (cur !== _prevHoles) { onStoreChange('holes', _prevHoles, cur); _prevHoles = cur }
+})
+useCameraStore.subscribe((state) => {
+  const cur = state.camerasByFloor
+  if (cur !== _prevCameras) { onStoreChange('cameras', _prevCameras, cur); _prevCameras = cur }
+  const curT = state.tripwiresByFloor
+  if (curT !== _prevTripwires) { onStoreChange('tripwires', _prevTripwires, curT); _prevTripwires = curT }
+  const curZ = state.zonesByFloor
+  if (curZ !== _prevCamZones) { onStoreChange('camZones', _prevCamZones, curZ); _prevCamZones = curZ }
 })
 useCableStore.subscribe((state) => {
   const curS = state.switchesByFloor

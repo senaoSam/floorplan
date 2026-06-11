@@ -18,6 +18,7 @@ export const EDITOR_MODE = {
   DRAW_CABLE_TRAY: 'draw_cable_tray',
   PLACE_RISER: 'place_riser',
   CLIENT_VIEW: 'client_view',
+  CAMERA: 'camera',
 }
 
 export const VIEW_MODE = {

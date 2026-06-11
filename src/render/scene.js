@@ -22,6 +22,7 @@ import { Application, Container } from 'pixi.js'
 const LAYER_KEYS = [
   'floorImage',
   'heatmap',
+  'cameraFov',     // camera FOV cones — under walls so wall lines stay crisp
   'walls',
   'scopes',
   'floorHoles',
@@ -30,6 +31,7 @@ const LAYER_KEYS = [
   'devicesAP',
   'devicesSW',
   'devicesRiser',
+  'cameras',       // camera markers (CAMERA mode only)
   'overlays',
   'handles',
   'labels',

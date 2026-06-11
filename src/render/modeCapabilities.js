@@ -189,6 +189,19 @@ const CLIENT_VIEW_CAP = {
   keepLayers: ['floorImage', 'devicesAP', 'heatmap'],
 }
 
+// CAMERA — surveillance planning (Phase 34). Per design consensus the mode is
+// walls-only: every layer except floorImage + walls is HIDDEN (not dimmed —
+// layerVisibilityBinder enforces the hiding; keepLayers here just keeps the
+// two visible layers at full alpha). Cameras are mode-exclusive objects with
+// their own interactions inside camerasLayer, so no per-category capability
+// is granted — clicking empty canvas places a camera (viewport place-mode).
+const CAMERA_CAP = {
+  ...emptyCap(),
+  cursor: 'crosshair',
+  dimOthers: [],
+  keepLayers: ['floorImage', 'walls'],
+}
+
 const CROP_IMAGE_CAP = {
   ...emptyCap(),
   cursor: 'crosshair',
@@ -220,6 +233,7 @@ const CAP_BY_MODE = {
   [EDITOR_MODE.CROP_IMAGE]:       CROP_IMAGE_CAP,
   [EDITOR_MODE.ALIGN_FLOOR]:      ALIGN_FLOOR_CAP,
   [EDITOR_MODE.CLIENT_VIEW]:      CLIENT_VIEW_CAP,
+  [EDITOR_MODE.CAMERA]:           CAMERA_CAP,
 }
 
 export function getModeCapability(mode) {

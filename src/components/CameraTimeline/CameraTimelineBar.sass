@@ -1,0 +1,132 @@
+@use '@/styles/variables' as *
+
+// Camera-mode playback bar — floats bottom-center over the canvas, same
+// dark glass styling family as the active-mode badge / heatmap control.
+
+.camera-timeline
+  position: absolute
+  bottom: 18px
+  left: 50%
+  transform: translateX(-50%)
+  z-index: 390
+  display: inline-flex
+  flex-direction: column
+  gap: 7px
+  padding: 8px 14px
+  background: rgba(15, 23, 42, 0.88)
+  border: 1px solid rgba(255, 255, 255, 0.12)
+  border-left: 3px solid #10b981
+  border-radius: 12px
+  backdrop-filter: blur(6px)
+  color: $text-primary
+  font-size: 12px
+  user-select: none
+  white-space: nowrap
+
+  &__row
+    display: inline-flex
+    align-items: center
+    gap: 10px
+
+  &__play
+    width: 30px
+    height: 30px
+    display: inline-flex
+    align-items: center
+    justify-content: center
+    background: rgba(16, 185, 129, 0.15)
+    border: 1px solid rgba(16, 185, 129, 0.5)
+    border-radius: 50%
+    color: #10b981
+    font-size: 13px
+    cursor: pointer
+    &:hover
+      background: rgba(16, 185, 129, 0.3)
+
+  &__clock
+    font-size: 15px
+    font-weight: 700
+    font-variant-numeric: tabular-nums
+    color: #10b981
+    min-width: 46px
+    text-align: center
+
+  &__scrubber
+    width: 260px
+    accent-color: #10b981
+    cursor: pointer
+
+  &__range
+    color: $text-secondary
+    font-size: 11px
+
+  &__speeds
+    display: inline-flex
+    gap: 4px
+
+  &__chip
+    padding: 3px 8px
+    background: transparent
+    border: 1px solid rgba(255, 255, 255, 0.18)
+    border-radius: 10px
+    color: $text-secondary
+    font-size: 11px
+    cursor: pointer
+    &:hover
+      border-color: rgba(16, 185, 129, 0.6)
+      color: $text-primary
+    &--active
+      background: rgba(16, 185, 129, 0.18)
+      border-color: #10b981
+      color: #10b981
+      font-weight: 600
+
+  &__ghosts
+    display: inline-flex
+    align-items: center
+    gap: 5px
+    color: $text-secondary
+    font-size: 11px
+    cursor: pointer
+    input
+      accent-color: #10b981
+      cursor: pointer
+
+  &__regen
+    padding: 4px 10px
+    background: transparent
+    border: 1px solid rgba(255, 255, 255, 0.18)
+    border-radius: 8px
+    color: $text-secondary
+    font-size: 11px
+    cursor: pointer
+    &:hover
+      border-color: rgba(16, 185, 129, 0.6)
+      color: $text-primary
+
+  &__divider
+    width: 1px
+    align-self: stretch
+    background: rgba(255, 255, 255, 0.15)
+
+  &__label
+    color: $text-secondary
+    font-size: 11px
+
+  &__window
+    display: inline-flex
+    align-items: center
+    gap: 4px
+    color: $text-secondary
+    font-size: 11px
+
+  &__select
+    background: rgba(255, 255, 255, 0.06)
+    border: 1px solid rgba(255, 255, 255, 0.18)
+    border-radius: 6px
+    color: $text-primary
+    font-size: 11px
+    padding: 2px 4px
+    cursor: pointer
+    option
+      background: #16213e

@@ -61,6 +61,14 @@ const GROUPS = [
     ],
   },
   {
+    id: 'surveillance',
+    label: '監控',
+    representativeIcon: 'camera',
+    items: [
+      { mode: EDITOR_MODE.CAMERA,          icon: 'camera', label: 'Camera 模式（監視器規劃）' },
+    ],
+  },
+  {
     id: 'cable',
     label: '網路布線',
     representativeIcon: 'switch',

@@ -1,0 +1,117 @@
+import React, { useCallback } from 'react'
+import { useCameraStore } from '@/store/useCameraStore'
+import { useFloorStore } from '@/store/useFloorStore'
+import { useEditorStore } from '@/store/useEditorStore'
+import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
+import { TextInput, NumberInput } from './_shared/PanelControls'
+import './_shared/shared.sass'
+
+// Camera properties panel (Phase 34-1). Opens when a camera marker is
+// selected in CAMERA mode. Pure-visual object — only placement metadata,
+// no simulation params.
+
+const MIN_FOV = 10
+const MAX_FOV = 360
+const MIN_RANGE_M = 1
+
+function CameraPanel({ floorId, cameraId }) {
+  const camera        = useCameraStore((s) => (s.camerasByFloor[floorId] ?? []).find((c) => c.id === cameraId))
+  const updateCamera  = useCameraStore((s) => s.updateCamera)
+  const removeCamera  = useCameraStore((s) => s.removeCamera)
+  const clearSelected = useEditorStore((s) => s.clearSelected)
+  const floors        = useFloorStore((s) => s.floors)
+  const floor         = floors.find((f) => f.id === floorId)
+  const hasScale      = !!floor?.scale
+
+  const handleField = useCallback((field, value) => {
+    updateCamera(floorId, cameraId, { [field]: value })
+  }, [floorId, cameraId, updateCamera])
+
+  const handleDelete = () => {
+    removeCamera(floorId, cameraId)
+    clearSelected()
+  }
+
+  if (!camera) return null
+
+  const wrapAzimuth = (v) => (((v % 360) + 360) % 360)
+  const rawAz = camera.azimuth ?? 0
+  const effAz = wrapAzimuth(rawAz)
+
+  return (
+    <PanelShell accent="camera">
+      <PanelHeader
+        title={camera.name}
+        meta={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981' }} />
+            Camera 屬性
+          </span>
+        }
+        onDelete={handleDelete}
+      />
+
+      <PanelSection title="識別">
+        <PanelField label="名稱">
+          <TextInput value={camera.name} onChange={(v) => handleField('name', v)} />
+        </PanelField>
+      </PanelSection>
+
+      <PanelSection title="視野">
+        <PanelField label="方位角" hint={effAz !== rawAz ? `實際 ${effAz}°` : '0°=右，順時針'}>
+          <NumberInput
+            value={rawAz}
+            step={1}
+            unit="度"
+            width={70}
+            onChange={(v) => { if (!isNaN(v)) handleField('azimuth', v) }}
+          />
+        </PanelField>
+        <PanelField label="視角 (FOV)" hint={`${MIN_FOV}~${MAX_FOV}，360=環景`}>
+          <NumberInput
+            value={camera.fovDeg ?? 90}
+            min={MIN_FOV}
+            max={MAX_FOV}
+            step={5}
+            unit="度"
+            width={70}
+            onChange={(v) => { if (!isNaN(v)) handleField('fovDeg', Math.max(MIN_FOV, Math.min(MAX_FOV, v))) }}
+          />
+        </PanelField>
+        <PanelField label="可視距離">
+          <NumberInput
+            value={camera.rangeM ?? 12}
+            min={MIN_RANGE_M}
+            step={1}
+            unit="m"
+            width={70}
+            onChange={(v) => { if (!isNaN(v) && v >= MIN_RANGE_M) handleField('rangeM', v) }}
+          />
+        </PanelField>
+        <div className="pnl__field" style={{ display: 'block', fontSize: 11, color: '#94a3b8' }}>
+          牆會遮擋視野；玻璃牆 / 窗可被看穿
+        </div>
+        {!hasScale && (
+          <div className="pnl__field" style={{ display: 'block', fontSize: 11, color: '#f59e0b' }}>
+            ⚠ 尚未設定比例尺，可視距離以預設 40 px/m 估算
+          </div>
+        )}
+      </PanelSection>
+
+      <PanelSection title="安裝">
+        <PanelField label="安裝高度">
+          <NumberInput
+            value={camera.z ?? 2.5}
+            min={0}
+            step={0.1}
+            unit="m"
+            width={70}
+            onChange={(v) => { if (!isNaN(v) && v >= 0) handleField('z', v) }}
+          />
+        </PanelField>
+      </PanelSection>
+    </PanelShell>
+  )
+}
+
+export default CameraPanel

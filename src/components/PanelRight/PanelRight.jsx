@@ -9,6 +9,9 @@ import WallPanel from './WallPanel'
 import ScopePanel from './ScopePanel'
 import FloorHolePanel from './FloorHolePanel'
 import FloorImagePanel from './FloorImagePanel'
+import CameraPanel from './CameraPanel'
+import TripwirePanel from './TripwirePanel'
+import ZonePanel from './ZonePanel'
 import AlignFloorPanel from './AlignFloorPanel'
 import BatchPanel from './BatchPanel'
 import './PanelRight.sass'
@@ -50,6 +53,9 @@ function PanelRight() {
       case 'wall':       body = <WallPanel     floorId={activeFloorId} wallId={selectedId} />; break
       case 'scope':      body = <ScopePanel    floorId={activeFloorId} zoneId={selectedId} />; break
       case 'floor_hole': body = <FloorHolePanel floorId={activeFloorId} holeId={selectedId} />; break
+      case 'camera':     body = <CameraPanel   floorId={activeFloorId} cameraId={selectedId} />; break
+      case 'tripwire':   body = <TripwirePanel floorId={activeFloorId} tripwireId={selectedId} />; break
+      case 'camera_zone': body = <ZonePanel    floorId={activeFloorId} zoneId={selectedId} />; break
       default:           body = null
     }
   }

@@ -23,6 +23,7 @@ const MODE_HINT = {
   [EDITOR_MODE.DRAW_CABLE_TRAY]:  { group: '網路布線', name: '繪製線槽模式', accent: 'cable',   hint: '左鍵新增頂點；Shift 鎖 0/45/90°；自動 snap 到 tray / 牆角 / 牆邊；近牆方向自動平行；Backspace 退一步；Enter / 右鍵 / Esc 完成（≥ 2 點才會建立）' },
   [EDITOR_MODE.PLACE_RISER]:      { group: '網路布線', name: '放置 Riser 模式', accent: 'cable', hint: '左鍵點擊放置 Riser；放完用右側面板加入跨樓層' },
   [EDITOR_MODE.CLIENT_VIEW]:      { group: '體驗',     name: 'Client 視角', accent: 'wireless', hint: '左鍵點擊放置 client，拖曳移動觀察漫遊；右側面板選裝置 / 6 GHz / 關聯範圍' },
+  [EDITOR_MODE.CAMERA]:           { group: '監控',     name: 'Camera 模式', accent: 'camera',   hint: '左鍵點擊放置 Camera；拖曳移動；選取後拖曳圓點調整朝向；牆會遮擋視野（玻璃可穿透）' },
   [EDITOR_MODE.CROP_IMAGE]:       { group: '樓層',     name: '裁切模式',  accent: 'meta',      hint: '左鍵點擊兩點定義裁切區域；右鍵或 Esc 取消' },
   [EDITOR_MODE.ALIGN_FLOOR]:      { group: '樓層',     name: '樓層對齊模式', accent: 'meta',   hint: '使用右側面板的偏移/縮放/旋轉對齊本樓層；其他樓層以半透明疊影顯示' },
 }
