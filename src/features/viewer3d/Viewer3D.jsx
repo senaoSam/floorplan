@@ -91,7 +91,9 @@ function FloorStack({ floor, elevation, isActive, onAPHover, inCameraMode }) {
       {!inCameraMode && (
         <ScopeLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
       )}
-      <WallLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActive} />
+      {/* CAMERA mode: walls are reference-only (not selectable) — the only
+          editable 3D object there is the camera body. */}
+      <WallLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActive} selectable={!inCameraMode} />
       {!inCameraMode && (
         <>
           <APLayer3D    floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActive} onAPHover={onAPHover} />
@@ -115,7 +117,7 @@ function FloorStack({ floor, elevation, isActive, onAPHover, inCameraMode }) {
       )}
       {inCameraMode && (
         <>
-          <CameraLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
+          <CameraLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActive} />
           {isActive && <TrackLayer3D floorId={floor.id} pxToM={pxToM} />}
         </>
       )}

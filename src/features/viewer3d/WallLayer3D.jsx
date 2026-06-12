@@ -70,7 +70,7 @@ function buildWallGeometry(length, height, openings, wallBottom, thickness) {
 const SELECT_EMISSIVE = '#e74c3c'
 const HOVER_EMISSIVE  = '#ffffff'
 
-function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor }) {
+function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true }) {
   const {
     startX, startY, endX, endY,
     topHeight = 3, bottomHeight = 0,
@@ -122,18 +122,21 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor }) {
   const setSelected  = useEditorStore((s) => s.setSelected)
   const [hovered, setHovered] = useState(false)
 
-  const isSelected = isActiveFloor && selectedType === 'wall' && selectedId === wall.id
-  const isHovered  = isActiveFloor && hovered
+  // CAMERA mode passes selectable=false — walls are reference geometry there
+  // (only cameras are editable), so clicks fall through and hover stays off.
+  const canInteract = isActiveFloor && selectable
+  const isSelected = canInteract && selectedType === 'wall' && selectedId === wall.id
+  const isHovered  = canInteract && hovered
   const emissive = isSelected ? SELECT_EMISSIVE : (isHovered ? HOVER_EMISSIVE : '#000000')
   const emissiveIntensity = isSelected ? 0.45 : (isHovered ? 0.25 : 0)
 
   const onClick = (e) => {
-    if (!isActiveFloor) return
+    if (!canInteract) return
     e.stopPropagation()
     setSelected(wall.id, 'wall')
   }
   const onPointerOver = (e) => {
-    if (!isActiveFloor) return
+    if (!canInteract) return
     e.stopPropagation()
     setHovered(true)
   }
@@ -173,13 +176,13 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor }) {
   )
 }
 
-export default function WallLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true }) {
+export default function WallLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true, selectable = true }) {
   const walls = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
   if (!walls.length || !pxToM) return null
   return (
     <group>
       {walls.map((w) => (
-        <WallMesh key={w.id} wall={w} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActiveFloor} />
+        <WallMesh key={w.id} wall={w} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActiveFloor} selectable={selectable} />
       ))}
     </group>
   )

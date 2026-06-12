@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { useCameraStore } from '@/store/useCameraStore'
 import { useWallStore } from '@/store/useWallStore'
+import { useEditorStore } from '@/store/useEditorStore'
 import { buildBlockingSegments, computeFovPolygon } from '@/features/cameras/fovPolygon'
+import Label3D from './Label3D'
 
 // Surveillance cameras in 3D (Phase 34): a small CCTV body at mount height
 // aimed along its azimuth, plus the wall-clipped FOV visibility polygon laid
@@ -13,22 +15,57 @@ import { buildBlockingSegments, computeFovPolygon } from '@/features/cameras/fov
 const CAMERA_COLOR = '#10b981'
 const BODY_COLOR = '#e2e8f0'
 const FOV_ALPHA = 0.16
+const SELECT_EMISSIVE = '#e74c3c'
+const HOVER_EMISSIVE = '#ffffff'
 
 // Canvas px → world: (x, y) ↦ (x·pxToM, h, y·pxToM); yaw = −atan2 (wall conv).
-function CameraBody({ camera, pxToM, dimOpacity }) {
+// The only editable object in CAMERA-mode 3D: click selects (CameraPanel
+// opens for azimuth/FOV/range/height edits, mirrored live), hover lights up.
+// Same 3D-read-only principle as walls/APs — no 3D dragging.
+function CameraBody({ camera, pxToM, dimOpacity, isActiveFloor }) {
   const x = camera.x * pxToM
   const z = camera.y * pxToM
   const y = Math.max(0.3, camera.z ?? 2.5)
   const yaw = -((camera.azimuth ?? 0) * Math.PI / 180)
   const transparent = dimOpacity < 1
+
+  const selectedId = useEditorStore((s) => s.selectedId)
+  const selectedType = useEditorStore((s) => s.selectedType)
+  const setSelected = useEditorStore((s) => s.setSelected)
+  const [hovered, setHovered] = useState(false)
+
+  const isSelected = isActiveFloor && selectedType === 'camera' && selectedId === camera.id
+  const isHovered = isActiveFloor && hovered
+  const emissive = isSelected ? SELECT_EMISSIVE : (isHovered ? HOVER_EMISSIVE : '#000000')
+  const emissiveIntensity = isSelected ? 0.55 : (isHovered ? 0.3 : 0)
+
+  const onClick = (e) => {
+    if (!isActiveFloor) return
+    e.stopPropagation()
+    setSelected(camera.id, 'camera')
+  }
+  const onPointerOver = (e) => {
+    if (!isActiveFloor) return
+    e.stopPropagation()
+    setHovered(true)
+  }
+  const onPointerOut = () => setHovered(false)
+
   return (
-    <group position={[x, y, z]} rotation={[0, yaw, 0]}>
+    <group
+      position={[x, y, z]}
+      rotation={[0, yaw, 0]}
+      onClick={onClick}
+      onPointerOver={onPointerOver}
+      onPointerOut={onPointerOut}
+    >
       {/* body — small housing box, long axis = view axis */}
       <mesh castShadow>
         <boxGeometry args={[0.42, 0.16, 0.16]} />
         <meshStandardMaterial
           color={BODY_COLOR} roughness={0.6} metalness={0.2}
           transparent={transparent} opacity={dimOpacity} depthWrite={!transparent}
+          emissive={emissive} emissiveIntensity={emissiveIntensity}
         />
       </mesh>
       {/* lens ring at the front */}
@@ -37,6 +74,7 @@ function CameraBody({ camera, pxToM, dimOpacity }) {
         <meshStandardMaterial
           color={CAMERA_COLOR} roughness={0.4} metalness={0.3}
           transparent={transparent} opacity={dimOpacity} depthWrite={!transparent}
+          emissive={emissive} emissiveIntensity={emissiveIntensity}
         />
       </mesh>
       {/* wall/ceiling stem so the body doesn't float unexplained */}
@@ -47,13 +85,17 @@ function CameraBody({ camera, pxToM, dimOpacity }) {
           transparent={transparent} opacity={dimOpacity} depthWrite={!transparent}
         />
       </mesh>
+      {/* floating name pill — billboard, like the AP labels */}
+      {camera.name && (
+        <Label3D text={camera.name} position={[0, 0.55, 0]} opacity={dimOpacity} />
+      )}
     </group>
   )
 }
 
 // Flat translucent visibility polygon on the floor. Shape is authored in
 // canvas-metric XY and rotated +90° about X so shape-Y lands on world +Z.
-function FovGround({ poly, pxToM, dimOpacity }) {
+function FovGround({ poly, pxToM, dimOpacity, selected = false }) {
   const geometry = useMemo(() => {
     if (!poly || poly.length < 6) return null
     const shape = new THREE.Shape()
@@ -74,7 +116,7 @@ function FovGround({ poly, pxToM, dimOpacity }) {
       <meshBasicMaterial
         color={CAMERA_COLOR}
         transparent
-        opacity={FOV_ALPHA * dimOpacity}
+        opacity={(selected ? FOV_ALPHA + 0.12 : FOV_ALPHA) * dimOpacity}
         side={THREE.DoubleSide}
         depthWrite={false}
       />
@@ -82,9 +124,11 @@ function FovGround({ poly, pxToM, dimOpacity }) {
   )
 }
 
-export default function CameraLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
+export default function CameraLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true }) {
   const cameras = useCameraStore((s) => s.camerasByFloor[floorId] ?? [])
   const walls = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
+  const selectedId = useEditorStore((s) => s.selectedId)
+  const selectedType = useEditorStore((s) => s.selectedType)
 
   const segments = useMemo(() => buildBlockingSegments(walls), [walls])
   const polys = useMemo(() => cameras.map((cam) => computeFovPolygon({
@@ -101,8 +145,15 @@ export default function CameraLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
     <group>
       {cameras.map((cam, i) => (
         <group key={cam.id}>
-          <CameraBody camera={cam} pxToM={pxToM} dimOpacity={dimOpacity} />
-          {polys[i] && <FovGround poly={polys[i]} pxToM={pxToM} dimOpacity={dimOpacity} />}
+          <CameraBody camera={cam} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActiveFloor} />
+          {polys[i] && (
+            <FovGround
+              poly={polys[i]}
+              pxToM={pxToM}
+              dimOpacity={dimOpacity}
+              selected={isActiveFloor && selectedType === 'camera' && selectedId === cam.id}
+            />
+          )}
         </group>
       ))}
     </group>
