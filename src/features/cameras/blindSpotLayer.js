@@ -1,6 +1,6 @@
 import { Sprite, Texture } from 'pixi.js'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
-import { buildBlockingSegments, computeFovPolygon } from './fovPolygon'
+import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from './fovPolygon'
 import { FALLBACK_PX_PER_M } from './camerasLayer'
 
 // Blind-spot overlay (Phase 34-5 ①): shades every part of the floor that NO
@@ -56,11 +56,13 @@ export function attachBlindSpotLayer({
     ctx.globalCompositeOperation = 'destination-out'
     ctx.fillStyle = '#000'
     for (const cam of cameras) {
+      const { minRangePx, rangePx } = cameraCoverageRadii(cam, scale)
       const poly = computeFovPolygon({
         cx: cam.x, cy: cam.y,
         azimuthDeg: cam.azimuth ?? 0,
         fovDeg: cam.fovDeg ?? 90,
-        rangePx: Math.max(1, (cam.rangeM ?? 12) * scale),
+        rangePx,
+        minRangePx,
         segments: segs,
       })
       if (!poly) continue

@@ -1,7 +1,7 @@
 import { Container, Graphics, Circle, Text, TextStyle } from 'pixi.js'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
-import { buildBlockingSegments, computeFovPolygon } from './fovPolygon'
+import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from './fovPolygon'
 
 // Camera markers + FOV cones adapter (Phase 34-1). Active only in CAMERA
 // mode — both layer containers are hidden in every other mode (per design:
@@ -101,12 +101,14 @@ export function attachCamerasLayer({
     const scale = pxPerM()
     const editor = useEditorStore.getState()
     for (const cam of cameras) {
+      const { minRangePx, rangePx } = cameraCoverageRadii(cam, scale)
       const poly = computeFovPolygon({
         cx: cam.x,
         cy: cam.y,
         azimuthDeg: cam.azimuth ?? 0,
         fovDeg: cam.fovDeg ?? 90,
-        rangePx: Math.max(1, (cam.rangeM ?? 12) * scale),
+        rangePx,
+        minRangePx,
         segments: segs,
       })
       if (!poly) continue

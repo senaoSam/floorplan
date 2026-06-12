@@ -5,7 +5,7 @@ import { useTrackingStore } from '@/store/useTrackingStore'
 import { useCameraStore } from '@/store/useCameraStore'
 import { useWallStore } from '@/store/useWallStore'
 import { sampleTrackAt, trackHeadingAt } from '@/features/cameras/mockTracks'
-import { buildBlockingSegments, computeFovPolygon } from '@/features/cameras/fovPolygon'
+import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from '@/features/cameras/fovPolygon'
 
 // Live tracking targets in 3D (Phase 34, CAMERA mode only — Viewer3D gates
 // the mount). Mirrors tracksLayer's semantics: a target is solid-coloured
@@ -136,14 +136,18 @@ export default function TrackLayer3D({ floorId, pxToM }) {
         cams,
         walls,
         polys: cams
-          .map((cam) => computeFovPolygon({
-            cx: cam.x,
-            cy: cam.y,
-            azimuthDeg: cam.azimuth ?? 0,
-            fovDeg: cam.fovDeg ?? 90,
-            rangePx: Math.max(1, (cam.rangeM ?? 12) / pxToM),
-            segments: segs,
-          }))
+          .map((cam) => {
+            const { minRangePx, rangePx } = cameraCoverageRadii(cam, 1 / pxToM)
+            return computeFovPolygon({
+              cx: cam.x,
+              cy: cam.y,
+              azimuthDeg: cam.azimuth ?? 0,
+              fovDeg: cam.fovDeg ?? 90,
+              rangePx,
+              minRangePx,
+              segments: segs,
+            })
+          })
           .filter(Boolean),
       }
     }

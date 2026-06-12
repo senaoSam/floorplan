@@ -2,7 +2,7 @@ import { Container, Graphics, Text, TextStyle } from 'pixi.js'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { sampleTrackAt, trackSpeedAt, trackHeadingAt } from './mockTracks'
-import { buildBlockingSegments, computeFovPolygon } from './fovPolygon'
+import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from './fovPolygon'
 import { FALLBACK_PX_PER_M } from './camerasLayer'
 
 // Live tracking icons for Camera mode (Phase 34-2). Renders "the world at
@@ -83,11 +83,13 @@ export function attachTracksLayer({
     const segs = buildBlockingSegments(walls)
     const next = []
     for (const cam of cameras) {
+      const { minRangePx, rangePx } = cameraCoverageRadii(cam, scale)
       const poly = computeFovPolygon({
         cx: cam.x, cy: cam.y,
         azimuthDeg: cam.azimuth ?? 0,
         fovDeg: cam.fovDeg ?? 90,
-        rangePx: Math.max(1, (cam.rangeM ?? 12) * scale),
+        rangePx,
+        minRangePx,
         segments: segs,
       })
       if (poly) next.push({ cameraId: cam.id, name: cam.name, poly })

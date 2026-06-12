@@ -2,6 +2,7 @@ import React, { useCallback } from 'react'
 import { useCameraStore } from '@/store/useCameraStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { cameraCoverageRadii, DEFAULT_TILT_DEG } from '@/features/cameras/fovPolygon'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { TextInput, NumberInput } from './_shared/PanelControls'
 import './_shared/shared.sass'
@@ -78,7 +79,18 @@ function CameraPanel({ floorId, cameraId }) {
             onChange={(v) => { if (!isNaN(v)) handleField('fovDeg', Math.max(MIN_FOV, Math.min(MAX_FOV, v))) }}
           />
         </PanelField>
-        <PanelField label="可視距離">
+        <PanelField label="俯角" hint="0=水平，90=垂直朝下">
+          <NumberInput
+            value={camera.tiltDeg ?? DEFAULT_TILT_DEG}
+            min={0}
+            max={85}
+            step={5}
+            unit="度"
+            width={70}
+            onChange={(v) => { if (!isNaN(v)) handleField('tiltDeg', Math.max(0, Math.min(85, v))) }}
+          />
+        </PanelField>
+        <PanelField label="可視距離" hint="鏡頭解析上限">
           <NumberInput
             value={camera.rangeM ?? 12}
             min={MIN_RANGE_M}
@@ -88,6 +100,18 @@ function CameraPanel({ floorId, cameraId }) {
             onChange={(v) => { if (!isNaN(v) && v >= MIN_RANGE_M) handleField('rangeM', v) }}
           />
         </PanelField>
+        {(() => {
+          // Derived detection band from height + tilt + FOV — surfaces the
+          // tilt trade-off (shallow = far reach + near blind ring). Near edge
+          // is measured against the target height (1.4 m), not the floor.
+          const { minRangePx, rangePx } = cameraCoverageRadii(camera, 1)
+          return (
+            <div className="pnl__field" style={{ display: 'block', fontSize: 11, color: '#94a3b8' }}>
+              偵測覆蓋帶 約 {minRangePx.toFixed(1)}–{rangePx.toFixed(1)} m（以目標高 1.4m 計）
+              {minRangePx > 0.3 && '；鏡頭正下方有盲區'}
+            </div>
+          )
+        })()}
         <div className="pnl__field" style={{ display: 'block', fontSize: 11, color: '#94a3b8' }}>
           牆會遮擋視野；玻璃牆 / 窗可被看穿
         </div>

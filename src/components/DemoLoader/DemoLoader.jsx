@@ -45,6 +45,9 @@ const DEMO_SWITCH_NORM = { x: 300 / 685, y: 320 / 511 }
 const DEMO_CAMERA_CORNER_INSET = 0.06
 const DEMO_CAMERA_FOV_DEG = 100
 const DEMO_CAMERA_RANGE_M = 14
+// Shallow tilt: corner units watch the whole floor (long reach, small blind
+// ring right at the corner is fine).
+const DEMO_CAMERA_TILT_DEG = 20
 
 const loadImage = (src) =>
   new Promise((resolve, reject) => {
@@ -183,6 +186,7 @@ function DemoLoader() {
           y: c.y,
           z: 2.5,
           azimuth,
+          tiltDeg: DEMO_CAMERA_TILT_DEG,
           fovDeg: DEMO_CAMERA_FOV_DEG,
           rangeM: DEMO_CAMERA_RANGE_M,
         })

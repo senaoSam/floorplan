@@ -249,6 +249,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
               name: cams.nextCameraName(),
               x, y, z: 2.5,
               azimuth: 0,
+              tiltDeg: 30,
               fovDeg: 90,
               rangeM: 12,
             })
