@@ -31,8 +31,16 @@ export function mulberry32(seed) {
 export const DAY_START_SEC = 8 * 3600    // 08:00
 export const DAY_END_SEC = 22 * 3600     // 22:00
 
+// On-screen minimums (user ask): baseline relay slots keep at least this many
+// people / cars present at every moment of the day; the hourly spawns below
+// add the rush-hour peaks on top.
+const MIN_ON_SCREEN_PERSON = 30
+const MIN_ON_SCREEN_CAR = 5
+
 // Hourly spawn intensity (tracks per hour) — lunch + evening peaks so the
 // occupancy heatmap (34-3) shows believable busy/quiet periods.
+// RATE_MULTIPLIER scales the bursty visitors layered on the baseline.
+const RATE_MULTIPLIER = 3
 const HOURLY_RATE = {
   8: 12, 9: 14, 10: 18, 11: 24, 12: 33, 13: 30, 14: 18, 15: 16,
   16: 18, 17: 26, 18: 33, 19: 30, 20: 21, 21: 12,
@@ -53,6 +61,21 @@ const HOP_DIST_M = [2, 8]
 // time spent moving on par with people (same dwell cadence, same duty cycle).
 const CAR_HOP_DIST_M = [7, 26]
 const POI_PICK_PROB = 0.55              // chance a hop targets a reachable POI
+// Only POIs within this straight-line distance attract — without the cap the
+// whole outdoor population funnels across the map to the one or two POIs it
+// can see (the demo floor's big top-left lawn collected ~40% of everyone).
+const POI_ATTRACT_RADIUS_M = 12
+// Cars rarely visit POIs (shelves/counters are a people thing) — also keeps
+// their moving-time share on par with people despite driving ~3× faster.
+const CAR_POI_PICK_PROB = 0.1
+// Scatter radius around a POI (m): crowds gather NEAR an attractor, never on
+// the exact same pixel (3× crowds made identical-POI stacking very visible).
+// Wide enough that even a popular POI reads as "a busy area", not one blob.
+const POI_SCATTER_M = [0.6, 3]
+// Minimum spacing between POIs, as a fraction of min(W, H) — without it a
+// seed can drop several POIs into the same corner and pile half the crowd
+// onto one spot (user-visible clump at the top-left on the demo floor).
+const POI_MIN_SPACING_FRAC = 0.22
 
 // Movement blockers: every wall sub-segment EXCEPT door openings. Glass
 // blocks (it stops people), windows block, doors pass.
@@ -118,71 +141,161 @@ export function generateDayTracks(floor, walls, opts = {}) {
     y: lerp(H * margin, H * (1 - margin), rng()),
   })
 
-  // POI attractors — fixed for the whole day so dwell hot-spots emerge.
-  const pois = Array.from({ length: POI_COUNT }, randPoint)
+  // POI attractors. Poisson-disc-ish rejection keeps each set spread out (no
+  // corner pile-ups), candidates are inset from the canvas border so a
+  // hot-spot crowd never sits glued to a corner, and the whole set ROTATES
+  // every two hours — one lucky spot can't collect a crowd all day long,
+  // and the dwell heatmap gets believable time-of-day hot-spots.
+  const poiPoint = () => ({
+    x: lerp(W * 0.12, W * 0.88, rng()),
+    y: lerp(H * 0.12, H * 0.88, rng()),
+  })
+  const poiMinD = Math.min(W, H) * POI_MIN_SPACING_FRAC
+  const makePoiSet = () => {
+    const set = []
+    for (let guard = 0; set.length < POI_COUNT && guard < 400; guard++) {
+      const p = poiPoint()
+      if (set.every((q) => Math.hypot(q.x - p.x, q.y - p.y) >= poiMinD)) set.push(p)
+    }
+    while (set.length < POI_COUNT) set.push(poiPoint())
+    return set
+  }
+  const POI_SLOT_SEC = 2 * 3600
+  const poiSlots = Array.from(
+    { length: Math.ceil((DAY_END_SEC - DAY_START_SEC) / POI_SLOT_SEC) },
+    makePoiSet,
+  )
+  const poisAt = (t) => poiSlots[Math.min(
+    poiSlots.length - 1,
+    Math.max(0, Math.floor((t - DAY_START_SEC) / POI_SLOT_SEC)),
+  )]
 
   const tracks = []
   let trackSeq = 0
 
+  // One track from t0 to (at most) tEnd. Returns null when the start point is
+  // boxed in before producing any movement.
+  const buildTrack = (t0, tEnd, isCar) => {
+    const speed = randIn(rng, isCar ? CAR_SPEED_MPS : PERSON_SPEED_MPS) * pxPerM  // px/s
+    let pos = randPoint()
+    let t = t0
+    const samples = [{ t, x: pos.x, y: pos.y }]
+
+    while (t < tEnd) {
+      // Pick the next waypoint: a reachable POI, else a short clear hop.
+      let next = null
+      let isPoi = false
+      if (rng() < (isCar ? CAR_POI_PICK_PROB : POI_PICK_PROB)) {
+        const attractPx = POI_ATTRACT_RADIUS_M * pxPerM
+        const order = poisAt(t)
+          .filter((p) => Math.hypot(p.x - pos.x, p.y - pos.y) <= attractPx)
+          .sort(() => rng() - 0.5)
+        for (const p of order) {
+          // Land NEAR the POI, not on its exact pixel. sqrt-sampled radius =
+          // uniform density over the scatter DISC — plain uniform radius
+          // piles everyone near the centre (≈11 in one 20px blob at rush).
+          const [r0, r1] = POI_SCATTER_M
+          const sr = Math.sqrt(lerp(r0 * r0, r1 * r1, rng())) * pxPerM
+          const sa = rng() * Math.PI * 2
+          const cand = { x: p.x + Math.cos(sa) * sr, y: p.y + Math.sin(sa) * sr }
+          if (walkClear(segs, pos.x, pos.y, cand.x, cand.y)) { next = cand; isPoi = true; break }
+        }
+      }
+      if (!next) {
+        // A hop that would leave the margin box is SHORTENED along its own
+        // direction to stop inside it (per-axis coordinate clamping snapped
+        // many long car hops onto the exact margin corners — a visible
+        // pile-up of cars at one point). Directions are continuous, so the
+        // shortened endpoints spread along the edges instead of stacking.
+        const xLo = W * margin, xHi = W * (1 - margin)
+        const yLo = H * margin, yHi = H * (1 - margin)
+        for (let tries = 0; tries < 30; tries++) {
+          const ang = rng() * Math.PI * 2
+          const dist = randIn(rng, isCar ? CAR_HOP_DIST_M : HOP_DIST_M) * pxPerM
+          const c = Math.cos(ang), sn = Math.sin(ang)
+          // distance along (c,sn) from pos to the margin box edge
+          let tMax = Infinity
+          if (c > 1e-9) tMax = Math.min(tMax, (xHi - pos.x) / c)
+          else if (c < -1e-9) tMax = Math.min(tMax, (xLo - pos.x) / c)
+          if (sn > 1e-9) tMax = Math.min(tMax, (yHi - pos.y) / sn)
+          else if (sn < -1e-9) tMax = Math.min(tMax, (yLo - pos.y) / sn)
+          const effDist = Math.min(dist, tMax * 0.95)
+          if (effDist < 1 * pxPerM) continue   // boxed against the edge — try another angle
+          const cand = { x: pos.x + c * effDist, y: pos.y + sn * effDist }
+          if (walkClear(segs, pos.x, pos.y, cand.x, cand.y)) { next = cand; break }
+        }
+      }
+      if (!next) break   // boxed in — end the track here
+
+      const legLen = Math.hypot(next.x - pos.x, next.y - pos.y)
+      t += Math.max(1, legLen / speed)
+      samples.push({ t, x: next.x, y: next.y })
+      pos = next
+
+      // Dwell — same cadence for cars and people (user ask: cars should
+      // move as often as people): long linger at POIs, short pause on a
+      // plain hop. What the dwell heatmap surfaces.
+      const dwell = isPoi ? randIn(rng, POI_DWELL_SEC) : randIn(rng, HOP_DWELL_SEC)
+      if (dwell > 1) {
+        t += dwell
+        samples.push({ t, x: pos.x, y: pos.y })
+      }
+    }
+
+    if (samples.length < 2) return null
+    return {
+      id: `trk-${seed}-${++trackSeq}`,
+      type: isCar ? 'car' : 'person',
+      t0: samples[0].t,
+      t1: samples[samples.length - 1].t,
+      samples,
+    }
+  }
+
+  // A boxed-in spawn point ends a track within seconds (or yields null) —
+  // re-rolling the spawn costs no simulated time, so retry a few times until
+  // the track actually lives a while. Keeps the relay slots gap-free.
+  const buildTrackRetry = (t0, tEnd, isCar, minLifeSec = 60) => {
+    let last = null
+    for (let i = 0; i < 8; i++) {
+      const tr = buildTrack(t0, tEnd, isCar)
+      if (!tr) continue
+      last = tr
+      if (tr.t1 - tr.t0 >= Math.min(minLifeSec, tEnd - t0 - 1)) return tr
+    }
+    return last
+  }
+
+  // Baseline slots — guarantee the on-screen MINIMUMS all day (user ask:
+  // ≥30 people, ≥5 cars at any moment). Each slot is a relay of back-to-back
+  // tracks covering 08:00–22:00: when one leaves, the next takes over.
+  const relay = (isCar, durRange) => {
+    let t = DAY_START_SEC
+    while (t < DAY_END_SEC - 60) {
+      const tr = buildTrackRetry(t, Math.min(DAY_END_SEC, t + randIn(rng, durRange)), isCar)
+      if (tr) {
+        tracks.push(tr)
+        t = tr.t1   // hand over the same second — a 1s seam would dip the minimum
+      } else {
+        t += 120   // every retry boxed in (extremely rare) — nudge forward
+      }
+    }
+  }
+  for (let i = 0; i < MIN_ON_SCREEN_PERSON; i++) relay(false, TRACK_DURATION_SEC)
+  for (let i = 0; i < MIN_ON_SCREEN_CAR; i++) relay(true, CAR_DURATION_SEC)
+
+  // Bursty hourly visitors on top of the baseline — the rush-hour texture
+  // that the occupancy heatmap and analysis-window comparisons surface.
   for (let hour = 8; hour < 22; hour++) {
-    const n = HOURLY_RATE[hour] ?? 10
+    const n = (HOURLY_RATE[hour] ?? 10) * RATE_MULTIPLIER
     for (let i = 0; i < n; i++) {
       const t0 = hour * 3600 + rng() * 3600
       const isCar = rng() < CAR_FRACTION
-      const speed = randIn(rng, isCar ? CAR_SPEED_MPS : PERSON_SPEED_MPS) * pxPerM  // px/s
       const tEnd = Math.min(DAY_END_SEC, t0 + randIn(rng, isCar ? CAR_DURATION_SEC : TRACK_DURATION_SEC))
-
-      let pos = randPoint()
-      let t = t0
-      const samples = [{ t, x: pos.x, y: pos.y }]
-
-      while (t < tEnd) {
-        // Pick the next waypoint: a reachable POI, else a short clear hop.
-        let next = null
-        let isPoi = false
-        if (rng() < POI_PICK_PROB) {
-          const order = pois.slice().sort(() => rng() - 0.5)
-          for (const p of order) {
-            if (walkClear(segs, pos.x, pos.y, p.x, p.y)) { next = p; isPoi = true; break }
-          }
-        }
-        if (!next) {
-          for (let tries = 0; tries < 20; tries++) {
-            const ang = rng() * Math.PI * 2
-            const dist = randIn(rng, isCar ? CAR_HOP_DIST_M : HOP_DIST_M) * pxPerM
-            const cand = {
-              x: Math.min(W * (1 - margin), Math.max(W * margin, pos.x + Math.cos(ang) * dist)),
-              y: Math.min(H * (1 - margin), Math.max(H * margin, pos.y + Math.sin(ang) * dist)),
-            }
-            if (walkClear(segs, pos.x, pos.y, cand.x, cand.y)) { next = cand; break }
-          }
-        }
-        if (!next) break   // boxed in — end the track here
-
-        const legLen = Math.hypot(next.x - pos.x, next.y - pos.y)
-        t += Math.max(1, legLen / speed)
-        samples.push({ t, x: next.x, y: next.y })
-        pos = next
-
-        // Dwell — same cadence for cars and people (user ask: cars should
-        // move as often as people): long linger at POIs, short pause on a
-        // plain hop. What the dwell heatmap surfaces.
-        const dwell = isPoi ? randIn(rng, POI_DWELL_SEC) : randIn(rng, HOP_DWELL_SEC)
-        if (dwell > 1) {
-          t += dwell
-          samples.push({ t, x: pos.x, y: pos.y })
-        }
-      }
-
-      if (samples.length >= 2) {
-        tracks.push({
-          id: `trk-${seed}-${++trackSeq}`,
-          type: isCar ? 'car' : 'person',
-          t0: samples[0].t,
-          t1: samples[samples.length - 1].t,
-          samples,
-        })
-      }
+      // Retry boxed-in spawns here too — otherwise indoor visitors die young
+      // and the surviving population skews toward the open outdoor areas.
+      const tr = buildTrackRetry(t0, tEnd, isCar)
+      if (tr) tracks.push(tr)
     }
   }
 
