@@ -3,8 +3,10 @@ import { Canvas, extend, useFrame, useLoader, useThree } from '@react-three/fibe
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { useFloorStore } from '@/store/useFloorStore'
-import { useEditorStore, VIEW_MODE } from '@/store/useEditorStore'
+import { useEditorStore, VIEW_MODE, EDITOR_MODE } from '@/store/useEditorStore'
 import WallLayer3D from './WallLayer3D'
+import CameraLayer3D from './CameraLayer3D'
+import TrackLayer3D from './TrackLayer3D'
 import APLayer3D from './APLayer3D'
 import ScopeLayer3D from './ScopeLayer3D'
 import HeatmapPlane3D from './HeatmapPlane3D'
@@ -73,7 +75,11 @@ function FloorPlane({ floor, opacity = 1 }) {
 // group lifted to the floor's elevation. Non-active floors render with a
 // uniform `dimOpacity` < 1 so the active floor stays legible against the
 // stacked reference floors.
-function FloorStack({ floor, elevation, isActive, onAPHover }) {
+//
+// CAMERA mode (Phase 34) mirrors the 2D rule "walls + floor image only":
+// every RF/cable layer is unmounted and the surveillance layers (camera
+// bodies + FOV ground polygons + live tracking targets) mount instead.
+function FloorStack({ floor, elevation, isActive, onAPHover, inCameraMode }) {
   const pxToM = 1 / (floor.scale || 100)
   const dimOpacity = isActive ? 1 : 0.28
 
@@ -82,24 +88,36 @@ function FloorStack({ floor, elevation, isActive, onAPHover }) {
       <Suspense fallback={null}>
         {floor.imageUrl && <FloorPlane floor={floor} opacity={dimOpacity} />}
       </Suspense>
-      <ScopeLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
+      {!inCameraMode && (
+        <ScopeLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
+      )}
       <WallLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActive} />
-      <APLayer3D    floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActive} onAPHover={onAPHover} />
-      {/* 15-1 / 19-2: cable tray rendered as thin boxes at each tray's
-          per-tray mountHeight (TrayLayer3D reads the floor from the store
-          so the ceiling preset can resolve against floor.floorHeight). */}
-      <TrayLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
-      {/* Switch / IDF / MDF / Router chassis at their mountHeight. */}
-      <SwitchLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
-      {/* Cable routes (AP↔switch + S2S) lifted to 3D so the user sees the
-          full plenum-routed path, not just the tray geometry. */}
-      <CableLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
-      {/* 10-5e MVP: heatmap on the active floor only. Mounted inside this
-          group so the plane inherits the floor's elevation translate; the
-          `elevation` prop is forwarded for future modes that may mount the
-          plane outside the group. */}
-      {isActive && (
-        <HeatmapPlane3D floorId={floor.id} elevation={elevation} />
+      {!inCameraMode && (
+        <>
+          <APLayer3D    floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActive} onAPHover={onAPHover} />
+          {/* 15-1 / 19-2: cable tray rendered as thin boxes at each tray's
+              per-tray mountHeight (TrayLayer3D reads the floor from the store
+              so the ceiling preset can resolve against floor.floorHeight). */}
+          <TrayLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
+          {/* Switch / IDF / MDF / Router chassis at their mountHeight. */}
+          <SwitchLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
+          {/* Cable routes (AP↔switch + S2S) lifted to 3D so the user sees the
+              full plenum-routed path, not just the tray geometry. */}
+          <CableLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
+          {/* 10-5e MVP: heatmap on the active floor only. Mounted inside this
+              group so the plane inherits the floor's elevation translate; the
+              `elevation` prop is forwarded for future modes that may mount the
+              plane outside the group. */}
+          {isActive && (
+            <HeatmapPlane3D floorId={floor.id} elevation={elevation} />
+          )}
+        </>
+      )}
+      {inCameraMode && (
+        <>
+          <CameraLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
+          {isActive && <TrackLayer3D floorId={floor.id} pxToM={pxToM} />}
+        </>
       )}
     </group>
   )
@@ -449,6 +467,7 @@ function Viewer3D() {
   // so this is safe.
   const viewMode        = useEditorStore((s) => s.viewMode)
   const isVisible       = viewMode === VIEW_MODE.THREE_D
+  const inCameraMode    = useEditorStore((s) => s.editorMode === EDITOR_MODE.CAMERA)
 
   const visibleFloors = show3DAllFloors
     ? floors
@@ -655,18 +674,20 @@ function Viewer3D() {
           elevation={elevations[f.id] ?? 0}
           isActive={f.id === activeFloorId}
           onAPHover={handleAPHover}
+          inCameraMode={inCameraMode}
         />
       ))}
 
       {/* 10-5f: floor-hole vertical extents rendered at scene root so a single
           column can span multiple floors regardless of which FloorStack groups
           are mounted (e.g. single-floor view still shows the whole column when
-          its home floor is active). */}
-      <FloorHoleVolume3D activeFloorId={activeFloorId} />
+          its home floor is active). CAMERA mode hides them with the rest of
+          the RF/structural extras (walls-only rule). */}
+      {!inCameraMode && <FloorHoleVolume3D activeFloorId={activeFloorId} />}
 
       {/* 12-3a: Risers are global vertical shafts spanning their floorIds.
           Rendered at scene root for the same reason as FloorHoleVolume3D. */}
-      <RiserLayer3D activeFloorId={activeFloorId} />
+      {!inCameraMode && <RiserLayer3D activeFloorId={activeFloorId} />}
 
       {/* Ground grid anchored to the active floor size, placed just under the
           active floor's elevation so orientation is clear even when viewing
