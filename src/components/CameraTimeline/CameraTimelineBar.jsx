@@ -105,9 +105,9 @@ function CameraTimelineBar() {
       </div>
 
       <div className="camera-timeline__row">
-        <label className="camera-timeline__ghosts" title="未被任何 Camera 偵測到的目標以半透明灰點顯示">
+        <label className="camera-timeline__ghosts" title="灰色 = 目前沒被任何 Camera 拍到的人車；取消勾選就只顯示鏡頭拍得到的目標">
           <input type="checkbox" checked={showUndetected} onChange={toggleShowUndetected} />
-          <span>未偵測目標</span>
+          <span>顯示鏡頭外目標</span>
         </label>
 
         <label className="camera-timeline__ghosts" title="把沒有任何 Camera 看得到的區域加上暗色遮罩（找監視死角）">

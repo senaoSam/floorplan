@@ -18,7 +18,20 @@ import './Toolbar.sass'
 //     isn't dropped by a stray tool click. (The floor-switch path has its own
 //     guard in SidebarLeft; this covers the toolbar tool-switch path.)
 
+// 'surveillance' sits first (user ask) — camera mode is its own world apart
+// from the RF-planning tools; Toolbar renders a divider right after it.
+// `direct: true` → the group button IS the tool (one click switches mode,
+// no dropdown for a single choice).
 const GROUPS = [
+  {
+    id: 'surveillance',
+    label: 'Camera 模式（監視器規劃）',
+    representativeIcon: 'camera',
+    direct: true,
+    items: [
+      { mode: EDITOR_MODE.CAMERA,          icon: 'camera', label: 'Camera 模式（監視器規劃）' },
+    ],
+  },
   {
     id: 'pointer',
     label: '指標',
@@ -58,14 +71,6 @@ const GROUPS = [
     representativeIcon: 'client',
     items: [
       { mode: EDITOR_MODE.CLIENT_VIEW,     icon: 'client', label: 'Client 視角（從裝置看網路）' },
-    ],
-  },
-  {
-    id: 'surveillance',
-    label: '監控',
-    representativeIcon: 'camera',
-    items: [
-      { mode: EDITOR_MODE.CAMERA,          icon: 'camera', label: 'Camera 模式（監視器規劃）' },
     ],
   },
   {
@@ -200,9 +205,34 @@ function Toolbar() {
       {GROUPS.map((group) => {
         const isOpen = openGroupId === group.id
         const active = groupHasActive(group)
+        // direct groups: one click = switch tool, no dropdown
+        if (group.direct) {
+          return (
+            <React.Fragment key={group.id}>
+              <div className="toolbar-floating__group">
+                <Tooltip label={group.label}>
+                  <button
+                    type="button"
+                    className={
+                      'toolbar-floating__btn' +
+                      (active ? ' toolbar-floating__btn--active' : '')
+                    }
+                    aria-label={group.label}
+                    onClick={() => handleItemClick(group.items[0])}
+                  >
+                    <Icon name={group.representativeIcon} size={18} />
+                  </button>
+                </Tooltip>
+              </div>
+              {group.id === 'surveillance' && (
+                <span className="toolbar-floating__divider" aria-hidden="true" />
+              )}
+            </React.Fragment>
+          )
+        }
         return (
+          <React.Fragment key={group.id}>
           <div
-            key={group.id}
             className="toolbar-floating__group"
             onMouseEnter={() => openGroup(group.id)}
             onMouseLeave={scheduleClose}
@@ -251,6 +281,10 @@ function Toolbar() {
               </div>
             )}
           </div>
+          {group.id === 'surveillance' && (
+            <span className="toolbar-floating__divider" aria-hidden="true" />
+          )}
+          </React.Fragment>
         )
       })}
 

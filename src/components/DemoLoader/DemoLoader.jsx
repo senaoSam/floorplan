@@ -4,6 +4,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useCableStore, DEFAULT_TRAY } from '@/store/useCableStore'
+import { useCameraStore } from '@/store/useCameraStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { floorplanFromLines } from '@/utils/floorplanFromLines'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
@@ -37,6 +38,13 @@ const DEMO_TRAY_PTS_NORM = [
 ]
 const DEMO_TRAY_MAGNET_PX = 150
 const DEMO_SWITCH_NORM = { x: 300 / 685, y: 320 / 511 }
+
+// Camera seed (Phase 34): four cameras, one per floor corner, each aimed at
+// the floor centre (azimuth computed from its own corner). Inset keeps the
+// markers off the canvas edge.
+const DEMO_CAMERA_CORNER_INSET = 0.06
+const DEMO_CAMERA_FOV_DEG = 100
+const DEMO_CAMERA_RANGE_M = 14
 
 const loadImage = (src) =>
   new Promise((resolve, reject) => {
@@ -152,6 +160,33 @@ function DemoLoader() {
         uplinkTo: null,
         cableType: 'auto',
       }])
+
+      // Camera-mode seed — one camera per corner, aimed at the centre.
+      // addCamera (not setCameras) so the global CAM-XX counter advances and
+      // the user's own cameras continue the numbering.
+      const cams = useCameraStore.getState()
+      const inset = DEMO_CAMERA_CORNER_INSET
+      const corners = [
+        { x: W * inset,       y: H * inset },
+        { x: W * (1 - inset), y: H * inset },
+        { x: W * inset,       y: H * (1 - inset) },
+        { x: W * (1 - inset), y: H * (1 - inset) },
+      ]
+      for (const c of corners) {
+        const azimuth = Math.round(
+          ((Math.atan2(H / 2 - c.y, W / 2 - c.x) * 180 / Math.PI) + 360) % 360,
+        )
+        cams.addCamera(floor.id, {
+          id: generateId('cam'),
+          name: cams.nextCameraName(),
+          x: c.x,
+          y: c.y,
+          z: 2.5,
+          azimuth,
+          fovDeg: DEMO_CAMERA_FOV_DEG,
+          rangeM: DEMO_CAMERA_RANGE_M,
+        })
+      }
 
       setHeatmapEnabled(true)
     } catch (e) {
