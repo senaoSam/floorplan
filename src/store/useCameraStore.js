@@ -19,6 +19,12 @@ export const useCameraStore = create((set, get) => ({
   globalZoneCounter: 0,
   // Blind-spot overlay: shade everything no camera can see.
   showBlindSpots: false,
+  // Floor-wide occupancy trend panel (Verkada "Occupancy Trends" parity).
+  showTrendPanel: false,
+  // Live-view popover (Verkada parity): the camera whose feed is open, or
+  // null. The feed is a MOCK placeholder — we have no real stream — but the
+  // interaction ("click a device, see its feed") matches Command.
+  liveViewCameraId: null,
   // Two-click draw sub-tool inside CAMERA mode: null | 'tripwire' | 'zone'.
   // First click stores draftPoint, second commits the object. While a tool is
   // armed, canvas clicks do NOT place cameras (FloorplanSystem routes here).
@@ -138,6 +144,9 @@ export const useCameraStore = create((set, get) => ({
 
   // ── Blind spots / draw tool ─────────────────────────────────────────────
   toggleShowBlindSpots: () => set((s) => ({ showBlindSpots: !s.showBlindSpots })),
+  toggleShowTrendPanel: () => set((s) => ({ showTrendPanel: !s.showTrendPanel })),
+  openLiveView: (cameraId) => set({ liveViewCameraId: cameraId }),
+  closeLiveView: () => set({ liveViewCameraId: null }),
   setDrawTool: (drawTool) => set({ drawTool, draftPoint: null }),
   setDraftPoint: (draftPoint) => set({ draftPoint }),
 }))

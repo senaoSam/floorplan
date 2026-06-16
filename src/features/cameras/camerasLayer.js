@@ -2,6 +2,8 @@ import { Container, Graphics, Circle, Text, TextStyle } from 'pixi.js'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from './fovPolygon'
+import { isCameraDetecting, anyDetecting, subscribeDetection } from './detectionBus'
+import { deviceStatus, STATUS_COLOR, DEVICE_STATUS } from './deviceStatus'
 
 // Camera markers + FOV cones adapter (Phase 34-1). Active only in CAMERA
 // mode — both layer containers are hidden in every other mode (per design:
@@ -91,6 +93,55 @@ export function attachCamerasLayer({
     return segCache
   }
 
+  // Pulse phase (0..1, a sine "breath") driven by a wall-clock timer, set each
+  // frame by the pulse loop. A detecting camera's cone brightens with this.
+  let pulse = 0
+  // Continuous wall-clock seconds, set each frame by the pulse loop — drives
+  // the radar "ripple" rings that travel outward from a detecting camera.
+  let waveSec = 0
+  const WAVE_PERIOD = 2.2    // seconds for a ring to travel lens → far edge
+  const WAVE_RINGS = 2       // concurrent rings, evenly phase-offset
+
+  // Draw expanding ripple rings radiating from a detecting camera's lens
+  // (radar-sweep feel). Each ring is an arc at radius r = phase·reach that
+  // fades as it expands. `hits` is the per-bearing wall-clipped reach from
+  // computeFovPolygon: a ring point only exists at a bearing whose reach is
+  // ≥ r, so the arc breaks at walls instead of leaking through them — the
+  // ripple stays strictly inside the green visible cone.
+  const drawWaveRings = (cam, minRangePx, rangePx, hits) => {
+    if (!hits || hits.length < 2) return
+    const cx = cam.x, cy = cam.y
+    const span = rangePx - minRangePx
+    if (span <= 1) return
+    for (let k = 0; k < WAVE_RINGS; k++) {
+      const phase = ((waveSec / WAVE_PERIOD) + k / WAVE_RINGS) % 1
+      const r = minRangePx + phase * span
+      const ringAlpha = (1 - phase) * 0.85   // bright near the lens, fades out
+      if (r <= minRangePx + 1 || ringAlpha < 0.03) continue
+      // Build the arc as visible spans: walk bearings, emit a point where the
+      // wall-clipped reach covers r, lift the pen across occluded bearings.
+      const buildArc = () => {
+        let pen = false
+        for (const h of hits) {
+          if (Math.min(h.t, rangePx) >= r) {
+            const px = cx + Math.cos(h.ang) * r
+            const py = cy + Math.sin(h.ang) * r
+            if (!pen) { fovG.moveTo(px, py); pen = true }
+            else fovG.lineTo(px, py)
+          } else {
+            pen = false   // wall break — next visible span starts a new sub-path
+          }
+        }
+      }
+      // White ring pops out of the green cone fill: a soft wide halo under a
+      // crisp bright core, so the ripple reads clearly against the tint.
+      buildArc()
+      fovG.stroke({ width: 5, color: '#ffffff', alpha: ringAlpha * 0.35 })
+      buildArc()
+      fovG.stroke({ width: 2, color: '#ffffff', alpha: ringAlpha })
+    }
+  }
+
   const redrawFov = () => {
     fovG.clear()
     if (!isCameraMode()) return
@@ -102,6 +153,8 @@ export function attachCamerasLayer({
     const editor = useEditorStore.getState()
     for (const cam of cameras) {
       const { minRangePx, rangePx } = cameraCoverageRadii(cam, scale)
+      const detecting = !!isCameraDetecting(cam.id) && deviceStatus(cam) !== DEVICE_STATUS.OFFLINE
+      const hits = detecting ? [] : null   // only need per-bearing reach for the ripple
       const poly = computeFovPolygon({
         cx: cam.x,
         cy: cam.y,
@@ -110,11 +163,30 @@ export function attachCamerasLayer({
         rangePx,
         minRangePx,
         segments: segs,
+        outHits: hits,
       })
       if (!poly) continue
       const selected = editor.selectedId === cam.id && editor.selectedType === 'camera'
-      fovG.poly(poly).fill({ color: CAMERA_COLOR, alpha: selected ? FOV_FILL_ALPHA + 0.08 : FOV_FILL_ALPHA })
-      fovG.poly(poly).stroke({ width: 1.5, color: CAMERA_COLOR, alpha: selected ? 0.9 : FOV_EDGE_ALPHA })
+      // Offline cameras aren't recording → their coverage is void: draw the
+      // cone greatly dimmed and skip the detection pulse entirely.
+      if (deviceStatus(cam) === DEVICE_STATUS.OFFLINE) {
+        fovG.poly(poly).fill({ color: CAMERA_COLOR, alpha: 0.05 })
+        fovG.poly(poly).stroke({ width: 1, color: CAMERA_COLOR, alpha: 0.2 })
+        continue
+      }
+      // Detecting → cone pulses (Verkada parity): fill/edge alpha breathe up
+      // by `pulse`. Selection emphasis still wins on a static cone.
+      const fillA = detecting
+        ? FOV_FILL_ALPHA + 0.06 + pulse * 0.16
+        : (selected ? FOV_FILL_ALPHA + 0.08 : FOV_FILL_ALPHA)
+      const edgeA = detecting
+        ? 0.6 + pulse * 0.4
+        : (selected ? 0.9 : FOV_EDGE_ALPHA)
+      fovG.poly(poly).fill({ color: CAMERA_COLOR, alpha: fillA })
+      fovG.poly(poly).stroke({ width: detecting ? 2 : 1.5, color: CAMERA_COLOR, alpha: edgeA })
+      // Radar ripple rings radiating from the lens while detecting — clipped
+      // to the wall-occluded reach so they don't leak past walls.
+      if (detecting) drawWaveRings(cam, minRangePx, rangePx, hits)
     }
   }
 
@@ -188,6 +260,13 @@ export function attachCamerasLayer({
     const ly = Math.sin(azRad) * 3.5
     graphics.circle(lx, ly, LENS_RADIUS).fill({ color: CAMERA_COLOR, alpha: 1 })
     graphics.circle(lx, ly, 1.8).fill({ color: '#0b3b2e', alpha: 1 })
+
+    // Operational-status dot (Verkada parity) — top-right of the body, green =
+    // online, orange = offline. White rim keeps it legible on any body fill.
+    const status = deviceStatus(camera)
+    const sdx = CAM_RADIUS * 0.72, sdy = -CAM_RADIUS * 0.72
+    graphics.circle(sdx, sdy, 3.4).fill({ color: '#ffffff', alpha: 1 })
+    graphics.circle(sdx, sdy, 2.6).fill({ color: STATUS_COLOR[status], alpha: 1 })
 
     // Rotate handle — only when selected: axis tick + draggable dot. Hovering
     // the dot inverts it (emerald fill, white ring, slightly larger) so the
@@ -412,16 +491,40 @@ export function attachCamerasLayer({
     }
   }
 
+  // ── FOV pulse loop ────────────────────────────────────────────────────────
+  // While ≥1 camera is detecting, animate `pulse` as a sine breath and repaint
+  // the cones. Self-contained rAF: starts when detection begins, stops when it
+  // ends, so render-on-demand idle is preserved when nothing is being seen.
+  let pulseRaf = 0
+  const PULSE_HZ = 1.4   // breaths per second
+  const pulseTick = (ts) => {
+    if (!isCameraMode() || !anyDetecting()) { pulseRaf = 0; pulse = 0; redrawFov(); scene.requestRender(); return }
+    pulse = 0.5 + 0.5 * Math.sin((ts / 1000) * PULSE_HZ * Math.PI * 2)
+    waveSec = ts / 1000
+    redrawFov()
+    scene.requestRender()
+    pulseRaf = requestAnimationFrame(pulseTick)
+  }
+  const syncPulse = () => {
+    if (isCameraMode() && anyDetecting() && pulseRaf === 0) {
+      pulseRaf = requestAnimationFrame(pulseTick)
+    }
+  }
+
   const unsubCamera = useCameraStore.subscribe(() => { reconcile(); redrawFov(); applyInverseScale() })
   const unsubFloor = useFloorStore.subscribe(() => { reconcile(); redrawFov(); applyInverseScale() })
   const unsubWall = useWallStore.subscribe(redrawFov)
   const unsubEditor = useEditorStore.subscribe(onEditorChange)
   const unsubViewport = useViewportStore.subscribe(applyInverseScale)
+  // Detection membership changed → repaint cones now and make sure the pulse
+  // loop is running (it self-stops when detection clears).
+  const unsubDetection = subscribeDetection(() => { redrawFov(); scene.requestRender(); syncPulse() })
 
   reconcile()
   redrawFov()
   applyInverseScale()
   applyModeVisibility()
+  syncPulse()
 
   return () => {
     unsubCamera()
@@ -429,6 +532,8 @@ export function attachCamerasLayer({
     unsubWall()
     unsubEditor()
     unsubViewport()
+    unsubDetection()
+    if (pulseRaf !== 0) cancelAnimationFrame(pulseRaf)
     for (const id of Array.from(containers.keys())) removeContainer(id)
     fovLayer.removeChild(fovG)
     fovG.destroy()

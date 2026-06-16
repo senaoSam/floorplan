@@ -13,6 +13,8 @@ import ClientPanelMount from '@/components/ClientPanel/ClientPanel'
 import ClientViewMenuMount from '@/components/ClientPanel/ClientViewMenu'
 import ScaleBarMount from '@/components/ScaleBar/ScaleBarMount'
 import CameraTimelineBar from '@/components/CameraTimeline/CameraTimelineBar'
+import TrendPanel from '@/components/CameraTimeline/TrendPanel'
+import LiveViewModal from '@/components/CameraTimeline/LiveViewModal'
 import './CanvasArea.sass'
 
 // Standalone-mode canvas pane — wraps the embeddable FloorplanSystem
@@ -44,6 +46,8 @@ function CanvasArea() {
       <ClientPanelMount />
       <ClientViewMenuMount />
       <CameraTimelineBar />
+      <TrendPanel />
+      <LiveViewModal />
       <ScaleBarMount />
     </div>
   )

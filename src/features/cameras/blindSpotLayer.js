@@ -2,6 +2,7 @@ import { Sprite, Texture } from 'pixi.js'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from './fovPolygon'
 import { FALLBACK_PX_PER_M } from './camerasLayer'
+import { deviceStatus, DEVICE_STATUS } from './deviceStatus'
 
 // Blind-spot overlay (Phase 34-5 ①): shades every part of the floor that NO
 // camera can see — the union of all wall-clipped FOV polygons punched out of
@@ -56,6 +57,8 @@ export function attachBlindSpotLayer({
     ctx.globalCompositeOperation = 'destination-out'
     ctx.fillStyle = '#000'
     for (const cam of cameras) {
+      // Offline cameras aren't recording → they cover nothing (count as blind).
+      if (deviceStatus(cam) === DEVICE_STATUS.OFFLINE) continue
       const { minRangePx, rangePx } = cameraCoverageRadii(cam, scale)
       const poly = computeFovPolygon({
         cx: cam.x, cy: cam.y,

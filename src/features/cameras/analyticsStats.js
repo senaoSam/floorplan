@@ -120,6 +120,68 @@ export function computeZoneStats(zone, tracks, tFromSec, tToSec) {
   }
 }
 
+// ── Floor-wide occupancy trend (Verkada "Occupancy Trends" parity) ──────────
+// Per-hour activity for the WHOLE floor (not a single zone): how many distinct
+// people/cars were present, and accumulated person-seconds, in each hour of
+// the day. Drives the trend panel's bar chart + peak-hour callout. Counts a
+// track in an hour if it has any sample inside that hour. Returns:
+//   hourly  — [{ hour, people, cars, presentSec }]
+//   peakHour, peakPresent — busiest hour by head-count (people, ties → earliest)
+//   totalPeople, totalCars — distinct tracks over the whole day
+export function computeFloorTrend(tracks, dayStartSec, dayEndSec) {
+  const hFrom = Math.floor(dayStartSec / 3600)
+  const hTo = Math.ceil(dayEndSec / 3600)
+  const hourly = []
+  for (let h = hFrom; h < hTo; h++) hourly.push({ hour: h, people: 0, cars: 0, presentSec: 0 })
+  const idxOf = (h) => h - hFrom
+
+  const peoplePerHour = hourly.map(() => new Set())
+  const carsPerHour = hourly.map(() => new Set())
+  const allPeople = new Set()
+  const allCars = new Set()
+
+  for (const track of tracks ?? []) {
+    const isCar = track.type === 'car'
+    if (isCar) allCars.add(track.id); else allPeople.add(track.id)
+    // Mark presence per hour from the track's sample span, and accumulate
+    // person-seconds bucketed by the hour each second falls in.
+    const s = track.samples
+    for (let i = 0; i + 1 < s.length; i++) {
+      const a = s[i], b = s[i + 1]
+      const hA = Math.max(hFrom, Math.floor(a.t / 3600))
+      const hB = Math.min(hTo - 1, Math.floor(b.t / 3600))
+      for (let h = hA; h <= hB; h++) {
+        const set = isCar ? carsPerHour[idxOf(h)] : peoplePerHour[idxOf(h)]
+        if (set) set.add(track.id)
+      }
+      // person-seconds: clamp the leg to each hour boundary it spans
+      const segStart = a.t, segEnd = b.t
+      if (segEnd <= segStart) continue
+      for (let h = hA; h <= hB; h++) {
+        const hStart = h * 3600, hEnd = (h + 1) * 3600
+        const lo = Math.max(segStart, hStart)
+        const hi = Math.min(segEnd, hEnd)
+        if (hi > lo && hourly[idxOf(h)]) hourly[idxOf(h)].presentSec += hi - lo
+      }
+    }
+  }
+
+  let peakHour = null, peakPresent = 0
+  for (let i = 0; i < hourly.length; i++) {
+    hourly[i].people = peoplePerHour[i].size
+    hourly[i].cars = carsPerHour[i].size
+    if (hourly[i].people > peakPresent) { peakPresent = hourly[i].people; peakHour = hourly[i].hour }
+  }
+
+  return {
+    hourly,
+    peakHour,
+    peakPresent,
+    totalPeople: allPeople.size,
+    totalCars: allCars.size,
+  }
+}
+
 // ── Flow grid ─────────────────────────────────────────────────────────────
 // Average movement vector per cell over the window. Dwell steps (zero
 // velocity) are skipped — the flow map shows WHERE PEOPLE MOVE, the dwell

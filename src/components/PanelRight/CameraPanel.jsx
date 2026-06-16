@@ -3,6 +3,7 @@ import { useCameraStore } from '@/store/useCameraStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { cameraCoverageRadii, DEFAULT_TILT_DEG } from '@/features/cameras/fovPolygon'
+import { deviceStatus, DEVICE_STATUS, STATUS_COLOR, STATUS_LABEL } from '@/features/cameras/deviceStatus'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { TextInput, NumberInput } from './_shared/PanelControls'
 import './_shared/shared.sass'
@@ -19,6 +20,7 @@ function CameraPanel({ floorId, cameraId }) {
   const camera        = useCameraStore((s) => (s.camerasByFloor[floorId] ?? []).find((c) => c.id === cameraId))
   const updateCamera  = useCameraStore((s) => s.updateCamera)
   const removeCamera  = useCameraStore((s) => s.removeCamera)
+  const openLiveView  = useCameraStore((s) => s.openLiveView)
   const clearSelected = useEditorStore((s) => s.clearSelected)
   const floors        = useFloorStore((s) => s.floors)
   const floor         = floors.find((f) => f.id === floorId)
@@ -55,6 +57,44 @@ function CameraPanel({ floorId, cameraId }) {
       <PanelSection title="識別">
         <PanelField label="名稱">
           <TextInput value={camera.name} onChange={(v) => handleField('name', v)} />
+        </PanelField>
+        <PanelField label="狀態" hint="離線時不錄影、不偵測，覆蓋計為盲區">
+          {(() => {
+            const status = deviceStatus(camera)
+            const next = status === DEVICE_STATUS.ONLINE ? DEVICE_STATUS.OFFLINE : DEVICE_STATUS.ONLINE
+            return (
+              <button
+                type="button"
+                onClick={() => handleField('status', next)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '3px 10px', borderRadius: 12, cursor: 'pointer',
+                  border: `1px solid ${STATUS_COLOR[status]}`,
+                  background: 'transparent', color: STATUS_COLOR[status],
+                  fontSize: 12, fontWeight: 600,
+                }}
+                title="點擊切換在線／離線"
+              >
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_COLOR[status] }} />
+                {STATUS_LABEL[status]}
+              </button>
+            )
+          })()}
+        </PanelField>
+        <PanelField label="影像">
+          <button
+            type="button"
+            onClick={() => openLiveView(cameraId)}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '4px 12px', borderRadius: 8, cursor: 'pointer',
+              border: '1px solid rgba(16,185,129,0.5)', background: 'rgba(16,185,129,0.12)',
+              color: '#10b981', fontSize: 12, fontWeight: 600,
+            }}
+            title="開啟即時影像（模擬畫面）"
+          >
+            📹 即時影像
+          </button>
         </PanelField>
       </PanelSection>
 

@@ -82,6 +82,37 @@ export function bindTracking({ useEditorStore }) {
     }
   }
 
+  // ── Occupancy timelapse loop ──────────────────────────────────────────────
+  // Independent rAF loop that slides the heatmap analysis window forward, so
+  // the occupancy heatmap animates the day's activity rolling through. Runs
+  // only in CAMERA mode while the lapse is playing and a heatmap mode is on.
+  let lapseRaf = 0
+  let lapseLastTs = 0
+  const lapseShouldRun = () => {
+    const tr = useTrackingStore.getState()
+    return isActive() && tr.occupancyLapsePlaying && tr.occupancyMode !== 'off'
+  }
+  const lapseTick = (ts) => {
+    if (!lapseShouldRun()) { lapseRaf = 0; lapseLastTs = 0; return }
+    lapseRaf = requestAnimationFrame(lapseTick)
+    const tr = useTrackingStore.getState()
+    if (lapseLastTs !== 0) {
+      const dt = Math.min(0.5, (ts - lapseLastTs) / 1000)
+      tr.advanceOccupancyLapse(dt * tr.occupancyLapseSpeed)
+    }
+    lapseLastTs = ts
+  }
+  const syncLapse = () => {
+    if (lapseShouldRun() && lapseRaf === 0) {
+      lapseLastTs = 0
+      lapseRaf = requestAnimationFrame(lapseTick)
+    } else if (!lapseShouldRun() && lapseRaf !== 0) {
+      cancelAnimationFrame(lapseRaf)
+      lapseRaf = 0
+      lapseLastTs = 0
+    }
+  }
+
   let prevMode = useEditorStore.getState().editorMode
   const unsubEditor = useEditorStore.subscribe(() => {
     const mode = useEditorStore.getState().editorMode
@@ -93,6 +124,7 @@ export function bindTracking({ useEditorStore }) {
     // fire on the first click after re-entry.
     if (left && useCameraStore.getState().drawTool) useCameraStore.getState().setDrawTool(null)
     syncLoop()
+    syncLapse()
   })
   // Floor switch while in CAMERA mode → make sure the new floor has a crowd.
   let prevFid = useFloorStore.getState().activeFloorId
@@ -102,15 +134,17 @@ export function bindTracking({ useEditorStore }) {
     prevFid = fid
     if (isActive()) ensureTracksForActiveFloor()
   })
-  const unsubTracking = useTrackingStore.subscribe(syncLoop)
+  const unsubTracking = useTrackingStore.subscribe(() => { syncLoop(); syncLapse() })
 
   if (isActive()) ensureTracksForActiveFloor()
   syncLoop()
+  syncLapse()
 
   return () => {
     unsubEditor()
     unsubFloor()
     unsubTracking()
     if (rafId !== 0) cancelAnimationFrame(rafId)
+    if (lapseRaf !== 0) cancelAnimationFrame(lapseRaf)
   }
 }

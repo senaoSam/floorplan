@@ -1,0 +1,101 @@
+@use '@/styles/variables' as *
+
+// Floor-wide occupancy trend panel — floats top-right over the canvas, same
+// dark-glass family as the camera timeline bar.
+
+.trend-panel
+  position: absolute
+  left: 12px
+  bottom: 12px
+  z-index: 390
+  width: 320px
+  display: flex
+  flex-direction: column
+  gap: 8px
+  padding: 10px 14px 12px
+  background: rgba(15, 23, 42, 0.9)
+  border: 1px solid rgba(255, 255, 255, 0.12)
+  border-left: 3px solid #10b981
+  border-radius: 12px
+  backdrop-filter: blur(6px)
+  color: $text-primary
+  font-size: 12px
+  user-select: none
+
+  &__head
+    display: flex
+    align-items: center
+    justify-content: space-between
+    &--drag
+      cursor: grab
+      touch-action: none
+      &:active
+        cursor: grabbing
+
+  &__title
+    font-size: 13px
+    font-weight: 700
+    color: #10b981
+
+  &__close
+    background: transparent
+    border: none
+    color: $text-secondary
+    font-size: 13px
+    cursor: pointer
+    &:hover
+      color: $text-primary
+
+  &__summary
+    display: flex
+    flex-direction: column
+    gap: 2px
+    color: $text-secondary
+    font-size: 11px
+    b
+      color: $text-primary
+      font-variant-numeric: tabular-nums
+
+  &__chart
+    display: flex
+    align-items: flex-end
+    gap: 3px
+    height: 96px
+    padding-top: 4px
+
+  &__bar-col
+    flex: 1
+    display: flex
+    flex-direction: column
+    align-items: center
+    gap: 3px
+    height: 100%
+    border-radius: 4px
+    &--now
+      background: rgba(16, 185, 129, 0.12)
+
+  &__bar-track
+    flex: 1
+    width: 100%
+    display: flex
+    align-items: flex-end
+    justify-content: center
+
+  &__bar
+    width: 70%
+    min-height: 2px
+    background: rgba(56, 189, 248, 0.7)
+    border-radius: 2px 2px 0 0
+    transition: height 0.18s ease
+    &--peak
+      background: #10b981
+
+  &__bar-label
+    font-size: 9px
+    color: $text-secondary
+    font-variant-numeric: tabular-nums
+
+  &__axis
+    color: $text-secondary
+    font-size: 10px
+    line-height: 1.3
