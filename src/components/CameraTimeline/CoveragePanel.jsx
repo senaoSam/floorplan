@@ -4,6 +4,10 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useCameraStore } from '@/store/useCameraStore'
 import { useWallStore } from '@/store/useWallStore'
 import { computeCoverageStats } from '@/features/cameras/coverageStats'
+import { flashGapMarker } from '@/features/cameras/gapMarkerBus'
+import { useViewportStore } from '@/store/useViewportStore'
+import { NumberInput } from '@/components/PanelRight/_shared/PanelControls'
+import '@/components/PanelRight/_shared/shared.sass'
 import './CoveragePanel.sass'
 
 // Coverage report for Camera mode (planning aid). Always-on card top-left:
@@ -25,9 +29,12 @@ function CoveragePanel() {
   const walls = useWallStore((s) => s.wallsByFloor[activeFloorId])
   const targetPct = useCameraStore((s) => s.coverageTargetPct)
   const setTargetPct = useCameraStore((s) => s.setCoverageTargetPct)
+  const showBlindSpots = useCameraStore((s) => s.showBlindSpots)
+  const toggleShowBlindSpots = useCameraStore((s) => s.toggleShowBlindSpots)
 
   const [stats, setStats] = useState(null)
   const timerRef = useRef(null)
+  const blindRevertRef = useRef(null)
 
   useEffect(() => {
     if (!inCameraMode || !activeFloorId) { setStats(null); return }
@@ -66,17 +73,18 @@ function CoveragePanel() {
 
       <div className={`coverage-panel__verdict${meetsTarget ? ' coverage-panel__verdict--pass' : ' coverage-panel__verdict--fail'}`}>
         <span>{meetsTarget ? '✓ 已達標' : '⚠ 未達標'}</span>
-        <label className="coverage-panel__target" title="覆蓋率目標門檻">
+        <span className="coverage-panel__target" title="覆蓋率目標門檻">
           目標
-          <input
-            type="number"
+          <NumberInput
+            value={targetPct}
             min={0}
             max={100}
-            value={targetPct}
-            onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setTargetPct(v) }}
+            step={5}
+            unit="%"
+            width={44}
+            onChange={(v) => { if (!isNaN(v)) setTargetPct(v) }}
           />
-          %
-        </label>
+        </span>
       </div>
 
       <div className="coverage-panel__rows">
@@ -97,6 +105,43 @@ function CoveragePanel() {
           <b>{stats.avgOverlap.toFixed(2)}×</b>
         </div>
       </div>
+
+      {stats.biggestGap && stats.blindPct > 0.5 && (
+        <button
+          type="button"
+          className="coverage-panel__gap"
+          onClick={() => {
+            const vp = useViewportStore.getState()
+            const canvas = window.__pixiApp?.canvas
+            if (canvas && vp.setViewport) {
+              const rect = canvas.getBoundingClientRect()
+              const scale = vp.scale || 1
+              vp.setViewport({
+                x: rect.width / 2 - stats.biggestGap.x * scale,
+                y: rect.height / 2 - stats.biggestGap.y * scale,
+                scale,
+              })
+            }
+            // Flash a pulsing ring AT the gap so it's clear where to look.
+            flashGapMarker(stats.biggestGap.x, stats.biggestGap.y, performance.now())
+            // Briefly shade the blind area too, then revert to the user's
+            // prior setting so the locate action doesn't leave the overlay
+            // stuck on. (If it was already on, leave it on.)
+            if (!showBlindSpots) {
+              toggleShowBlindSpots()
+              if (blindRevertRef.current) clearTimeout(blindRevertRef.current)
+              blindRevertRef.current = setTimeout(() => {
+                if (useCameraStore.getState().showBlindSpots) {
+                  useCameraStore.getState().toggleShowBlindSpots()
+                }
+              }, 4500)
+            }
+          }}
+          title="把畫面移到盲區最集中的位置並閃示標記，方便補一台相機"
+        >
+          ◎ 定位最大盲區
+        </button>
+      )}
 
       <div className="coverage-panel__note">以整張平面圖範圍為分母</div>
     </div>

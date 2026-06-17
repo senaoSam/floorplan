@@ -71,6 +71,38 @@ export function computeCoverageStats({ cameras, walls, floor }) {
     if (c >= 2) redundant += 1
   }
 
+  // Find the coarse grid cell with the most blind (0-camera) pixels — the
+  // "biggest gap" the user should consider covering. Returned in image-px so
+  // the panel can recentre the viewport there. Cheap second pass over counts.
+  const GRID = 8   // 8×8 coarse cells over the sampled buffer
+  const cellW = Math.ceil(cw / GRID)
+  const cellH = Math.ceil(ch / GRID)
+  const blindPerCell = new Int32Array(GRID * GRID)
+  for (let y = 0; y < ch; y++) {
+    const gy = Math.min(GRID - 1, Math.floor(y / cellH))
+    for (let x = 0; x < cw; x++) {
+      if (counts[y * cw + x] === 0) {
+        const gx = Math.min(GRID - 1, Math.floor(x / cellW))
+        blindPerCell[gy * GRID + gx] += 1
+      }
+    }
+  }
+  let worstCell = -1
+  let worstBlind = 0
+  for (let i = 0; i < blindPerCell.length; i++) {
+    if (blindPerCell[i] > worstBlind) { worstBlind = blindPerCell[i]; worstCell = i }
+  }
+  let biggestGap = null
+  if (worstCell >= 0 && worstBlind > 0) {
+    const gx = worstCell % GRID
+    const gy = Math.floor(worstCell / GRID)
+    // cell centre, sampled-px → image-px
+    biggestGap = {
+      x: ((gx + 0.5) * cellW) / k,
+      y: ((gy + 0.5) * cellH) / k,
+    }
+  }
+
   // Area per sampled pixel in m²: each sample covers (1/k px)² of image space.
   const pxPerSample = 1 / k
   const m2PerSample = (pxPerSample / scale) * (pxPerSample / scale)
@@ -84,5 +116,6 @@ export function computeCoverageStats({ cameras, walls, floor }) {
     coveredAreaM2: covered * m2PerSample,
     blindAreaM2: (total - covered) * m2PerSample,
     avgOverlap: covered > 0 ? overlapSum / covered : 0,
+    biggestGap,   // {x,y} image-px of the densest blind cell, or null
   }
 }

@@ -18,6 +18,14 @@ const MIN_FOV = 10
 const MAX_FOV = 360
 const MIN_RANGE_M = 1
 
+// Common camera mount heights (m) for one-click setting.
+const HEIGHT_PRESETS = [
+  { m: 2.5, title: '室內天花板' },
+  { m: 3, title: '標準' },
+  { m: 4, title: '挑高 / 大廳' },
+  { m: 6, title: '戶外桿' },
+]
+
 function CameraPanel({ floorId, cameraId }) {
   const camera        = useCameraStore((s) => (s.camerasByFloor[floorId] ?? []).find((c) => c.id === cameraId))
   const updateCamera  = useCameraStore((s) => s.updateCamera)
@@ -230,6 +238,29 @@ function CameraPanel({ floorId, cameraId }) {
             width={70}
             onChange={(v) => { if (!isNaN(v) && v >= 0) handleField('z', v) }}
           />
+        </PanelField>
+        <PanelField label="常用高度" hint="一鍵套用">
+          <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
+            {HEIGHT_PRESETS.map((h) => {
+              const active = Math.abs((camera.z ?? 2.5) - h.m) < 0.01
+              return (
+                <button
+                  key={h.m}
+                  type="button"
+                  onClick={() => handleField('z', h.m)}
+                  title={h.title}
+                  style={{
+                    padding: '2px 8px', borderRadius: 8, cursor: 'pointer', fontSize: 11,
+                    border: `1px solid ${active ? '#10b981' : 'rgba(255,255,255,0.18)'}`,
+                    background: active ? 'rgba(16,185,129,0.18)' : 'transparent',
+                    color: active ? '#10b981' : '#94a3b8', fontWeight: 600,
+                  }}
+                >
+                  {h.m}m
+                </button>
+              )
+            })}
+          </span>
         </PanelField>
       </PanelSection>
     </PanelShell>

@@ -70,14 +70,13 @@
   &__row
     display: flex
     align-items: center
-    gap: 8px
-    padding: 5px 7px
+    gap: 6px
+    padding: 4px 7px
     background: transparent
     border: 1px solid transparent
     border-radius: 7px
     color: $text-primary
     font-size: 12px
-    cursor: pointer
     text-align: left
     &:hover
       background: rgba(255, 255, 255, 0.06)
@@ -86,6 +85,19 @@
     &--sel
       background: rgba(16, 185, 129, 0.16)
       border-color: rgba(16, 185, 129, 0.6)
+
+  &__check
+    flex: none
+    accent-color: #10b981
+    cursor: pointer
+
+  &__rowmain
+    flex: 1
+    display: flex
+    align-items: center
+    gap: 8px
+    min-width: 0
+    cursor: pointer
 
   &__dot
     width: 8px
@@ -120,3 +132,60 @@
     &:hover
       background: rgba(239, 68, 68, 0.2)
       color: #ef4444
+
+  // ── Batch bar (shown when ≥1 row checked) ──
+  &__batch
+    display: flex
+    flex-direction: column
+    gap: 5px
+    margin-top: 2px
+    padding-top: 7px
+    border-top: 1px solid rgba(255, 255, 255, 0.12)
+
+  &__batch-head
+    display: flex
+    align-items: center
+    justify-content: space-between
+    font-size: 11px
+    color: #10b981
+    font-weight: 600
+    button
+      background: transparent
+      border: none
+      color: $text-secondary
+      font-size: 11px
+      cursor: pointer
+      &:hover
+        color: $text-primary
+
+  &__batch-row
+    display: flex
+    align-items: center
+    gap: 4px
+    flex-wrap: wrap
+    button
+      padding: 3px 9px
+      background: transparent
+      border: 1px solid rgba(255, 255, 255, 0.18)
+      border-radius: 7px
+      color: $text-secondary
+      font-size: 11px
+      cursor: pointer
+      &:hover
+        border-color: rgba(16, 185, 129, 0.6)
+        color: $text-primary
+
+  &__batch-model
+    background: rgba(255, 255, 255, 0.06)
+    border: 1px solid rgba(255, 255, 255, 0.18)
+    border-radius: 7px
+    color: $text-primary
+    font-size: 11px
+    padding: 3px 5px
+    cursor: pointer
+    option
+      background: #16213e
+
+  &__batch-del:hover
+    border-color: rgba(239, 68, 68, 0.6) !important
+    color: #ef4444 !important

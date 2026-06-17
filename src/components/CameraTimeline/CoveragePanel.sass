@@ -82,18 +82,9 @@
   &__target
     display: inline-flex
     align-items: center
-    gap: 3px
+    gap: 4px
     color: $text-secondary
     font-weight: 400
-    input
-      width: 38px
-      background: rgba(255, 255, 255, 0.06)
-      border: 1px solid rgba(255, 255, 255, 0.18)
-      border-radius: 5px
-      color: $text-primary
-      font-size: 11px
-      padding: 1px 4px
-      text-align: right
 
   &__rows
     display: flex
@@ -110,6 +101,18 @@
       color: $text-primary
       font-variant-numeric: tabular-nums
       font-weight: 600
+
+  &__gap
+    padding: 5px 10px
+    background: rgba(245, 158, 11, 0.12)
+    border: 1px solid rgba(245, 158, 11, 0.5)
+    border-radius: 8px
+    color: #f59e0b
+    font-size: 11px
+    font-weight: 600
+    cursor: pointer
+    &:hover
+      background: rgba(245, 158, 11, 0.22)
 
   &__note
     color: $text-secondary
