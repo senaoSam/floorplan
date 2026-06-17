@@ -1,0 +1,88 @@
+@use '@/styles/variables' as *
+
+// Camera roster — floats top-right of the canvas in Camera mode, dark-glass
+// family. (Trend panel sits bottom-left, coverage top-left, so top-right is
+// free.)
+
+.camera-list
+  position: absolute
+  top: 64px
+  right: 18px
+  z-index: 389
+  width: 220px
+  max-height: 60vh
+  display: flex
+  flex-direction: column
+  gap: 6px
+  padding: 10px 12px 11px
+  background: rgba(15, 23, 42, 0.9)
+  border: 1px solid rgba(255, 255, 255, 0.12)
+  border-left: 3px solid #10b981
+  border-radius: 12px
+  backdrop-filter: blur(6px)
+  color: $text-primary
+  font-size: 12px
+  user-select: none
+
+  &__head
+    display: flex
+    align-items: center
+    justify-content: space-between
+
+  &__title
+    font-size: 13px
+    font-weight: 700
+    color: #10b981
+
+  &__close
+    background: transparent
+    border: none
+    color: $text-secondary
+    font-size: 13px
+    cursor: pointer
+    &:hover
+      color: $text-primary
+
+  &__empty
+    color: $text-secondary
+    font-size: 11px
+    line-height: 1.4
+
+  &__rows
+    display: flex
+    flex-direction: column
+    gap: 2px
+    overflow-y: auto
+
+  &__row
+    display: flex
+    align-items: center
+    gap: 8px
+    padding: 5px 7px
+    background: transparent
+    border: 1px solid transparent
+    border-radius: 7px
+    color: $text-primary
+    font-size: 12px
+    cursor: pointer
+    text-align: left
+    &:hover
+      background: rgba(255, 255, 255, 0.06)
+    &--sel
+      background: rgba(16, 185, 129, 0.16)
+      border-color: rgba(16, 185, 129, 0.6)
+
+  &__dot
+    width: 8px
+    height: 8px
+    border-radius: 50%
+    flex: none
+
+  &__name
+    flex: 1
+    font-weight: 600
+    font-variant-numeric: tabular-nums
+
+  &__model
+    color: $text-secondary
+    font-size: 10px

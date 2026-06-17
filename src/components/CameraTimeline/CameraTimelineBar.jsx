@@ -47,8 +47,12 @@ function CameraTimelineBar() {
   const toggleShowUndetected = useTrackingStore((s) => s.toggleShowUndetected)
   const showBlindSpots = useCameraStore((s) => s.showBlindSpots)
   const toggleShowBlindSpots = useCameraStore((s) => s.toggleShowBlindSpots)
+  const showOverlap = useCameraStore((s) => s.showOverlap)
+  const toggleShowOverlap = useCameraStore((s) => s.toggleShowOverlap)
   const showTrendPanel = useCameraStore((s) => s.showTrendPanel)
   const toggleShowTrendPanel = useCameraStore((s) => s.toggleShowTrendPanel)
+  const showCameraList = useCameraStore((s) => s.showCameraList)
+  const toggleShowCameraList = useCameraStore((s) => s.toggleShowCameraList)
   const drawTool = useCameraStore((s) => s.drawTool)
   const setDrawTool = useCameraStore((s) => s.setDrawTool)
 
@@ -119,6 +123,11 @@ function CameraTimelineBar() {
           <span>盲區</span>
         </label>
 
+        <label className="camera-timeline__ghosts" title="重疊覆蓋：黃=只有 1 台相機看到（單點故障即盲區），藍綠=2 台以上備援">
+          <input type="checkbox" checked={showOverlap} onChange={toggleShowOverlap} />
+          <span>重疊</span>
+        </label>
+
         <button
           type="button"
           className={`camera-timeline__chip${showTrendPanel ? ' camera-timeline__chip--active' : ''}`}
@@ -126,6 +135,14 @@ function CameraTimelineBar() {
           title="顯示整層樓的逐時占用趨勢（全日人/車數、尖峰時段）"
         >
           📊 趨勢
+        </button>
+        <button
+          type="button"
+          className={`camera-timeline__chip${showCameraList ? ' camera-timeline__chip--active' : ''}`}
+          onClick={toggleShowCameraList}
+          title="顯示本樓層相機清單（型號／狀態），點一列選取並置中"
+        >
+          📋 清單
         </button>
 
         <span className="camera-timeline__divider" aria-hidden="true" />

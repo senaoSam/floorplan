@@ -15,6 +15,7 @@ import ScaleBarMount from '@/components/ScaleBar/ScaleBarMount'
 import CameraTimelineBar from '@/components/CameraTimeline/CameraTimelineBar'
 import TrendPanel from '@/components/CameraTimeline/TrendPanel'
 import CoveragePanel from '@/components/CameraTimeline/CoveragePanel'
+import CameraListPanel from '@/components/CameraTimeline/CameraListPanel'
 import LiveViewModal from '@/components/CameraTimeline/LiveViewModal'
 import './CanvasArea.sass'
 
@@ -48,6 +49,7 @@ function CanvasArea() {
       <ClientViewMenuMount />
       <CameraTimelineBar />
       <CoveragePanel />
+      <CameraListPanel />
       <TrendPanel />
       <LiveViewModal />
       <ScaleBarMount />

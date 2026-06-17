@@ -72,6 +72,8 @@ function CoveragePanel() {
           <b>{stats.avgOverlap.toFixed(2)}×</b>
         </div>
       </div>
+
+      <div className="coverage-panel__note">以整張平面圖範圍為分母</div>
     </div>
   )
 }

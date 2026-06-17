@@ -4,8 +4,9 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { cameraCoverageRadii, DEFAULT_TILT_DEG } from '@/features/cameras/fovPolygon'
 import { deviceStatus, DEVICE_STATUS, STATUS_COLOR, STATUS_LABEL } from '@/features/cameras/deviceStatus'
+import { CAMERA_MODEL_LIST, cameraModelById } from '@/constants/cameraModels'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
-import { TextInput, NumberInput } from './_shared/PanelControls'
+import { TextInput, NumberInput, Select } from './_shared/PanelControls'
 import './_shared/shared.sass'
 
 // Camera properties panel (Phase 34-1). Opens when a camera marker is
@@ -28,6 +29,21 @@ function CameraPanel({ floorId, cameraId }) {
 
   const handleField = useCallback((field, value) => {
     updateCamera(floorId, cameraId, { [field]: value })
+  }, [floorId, cameraId, updateCamera])
+
+  // Picking a model preset fills FOV / range / mount height / tilt in one go
+  // (azimuth + position are left as-is). 'custom' just records the choice and
+  // changes nothing, so manual edits aren't clobbered.
+  const applyModel = useCallback((modelId) => {
+    const m = cameraModelById(modelId)
+    const patch = { model: modelId }
+    if (modelId !== 'custom') {
+      patch.fovDeg = m.fovDeg
+      patch.rangeM = m.rangeM
+      patch.z = m.zM
+      patch.tiltDeg = m.tiltDeg
+    }
+    updateCamera(floorId, cameraId, patch)
   }, [floorId, cameraId, updateCamera])
 
   const handleDelete = () => {
@@ -99,6 +115,13 @@ function CameraPanel({ floorId, cameraId }) {
       </PanelSection>
 
       <PanelSection title="視野">
+        <PanelField label="型號" hint="套用後可再微調各參數">
+          <Select
+            value={camera.model ?? 'custom'}
+            onChange={applyModel}
+            options={CAMERA_MODEL_LIST.map((m) => ({ value: m.id, label: m.label }))}
+          />
+        </PanelField>
         <PanelField label="方位角" hint={effAz !== rawAz ? `實際 ${effAz}°` : '0°=右，順時針'}>
           <NumberInput
             value={rawAz}
