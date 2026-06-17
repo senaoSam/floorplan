@@ -23,6 +23,8 @@ function CoveragePanel() {
   const floors = useFloorStore((s) => s.floors)
   const cameras = useCameraStore((s) => s.camerasByFloor[activeFloorId])
   const walls = useWallStore((s) => s.wallsByFloor[activeFloorId])
+  const targetPct = useCameraStore((s) => s.coverageTargetPct)
+  const setTargetPct = useCameraStore((s) => s.setCoverageTargetPct)
 
   const [stats, setStats] = useState(null)
   const timerRef = useRef(null)
@@ -40,18 +42,41 @@ function CoveragePanel() {
   if (!inCameraMode || !activeFloorId || !stats) return null
 
   const offline = stats.cameraCount - stats.onlineCount
+  const meetsTarget = stats.coveredPct >= targetPct
 
   return (
     <div className="coverage-panel">
       <div className="coverage-panel__title">覆蓋率報表</div>
 
       <div className="coverage-panel__hero">
-        <span className="coverage-panel__hero-num">{fmtPct(stats.coveredPct)}</span>
+        <span className={`coverage-panel__hero-num${meetsTarget ? '' : ' coverage-panel__hero-num--fail'}`}>
+          {fmtPct(stats.coveredPct)}
+        </span>
         <span className="coverage-panel__hero-label">地板已涵蓋</span>
       </div>
 
       <div className="coverage-panel__bar" title={`已涵蓋 ${fmtPct(stats.coveredPct)}、盲區 ${fmtPct(stats.blindPct)}`}>
-        <div className="coverage-panel__bar-fill" style={{ width: `${stats.coveredPct}%` }} />
+        <div
+          className={`coverage-panel__bar-fill${meetsTarget ? '' : ' coverage-panel__bar-fill--fail'}`}
+          style={{ width: `${stats.coveredPct}%` }}
+        />
+        {/* target threshold marker */}
+        <div className="coverage-panel__bar-target" style={{ left: `${targetPct}%` }} />
+      </div>
+
+      <div className={`coverage-panel__verdict${meetsTarget ? ' coverage-panel__verdict--pass' : ' coverage-panel__verdict--fail'}`}>
+        <span>{meetsTarget ? '✓ 已達標' : '⚠ 未達標'}</span>
+        <label className="coverage-panel__target" title="覆蓋率目標門檻">
+          目標
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={targetPct}
+            onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setTargetPct(v) }}
+          />
+          %
+        </label>
       </div>
 
       <div className="coverage-panel__rows">

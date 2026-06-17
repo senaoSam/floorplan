@@ -25,6 +25,9 @@ export const useCameraStore = create((set, get) => ({
   showTrendPanel: false,
   // Camera list panel: roster of every camera on the floor.
   showCameraList: false,
+  cameraListCollapsed: false,
+  // Coverage target % — the coverage panel flags pass/fail against this.
+  coverageTargetPct: 80,
   // Live-view popover (Verkada parity): the camera whose feed is open, or
   // null. The feed is a MOCK placeholder — we have no real stream — but the
   // interaction ("click a device, see its feed") matches Command.
@@ -151,6 +154,9 @@ export const useCameraStore = create((set, get) => ({
   toggleShowOverlap: () => set((s) => ({ showOverlap: !s.showOverlap })),
   toggleShowTrendPanel: () => set((s) => ({ showTrendPanel: !s.showTrendPanel })),
   toggleShowCameraList: () => set((s) => ({ showCameraList: !s.showCameraList })),
+  toggleCameraListCollapsed: () => set((s) => ({ cameraListCollapsed: !s.cameraListCollapsed })),
+  setCoverageTargetPct: (coverageTargetPct) =>
+    set({ coverageTargetPct: Math.max(0, Math.min(100, coverageTargetPct)) }),
   openLiveView: (cameraId) => set({ liveViewCameraId: cameraId }),
   closeLiveView: () => set({ liveViewCameraId: null }),
   setDrawTool: (drawTool) => set({ drawTool, draftPoint: null }),

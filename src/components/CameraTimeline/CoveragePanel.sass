@@ -38,12 +38,15 @@
     line-height: 1
     font-variant-numeric: tabular-nums
     color: $text-primary
+    &--fail
+      color: #f59e0b
 
   &__hero-label
     font-size: 11px
     color: $text-secondary
 
   &__bar
+    position: relative
     height: 7px
     border-radius: 4px
     background: rgba(239, 68, 68, 0.35)   // blind portion shows through as red-ish
@@ -54,6 +57,43 @@
     background: #10b981
     border-radius: 4px 0 0 4px
     transition: width 0.2s ease
+    &--fail
+      background: #f59e0b
+
+  &__bar-target
+    position: absolute
+    top: -2px
+    bottom: -2px
+    width: 2px
+    background: rgba(255, 255, 255, 0.85)
+    transform: translateX(-1px)
+
+  &__verdict
+    display: flex
+    align-items: center
+    justify-content: space-between
+    font-size: 11px
+    font-weight: 600
+    &--pass
+      color: #10b981
+    &--fail
+      color: #f59e0b
+
+  &__target
+    display: inline-flex
+    align-items: center
+    gap: 3px
+    color: $text-secondary
+    font-weight: 400
+    input
+      width: 38px
+      background: rgba(255, 255, 255, 0.06)
+      border: 1px solid rgba(255, 255, 255, 0.18)
+      border-radius: 5px
+      color: $text-primary
+      font-size: 11px
+      padding: 1px 4px
+      text-align: right
 
   &__rows
     display: flex

@@ -7,6 +7,7 @@ import { deviceStatus, DEVICE_STATUS, STATUS_COLOR, STATUS_LABEL } from '@/featu
 import { CAMERA_MODEL_LIST, cameraModelById } from '@/constants/cameraModels'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { TextInput, NumberInput, Select } from './_shared/PanelControls'
+import { generateId } from '@/utils/id'
 import './_shared/shared.sass'
 
 // Camera properties panel (Phase 34-1). Opens when a camera marker is
@@ -21,8 +22,11 @@ function CameraPanel({ floorId, cameraId }) {
   const camera        = useCameraStore((s) => (s.camerasByFloor[floorId] ?? []).find((c) => c.id === cameraId))
   const updateCamera  = useCameraStore((s) => s.updateCamera)
   const removeCamera  = useCameraStore((s) => s.removeCamera)
+  const addCamera     = useCameraStore((s) => s.addCamera)
+  const nextCameraName = useCameraStore((s) => s.nextCameraName)
   const openLiveView  = useCameraStore((s) => s.openLiveView)
   const clearSelected = useEditorStore((s) => s.clearSelected)
+  const setSelected   = useEditorStore((s) => s.setSelected)
   const floors        = useFloorStore((s) => s.floors)
   const floor         = floors.find((f) => f.id === floorId)
   const hasScale      = !!floor?.scale
@@ -49,6 +53,22 @@ function CameraPanel({ floorId, cameraId }) {
   const handleDelete = () => {
     removeCamera(floorId, cameraId)
     clearSelected()
+  }
+
+  // Duplicate the camera with all its params (azimuth/fov/range/z/tilt/model/
+  // status), offset slightly so it's visible, then select the copy.
+  const handleDuplicate = () => {
+    if (!camera) return
+    const id = generateId('cam')
+    const { id: _omit, name: _omitName, ...rest } = camera
+    addCamera(floorId, {
+      ...rest,
+      id,
+      name: nextCameraName(),
+      x: camera.x + 24,
+      y: camera.y + 24,
+    })
+    setSelected(id, 'camera')
   }
 
   if (!camera) return null
@@ -110,6 +130,21 @@ function CameraPanel({ floorId, cameraId }) {
             title="開啟即時影像（模擬畫面）"
           >
             📹 即時影像
+          </button>
+        </PanelField>
+        <PanelField label="複製" hint="複製這台含所有參數">
+          <button
+            type="button"
+            onClick={handleDuplicate}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '4px 12px', borderRadius: 8, cursor: 'pointer',
+              border: '1px solid rgba(255,255,255,0.2)', background: 'transparent',
+              color: '#e2e8f0', fontSize: 12, fontWeight: 600,
+            }}
+            title="複製這台相機（含方位/FOV/距離/高度/俯角/型號）"
+          >
+            ⧉ 複製相機
           </button>
         </PanelField>
       </PanelSection>
