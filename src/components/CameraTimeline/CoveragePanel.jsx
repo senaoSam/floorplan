@@ -31,9 +31,13 @@ function CoveragePanel() {
   const setTargetPct = useCameraStore((s) => s.setCoverageTargetPct)
   const showBlindSpots = useCameraStore((s) => s.showBlindSpots)
   const toggleShowBlindSpots = useCameraStore((s) => s.toggleShowBlindSpots)
+  const selectedId = useEditorStore((s) => s.selectedId)
+  const selectedType = useEditorStore((s) => s.selectedType)
 
   const [stats, setStats] = useState(null)
+  const [soloStats, setSoloStats] = useState(null)   // selected camera alone
   const timerRef = useRef(null)
+  const soloTimerRef = useRef(null)
   const blindRevertRef = useRef(null)
 
   useEffect(() => {
@@ -45,6 +49,21 @@ function CoveragePanel() {
     }, DEBOUNCE_MS)
     return () => { if (timerRef.current) clearTimeout(timerRef.current) }
   }, [inCameraMode, activeFloorId, floors, cameras, walls])
+
+  // Contribution of the SELECTED camera alone — what it covers on its own
+  // (rasterise just that one). Only when a camera is selected.
+  const selCam = selectedType === 'camera'
+    ? (cameras ?? []).find((c) => c.id === selectedId)
+    : null
+  useEffect(() => {
+    if (!inCameraMode || !activeFloorId || !selCam) { setSoloStats(null); return }
+    const floor = floors.find((f) => f.id === activeFloorId)
+    if (soloTimerRef.current) clearTimeout(soloTimerRef.current)
+    soloTimerRef.current = setTimeout(() => {
+      setSoloStats(computeCoverageStats({ cameras: [selCam], walls: walls ?? [], floor }))
+    }, DEBOUNCE_MS)
+    return () => { if (soloTimerRef.current) clearTimeout(soloTimerRef.current) }
+  }, [inCameraMode, activeFloorId, floors, walls, selCam])
 
   if (!inCameraMode || !activeFloorId || !stats) return null
 
@@ -105,6 +124,13 @@ function CoveragePanel() {
           <b>{stats.avgOverlap.toFixed(2)}×</b>
         </div>
       </div>
+
+      {selCam && soloStats && (
+        <div className="coverage-panel__solo" title="這台相機單獨能看到的範圍（不計其他相機）">
+          <span>📷 {selCam.name} 單獨涵蓋</span>
+          <b>{fmtPct(soloStats.coveredPct)} · {fmtArea(soloStats.coveredAreaM2)}</b>
+        </div>
+      )}
 
       {stats.biggestGap && stats.blindPct > 0.5 && (
         <button

@@ -26,6 +26,13 @@ const HEIGHT_PRESETS = [
   { m: 6, title: '戶外桿' },
 ]
 
+// Shared inline style for the azimuth nudge / aim buttons.
+const NUDGE_BTN = {
+  padding: '2px 8px', borderRadius: 8, cursor: 'pointer', fontSize: 11,
+  border: '1px solid rgba(255,255,255,0.18)', background: 'transparent',
+  color: '#94a3b8', fontWeight: 600,
+}
+
 function CameraPanel({ floorId, cameraId }) {
   const camera        = useCameraStore((s) => (s.camerasByFloor[floorId] ?? []).find((c) => c.id === cameraId))
   const updateCamera  = useCameraStore((s) => s.updateCamera)
@@ -102,6 +109,13 @@ function CameraPanel({ floorId, cameraId }) {
         <PanelField label="名稱">
           <TextInput value={camera.name} onChange={(v) => handleField('name', v)} />
         </PanelField>
+        <PanelField label="區域" hint="如 大廳／車庫；清單依此分組">
+          <TextInput
+            value={camera.group ?? ''}
+            placeholder="未分組"
+            onChange={(v) => handleField('group', v)}
+          />
+        </PanelField>
         <PanelField label="狀態" hint="離線時不錄影、不偵測，覆蓋計為盲區">
           {(() => {
             const status = deviceStatus(camera)
@@ -173,6 +187,20 @@ function CameraPanel({ floorId, cameraId }) {
             width={70}
             onChange={(v) => { if (!isNaN(v)) handleField('azimuth', v) }}
           />
+        </PanelField>
+        <PanelField label="轉向" hint="微調或朝向底圖中心">
+          <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
+            <button type="button" style={NUDGE_BTN} title="逆時針 15°"
+              onClick={() => handleField('azimuth', wrapAzimuth(rawAz - 15))}>↺ 15°</button>
+            <button type="button" style={NUDGE_BTN} title="順時針 15°"
+              onClick={() => handleField('azimuth', wrapAzimuth(rawAz + 15))}>15° ↻</button>
+            <button type="button" style={NUDGE_BTN} title="朝向底圖中心"
+              onClick={() => {
+                if (!floor?.imageWidth) return
+                const deg = Math.atan2(floor.imageHeight / 2 - camera.y, floor.imageWidth / 2 - camera.x) * 180 / Math.PI
+                handleField('azimuth', wrapAzimuth(Math.round(deg)))
+              }}>◎ 對準中心</button>
+          </span>
         </PanelField>
         <PanelField label="視角 (FOV)" hint={`${MIN_FOV}~${MAX_FOV}，360=環景`}>
           <NumberInput

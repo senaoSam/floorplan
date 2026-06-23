@@ -59,6 +59,24 @@ function CameraListPanel() {
     }
   }
 
+  // Group cameras by their `group` label for the roster. Unlabelled cameras
+  // fall into 未分組. Group headers only show once ≥1 camera has a real group
+  // (otherwise everything is 未分組 and headers would be noise). Named groups
+  // sort alphabetically; 未分組 always sorts last.
+  const UNGROUPED = '未分組'
+  const groupMap = new Map()
+  for (const cam of cameras) {
+    const key = (cam.group ?? '').trim() || UNGROUPED
+    if (!groupMap.has(key)) groupMap.set(key, [])
+    groupMap.get(key).push(cam)
+  }
+  const showGroupHeaders = [...groupMap.keys()].some((k) => k !== UNGROUPED)
+  const groups = [...groupMap.entries()].sort((a, b) => {
+    if (a[0] === UNGROUPED) return 1
+    if (b[0] === UNGROUPED) return -1
+    return a[0].localeCompare(b[0])
+  })
+
   // ── Batch operations over the checked cameras ──
   const batchApplyModel = (modelId) => {
     if (modelId === 'custom') return
@@ -98,51 +116,58 @@ function CameraListPanel() {
       ) : (
         <>
           <div className="camera-list__rows">
-            {cameras.map((cam) => {
-              const status = deviceStatus(cam)
-              const model = cameraModelById(cam.model ?? 'custom')
-              const isSel = selectedId === cam.id && selectedType === 'camera'
-              const isChecked = checked.has(cam.id)
-              return (
-                <div
-                  key={cam.id}
-                  className={`camera-list__row${isSel ? ' camera-list__row--sel' : ''}`}
-                >
-                  <input
-                    type="checkbox"
-                    className="camera-list__check"
-                    checked={isChecked}
-                    onChange={() => toggleChecked(cam.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    title="選取以批次操作"
-                  />
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    className="camera-list__rowmain"
-                    onClick={() => focusCamera(cam)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focusCamera(cam) } }}
-                    title="點擊選取並置中"
-                  >
-                    <span className="camera-list__dot" style={{ background: STATUS_COLOR[status] }} />
-                    <span className="camera-list__name">{cam.name}</span>
-                    <span className="camera-list__model">{model.id === 'custom' ? '自訂' : model.label.split(' ')[0]}</span>
-                  </span>
-                  <button
-                    type="button"
-                    className="camera-list__del"
-                    title="刪除這台相機"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      removeCamera(activeFloorId, cam.id)
-                      if (selectedId === cam.id) clearSelected()
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-              )
-            })}
+            {groups.map(([groupName, groupCams]) => (
+              <React.Fragment key={groupName}>
+                {showGroupHeaders && (
+                  <div className="camera-list__group">{groupName}（{groupCams.length}）</div>
+                )}
+                {groupCams.map((cam) => {
+                  const status = deviceStatus(cam)
+                  const model = cameraModelById(cam.model ?? 'custom')
+                  const isSel = selectedId === cam.id && selectedType === 'camera'
+                  const isChecked = checked.has(cam.id)
+                  return (
+                    <div
+                      key={cam.id}
+                      className={`camera-list__row${isSel ? ' camera-list__row--sel' : ''}`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="camera-list__check"
+                        checked={isChecked}
+                        onChange={() => toggleChecked(cam.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        title="選取以批次操作"
+                      />
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        className="camera-list__rowmain"
+                        onClick={() => focusCamera(cam)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focusCamera(cam) } }}
+                        title="點擊選取並置中"
+                      >
+                        <span className="camera-list__dot" style={{ background: STATUS_COLOR[status] }} />
+                        <span className="camera-list__name">{cam.name}</span>
+                        <span className="camera-list__model">{model.id === 'custom' ? '自訂' : model.label.split(' ')[0]}</span>
+                      </span>
+                      <button
+                        type="button"
+                        className="camera-list__del"
+                        title="刪除這台相機"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          removeCamera(activeFloorId, cam.id)
+                          if (selectedId === cam.id) clearSelected()
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )
+                })}
+              </React.Fragment>
+            ))}
           </div>
 
           {checkedLive.length > 0 && (
