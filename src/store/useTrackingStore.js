@@ -25,6 +25,13 @@ export const useTrackingStore = create((set) => ({
   occupancyMode: 'off',
   occupancyFromSec: DAY_START_SEC,
   occupancyToSec: DAY_END_SEC,
+  // Timelapse (Verkada parity): when on, the [from,to] window keeps its WIDTH
+  // and slides forward along the day on its own rAF loop (trackingBinder owns
+  // it), so the heatmap animates the activity rolling through the day — the
+  // Verkada "select interval, watch it evolve" experience. occupancyLapseSpeed
+  // is simulated-seconds advanced per real second.
+  occupancyLapsePlaying: false,
+  occupancyLapseSpeed: 1800,   // 30 simulated min per real sec → a full day in ~28s
 
   setTracks: (floorId, tracks, seed) => set((s) => ({
     tracksByFloor: { ...s.tracksByFloor, [floorId]: tracks },
@@ -50,5 +57,17 @@ export const useTrackingStore = create((set) => ({
     return from < to
       ? { occupancyFromSec: from, occupancyToSec: to }
       : {}   // ignore inverted ranges — the UI constrains the selects anyway
+  }),
+
+  // ── Timelapse ─────────────────────────────────────────────────────────────
+  setOccupancyLapsePlaying: (occupancyLapsePlaying) => set({ occupancyLapsePlaying }),
+  setOccupancyLapseSpeed: (occupancyLapseSpeed) => set({ occupancyLapseSpeed }),
+  // Slide the window forward by `dtSec` keeping its width; wrap to the start of
+  // the day once the trailing edge reaches DAY_END_SEC so the lapse loops.
+  advanceOccupancyLapse: (dtSec) => set((s) => {
+    const width = s.occupancyToSec - s.occupancyFromSec
+    let from = s.occupancyFromSec + dtSec
+    if (from + width >= DAY_END_SEC) from = DAY_START_SEC   // loop the day
+    return { occupancyFromSec: from, occupancyToSec: from + width }
   }),
 }))

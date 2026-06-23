@@ -1,0 +1,55 @@
+@use '@/styles/variables' as *
+
+// Mock live-view popover — centered modal over the canvas, dark-glass family.
+
+.live-view
+  position: absolute
+  inset: 0
+  z-index: 500
+  display: flex
+  align-items: center
+  justify-content: center
+  background: rgba(2, 6, 23, 0.55)
+  backdrop-filter: blur(2px)
+
+  &__frame
+    display: flex
+    flex-direction: column
+    background: rgba(15, 23, 42, 0.96)
+    border: 1px solid rgba(255, 255, 255, 0.14)
+    border-left: 3px solid #10b981
+    border-radius: 12px
+    overflow: hidden
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55)
+
+  &__bar
+    display: flex
+    align-items: center
+    justify-content: space-between
+    padding: 8px 12px
+    color: $text-primary
+    font-size: 13px
+
+  &__title
+    font-weight: 700
+    color: #10b981
+
+  &__close
+    background: transparent
+    border: none
+    color: $text-secondary
+    font-size: 14px
+    cursor: pointer
+    &:hover
+      color: $text-primary
+
+  &__canvas
+    display: block
+    width: 480px
+    height: 270px
+    background: #0b1220
+
+  &__hint
+    padding: 7px 12px
+    color: $text-secondary
+    font-size: 11px

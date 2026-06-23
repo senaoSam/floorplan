@@ -4,18 +4,23 @@ import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from '.
 import { FALLBACK_PX_PER_M } from './camerasLayer'
 import { deviceStatus, DEVICE_STATUS } from './deviceStatus'
 
-// Blind-spot overlay (Phase 34-5 ①): shades every part of the floor that NO
-// camera can see — the union of all wall-clipped FOV polygons punched out of
-// a dark sheet. The punching is done on an offscreen 2D canvas with
-// destination-out (PIXI Graphics has no even-odd/boolean fill), then wrapped
-// in a sprite at the top of the cameraFov layer: the dark sheet covers the
-// floor image + occupancy heatmap, the transparent holes let the green FOV
-// cones show through, and the walls layer above stays crisp.
+// Overlap overlay (planning aid): tints the floor by how many cameras can see
+// each spot — single coverage (one camera; a failure there becomes a blind
+// spot) vs redundant coverage (≥2 cameras). Complements the blind-spot overlay
+// (which shades the 0-camera area). Toggled from the camera timeline bar.
+//
+// Built on an offscreen canvas: each online camera's wall-clipped FOV polygon
+// is rasterised once and read back to accumulate a per-pixel overlap count,
+// then the count buffer is colourised into an RGBA image (amber = 1 camera,
+// teal = ≥2). Sits in the cameraFov layer, under the walls layer.
 
-const SHADE_COLOR = 'rgba(15, 23, 42, 0.52)'
-const MAX_CANVAS_PX = 1400   // cap the offscreen resolution on huge floors
+const MAX_CANVAS_PX = 1100
+const SINGLE_RGB = [245, 158, 11]   // amber — single coverage
+const MULTI_RGB = [20, 184, 166]    // teal — redundant (≥2)
+const SINGLE_ALPHA = 90             // 0..255
+const MULTI_ALPHA = 105
 
-export function attachBlindSpotLayer({
+export function attachOverlapLayer({
   scene,
   useFloorStore,
   useWallStore,
@@ -37,7 +42,7 @@ export function attachBlindSpotLayer({
     const cs = useCameraStore.getState()
     const { floors, activeFloorId } = useFloorStore.getState()
     const floor = floors.find((f) => f.id === activeFloorId)
-    if (!isCameraMode() || !cs.showBlindSpots || !floor?.imageWidth) {
+    if (!isCameraMode() || !cs.showOverlap || !floor?.imageWidth) {
       clearSprite()
       scene.requestRender()
       return
@@ -48,46 +53,66 @@ export function attachBlindSpotLayer({
     const segs = buildBlockingSegments(walls)
 
     const k = Math.min(1, MAX_CANVAS_PX / Math.max(floor.imageWidth, floor.imageHeight))
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(floor.imageWidth * k))
-    canvas.height = Math.max(1, Math.round(floor.imageHeight * k))
-    const ctx = canvas.getContext('2d')
-    ctx.fillStyle = SHADE_COLOR
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    ctx.globalCompositeOperation = 'destination-out'
-    ctx.fillStyle = '#000'
+    const cw = Math.max(1, Math.round(floor.imageWidth * k))
+    const ch = Math.max(1, Math.round(floor.imageHeight * k))
+    const total = cw * ch
+    const counts = new Uint8Array(total)
+
+    const scratch = document.createElement('canvas')
+    scratch.width = cw
+    scratch.height = ch
+    const sctx = scratch.getContext('2d', { willReadFrequently: true })
+
     for (const cam of cameras) {
-      // Offline cameras aren't recording → they cover nothing (count as blind).
       if (deviceStatus(cam) === DEVICE_STATUS.OFFLINE) continue
       const { minRangePx, rangePx } = cameraCoverageRadii(cam, scale)
       const poly = computeFovPolygon({
         cx: cam.x, cy: cam.y,
         azimuthDeg: cam.azimuth ?? 0,
         fovDeg: cam.fovDeg ?? 90,
-        rangePx,
-        minRangePx,
+        rangePx, minRangePx,
         segments: segs,
       })
-      if (!poly) continue
-      ctx.beginPath()
-      ctx.moveTo(poly[0] * k, poly[1] * k)
-      for (let i = 2; i < poly.length; i += 2) ctx.lineTo(poly[i] * k, poly[i + 1] * k)
-      ctx.closePath()
-      ctx.fill()
+      if (!poly || poly.length < 6) continue
+      sctx.clearRect(0, 0, cw, ch)
+      sctx.fillStyle = '#fff'
+      sctx.beginPath()
+      sctx.moveTo(poly[0] * k, poly[1] * k)
+      for (let i = 2; i < poly.length; i += 2) sctx.lineTo(poly[i] * k, poly[i + 1] * k)
+      sctx.closePath()
+      sctx.fill()
+      const d = sctx.getImageData(0, 0, cw, ch).data
+      for (let p = 0, px = 0; p < d.length; p += 4, px++) {
+        if (d[p + 3] > 40 && counts[px] < 255) counts[px] += 1
+      }
     }
 
+    // Colourise the count buffer into the output image.
+    const out = document.createElement('canvas')
+    out.width = cw
+    out.height = ch
+    const octx = out.getContext('2d')
+    const img = octx.createImageData(cw, ch)
+    for (let px = 0, p = 0; px < total; px++, p += 4) {
+      const c = counts[px]
+      if (c === 0) continue   // leave 0-camera area transparent (blind layer owns it)
+      const [r, g, b] = c >= 2 ? MULTI_RGB : SINGLE_RGB
+      img.data[p] = r
+      img.data[p + 1] = g
+      img.data[p + 2] = b
+      img.data[p + 3] = c >= 2 ? MULTI_ALPHA : SINGLE_ALPHA
+    }
+    octx.putImageData(img, 0, 0)
+
     clearSprite()
-    sprite = new Sprite(Texture.from(canvas))
+    sprite = new Sprite(Texture.from(out))
     sprite.eventMode = 'none'
     sprite.width = floor.imageWidth
     sprite.height = floor.imageHeight
-    layer.addChild(sprite)   // top of cameraFov — under the walls layer
+    layer.addChild(sprite)
     scene.requestRender()
   }
 
-  // Diff inputs by hand — camera store changes on draft-point moves etc. too,
-  // but rebuilding is cheap enough (per change, not per frame) to keep simple:
-  // only skip when nothing relevant changed.
   let prev = snapshot()
   function snapshot() {
     const cs = useCameraStore.getState()
@@ -95,7 +120,7 @@ export function attachBlindSpotLayer({
     return {
       cams: cs.camerasByFloor[fid],
       walls: useWallStore.getState().wallsByFloor[fid],
-      show: cs.showBlindSpots,
+      show: cs.showOverlap,
       fid,
       inCamera: isCameraMode(),
     }

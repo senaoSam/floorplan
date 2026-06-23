@@ -4,6 +4,8 @@ import { useViewportStore } from '@/store/useViewportStore'
 import { sampleTrackAt, trackSpeedAt, trackHeadingAt } from './mockTracks'
 import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from './fovPolygon'
 import { FALLBACK_PX_PER_M } from './camerasLayer'
+import { setDetectingCameras, resetDetection } from './detectionBus'
+import { deviceStatus, DEVICE_STATUS } from './deviceStatus'
 
 // Live tracking icons for Camera mode (Phase 34-2). Renders "the world at
 // clockSec": every track active at the current playback clock becomes a
@@ -83,6 +85,8 @@ export function attachTracksLayer({
     const segs = buildBlockingSegments(walls)
     const next = []
     for (const cam of cameras) {
+      // Offline cameras aren't recording → they detect nothing.
+      if (deviceStatus(cam) === DEVICE_STATUS.OFFLINE) continue
       const { minRangePx, rangePx } = cameraCoverageRadii(cam, scale)
       const poly = computeFovPolygon({
         cx: cam.x, cy: cam.y,
@@ -158,25 +162,39 @@ export function attachTracksLayer({
     return inside
   }
 
-  const detectedBy = (x, y) => {
+  // First camera whose FOV contains (x,y) — used for icon colour + hover
+  // label. When `collect` is given, ALSO record every detecting camera's id
+  // into it (for the FOV-pulse bus), not just the first.
+  const detectedBy = (x, y, collect = null) => {
+    let first = null
     for (const f of fovPolygons()) {
-      if (pointInPoly(x, y, f.poly)) return f
+      if (pointInPoly(x, y, f.poly)) {
+        if (!first) first = f
+        if (collect) collect.add(f.cameraId)
+        else return f
+      }
     }
-    return null
+    return first
   }
 
   // Active icons from the last redraw — the hover probe searches this list.
   let activeIcons = []   // [{ track, x, y, detected }]
 
+  // Reused per-frame accumulator of cameras currently seeing ≥1 target →
+  // pushed to detectionBus so the cones can pulse. Module-scope-ish (closure)
+  // to avoid per-frame allocation.
+  const detectingThisFrame = new Set()
+
   const redraw = () => {
     g.clear()
     activeIcons = []
-    if (!isCameraMode()) { root.visible = false; label.visible = false; return }
+    if (!isCameraMode()) { root.visible = false; label.visible = false; resetDetection(); return }
     root.visible = true
     const fid = useFloorStore.getState().activeFloorId
     const tr = useTrackingStore.getState()
     const tracks = tr.tracksByFloor[fid] ?? []
-    if (tracks.length === 0) { label.visible = false; return }
+    if (tracks.length === 0) { label.visible = false; resetDetection(); return }
+    detectingThisFrame.clear()
     const t = tr.clockSec
     const vpScale = useViewportStore.getState().scale || 1
     const s = 1 / vpScale
@@ -187,7 +205,7 @@ export function attachTracksLayer({
       if (t < track.t0 || t > track.t1) continue
       const pos = sampleTrackAt(track, t)
       if (!pos) continue
-      const det = detectedBy(pos.x, pos.y)
+      const det = detectedBy(pos.x, pos.y, detectingThisFrame)
       if (!det && !showGhosts) continue
       activeIcons.push({ track, x: pos.x, y: pos.y, detected: det })
 
@@ -225,6 +243,7 @@ export function attachTracksLayer({
       }
     }
 
+    setDetectingCameras(detectingThisFrame)
     updateHoverLabel()
   }
 
@@ -276,6 +295,7 @@ export function attachTracksLayer({
     unsubCamera()
     unsubWall()
     unsubViewport()
+    resetDetection()
     scene.layers.overlays.removeChild(root)
     root.destroy({ children: true })
   }

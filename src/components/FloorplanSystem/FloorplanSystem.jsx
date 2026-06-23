@@ -15,6 +15,8 @@ import { attachCamerasLayer } from '@/features/cameras/camerasLayer'
 import { attachTracksLayer } from '@/features/cameras/tracksLayer'
 import { attachOccupancyLayer } from '@/features/cameras/occupancyLayer'
 import { attachBlindSpotLayer } from '@/features/cameras/blindSpotLayer'
+import { attachOverlapLayer } from '@/features/cameras/overlapLayer'
+import { attachGapMarkerLayer } from '@/features/cameras/gapMarkerLayer'
 import { attachAnalyticsLayer } from '@/features/cameras/analyticsLayer'
 import { bindTracking } from '@/features/cameras/trackingBinder'
 import { attachCablesLayer } from '@/features/cables/cablesLayer'
@@ -83,6 +85,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachTracks = null
     let detachOccupancy = null
     let detachBlindSpots = null
+    let detachOverlap = null
+    let detachGapMarker = null
     let analyticsCtl = null
     let detachTracking = null
     let detachCables = null
@@ -331,6 +335,13 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useWallStore,
         useCameraStore,
       })
+      detachOverlap = attachOverlapLayer({
+        scene: s,
+        useFloorStore,
+        useWallStore,
+        useCameraStore,
+      })
+      detachGapMarker = attachGapMarkerLayer({ scene: s })
       analyticsCtl = attachAnalyticsLayer({
         scene: s,
         useFloorStore,
@@ -711,6 +722,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (detachTrays) detachTrays()
       if (detachTracking) detachTracking()
       if (analyticsCtl) analyticsCtl.detach()
+      if (detachGapMarker) detachGapMarker()
+      if (detachOverlap) detachOverlap()
       if (detachBlindSpots) detachBlindSpots()
       if (detachOccupancy) detachOccupancy()
       if (detachTracks) detachTracks()

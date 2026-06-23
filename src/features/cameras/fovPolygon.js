@@ -112,7 +112,11 @@ function raySegmentT(ox, oy, dx, dy, seg) {
 // boundary walked back). Rays whose wall hit lands inside the blind ring
 // collapse to zero width and contribute no area. minRangePx === 0 keeps the
 // classic fan anchored at the camera (full circle omits the centre point).
-export function computeFovPolygon({ cx, cy, azimuthDeg, fovDeg, rangePx, segments, minRangePx = 0 }) {
+// `outHits`, when supplied, is filled with the per-bearing wall-clipped reach
+// [{ ang, t }] — the same data the polygon is built from. The wave-ripple
+// renderer uses it to clip its arcs against walls (so ripples don't leak
+// through occluders), reusing this ray-cast instead of repeating it.
+export function computeFovPolygon({ cx, cy, azimuthDeg, fovDeg, rangePx, segments, minRangePx = 0, outHits = null }) {
   const fov = Math.max(1, Math.min(FULL_CIRCLE_DEG, fovDeg ?? 90))
   const isFull = fov >= FULL_CIRCLE_DEG - 1e-6
   const fovRad = fov * Math.PI / 180
@@ -155,6 +159,7 @@ export function computeFovPolygon({ cx, cy, azimuthDeg, fovDeg, rangePx, segment
     }
     hits.push({ ang, t: best })
   }
+  if (outHits) { outHits.length = 0; for (const h of hits) outHits.push(h) }
   if (hits.length < 2) return null
 
   if (minRangePx <= 0) {

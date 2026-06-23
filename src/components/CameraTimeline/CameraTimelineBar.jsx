@@ -36,8 +36,10 @@ function CameraTimelineBar() {
   const occupancyMode = useTrackingStore((s) => s.occupancyMode)
   const occupancyFromSec = useTrackingStore((s) => s.occupancyFromSec)
   const occupancyToSec = useTrackingStore((s) => s.occupancyToSec)
+  const occupancyLapsePlaying = useTrackingStore((s) => s.occupancyLapsePlaying)
   const setOccupancyMode = useTrackingStore((s) => s.setOccupancyMode)
   const setOccupancyRange = useTrackingStore((s) => s.setOccupancyRange)
+  const setOccupancyLapsePlaying = useTrackingStore((s) => s.setOccupancyLapsePlaying)
   const trackCount = useTrackingStore((s) => (s.tracksByFloor[activeFloorId] ?? []).length)
   const setClockSec = useTrackingStore((s) => s.setClockSec)
   const setPlaying = useTrackingStore((s) => s.setPlaying)
@@ -45,6 +47,12 @@ function CameraTimelineBar() {
   const toggleShowUndetected = useTrackingStore((s) => s.toggleShowUndetected)
   const showBlindSpots = useCameraStore((s) => s.showBlindSpots)
   const toggleShowBlindSpots = useCameraStore((s) => s.toggleShowBlindSpots)
+  const showOverlap = useCameraStore((s) => s.showOverlap)
+  const toggleShowOverlap = useCameraStore((s) => s.toggleShowOverlap)
+  const showTrendPanel = useCameraStore((s) => s.showTrendPanel)
+  const toggleShowTrendPanel = useCameraStore((s) => s.toggleShowTrendPanel)
+  const showCameraList = useCameraStore((s) => s.showCameraList)
+  const toggleShowCameraList = useCameraStore((s) => s.toggleShowCameraList)
   const drawTool = useCameraStore((s) => s.drawTool)
   const setDrawTool = useCameraStore((s) => s.setDrawTool)
 
@@ -115,6 +123,28 @@ function CameraTimelineBar() {
           <span>盲區</span>
         </label>
 
+        <label className="camera-timeline__ghosts" title="重疊覆蓋：黃=只有 1 台相機看到（單點故障即盲區），藍綠=2 台以上備援">
+          <input type="checkbox" checked={showOverlap} onChange={toggleShowOverlap} />
+          <span>重疊</span>
+        </label>
+
+        <button
+          type="button"
+          className={`camera-timeline__chip${showTrendPanel ? ' camera-timeline__chip--active' : ''}`}
+          onClick={toggleShowTrendPanel}
+          title="顯示整層樓的逐時占用趨勢（全日人/車數、尖峰時段）"
+        >
+          📊 趨勢
+        </button>
+        <button
+          type="button"
+          className={`camera-timeline__chip${showCameraList ? ' camera-timeline__chip--active' : ''}`}
+          onClick={toggleShowCameraList}
+          title="顯示本樓層相機清單（型號／狀態），點一列選取並置中"
+        >
+          📋 清單
+        </button>
+
         <span className="camera-timeline__divider" aria-hidden="true" />
 
         <button
@@ -177,6 +207,22 @@ function CameraTimelineBar() {
                 <option key={h} value={h}>{formatClock(h)}</option>
               ))}
             </select>
+            <button
+              type="button"
+              className={`camera-timeline__chip${occupancyLapsePlaying ? ' camera-timeline__chip--active' : ''}`}
+              onClick={() => {
+                // Starting the lapse with a full-day window shows no motion —
+                // the window already spans everything. Narrow it to 2h first so
+                // the sliding hot-spots are immediately visible.
+                if (!occupancyLapsePlaying && occupancyToSec - occupancyFromSec > 3 * 3600) {
+                  setOccupancyRange(DAY_START_SEC, DAY_START_SEC + 2 * 3600)
+                }
+                setOccupancyLapsePlaying(!occupancyLapsePlaying)
+              }}
+              title="時間推移：固定統計時段寬度（自動縮成 2 小時），沿整天自動滑動播放，看活動熱點隨時間演變"
+            >
+              {occupancyLapsePlaying ? '⏸ 推移' : '⏱ 推移'}
+            </button>
           </span>
         )}
       </div>

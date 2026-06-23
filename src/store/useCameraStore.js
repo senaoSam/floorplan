@@ -19,6 +19,19 @@ export const useCameraStore = create((set, get) => ({
   globalZoneCounter: 0,
   // Blind-spot overlay: shade everything no camera can see.
   showBlindSpots: false,
+  // Overlap overlay: tint single-camera vs multi-camera (redundant) coverage.
+  showOverlap: false,
+  // Floor-wide occupancy trend panel (Verkada "Occupancy Trends" parity).
+  showTrendPanel: false,
+  // Camera list panel: roster of every camera on the floor.
+  showCameraList: false,
+  cameraListCollapsed: false,
+  // Coverage target % — the coverage panel flags pass/fail against this.
+  coverageTargetPct: 80,
+  // Live-view popover (Verkada parity): the camera whose feed is open, or
+  // null. The feed is a MOCK placeholder — we have no real stream — but the
+  // interaction ("click a device, see its feed") matches Command.
+  liveViewCameraId: null,
   // Two-click draw sub-tool inside CAMERA mode: null | 'tripwire' | 'zone'.
   // First click stores draftPoint, second commits the object. While a tool is
   // armed, canvas clicks do NOT place cameras (FloorplanSystem routes here).
@@ -138,6 +151,14 @@ export const useCameraStore = create((set, get) => ({
 
   // ── Blind spots / draw tool ─────────────────────────────────────────────
   toggleShowBlindSpots: () => set((s) => ({ showBlindSpots: !s.showBlindSpots })),
+  toggleShowOverlap: () => set((s) => ({ showOverlap: !s.showOverlap })),
+  toggleShowTrendPanel: () => set((s) => ({ showTrendPanel: !s.showTrendPanel })),
+  toggleShowCameraList: () => set((s) => ({ showCameraList: !s.showCameraList })),
+  toggleCameraListCollapsed: () => set((s) => ({ cameraListCollapsed: !s.cameraListCollapsed })),
+  setCoverageTargetPct: (coverageTargetPct) =>
+    set({ coverageTargetPct: Math.max(0, Math.min(100, coverageTargetPct)) }),
+  openLiveView: (cameraId) => set({ liveViewCameraId: cameraId }),
+  closeLiveView: () => set({ liveViewCameraId: null }),
   setDrawTool: (drawTool) => set({ drawTool, draftPoint: null }),
   setDraftPoint: (draftPoint) => set({ draftPoint }),
 }))

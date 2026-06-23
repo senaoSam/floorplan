@@ -1,0 +1,199 @@
+@use '@/styles/variables' as *
+
+// Camera roster — floats bottom-left, stacked just above the occupancy trend
+// panel (which sits at bottom:12px). Collapsible to just its title bar.
+
+.camera-list
+  position: absolute
+  left: 12px
+  bottom: 254px
+  z-index: 389
+  width: 320px
+  max-height: 42vh
+  display: flex
+  flex-direction: column
+  gap: 6px
+  padding: 10px 12px 11px
+  background: rgba(15, 23, 42, 0.9)
+  border: 1px solid rgba(255, 255, 255, 0.12)
+  border-left: 3px solid #10b981
+  border-radius: 12px
+  backdrop-filter: blur(6px)
+  color: $text-primary
+  font-size: 12px
+  user-select: none
+  &--collapsed
+    max-height: none
+    padding-bottom: 10px
+
+  &__head
+    display: flex
+    align-items: center
+    gap: 6px
+
+  &__caret
+    background: transparent
+    border: none
+    color: $text-secondary
+    font-size: 11px
+    cursor: pointer
+    padding: 0 2px
+    &:hover
+      color: $text-primary
+
+  &__title
+    flex: 1
+    font-size: 13px
+    font-weight: 700
+    color: #10b981
+
+  &__close
+    background: transparent
+    border: none
+    color: $text-secondary
+    font-size: 13px
+    cursor: pointer
+    &:hover
+      color: $text-primary
+
+  &__empty
+    color: $text-secondary
+    font-size: 11px
+    line-height: 1.4
+
+  &__rows
+    display: flex
+    flex-direction: column
+    gap: 2px
+    overflow-y: auto
+
+  &__row
+    display: flex
+    align-items: center
+    gap: 6px
+    padding: 4px 7px
+    background: transparent
+    border: 1px solid transparent
+    border-radius: 7px
+    color: $text-primary
+    font-size: 12px
+    text-align: left
+    &:hover
+      background: rgba(255, 255, 255, 0.06)
+      .camera-list__del
+        opacity: 1
+    &--sel
+      background: rgba(16, 185, 129, 0.16)
+      border-color: rgba(16, 185, 129, 0.6)
+
+  &__group
+    padding: 4px 6px 2px
+    font-size: 10.5px
+    font-weight: 700
+    color: $text-secondary
+    text-transform: none
+    letter-spacing: 0.02em
+
+  &__check
+    flex: none
+    accent-color: #10b981
+    cursor: pointer
+
+  &__rowmain
+    flex: 1
+    display: flex
+    align-items: center
+    gap: 8px
+    min-width: 0
+    cursor: pointer
+
+  &__dot
+    width: 8px
+    height: 8px
+    border-radius: 50%
+    flex: none
+
+  &__name
+    flex: 1
+    font-weight: 600
+    font-variant-numeric: tabular-nums
+
+  &__model
+    color: $text-secondary
+    font-size: 10px
+
+  &__del
+    flex: none
+    width: 18px
+    height: 18px
+    display: flex
+    align-items: center
+    justify-content: center
+    padding: 0
+    background: transparent
+    border: none
+    border-radius: 4px
+    color: $text-secondary
+    font-size: 11px
+    cursor: pointer
+    opacity: 0          // revealed on row hover
+    &:hover
+      background: rgba(239, 68, 68, 0.2)
+      color: #ef4444
+
+  // ── Batch bar (shown when ≥1 row checked) ──
+  &__batch
+    display: flex
+    flex-direction: column
+    gap: 5px
+    margin-top: 2px
+    padding-top: 7px
+    border-top: 1px solid rgba(255, 255, 255, 0.12)
+
+  &__batch-head
+    display: flex
+    align-items: center
+    justify-content: space-between
+    font-size: 11px
+    color: #10b981
+    font-weight: 600
+    button
+      background: transparent
+      border: none
+      color: $text-secondary
+      font-size: 11px
+      cursor: pointer
+      &:hover
+        color: $text-primary
+
+  &__batch-row
+    display: flex
+    align-items: center
+    gap: 4px
+    flex-wrap: wrap
+    button
+      padding: 3px 9px
+      background: transparent
+      border: 1px solid rgba(255, 255, 255, 0.18)
+      border-radius: 7px
+      color: $text-secondary
+      font-size: 11px
+      cursor: pointer
+      &:hover
+        border-color: rgba(16, 185, 129, 0.6)
+        color: $text-primary
+
+  &__batch-model
+    background: rgba(255, 255, 255, 0.06)
+    border: 1px solid rgba(255, 255, 255, 0.18)
+    border-radius: 7px
+    color: $text-primary
+    font-size: 11px
+    padding: 3px 5px
+    cursor: pointer
+    option
+      background: #16213e
+
+  &__batch-del:hover
+    border-color: rgba(239, 68, 68, 0.6) !important
+    color: #ef4444 !important

@@ -14,6 +14,10 @@ import { FALLBACK_PX_PER_M } from './camerasLayer'
 // the heatmap is an aggregate, deliberately independent of the scrubber.
 
 const RECOMPUTE_DEBOUNCE_MS = 120
+// Max time the debounce can be deferred before a forced rebuild — keeps the
+// timelapse animating (its window changes every frame) instead of the debounce
+// resetting forever and freezing the heatmap.
+const RECOMPUTE_MAX_WAIT_MS = 200
 
 // Flow-map arrows (occupancyMode 'flow').
 const FLOW_COLOR = '#06b6d4'
@@ -107,9 +111,25 @@ export function attachOccupancyLayer({
     scene.requestRender()
   }
 
+  // Debounce, but with a MAX WAIT: while the timelapse is playing, the window
+  // changes every frame, which would reset a plain debounce forever and freeze
+  // the heatmap (it never gets to rebuild). The max-wait guarantees a refresh
+  // at least every RECOMPUTE_MAX_WAIT_MS so the lapse animates and a mode
+  // switch mid-lapse takes effect.
+  let lastRunTs = 0
   const scheduleRebuild = () => {
+    const now = performance.now()
     if (timer) clearTimeout(timer)
-    timer = setTimeout(() => { timer = null; rebuild() }, RECOMPUTE_DEBOUNCE_MS)
+    if (lastRunTs && now - lastRunTs >= RECOMPUTE_MAX_WAIT_MS) {
+      lastRunTs = now
+      rebuild()
+      return
+    }
+    timer = setTimeout(() => {
+      timer = null
+      lastRunTs = performance.now()
+      rebuild()
+    }, RECOMPUTE_DEBOUNCE_MS)
   }
 
   // Diff the inputs by hand — the tracking store changes every playback frame
