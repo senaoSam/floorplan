@@ -131,7 +131,7 @@ function FloorStack({ floor, elevation, isActive, onAPHover, inCameraMode }) {
 // sidebar) we tween target + camera position together for a short window so
 // the view glides instead of snapping. Outside that window OrbitControls owns
 // the camera fully — keeping it hijacked per-frame breaks orbit/pan/zoom.
-function CameraRig({ target, cameraStateRef, entryPose }) {
+function CameraRig({ target, cameraStateRef }) {
   const controlsRef = useRef()
   const { camera, gl } = useThree()
 
@@ -143,14 +143,34 @@ function CameraRig({ target, cameraStateRef, entryPose }) {
     cameraStateRef.current = {
       camera,
       controls: controlsRef.current,
-      tweenTo: ({ camPos, target: tgt, duration }) => {
+      tweenTo: ({ camPos, target: tgt, duration, fromCam, fromTarget }) => {
         if (camPos) desiredCam.current.set(camPos[0], camPos[1], camPos[2])
         else desiredCam.current.copy(camera.position)
         if (tgt) desiredTarget.current.set(tgt[0], tgt[1], tgt[2])
         else if (controlsRef.current) desiredTarget.current.copy(controlsRef.current.target)
-        // Snapshot starting pose for fixed-duration interpolation.
-        startCam.current.copy(camera.position)
-        startTarget.current.copy(controlsRef.current?.target ?? desiredTarget.current)
+        // Starting pose. Normally snapshot the live camera, but the caller can
+        // pass an explicit fromCam/fromTarget to make the tween begin from a
+        // known pose regardless of where the camera currently sits — used by
+        // the 2D→3D entry so the animation always starts top-down even if the
+        // stale initial camera (set by the <Canvas camera> prop before any
+        // floor existed) is somewhere else. Because useFrame snaps the camera
+        // to the interpolated start on the very first tween frame, this also
+        // overwrites that stale pose before it can be painted.
+        if (fromCam) {
+          startCam.current.set(fromCam[0], fromCam[1], fromCam[2])
+          camera.position.copy(startCam.current)
+        } else {
+          startCam.current.copy(camera.position)
+        }
+        if (fromTarget) {
+          startTarget.current.set(fromTarget[0], fromTarget[1], fromTarget[2])
+          if (controlsRef.current) {
+            controlsRef.current.target.copy(startTarget.current)
+            controlsRef.current.update()
+          }
+        } else {
+          startTarget.current.copy(controlsRef.current?.target ?? desiredTarget.current)
+        }
         tweenStartMs.current = performance.now()
         tweenDurMs.current = duration > 0 ? duration : 0
         tweening.current = true
@@ -189,9 +209,9 @@ function CameraRig({ target, cameraStateRef, entryPose }) {
   // that preserves the user's current orbit pose (same offset to the target).
   // First mount is special: controls.target is still the default (0,0,0) so
   // the offset would be wrong — instead snap controls.target to the prop and
-  // leave camera.position alone (already set via Canvas `camera` prop). If an
-  // entryPose is provided we kick off the 2D→3D entry animation right after
-  // the snap, since CameraRig owns the moment controls become ready.
+  // leave camera.position alone (already set via Canvas `camera` prop). The
+  // 2D→3D entry animation is driven by Viewer3D's isVisible effect (Viewer3D
+  // is now always-mounted, so it can't ride CameraRig's first mount).
   useEffect(() => {
     const controls = controlsRef.current
     if (!controls) return
@@ -201,16 +221,6 @@ function CameraRig({ target, cameraStateRef, entryPose }) {
       tweening.current = false
       mounted.current = true
       lastTarget.current = [target[0], target[1], target[2]]
-      if (entryPose) {
-        const tgt = entryPose.target ?? target
-        desiredCam.current.set(entryPose.camPos[0], entryPose.camPos[1], entryPose.camPos[2])
-        desiredTarget.current.set(tgt[0], tgt[1], tgt[2])
-        startCam.current.copy(camera.position)
-        startTarget.current.copy(controls.target)
-        tweenStartMs.current = performance.now()
-        tweenDurMs.current = entryPose.duration > 0 ? entryPose.duration : 0
-        tweening.current = true
-      }
       return
     }
     // Skip if the numeric target didn't actually change — `target` is often a
@@ -223,7 +233,7 @@ function CameraRig({ target, cameraStateRef, entryPose }) {
     desiredTarget.current.copy(nextTarget)
     desiredCam.current.copy(nextTarget).add(camOffset)
     tweening.current = true
-  }, [target, camera, entryPose])
+  }, [target, camera])
 
   useFrame((_, dt) => {
     const controls = controlsRef.current
@@ -500,13 +510,70 @@ function Viewer3D() {
 
   const cameraStateRef = useRef(null)
 
-  // 進 3D 立刻啟動「2D → 3D 落地」的 5 秒鏡頭過渡：俯瞰起手 → 3/4
-  // perspective。Pose 是當下測試樓層手動 tune 出來的世界座標，後續可改成
-  // 相對 target 的 offset 讓多樓層通用。
+  // 「2D → 3D 落地」鏡頭過渡：俯瞰起手 → 3/4 perspective。Pose 是當下測試
+  // 樓層手動 tune 出來的世界座標，後續可改成相對 target 的 offset 讓多樓層
+  // 通用。Viewer3D 現在常駐 mount（切換無縫），所以入場動畫不再綁 CameraRig
+  // 的首次 mount，而是每次「2D→3D」切換時由下方 effect 主動觸發重播。
   const entryPose = useMemo(
     () => ({ camPos: [41.617, 31.053, 56.264], target: center, duration: 1500 }),
     [center],
   )
+
+  // 每次切到 3D 重播落地動畫。偵測 isVisible 由 false→true 的那一刻：先把
+  // 相機瞬移到俯瞰起手位（top-down，避開 OrbitControls gimbal singularity），
+  // 再 tween 到 3/4 透視。frameloop 此時剛從 'demand' 升成 'always'，用一個
+  // rAF 等 r3f 把 loop 起來再下命令，確保 tween 的每一幀都會被畫出來。
+  // The top-down pose the 2D→3D entry animation starts from. Z nudged a hair
+  // off-target to dodge the OrbitControls azimuth singularity.
+  const entryStartCam = useMemo(
+    () => [center[0], center[1] + diag * 1.6, center[2] + 0.001],
+    [center, diag],
+  )
+
+  // PRE-POSITION the camera while still in 2D (hidden). The <Canvas camera>
+  // prop only seeds the camera on first mount — which happens at app start,
+  // before any floor is loaded, so the initial camera sits at a wrong,
+  // too-close distance (e.g. dist ≈ 10 instead of ≈ 60). The first time we
+  // switch to 3D, r3f flips its frameloop demand→always and paints a frame
+  // before our entry effect runs, exposing that stale close-up as a "huge
+  // top-down" flash. Fixing the camera here — keyed on the pose, not on the
+  // switch — means it's already correct whenever that first frame paints,
+  // independent of effect-vs-render ordering. We only do this until the user
+  // has actually entered 3D once (after that the camera is theirs to orbit).
+  const hasEnteredRef = useRef(false)
+  useEffect(() => {
+    if (isVisible) return            // only pre-position while hidden (2D)
+    if (hasEnteredRef.current) return // user already orbited in 3D — leave it
+    const state = cameraStateRef.current
+    if (!state) return
+    const { camera, controls } = state
+    camera.position.set(entryStartCam[0], entryStartCam[1], entryStartCam[2])
+    if (controls) {
+      controls.target.set(center[0], center[1], center[2])
+      controls.update()
+    }
+  }, [isVisible, entryStartCam, center])
+
+  // Replay the landing animation every time we enter 3D. The tween is told its
+  // explicit start (top-down) via fromCam/fromTarget so it never inherits the
+  // stale initial camera — and useFrame snaps the camera to that start on the
+  // first tween frame, overwriting any stale pose before it's visible.
+  const wasVisibleRef = useRef(isVisible)
+  useEffect(() => {
+    const becameVisible = isVisible && !wasVisibleRef.current
+    wasVisibleRef.current = isVisible
+    if (!becameVisible) return
+    hasEnteredRef.current = true
+    const state = cameraStateRef.current
+    if (!state || !state.tweenTo) return
+    state.tweenTo({
+      fromCam: entryStartCam,
+      fromTarget: center,
+      camPos: entryPose.camPos,
+      target: entryPose.target,
+      duration: entryPose.duration,
+    })
+  }, [isVisible, center, entryStartCam, entryPose])
   // 28-3 Camera presets: top-down / iso / front. Distance scales with the
   // floor diagonal so small and large plans both frame well. Tween via the
   // CameraRig's tweenTo so OrbitControls picks up the new pose cleanly.
@@ -701,7 +768,7 @@ function Viewer3D() {
         />
       )}
 
-      <CameraRig target={center} cameraStateRef={cameraStateRef} entryPose={entryPose} />
+      <CameraRig target={center} cameraStateRef={cameraStateRef} />
       </Canvas>
     </div>
   )

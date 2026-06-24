@@ -11,10 +11,20 @@
   position: absolute
   inset: 0
 
-// Viewer3D mounts on top of (and replaces visually) the PIXI canvas
-// when viewMode === '3d'. The PIXI canvas is hidden but kept mounted so
-// switching back to 2D is instant (no scene re-init).
+// Viewer3D is ALWAYS mounted on top of the PIXI canvas (z-index higher) so
+// its WebGL context + floor textures stay warm — switching either direction
+// is instant with no scene re-init. Hidden by default: zero opacity + no
+// pointer events (events fall through to the 2D canvas underneath). Becoming
+// --active cross-fades it in over the still-visible 2D backdrop, so there's
+// never a blank frame during the 2D→3D switch.
 .floorplan-system__viewer3d
   position: absolute
   inset: 0
   z-index: 2
+  opacity: 0
+  pointer-events: none
+  transition: opacity 0.18s ease-out
+
+  &--active
+    opacity: 1
+    pointer-events: auto

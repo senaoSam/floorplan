@@ -783,16 +783,25 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
 
   return (
     <div className="floorplan-system">
+      {/* 2D PIXI canvas — always mounted. Stays VISIBLE underneath the 3D
+          viewer (z-index lower) so it acts as the backdrop while the 3D
+          canvas fades in: no blank flash during the 2D→3D switch. Only its
+          pointer events are disabled in 3D. */}
       <div
         ref={containerRef}
         className="floorplan-system__canvas"
-        style={is3D ? { visibility: 'hidden', pointerEvents: 'none' } : null}
+        style={is3D ? { pointerEvents: 'none' } : null}
       />
-      {is3D && (
-        <div className="floorplan-system__viewer3d">
-          <Viewer3D />
-        </div>
-      )}
+      {/* Viewer3D — also ALWAYS mounted (per the .sass note). Keeping the
+          Three.js <Canvas> alive means its WebGL context + floor textures are
+          already warm, so switching to 3D is instant. We toggle visibility via
+          a class instead of conditional mount; Viewer3D itself drops its
+          frameloop to 'demand' when hidden so it costs no GPU in 2D. */}
+      <div
+        className={`floorplan-system__viewer3d${is3D ? ' floorplan-system__viewer3d--active' : ''}`}
+      >
+        <Viewer3D />
+      </div>
       <MaterialToast />
       {scaleDialog && (
         <ScaleDialog
