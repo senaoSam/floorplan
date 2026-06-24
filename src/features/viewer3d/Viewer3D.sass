@@ -5,12 +5,27 @@
   width: 100%
   height: 100%
 
-  &__overlay
+  // Unified top-right control panel. Holds every 3D control (floor
+  // visibility, camera log, presets, floor selector) so none of them clash
+  // with the host product's top-left toolbar. pointer-events none on the
+  // container so empty gaps don't block canvas orbit; each control re-enables.
+  &__panel
     position: absolute
-    top: 12px
-    left: 12px
+    // Sits below the host's floating top toolbar (操作/設備規劃/選取模式…),
+    // which overhangs the canvas top ~52px into the viewer. Starting at 64px
+    // leaves a comfortable gap under it instead of clashing in the top-right.
+    top: 64px
+    right: 12px
     z-index: 400
     display: flex
+    flex-direction: column
+    align-items: flex-end
+    gap: 6px
+    pointer-events: none
+
+  &__panel-row
+    display: flex
+    justify-content: flex-end
     gap: 6px
     pointer-events: none  // children re-enable
 
@@ -37,15 +52,6 @@
       &:hover
         background: rgba(37, 99, 235, 0.9)
 
-  // 28-3 Camera preset cluster — top-right.
-  &__camera-presets
-    position: absolute
-    top: 12px
-    right: 12px
-    z-index: 400
-    display: flex
-    gap: 6px
-
   &__preset-btn
     pointer-events: auto
     height: 30px
@@ -64,12 +70,10 @@
       border-color: rgba(255, 255, 255, 0.4)
       background: rgba(51, 65, 85, 0.9)
 
-  // 28-2 Floor selector — compact dropdown on the right edge below presets.
+  // 28-2 Floor selector — now a row inside the unified top-right panel.
+  // Relative so its dropdown list (absolute) anchors to the trigger.
   &__floor-selector
-    position: absolute
-    top: 56px
-    right: 12px
-    z-index: 400
+    position: relative
     pointer-events: none  // children re-enable
 
   &__floor-trigger
