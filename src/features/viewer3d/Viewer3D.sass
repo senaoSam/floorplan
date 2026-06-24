@@ -11,10 +11,10 @@
   // container so empty gaps don't block canvas orbit; each control re-enables.
   &__panel
     position: absolute
-    // Sits below the host's floating top toolbar (操作/設備規劃/選取模式…),
-    // which overhangs the canvas top ~52px into the viewer. Starting at 64px
-    // leaves a comfortable gap under it instead of clashing in the top-right.
-    top: 64px
+    // Aligned to the top-right corner. The host's floating top toolbar lives on
+    // the left side, so at normal viewport widths there's no overlap and the
+    // panel can sit flush with the top instead of leaving a gap.
+    top: 12px
     right: 12px
     z-index: 400
     display: flex
