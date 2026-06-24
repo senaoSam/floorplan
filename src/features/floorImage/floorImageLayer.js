@@ -41,6 +41,10 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, 
   let currentFloorId = null
   let currentImageUrl = null
   let pendingLoadKey = null
+  // Which floor key we've already fit the viewport to. Guards against
+  // re-fitting on unrelated store changes (which would yank the user's
+  // pan/zoom back to fit every time a wall/AP changes).
+  let fittedKey = null
 
   const clearMask = () => {
     if (!currentMask) return
@@ -136,6 +140,22 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, 
     const loadKey = `${floor.id}::${floor.imageUrl}`
     pendingLoadKey = loadKey
 
+    // Fit the viewport NOW — before awaiting the texture. floor.imageWidth/
+    // Height are known the moment the floor record exists, but the texture
+    // decode is async. Other layers (walls / APs / trays seeded by DemoLoader)
+    // update their stores synchronously and trigger a render-on-demand frame
+    // BEFORE the texture resolves — if we fit only after the texture loads,
+    // that early frame paints all the vector objects at the default viewport
+    // (scale 1, origin top-left), so they flash small in the top-left corner
+    // before snapping to fit. Fitting here makes that early frame already
+    // centred + scaled. Guarded by fittedKey so we fit once per floor/image,
+    // never yanking the user's later pan/zoom back. (User report: 載入 demo
+    // 先小圖左上再 fit 置中。)
+    if (fittedKey !== loadKey && floor.imageWidth && floor.imageHeight) {
+      fittedKey = loadKey
+      fitViewportTo(floor.imageWidth, floor.imageHeight)
+    }
+
     try {
       const texture = await loadTextureFromUrl(floor.imageUrl)
       if (pendingLoadKey !== loadKey) return
@@ -192,6 +212,8 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, 
         // Intentionally NO stopPropagation + NO setSelected — fall
         // through to stage's pan handling so background drag pans.
       })
+      // Viewport was already fit above (before the await) so the sprite's
+      // first painted frame lands centred + scaled.
       layer.addChild(sprite)
       currentSprite = sprite
       currentFloorId = floor.id
@@ -199,7 +221,6 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, 
 
       applyVisualProps(floor)
       applyCrop(floor)
-      fitViewportTo(floor.imageWidth, floor.imageHeight)
     } catch (err) {
       console.error('[floorImageLayer] failed to load', floor.imageUrl, err)
     }

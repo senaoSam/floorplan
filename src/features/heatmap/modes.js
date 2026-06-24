@@ -9,43 +9,44 @@
 //   - signBetter: 'high' when higher values are better (green end = high),
 //                 'low'  when lower values are better (CCI: low = less noise).
 
-// RSSI anchors. Weakest on the left side of the bar (teal, far edge),
-// strongest on the right (red, close).
+// RSSI anchors. Colour sense: strong = green (good), weak = red (poor).
 const RSSI_ANCHORS = [
-  [-35, 235,  26,  26, 0.90],
-  [-45, 255, 128,  13, 0.88],
-  [-55, 255, 217,  26, 0.86],
-  [-65, 102, 217,  64, 0.84],
-  [-75, 160, 160, 160, 0.80],
+  [-35, 102, 217,  64, 0.90],
+  [-45, 255, 217,  26, 0.88],
+  [-55, 255, 128,  13, 0.86],
+  [-65, 255, 128,  13, 0.84],
+  [-75, 235,  26,  26, 0.80],
 ]
 
 // SINR — 0 dB ≈ equal signal and interference. 25+ dB ≈ clean.
+// Colour sense: strong = green (good), weak = red (poor).
 const SINR_ANCHORS = [
-  [35, 235,  26,  26, 0.90],
-  [25, 255, 128,  13, 0.88],
-  [15, 255, 217,  26, 0.86],
-  [ 5, 102, 217,  64, 0.84],
-  [-5, 160, 160, 160, 0.80],
+  [35, 102, 217,  64, 0.90],
+  [25, 255, 217,  26, 0.88],
+  [15, 255, 128,  13, 0.86],
+  [ 5, 255, 128,  13, 0.84],
+  [-5, 235,  26,  26, 0.80],
 ]
 
 // SNR — without co-channel interferers; same band as SINR but upshifted.
+// Colour sense: strong = green (good), weak = red (poor).
 const SNR_ANCHORS = [
-  [60, 235,  26,  26, 0.90],
-  [45, 255, 128,  13, 0.88],
-  [30, 255, 217,  26, 0.86],
-  [15, 102, 217,  64, 0.84],
-  [ 0, 160, 160, 160, 0.80],
+  [60, 102, 217,  64, 0.90],
+  [45, 255, 217,  26, 0.88],
+  [30, 255, 128,  13, 0.86],
+  [15, 255, 128,  13, 0.84],
+  [ 0, 235,  26,  26, 0.80],
 ]
 
-// CCI — aggregate co-channel interference power in dBm. Lower is better, so we
-// invert the color sense: the teal "good" end maps to low dBm (quiet), red to
-// high dBm (loud). sign='low' flips legend ordering for the user.
+// CCI — aggregate co-channel interference power in dBm. Lower is better, so the
+// "good" (quiet) end maps to low dBm = green, loud high dBm = red.
+// sign='low' flips legend ordering for the user.
 const CCI_ANCHORS = [
-  [ -45, 235,  26,  26, 0.90],
-  [ -55, 255, 128,  13, 0.88],
-  [ -70, 255, 217,  26, 0.86],
-  [ -85, 102, 217,  64, 0.84],
-  [-100, 160, 160, 160, 0.80],
+  [ -45, 102, 217,  64, 0.90],
+  [ -55, 255, 217,  26, 0.88],
+  [ -70, 255, 128,  13, 0.86],
+  [ -85, 255, 128,  13, 0.84],
+  [-100, 235,  26,  26, 0.80],
 ]
 
 export const HEATMAP_MODE_CONFIG = {

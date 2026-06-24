@@ -83,8 +83,39 @@ function FloorStack({ floor, elevation, isActive, onAPHover, inCameraMode }) {
   const pxToM = 1 / (floor.scale || 100)
   const dimOpacity = isActive ? 1 : 0.28
 
+  // Floor-align transform (mirrors the 2D ALIGN_FLOOR rule). The 2D editor
+  // stores per-floor offset/scale/rotation in canvas pixels, applied as
+  //   world = (cx+ox, cy+oy) + R·s·(p − (cx,cy))
+  // i.e. rotate+scale about the image center, then translate by the offset
+  // (see refOverlayLayer.applyAlignTransform). We reproduce the same map in
+  // 3D so a floor aligned in 2D stacks correctly here too. The vector layers
+  // below already render in meters (pixel × pxToM), so we work in meters and
+  // drive a single <group>: canvas X → world X, canvas Y → world Z, rotation
+  // about the world Y axis. r3f group applies world = R·s·p + position, so we
+  // bake the pivot in: position = (C + O) − R·s·C.
+  const align = useMemo(() => {
+    const sc = floor.alignScale ?? 1
+    const theta = ((floor.alignRotation ?? 0) * Math.PI) / 180
+    const cx = ((floor.imageWidth ?? 0) / 2) * pxToM
+    const cz = ((floor.imageHeight ?? 0) / 2) * pxToM
+    const ox = (floor.alignOffsetX ?? 0) * pxToM
+    const oz = (floor.alignOffsetY ?? 0) * pxToM
+    // R·s·C, rotating (cx, cz) about world Y. Canvas +Y maps to world +Z; the
+    // floor's −90° X tilt makes a positive canvas rotation read as +theta about
+    // world Y, matching the 2D ALIGN_FLOOR direction.
+    const cos = Math.cos(theta)
+    const sin = Math.sin(theta)
+    const rsx = sc * (cos * cx - sin * cz)
+    const rsz = sc * (sin * cx + cos * cz)
+    return {
+      position: [cx + ox - rsx, elevation, cz + oz - rsz],
+      rotationY: theta,
+      scale: sc,
+    }
+  }, [floor.alignScale, floor.alignRotation, floor.imageWidth, floor.imageHeight, floor.alignOffsetX, floor.alignOffsetY, pxToM, elevation])
+
   return (
-    <group position={[0, elevation, 0]}>
+    <group position={align.position} rotation={[0, align.rotationY, 0]} scale={[align.scale, 1, align.scale]}>
       <Suspense fallback={null}>
         {floor.imageUrl && <FloorPlane floor={floor} opacity={dimOpacity} />}
       </Suspense>
@@ -131,9 +162,27 @@ function FloorStack({ floor, elevation, isActive, onAPHover, inCameraMode }) {
 // sidebar) we tween target + camera position together for a short window so
 // the view glides instead of snapping. Outside that window OrbitControls owns
 // the camera fully — keeping it hijacked per-frame breaks orbit/pan/zoom.
-function CameraRig({ target, cameraStateRef, entryPose }) {
+function CameraRig({ target, cameraStateRef }) {
   const controlsRef = useRef()
   const { camera, gl } = useThree()
+
+  // Configure the idle turntable spin + stop it the instant the user grabs the
+  // controls. autoRotateSpeed is intentionally low for a gentle showcase turn
+  // (default is 2.0). The `start` event fires on the first pointerdown / wheel,
+  // so any user interaction immediately ends the spin and hands the camera back.
+  useEffect(() => {
+    const controls = controlsRef.current
+    if (!controls) return
+    controls.autoRotate = false
+    controls.autoRotateSpeed = 0.6
+    const stopSpin = () => {
+      autoRotating.current = false
+      wantAutoRotateAfterTween.current = false
+      controls.autoRotate = false
+    }
+    controls.addEventListener('start', stopSpin)
+    return () => controls.removeEventListener('start', stopSpin)
+  }, [])
 
   // Expose live camera + controls + a tween command so the parent can read
   // the current pose on demand AND drive an animated pose change without us
@@ -143,14 +192,38 @@ function CameraRig({ target, cameraStateRef, entryPose }) {
     cameraStateRef.current = {
       camera,
       controls: controlsRef.current,
-      tweenTo: ({ camPos, target: tgt, duration }) => {
+      tweenTo: ({ camPos, target: tgt, duration, fromCam, fromTarget, autoRotateAfter }) => {
+        // Any new programmatic move cancels an in-progress idle spin; opt back
+        // in only if this tween asked for it (the entry animation does).
+        autoRotating.current = false
+        wantAutoRotateAfterTween.current = !!autoRotateAfter
         if (camPos) desiredCam.current.set(camPos[0], camPos[1], camPos[2])
         else desiredCam.current.copy(camera.position)
         if (tgt) desiredTarget.current.set(tgt[0], tgt[1], tgt[2])
         else if (controlsRef.current) desiredTarget.current.copy(controlsRef.current.target)
-        // Snapshot starting pose for fixed-duration interpolation.
-        startCam.current.copy(camera.position)
-        startTarget.current.copy(controlsRef.current?.target ?? desiredTarget.current)
+        // Starting pose. Normally snapshot the live camera, but the caller can
+        // pass an explicit fromCam/fromTarget to make the tween begin from a
+        // known pose regardless of where the camera currently sits — used by
+        // the 2D→3D entry so the animation always starts top-down even if the
+        // stale initial camera (set by the <Canvas camera> prop before any
+        // floor existed) is somewhere else. Because useFrame snaps the camera
+        // to the interpolated start on the very first tween frame, this also
+        // overwrites that stale pose before it can be painted.
+        if (fromCam) {
+          startCam.current.set(fromCam[0], fromCam[1], fromCam[2])
+          camera.position.copy(startCam.current)
+        } else {
+          startCam.current.copy(camera.position)
+        }
+        if (fromTarget) {
+          startTarget.current.set(fromTarget[0], fromTarget[1], fromTarget[2])
+          if (controlsRef.current) {
+            controlsRef.current.target.copy(startTarget.current)
+            controlsRef.current.update()
+          }
+        } else {
+          startTarget.current.copy(controlsRef.current?.target ?? desiredTarget.current)
+        }
         tweenStartMs.current = performance.now()
         tweenDurMs.current = duration > 0 ? duration : 0
         tweening.current = true
@@ -176,6 +249,14 @@ function CameraRig({ target, cameraStateRef, entryPose }) {
   const startCam      = useRef(new THREE.Vector3())
   const tweenStartMs  = useRef(0)
   const tweenDurMs    = useRef(0)
+  // Idle auto-rotate: after the 2D→3D entry tween lands, the camera keeps
+  // slowly orbiting the floor (showcase turntable) until the user touches the
+  // controls. `wantAutoRotateAfterTween` is set by tweenTo when the caller
+  // opts in (the entry animation does; floor-switch lifts don't); the actual
+  // spin is OrbitControls' own autoRotate, driven by per-frame update() while
+  // `autoRotating` is true.
+  const wantAutoRotateAfterTween = useRef(false)
+  const autoRotating = useRef(false)
 
   // Track the target values we last reacted to so we only kick off a tween
   // when the *numeric* target actually changes. The `target` prop is a fresh
@@ -189,9 +270,9 @@ function CameraRig({ target, cameraStateRef, entryPose }) {
   // that preserves the user's current orbit pose (same offset to the target).
   // First mount is special: controls.target is still the default (0,0,0) so
   // the offset would be wrong — instead snap controls.target to the prop and
-  // leave camera.position alone (already set via Canvas `camera` prop). If an
-  // entryPose is provided we kick off the 2D→3D entry animation right after
-  // the snap, since CameraRig owns the moment controls become ready.
+  // leave camera.position alone (already set via Canvas `camera` prop). The
+  // 2D→3D entry animation is driven by Viewer3D's isVisible effect (Viewer3D
+  // is now always-mounted, so it can't ride CameraRig's first mount).
   useEffect(() => {
     const controls = controlsRef.current
     if (!controls) return
@@ -201,16 +282,6 @@ function CameraRig({ target, cameraStateRef, entryPose }) {
       tweening.current = false
       mounted.current = true
       lastTarget.current = [target[0], target[1], target[2]]
-      if (entryPose) {
-        const tgt = entryPose.target ?? target
-        desiredCam.current.set(entryPose.camPos[0], entryPose.camPos[1], entryPose.camPos[2])
-        desiredTarget.current.set(tgt[0], tgt[1], tgt[2])
-        startCam.current.copy(camera.position)
-        startTarget.current.copy(controls.target)
-        tweenStartMs.current = performance.now()
-        tweenDurMs.current = entryPose.duration > 0 ? entryPose.duration : 0
-        tweening.current = true
-      }
       return
     }
     // Skip if the numeric target didn't actually change — `target` is often a
@@ -223,12 +294,21 @@ function CameraRig({ target, cameraStateRef, entryPose }) {
     desiredTarget.current.copy(nextTarget)
     desiredCam.current.copy(nextTarget).add(camOffset)
     tweening.current = true
-  }, [target, camera, entryPose])
+  }, [target, camera])
 
   useFrame((_, dt) => {
     const controls = controlsRef.current
     if (!controls) return
-    if (!tweening.current) return   // idle → OrbitControls fully in charge
+    if (!tweening.current) {
+      // Not tweening. If an idle spin is active, keep ticking OrbitControls so
+      // its autoRotate advances the azimuth each frame. Otherwise OrbitControls
+      // owns the camera fully (user orbit/pan/zoom).
+      if (autoRotating.current) {
+        controls.autoRotate = true
+        controls.update()
+      }
+      return
+    }
 
     if (tweenDurMs.current > 0) {
       // Fixed-duration tween: interpolate the camera offset in *spherical*
@@ -268,6 +348,11 @@ function CameraRig({ target, cameraStateRef, entryPose }) {
         controls.update()
         tweening.current = false
         tweenDurMs.current = 0
+        // Entry tween done → start the idle turntable spin if requested.
+        if (wantAutoRotateAfterTween.current) {
+          wantAutoRotateAfterTween.current = false
+          autoRotating.current = true
+        }
       }
       return
     }
@@ -500,13 +585,71 @@ function Viewer3D() {
 
   const cameraStateRef = useRef(null)
 
-  // 進 3D 立刻啟動「2D → 3D 落地」的 5 秒鏡頭過渡：俯瞰起手 → 3/4
-  // perspective。Pose 是當下測試樓層手動 tune 出來的世界座標，後續可改成
-  // 相對 target 的 offset 讓多樓層通用。
+  // 「2D → 3D 落地」鏡頭過渡：俯瞰起手 → 3/4 perspective。Pose 是當下測試
+  // 樓層手動 tune 出來的世界座標，後續可改成相對 target 的 offset 讓多樓層
+  // 通用。Viewer3D 現在常駐 mount（切換無縫），所以入場動畫不再綁 CameraRig
+  // 的首次 mount，而是每次「2D→3D」切換時由下方 effect 主動觸發重播。
   const entryPose = useMemo(
     () => ({ camPos: [41.617, 31.053, 56.264], target: center, duration: 1500 }),
     [center],
   )
+
+  // 每次切到 3D 重播落地動畫。偵測 isVisible 由 false→true 的那一刻：先把
+  // 相機瞬移到俯瞰起手位（top-down，避開 OrbitControls gimbal singularity），
+  // 再 tween 到 3/4 透視。frameloop 此時剛從 'demand' 升成 'always'，用一個
+  // rAF 等 r3f 把 loop 起來再下命令，確保 tween 的每一幀都會被畫出來。
+  // The top-down pose the 2D→3D entry animation starts from. Z nudged a hair
+  // off-target to dodge the OrbitControls azimuth singularity.
+  const entryStartCam = useMemo(
+    () => [center[0], center[1] + diag * 1.6, center[2] + 0.001],
+    [center, diag],
+  )
+
+  // PRE-POSITION the camera while still in 2D (hidden). The <Canvas camera>
+  // prop only seeds the camera on first mount — which happens at app start,
+  // before any floor is loaded, so the initial camera sits at a wrong,
+  // too-close distance (e.g. dist ≈ 10 instead of ≈ 60). The first time we
+  // switch to 3D, r3f flips its frameloop demand→always and paints a frame
+  // before our entry effect runs, exposing that stale close-up as a "huge
+  // top-down" flash. Fixing the camera here — keyed on the pose, not on the
+  // switch — means it's already correct whenever that first frame paints,
+  // independent of effect-vs-render ordering. We only do this until the user
+  // has actually entered 3D once (after that the camera is theirs to orbit).
+  const hasEnteredRef = useRef(false)
+  useEffect(() => {
+    if (isVisible) return            // only pre-position while hidden (2D)
+    if (hasEnteredRef.current) return // user already orbited in 3D — leave it
+    const state = cameraStateRef.current
+    if (!state) return
+    const { camera, controls } = state
+    camera.position.set(entryStartCam[0], entryStartCam[1], entryStartCam[2])
+    if (controls) {
+      controls.target.set(center[0], center[1], center[2])
+      controls.update()
+    }
+  }, [isVisible, entryStartCam, center])
+
+  // Replay the landing animation every time we enter 3D. The tween is told its
+  // explicit start (top-down) via fromCam/fromTarget so it never inherits the
+  // stale initial camera — and useFrame snaps the camera to that start on the
+  // first tween frame, overwriting any stale pose before it's visible.
+  const wasVisibleRef = useRef(isVisible)
+  useEffect(() => {
+    const becameVisible = isVisible && !wasVisibleRef.current
+    wasVisibleRef.current = isVisible
+    if (!becameVisible) return
+    hasEnteredRef.current = true
+    const state = cameraStateRef.current
+    if (!state || !state.tweenTo) return
+    state.tweenTo({
+      fromCam: entryStartCam,
+      fromTarget: center,
+      camPos: entryPose.camPos,
+      target: entryPose.target,
+      duration: entryPose.duration,
+      autoRotateAfter: true,   // gentle turntable spin once landed
+    })
+  }, [isVisible, center, entryStartCam, entryPose])
   // 28-3 Camera presets: top-down / iso / front. Distance scales with the
   // floor diagonal so small and large plans both frame well. Tween via the
   // CameraRig's tweenTo so OrbitControls picks up the new pose cleanly.
@@ -588,65 +731,73 @@ function Viewer3D() {
       onPointerMove={handleContainerPointerMove}
       onPointerLeave={() => setHoveredAP(null)}
     >
-      <div className="viewer3d__overlay">
-        <button
-          type="button"
-          className={`viewer3d__floors-btn${show3DAllFloors ? ' viewer3d__floors-btn--active' : ''}`}
-          onClick={() => toggleLayer('show3DAllFloors')}
-          title={show3DAllFloors ? '切換為只顯示當前樓層' : '切換為顯示全部樓層'}
-        >
-          {show3DAllFloors ? '🏢 全樓層' : '🏠 單樓層'}
-        </button>
-        <button
-          type="button"
-          className="viewer3d__floors-btn"
-          onClick={handleLogCamera}
-          title="把目前相機位置與 target 印到 console"
-        >
-          📷 Log Camera
-        </button>
-      </div>
+      {/* All 3D controls are consolidated into a single top-right panel so
+          nothing overlaps the host product's top toolbar (塗層 / 設備檢測…)
+          which stays visible in the top-left now that Viewer3D is always
+          mounted. Rows top→bottom: floor-visibility + camera log, camera
+          presets, floor selector. */}
+      <div className="viewer3d__panel">
+        <div className="viewer3d__panel-row">
+          <button
+            type="button"
+            className={`viewer3d__floors-btn${show3DAllFloors ? ' viewer3d__floors-btn--active' : ''}`}
+            onClick={() => toggleLayer('show3DAllFloors')}
+            title={show3DAllFloors ? '切換為只顯示當前樓層' : '切換為顯示全部樓層'}
+          >
+            {show3DAllFloors ? '🏢 全樓層' : '🏠 單樓層'}
+          </button>
+          <button
+            type="button"
+            className="viewer3d__floors-btn"
+            onClick={handleLogCamera}
+            title="把目前相機位置與 target 印到 console"
+          >
+            📷 Log Camera
+          </button>
+        </div>
 
-      {/* 28-3 Camera preset cluster — top-right. Three quick poses so the
-          user can re-orient without orbiting manually. */}
-      <div className="viewer3d__camera-presets" role="group" aria-label="相機視角">
-        <button
-          type="button"
-          className="viewer3d__preset-btn"
-          onClick={() => applyCameraPreset('top')}
-          title="俯瞰（從正上方往下看）"
-        >
-          俯瞰
-        </button>
-        <button
-          type="button"
-          className="viewer3d__preset-btn"
-          onClick={() => applyCameraPreset('iso')}
-          title="等角（3/4 透視）"
-        >
-          等角
-        </button>
-        <button
-          type="button"
-          className="viewer3d__preset-btn"
-          onClick={() => applyCameraPreset('front')}
-          title="正視（從正面水平看）"
-        >
-          正視
-        </button>
-      </div>
+        {/* 28-3 Camera presets — three quick poses to re-orient without
+            orbiting manually. */}
+        <div className="viewer3d__panel-row" role="group" aria-label="相機視角">
+          <button
+            type="button"
+            className="viewer3d__preset-btn"
+            onClick={() => applyCameraPreset('top')}
+            title="俯瞰（從正上方往下看）"
+          >
+            俯瞰
+          </button>
+          <button
+            type="button"
+            className="viewer3d__preset-btn"
+            onClick={() => applyCameraPreset('iso')}
+            title="等角（3/4 透視）"
+          >
+            等角
+          </button>
+          <button
+            type="button"
+            className="viewer3d__preset-btn"
+            onClick={() => applyCameraPreset('front')}
+            title="正視（從正面水平看）"
+          >
+            正視
+          </button>
+        </div>
 
-      {/* 28-2 Floor selector — compact dropdown on the right edge. Click the
-          trigger button to expand the list, click a row to switch active
-          floor (heatmap remounts, camera tweens, layers retarget). Single
-          floor → still shown for clarity but list collapses to one row. */}
-      {floors.length > 0 && (
-        <FloorSelector
-          floors={floors}
-          activeFloorId={activeFloorId}
-          onSelect={(id) => { if (id !== activeFloorId) setActiveFloor(id) }}
-        />
-      )}
+        {/* 28-2 Floor selector — compact dropdown. Click the trigger to expand
+            the list, click a row to switch active floor (heatmap remounts,
+            camera tweens, layers retarget). */}
+        {floors.length > 0 && (
+          <div className="viewer3d__panel-row">
+            <FloorSelector
+              floors={floors}
+              activeFloorId={activeFloorId}
+              onSelect={(id) => { if (id !== activeFloorId) setActiveFloor(id) }}
+            />
+          </div>
+        )}
+      </div>
 
       {/* 28-4 AP hover readout — floating HTML tooltip. Pointer is captured at
           the viewer3d container level so the tooltip can position itself in
@@ -701,7 +852,7 @@ function Viewer3D() {
         />
       )}
 
-      <CameraRig target={center} cameraStateRef={cameraStateRef} entryPose={entryPose} />
+      <CameraRig target={center} cameraStateRef={cameraStateRef} />
       </Canvas>
     </div>
   )
