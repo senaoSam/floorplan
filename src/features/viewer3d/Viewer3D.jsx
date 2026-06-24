@@ -83,8 +83,39 @@ function FloorStack({ floor, elevation, isActive, onAPHover, inCameraMode }) {
   const pxToM = 1 / (floor.scale || 100)
   const dimOpacity = isActive ? 1 : 0.28
 
+  // Floor-align transform (mirrors the 2D ALIGN_FLOOR rule). The 2D editor
+  // stores per-floor offset/scale/rotation in canvas pixels, applied as
+  //   world = (cx+ox, cy+oy) + R·s·(p − (cx,cy))
+  // i.e. rotate+scale about the image center, then translate by the offset
+  // (see refOverlayLayer.applyAlignTransform). We reproduce the same map in
+  // 3D so a floor aligned in 2D stacks correctly here too. The vector layers
+  // below already render in meters (pixel × pxToM), so we work in meters and
+  // drive a single <group>: canvas X → world X, canvas Y → world Z, rotation
+  // about the world Y axis. r3f group applies world = R·s·p + position, so we
+  // bake the pivot in: position = (C + O) − R·s·C.
+  const align = useMemo(() => {
+    const sc = floor.alignScale ?? 1
+    const theta = ((floor.alignRotation ?? 0) * Math.PI) / 180
+    const cx = ((floor.imageWidth ?? 0) / 2) * pxToM
+    const cz = ((floor.imageHeight ?? 0) / 2) * pxToM
+    const ox = (floor.alignOffsetX ?? 0) * pxToM
+    const oz = (floor.alignOffsetY ?? 0) * pxToM
+    // R·s·C, rotating (cx, cz) about world Y. Canvas +Y maps to world +Z; the
+    // floor's −90° X tilt makes a positive canvas rotation read as +theta about
+    // world Y, matching the 2D ALIGN_FLOOR direction.
+    const cos = Math.cos(theta)
+    const sin = Math.sin(theta)
+    const rsx = sc * (cos * cx - sin * cz)
+    const rsz = sc * (sin * cx + cos * cz)
+    return {
+      position: [cx + ox - rsx, elevation, cz + oz - rsz],
+      rotationY: theta,
+      scale: sc,
+    }
+  }, [floor.alignScale, floor.alignRotation, floor.imageWidth, floor.imageHeight, floor.alignOffsetX, floor.alignOffsetY, pxToM, elevation])
+
   return (
-    <group position={[0, elevation, 0]}>
+    <group position={align.position} rotation={[0, align.rotationY, 0]} scale={[align.scale, 1, align.scale]}>
       <Suspense fallback={null}>
         {floor.imageUrl && <FloorPlane floor={floor} opacity={dimOpacity} />}
       </Suspense>
