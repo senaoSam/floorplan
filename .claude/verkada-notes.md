@@ -126,7 +126,7 @@
 | **即時動態 E1** | 偵測時 FOV 錐形脈動 | live detection icons（FOV 內實色/外灰 ghost） | 🟡 | 純數據（偵測 bool → 觸發 pulse 動畫）；加錐形 pulse 即對齊 |
 | **即時動態 E2** | 多機 motion 即時繪到平面圖 | mock 一天軌跡 + 即時播放 | 🔶理想 | **最典型**：Verkada 難點全在「真實影像→平面座標」(15點校準/透視/4Hz)，我們 mock 直接給座標＝跳過整個難題，非做得更好 |
 | **人流熱圖** | contour 色階 | 占用熱圖（人流量/停留/動線三檔 + 時段篩選） | 🔶理想 | 多 ≠ 強；真實雜訊資料下三模式是否各自清晰可用、使用者分得出差異，未驗證 |
-| **熱圖 timelapse** | 選日期區間 + 聚合間隔產生**動畫** | 時段篩選為**靜態**圖 | 🟡 | 純數據（時間×格子計數）；playback 已有 clock，把窗篩升級成沿軸自動播放 |
+| **熱圖 timelapse** | 選日期區間 + 聚合間隔產生**動畫** | 占用熱圖已沿時間軸自動播放（Phase 34-V ①） | ✅真 | 占用窗沿日滑動（`advanceOccupancyLapse` + trackingBinder lapse rAF + CameraTimelineBar「⏱ 推移」按鈕含自動縮窗）。**對標的是人流/占用熱圖**，已落地；WiFi 訊號熱圖無時間維度，timelapse 不適用 |
 | **占用趨勢** | Occupancy Trends 報表 | 分析區逐時長條圖 | 🟡 | 純數據（逐時聚合）；補全樓層趨勢報表 |
 | **計數線** | （Verkada 屬 analytics，非 floorplan 核心） | 計數線（分方向、端點可拖） | ✅真 | 獨立 UI 功能（畫線數穿越），不靠 mock 完美資料（前提：計數來源真實） |
 | **盲區** | （Verkada 文件未明列） | 盲區圖 overlay | ✅真 | FOV 補集的幾何運算，真實成立，符合「覆蓋缺口」訴求 |
@@ -168,10 +168,10 @@
 ### Tier 1 — 現有能力延伸，低風險高回報（建議先做）
 | 序 | 項目 | 為何優先 | 接哪個現有基礎 |
 |----|------|---------|---------------|
-| 1 | **熱圖 timelapse 動畫** | Verkada 招牌賣點；純把「靜態窗篩」變「沿時間軸自動播放」 | useTrackingStore 已有 clock + occupancyFrom/ToSec；occupancyGrid 已可窗篩 |
-| 2 | **FOV 錐形偵測脈動（E1）** | 視覺上最像 Verkada；小工 | tracksLayer 已有「點在 FOV polygon 內」判定；觸發 fovPolygon alpha pulse |
-| 3 | **裝置線上狀態（顏色）** | 純 enum，立刻讓畫面「像營運系統」 | camerasLayer 已渲染 camera body，加 status 欄位 + 顏色 |
-| 3b | **Device List 側欄 + 清單↔marker 雙向高亮 + hover live 縮圖**（實機新發現，§J3） | Verkada 核心導覽件、純前端互動、無新資料 | apsByFloor/camerasByFloor 已有清單資料；加側欄元件 + hover 連動 selectedId |
+| 1 | ~~**熱圖 timelapse 動畫**~~ ✅已做（Phase 34-V ①） | Verkada 招牌賣點；占用窗已沿時間軸自動播放 | useTrackingStore.advanceOccupancyLapse + trackingBinder lapse rAF + CameraTimelineBar「⏱ 推移」 |
+| 2 | ~~**FOV 錐形偵測脈動（E1）**~~ ✅已做（Phase 34-V ②，含由內而外水波擴散環） | 視覺上最像 Verkada；小工 | tracksLayer 已有「點在 FOV polygon 內」判定；觸發 fovPolygon alpha pulse |
+| 3 | ~~**裝置線上狀態（顏色）**~~ ✅已做（Phase 34-V ③，綠/橘點 + 離線錐暗） | 純 enum，立刻讓畫面「像營運系統」 | camerasLayer 已渲染 camera body，加 status 欄位 + 顏色 |
+| 3b | **Device List 側欄 + 清單↔marker 雙向高亮 + hover live 縮圖**（實機新發現，§J3） | Verkada 核心導覽件、純前端互動、無新資料 | apsByFloor/camerasByFloor 已有清單資料；加側欄元件 + hover 連動 selectedId。**註**：34-V ⑨ 已有相機清單面板（多選/批次/區域分組/點列定位），但 hover live 縮圖與 AP↔camera 統一導覽尚缺 |
 
 ### Tier 2 — 純資料結構，中等工程
 | 序 | 項目 | 數據本質 | 備註 |

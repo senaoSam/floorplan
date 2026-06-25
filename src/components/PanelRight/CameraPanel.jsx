@@ -8,6 +8,7 @@ import { CAMERA_MODEL_LIST, cameraModelById } from '@/constants/cameraModels'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { TextInput, NumberInput, Select } from './_shared/PanelControls'
 import { generateId } from '@/utils/id'
+import { wrapAzimuth } from '@/utils/angle'
 import './_shared/shared.sass'
 
 // Camera properties panel (Phase 34-1). Opens when a camera marker is
@@ -88,7 +89,6 @@ function CameraPanel({ floorId, cameraId }) {
 
   if (!camera) return null
 
-  const wrapAzimuth = (v) => (((v % 360) + 360) % 360)
   const rawAz = camera.azimuth ?? 0
   const effAz = wrapAzimuth(rawAz)
 

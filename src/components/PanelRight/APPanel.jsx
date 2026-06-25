@@ -11,6 +11,7 @@ import { CHANNEL_WIDTHS, DEFAULT_CHANNEL_WIDTH, allowedWidthsForBand } from '@/c
 import PatternPreview from './PatternPreview'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { TextInput, NumberInput, Select } from './_shared/PanelControls'
+import { wrapAzimuth } from '@/utils/angle'
 import './_shared/shared.sass'
 import './APPanel.sass'
 
@@ -123,7 +124,6 @@ function APPanel({ floorId, apId }) {
     updateAP(floorId, apId, patch)
   }, [floorId, apId, ap, updateAP])
 
-  const wrapAzimuth = (v) => (((v % 360) + 360) % 360)
   const clampBeamwidth = (v) => Math.max(MIN_BEAMWIDTH, Math.min(MAX_BEAMWIDTH, v))
 
   const handleDelete = () => {

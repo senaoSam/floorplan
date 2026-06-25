@@ -14,6 +14,7 @@ import { CHANNEL_WIDTHS, DEFAULT_CHANNEL_WIDTH, allowedWidthsForBand } from '@/c
 import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
 import PatternPreview from './PatternPreview'
 import { PanelShell, PanelHeader } from './_shared/PanelShell'
+import { wrapAzimuth } from '@/utils/angle'
 import './_shared/shared.sass'
 import './BatchPanel.sass'
 
@@ -44,7 +45,6 @@ const MIXED = '__mixed__'
 const MIN_BEAMWIDTH = 10
 const MAX_BEAMWIDTH = 180
 
-const wrapAzimuth = (v) => (((v % 360) + 360) % 360)
 const clampBeamwidth = (v) => Math.max(MIN_BEAMWIDTH, Math.min(MAX_BEAMWIDTH, v))
 
 // If all items share the same value for `field`, return that value; otherwise MIXED.

@@ -1,8 +1,6 @@
 import { Sprite, Texture } from 'pixi.js'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
-import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from './fovPolygon'
-import { FALLBACK_PX_PER_M } from './camerasLayer'
-import { deviceStatus, DEVICE_STATUS } from './deviceStatus'
+import { rasterizeCoverageCounts } from './fovRasterize'
 
 // Overlap overlay (planning aid): tints the floor by how many cameras can see
 // each spot — single coverage (one camera; a failure there becomes a blind
@@ -49,43 +47,14 @@ export function attachOverlapLayer({
     }
     const cameras = cs.camerasByFloor[activeFloorId] ?? []
     const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
-    const scale = floor.scale ?? FALLBACK_PX_PER_M
-    const segs = buildBlockingSegments(walls)
 
-    const k = Math.min(1, MAX_CANVAS_PX / Math.max(floor.imageWidth, floor.imageHeight))
-    const cw = Math.max(1, Math.round(floor.imageWidth * k))
-    const ch = Math.max(1, Math.round(floor.imageHeight * k))
-    const total = cw * ch
-    const counts = new Uint8Array(total)
-
-    const scratch = document.createElement('canvas')
-    scratch.width = cw
-    scratch.height = ch
-    const sctx = scratch.getContext('2d', { willReadFrequently: true })
-
-    for (const cam of cameras) {
-      if (deviceStatus(cam) === DEVICE_STATUS.OFFLINE) continue
-      const { minRangePx, rangePx } = cameraCoverageRadii(cam, scale)
-      const poly = computeFovPolygon({
-        cx: cam.x, cy: cam.y,
-        azimuthDeg: cam.azimuth ?? 0,
-        fovDeg: cam.fovDeg ?? 90,
-        rangePx, minRangePx,
-        segments: segs,
-      })
-      if (!poly || poly.length < 6) continue
-      sctx.clearRect(0, 0, cw, ch)
-      sctx.fillStyle = '#fff'
-      sctx.beginPath()
-      sctx.moveTo(poly[0] * k, poly[1] * k)
-      for (let i = 2; i < poly.length; i += 2) sctx.lineTo(poly[i] * k, poly[i + 1] * k)
-      sctx.closePath()
-      sctx.fill()
-      const d = sctx.getImageData(0, 0, cw, ch).data
-      for (let p = 0, px = 0; p < d.length; p += 4, px++) {
-        if (d[p + 3] > 40 && counts[px] < 255) counts[px] += 1
-      }
+    const raster = rasterizeCoverageCounts({ cameras, walls, floor, maxCanvasPx: MAX_CANVAS_PX })
+    if (!raster) {
+      clearSprite()
+      scene.requestRender()
+      return
     }
+    const { counts, cw, ch, total } = raster
 
     // Colourise the count buffer into the output image.
     const out = document.createElement('canvas')
