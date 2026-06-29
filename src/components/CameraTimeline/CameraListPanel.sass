@@ -26,6 +26,29 @@
     max-height: none
     padding-bottom: 10px
 
+  &__thumb
+    position: absolute
+    left: calc(100% + 10px)
+    top: 0
+    padding: 6px
+    background: rgba(15, 23, 42, 0.96)
+    border: 1px solid rgba(255, 255, 255, 0.14)
+    border-radius: 10px
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5)
+    pointer-events: none
+    z-index: 391
+
+  &__thumb-canvas
+    display: block
+    border-radius: 6px
+    background: #0b1220
+
+  &__thumb-cap
+    margin-top: 5px
+    color: $text-secondary
+    font-size: 10px
+    text-align: center
+
   &__head
     display: flex
     align-items: center
@@ -82,6 +105,8 @@
       background: rgba(255, 255, 255, 0.06)
       .camera-list__del
         opacity: 1
+    &--hover
+      background: rgba(56, 189, 248, 0.1)
     &--sel
       background: rgba(16, 185, 129, 0.16)
       border-color: rgba(16, 185, 129, 0.6)

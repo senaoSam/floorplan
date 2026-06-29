@@ -1,0 +1,156 @@
+@use '@/styles/variables' as *
+
+// Heat-map calibration modal — centered over the canvas, dark-glass family,
+// two side-by-side panes (floorplan ↔ mock camera frame).
+
+.calib
+  position: absolute
+  inset: 0
+  z-index: 510
+  display: flex
+  align-items: center
+  justify-content: center
+  background: rgba(2, 6, 23, 0.55)
+  backdrop-filter: blur(2px)
+
+  &__frame
+    display: flex
+    flex-direction: column
+    background: rgba(15, 23, 42, 0.96)
+    border: 1px solid rgba(255, 255, 255, 0.14)
+    border-left: 3px solid #10b981
+    border-radius: 12px
+    overflow: hidden
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55)
+
+  &__bar
+    display: flex
+    align-items: center
+    justify-content: space-between
+    padding: 8px 12px
+    color: $text-primary
+    font-size: 13px
+
+  &__title
+    font-weight: 700
+    color: #10b981
+
+  &__close
+    background: transparent
+    border: none
+    color: $text-secondary
+    font-size: 14px
+    cursor: pointer
+    &:hover
+      color: $text-primary
+
+  &__step
+    padding: 4px 14px 8px
+    color: #38bdf8
+    font-size: 12px
+    font-weight: 600
+
+  &__panes
+    display: flex
+    gap: 12px
+    padding: 0 14px
+
+  &__pane
+    display: flex
+    flex-direction: column
+    gap: 5px
+
+  &__pane-label
+    color: $text-secondary
+    font-size: 11px
+
+  &__plan
+    position: relative
+    overflow: hidden
+    border-radius: 8px
+    background: #0b1220
+    cursor: crosshair
+
+  &__plan-img
+    position: absolute
+    object-fit: fill
+    user-select: none
+    pointer-events: none
+
+  &__frame-wrap
+    position: relative
+    overflow: hidden
+    border-radius: 8px
+    cursor: crosshair
+
+  &__frame-canvas
+    display: block
+
+  &__cam-dot
+    position: absolute
+    width: 10px
+    height: 10px
+    margin: -5px 0 0 -5px
+    border-radius: 50%
+    background: transparent
+    border: 2px solid #10b981
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3)
+    pointer-events: none
+
+  &__dot
+    position: absolute
+    width: 18px
+    height: 18px
+    margin: -9px 0 0 -9px
+    border-radius: 50%
+    display: flex
+    align-items: center
+    justify-content: center
+    font-size: 11px
+    font-weight: 700
+    color: #fff
+    border: 2px solid rgba(255, 255, 255, 0.85)
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5)
+    pointer-events: none
+
+  &__footer
+    display: flex
+    align-items: center
+    justify-content: space-between
+    padding: 10px 14px 6px
+    gap: 12px
+
+  &__status
+    color: $text-secondary
+    font-size: 12px
+    font-variant-numeric: tabular-nums
+    &--warn
+      color: #f59e0b
+
+  &__actions
+    display: flex
+    gap: 8px
+
+  &__btn
+    padding: 6px 14px
+    border-radius: 8px
+    border: 1px solid rgba(255, 255, 255, 0.18)
+    background: rgba(255, 255, 255, 0.06)
+    color: $text-primary
+    font-size: 12px
+    cursor: pointer
+    &:hover
+      background: rgba(255, 255, 255, 0.12)
+    &--primary
+      border-color: #10b981
+      background: rgba(16, 185, 129, 0.18)
+      color: #10b981
+      font-weight: 700
+      &:disabled
+        opacity: 0.4
+        cursor: not-allowed
+
+  &__hint
+    padding: 4px 14px 12px
+    color: $text-secondary
+    font-size: 11px

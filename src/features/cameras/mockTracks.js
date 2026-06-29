@@ -351,3 +351,9 @@ export function formatClock(sec) {
   const m = Math.floor((sec % 3600) / 60)
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
+
+// HH:MM:SS — for the live playback clock readout where the second matters.
+export function formatClockSec(sec) {
+  const s = Math.floor(sec % 60)
+  return `${formatClock(sec)}:${String(s).padStart(2, '0')}`
+}

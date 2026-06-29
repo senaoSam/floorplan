@@ -17,6 +17,7 @@ import TrendPanel from '@/components/CameraTimeline/TrendPanel'
 import CoveragePanel from '@/components/CameraTimeline/CoveragePanel'
 import CameraListPanel from '@/components/CameraTimeline/CameraListPanel'
 import LiveViewModal from '@/components/CameraTimeline/LiveViewModal'
+import CalibrationModal from '@/components/CameraTimeline/CalibrationModal'
 import './CanvasArea.sass'
 
 // Standalone-mode canvas pane — wraps the embeddable FloorplanSystem
@@ -52,6 +53,7 @@ function CanvasArea() {
       <CameraListPanel />
       <TrendPanel />
       <LiveViewModal />
+      <CalibrationModal />
       <ScaleBarMount />
     </div>
   )

@@ -241,7 +241,7 @@ export function attachCamerasLayer({
 
     const editor = useEditorStore.getState()
     const isSelected = editor.selectedId === camera.id && editor.selectedType === 'camera'
-    const isHovered = entry.hovered
+    const isHovered = entry.hovered || useCameraStore.getState().hoverCameraId === camera.id
     const isInvert = isHovered && !isSelected
 
     const azRad = ((camera.azimuth ?? 0) % 360) * Math.PI / 180
@@ -329,6 +329,9 @@ export function attachCamerasLayer({
     container.on('pointerover', () => {
       if (!isCameraMode()) return
       entry.hovered = true
+      // mirror into the store so the roster panel row highlights in sync
+      useCameraStore.getState().setHoverCamera(entry.camera.id)
+      lastHoverId = entry.camera.id
       drawCamera(entry)
       scene.requestRender()
     })
@@ -336,6 +339,10 @@ export function attachCamerasLayer({
       if (!entry.hovered && !entry.handleHover) return
       entry.hovered = false
       entry.handleHover = false
+      if (useCameraStore.getState().hoverCameraId === entry.camera.id) {
+        useCameraStore.getState().setHoverCamera(null)
+        lastHoverId = null
+      }
       drawCamera(entry)
       scene.requestRender()
     })
@@ -511,7 +518,21 @@ export function attachCamerasLayer({
     }
   }
 
-  const unsubCamera = useCameraStore.subscribe(() => { reconcile(); redrawFov(); applyInverseScale() })
+  // Roster-panel hover → highlight the matching marker (and un-highlight the
+  // previous one). Cheap: redraw only the two affected containers.
+  let lastHoverId = useCameraStore.getState().hoverCameraId
+  const onHoverChange = () => {
+    const id = useCameraStore.getState().hoverCameraId
+    if (id === lastHoverId) return
+    const prev = lastHoverId ? containers.get(lastHoverId) : null
+    const next = id ? containers.get(id) : null
+    lastHoverId = id
+    if (prev) drawCamera(prev)
+    if (next) drawCamera(next)
+    scene.requestRender()
+  }
+
+  const unsubCamera = useCameraStore.subscribe(() => { onHoverChange(); reconcile(); redrawFov(); applyInverseScale() })
   const unsubFloor = useFloorStore.subscribe(() => { reconcile(); redrawFov(); applyInverseScale() })
   const unsubWall = useWallStore.subscribe(redrawFov)
   const unsubEditor = useEditorStore.subscribe(onEditorChange)

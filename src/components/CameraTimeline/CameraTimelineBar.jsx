@@ -3,7 +3,7 @@ import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useTrackingStore } from '@/store/useTrackingStore'
 import { useCameraStore } from '@/store/useCameraStore'
-import { DAY_START_SEC, DAY_END_SEC, formatClock } from '@/features/cameras/mockTracks'
+import { DAY_START_SEC, DAY_END_SEC, formatClock, formatClockSec } from '@/features/cameras/mockTracks'
 import { regenerateActiveFloorTracks } from '@/features/cameras/trackingBinder'
 import './CameraTimelineBar.sass'
 
@@ -72,7 +72,7 @@ function CameraTimelineBar() {
           {playing ? '⏸' : '▶'}
         </button>
 
-        <span className="camera-timeline__clock">{formatClock(clockSec)}</span>
+        <span className="camera-timeline__clock">{formatClockSec(clockSec)}</span>
 
         <input
           type="range"

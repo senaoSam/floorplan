@@ -41,6 +41,7 @@ function CameraPanel({ floorId, cameraId }) {
   const addCamera     = useCameraStore((s) => s.addCamera)
   const nextCameraName = useCameraStore((s) => s.nextCameraName)
   const openLiveView  = useCameraStore((s) => s.openLiveView)
+  const openCalibrate = useCameraStore((s) => s.openCalibrate)
   const clearSelected = useEditorStore((s) => s.clearSelected)
   const setSelected   = useEditorStore((s) => s.setSelected)
   const floors        = useFloorStore((s) => s.floors)
@@ -152,6 +153,22 @@ function CameraPanel({ floorId, cameraId }) {
             title="開啟即時影像（模擬畫面）"
           >
             📹 即時影像
+          </button>
+        </PanelField>
+        <PanelField label="熱圖校正" hint="點 4 對點求單應性矩陣，對齊 Verkada 做法">
+          <button
+            type="button"
+            onClick={() => openCalibrate(cameraId)}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '4px 12px', borderRadius: 8, cursor: 'pointer',
+              border: camera.calibration ? '1px solid rgba(16,185,129,0.5)' : '1px solid rgba(56,189,248,0.5)',
+              background: camera.calibration ? 'rgba(16,185,129,0.12)' : 'rgba(56,189,248,0.12)',
+              color: camera.calibration ? '#10b981' : '#38bdf8', fontSize: 12, fontWeight: 600,
+            }}
+            title="開啟 4 點校正（在平面圖與相機畫面點對應點）"
+          >
+            🎯 {camera.calibration ? '已校正' : '校正熱圖'}
           </button>
         </PanelField>
         <PanelField label="複製" hint="複製這台含所有參數">

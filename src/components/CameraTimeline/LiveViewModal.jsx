@@ -4,7 +4,7 @@ import { useCameraStore } from '@/store/useCameraStore'
 import { useTrackingStore } from '@/store/useTrackingStore'
 import { deviceStatus, DEVICE_STATUS } from '@/features/cameras/deviceStatus'
 import { isCameraDetecting } from '@/features/cameras/detectionBus'
-import { formatClock } from '@/features/cameras/mockTracks'
+import { formatClockSec } from '@/features/cameras/mockTracks'
 import './LiveViewModal.sass'
 
 // Mock live-view popover (Verkada parity). Clicking a device in Command opens
@@ -99,7 +99,7 @@ function LiveViewModal() {
       ctx.fillStyle = '#e2e8f0'
       ctx.font = '600 13px ui-monospace, monospace'
       ctx.textAlign = 'left'
-      ctx.fillText(`${formatClock(t)}:${String(frame % 60).padStart(2, '0')}`, 12, 22)
+      ctx.fillText(formatClockSec(t), 12, 22)
       ctx.textAlign = 'right'
       ctx.fillText(camera.name, W - 12, 22)
       // REC blinking dot

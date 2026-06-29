@@ -26,6 +26,7 @@ function TrendPanel() {
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
   const tracks = useTrackingStore((s) => s.tracksByFloor[activeFloorId] ?? [])
   const clockSec = useTrackingStore((s) => s.clockSec)
+  const setClockSec = useTrackingStore((s) => s.setClockSec)
 
   // null pos → not yet dragged, use the CSS default (bottom-left). After the
   // first drag we switch to explicit top/left coordinates.
@@ -86,8 +87,10 @@ function TrendPanel() {
           return (
             <div
               key={h.hour}
-              className={`trend-panel__bar-col${isNow ? ' trend-panel__bar-col--now' : ''}`}
-              title={`${formatClock(h.hour * 3600)}：${h.people} 人、${h.cars} 車`}
+              role="button"
+              className={`trend-panel__bar-col trend-panel__bar-col--clickable${isNow ? ' trend-panel__bar-col--now' : ''}`}
+              title={`${formatClock(h.hour * 3600)}：${h.people} 人、${h.cars} 車（點擊跳到此時段）`}
+              onClick={() => setClockSec(Math.max(DAY_START_SEC, h.hour * 3600))}
             >
               <div className="trend-panel__bar-track">
                 <div
