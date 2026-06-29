@@ -491,6 +491,34 @@ const PHASES = [
     ],
   },
   {
+    phase: 'Phase 35 — Camera 校正 + 導覽 polish',
+    groups: [
+      {
+        layer: 'Layer 33 — 相機 4 點校正（homography）',
+        items: [
+          { id: '35-1a', done: true, text: '4+4 點校正 modal — 平面圖點 4 點 + 相機畫面點 4 點，求 frame→floor homography（utils/homography solveHomography）' },
+          { id: '35-1b', done: true, text: '校正品質防呆 — 四邊形過小/共線即時警告（不顯示重投影誤差，4 點恆為 0 無意義）；步驟提示跟著 active pane' },
+          { id: '35-1c', done: true, text: '階段 2 — 軌跡綁定相機 FOV + 經 homography 投影；first-freeze 模型（首次校正不位移、重校才位移），消費者零改動' },
+          { id: '35-1d', done: true, text: '純手動校正（對標 Verkada，無 auto 預設）；已校正綠徽記 + 未校正提示' },
+        ],
+      },
+      {
+        layer: 'Layer 34 — 導覽 + 分析 polish',
+        items: [
+          { id: '35-2a', done: true, text: 'Device List hover — 清單列↔畫布 marker 雙向高亮 + mock CCTV live 縮圖氣泡' },
+          { id: '35-2b', done: true, text: '占用趨勢面板點長條 → 跳到該小時（clockSec 連動）' },
+          { id: '35-2c', done: true, text: '回放時鐘 + live HUD 顯示到秒（HH:MM:SS）' },
+        ],
+      },
+      {
+        layer: 'Layer 35 — 重構',
+        items: [
+          { id: '35-3a', done: true, text: '抽共用 FOV rasteriser（coverageStats + overlapLayer 去重）+ wrapAzimuth 抽 utils/angle' },
+        ],
+      },
+    ],
+  },
+  {
     phase: 'Phase 9 — AI 輔助',
     groups: [
       {
