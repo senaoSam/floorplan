@@ -491,6 +491,72 @@ const PHASES = [
     ],
   },
   {
+    phase: 'Phase 25 — PixiJS Hybrid 全功能 Port',
+    groups: [
+      {
+        layer: 'Layer — Konva → PixiJS 渲染遷移',
+        items: [
+          { id: '25-port', done: true, text: 'PixiJS hybrid 全功能 port（Bundle 1–52 + parity gaps）— 所有 2D 圖層改走 PixiJS Container 階層' },
+          { id: '25-heatmap', done: true, text: 'Heatmap 等高線 byte-identical 對齊（遷移前後像素一致）' },
+          { id: '32-C', done: true, text: '增量 routing（只重算受影響路徑）' },
+          { id: '32-E', done: true, text: 'Cable 靜動分層（gStatic/gDynamic；殘影回歸已驗證消除）' },
+        ],
+      },
+    ],
+  },
+  {
+    phase: 'Phase 26–27 — Perf baseline + Heatmap polish audit',
+    groups: [
+      {
+        layer: 'Layer — 文件與實測',
+        items: [
+          { id: '26-1c', done: true, text: 'perf-baseline 文件脈絡警示（避免誤讀 before/after 數字）' },
+          { id: '27-audit', done: true, text: 'Heatmap polish audit — 實測後全部不做（品質已達標）' },
+        ],
+      },
+    ],
+  },
+  {
+    // 設計依據：.claude/client-view-spec.md
+    phase: 'Phase 33 — Client View（單點查詢視圖）',
+    groups: [
+      {
+        layer: 'Layer — Client View 模擬',
+        items: [
+          { id: '33-mode', done: true, text: 'CLIENT_VIEW 模式 + simulate（band / hysteresis / MCS / data rate）' },
+          { id: '33-panel', done: true, text: 'ClientPanel + association/coverage（藍色＝RSSI≥門檻 -67 可調，非連不連得到）' },
+          { id: '33-model', done: true, text: 'indoorLoss 距離模型 + 位置記憶' },
+          { id: '33-lock', done: true, text: '手動鎖定 AP（右鍵選單）+ 單台 AP 涵蓋（紅色）+ CV hover 回饋' },
+        ],
+      },
+    ],
+  },
+  {
+    phase: 'Phase 34-V — Verkada parity 擴充',
+    groups: [
+      {
+        layer: 'Layer — 即時動態 + 狀態',
+        items: [
+          { id: '34V-1', done: true, text: '熱圖 timelapse 時間推移（占用窗沿日滑動 + 自動縮窗）' },
+          { id: '34V-2', done: true, text: 'FOV 偵測脈動 + 由內而外水波擴散環（牆裁切）' },
+          { id: '34V-3', done: true, text: '裝置線上/離線狀態（綠/橘點、離線錐暗 + 不偵測 + 計盲區）' },
+          { id: '34V-5', done: true, text: '即時影像 mock popover（canvas CCTV 畫面、離線雪花）' },
+        ],
+      },
+      {
+        layer: 'Layer — 覆蓋分析 + 規劃輔助',
+        items: [
+          { id: '34V-4', done: true, text: '占用趨勢面板（逐時長條、可拖、左下）' },
+          { id: '34V-6', done: true, text: '覆蓋率報表（涵蓋%/盲區/重疊備援/平均重疊 + 目標門檻 pass/fail + 最大盲區定位）' },
+          { id: '34V-7', done: true, text: '重疊覆蓋 overlay（黃=1台 / 藍綠=≥2台）' },
+          { id: '34V-8', done: true, text: '型號預設（dome / bullet / turret / wide / fisheye）' },
+          { id: '34V-9', done: true, text: '相機清單面板（多選批次改型號/狀態/刪除、區域分組、可收合、點列定位）' },
+          { id: '34V-10', done: true, text: '複製相機 + 高度快設 + 方位角 ±15°/對準中心' },
+        ],
+      },
+    ],
+  },
+  {
     phase: 'Phase 35 — Camera 校正 + 導覽 polish',
     groups: [
       {
