@@ -4,6 +4,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useTrackingStore } from '@/store/useTrackingStore'
 import { useCameraStore } from '@/store/useCameraStore'
 import { generateDayTracks, DAY_START_SEC, DAY_END_SEC } from './mockTracks'
+import { bindTracksToCameras } from './projectTracks'
 
 // Drives the Camera-mode playback clock + lazily generates the mock crowd.
 //
@@ -32,7 +33,18 @@ export function ensureTracksForActiveFloor(seedOverride) {
   const seed = seedOverride ?? DEFAULT_SEED
   const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
   const tracks = generateDayTracks(floor, walls, { seed })
-  tr.setTracks(activeFloorId, tracks, seed)
+  // Stage-2: bind each track to the camera that sees it (FOV containment) so a
+  // manual calibration can later re-project it. samples stay in floor px —
+  // uncalibrated cameras display tracks as generated.
+  const cameras = useCameraStore.getState().camerasByFloor[activeFloorId] ?? []
+  const scale = floor.scale ?? 40
+  const bound = bindTracksToCameras(tracks, cameras, walls, scale)
+  tr.setTracks(activeFloorId, bound, seed)
+  // Re-project any cameras already manually calibrated (e.g. returning to a
+  // floor whose cameras were calibrated before this regeneration).
+  for (const cam of cameras) {
+    if (cam.calibration?.H) tr.reprojectCameraTracks(activeFloorId, cam.id, cam.calibration.H)
+  }
   if (seedOverride == null) {
     tr.setClockSec(ENTRY_CLOCK_SEC)
     tr.setPlaying(true)
@@ -136,6 +148,31 @@ export function bindTracking({ useEditorStore }) {
   })
   const unsubTracking = useTrackingStore.subscribe(() => { syncLoop(); syncLapse() })
 
+  // Re-project a camera's tracks when its calibration homography changes
+  // (manual recalibrate). We snapshot each camera's H reference; on change we
+  // ask the tracking store to recompute that camera's samples from its frame
+  // source. Writes only to the tracking store → no feedback loop with cameras.
+  let prevHById = new Map()
+  const snapshotH = () => {
+    const fid = useFloorStore.getState().activeFloorId
+    const cams = useCameraStore.getState().camerasByFloor[fid] ?? []
+    const m = new Map()
+    for (const c of cams) m.set(c.id, c.calibration?.H ?? null)
+    return m
+  }
+  prevHById = snapshotH()
+  const unsubCalib = useCameraStore.subscribe(() => {
+    const fid = useFloorStore.getState().activeFloorId
+    const cams = useCameraStore.getState().camerasByFloor[fid] ?? []
+    const tr = useTrackingStore.getState()
+    for (const c of cams) {
+      const H = c.calibration?.H ?? null
+      if (prevHById.get(c.id) !== H && H) tr.reprojectCameraTracks(fid, c.id, H)
+    }
+    // refresh snapshot (covers H changes handled above + camera add/remove)
+    prevHById = snapshotH()
+  })
+
   if (isActive()) ensureTracksForActiveFloor()
   syncLoop()
   syncLapse()
@@ -144,6 +181,7 @@ export function bindTracking({ useEditorStore }) {
     unsubEditor()
     unsubFloor()
     unsubTracking()
+    unsubCalib()
     if (rafId !== 0) cancelAnimationFrame(rafId)
     if (lapseRaf !== 0) cancelAnimationFrame(lapseRaf)
   }

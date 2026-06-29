@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { DAY_START_SEC, DAY_END_SEC } from '@/features/cameras/mockTracks'
+import { applyHomography, invertHomography } from '@/utils/homography'
 
 // Camera-mode tracking/playback state (Phase 34-2/34-4).
 //
@@ -41,6 +42,38 @@ export const useTrackingStore = create((set) => ({
     const { [floorId]: _, ...rest } = s.tracksByFloor
     const { [floorId]: __, ...restSeed } = s.seedByFloor
     return { tracksByFloor: rest, seedByFloor: restSeed }
+  }),
+
+  // Stage-2 calibration: project a camera's tracks through its homography H.
+  //
+  //   • First time (track has no frameSamples): freeze frameSamples = H⁻¹·samples
+  //     — the track captured in this camera's frame. Displayed samples = H·that
+  //     = the original floor path, so a camera's FIRST calibration doesn't move
+  //     its tracks (they were already where it sees them).
+  //   • Later recalibration (frameSamples already frozen): samples = H·frameSamples,
+  //     which differs from the original → the tracks visibly shift.
+  //
+  // `baseSamples` preserves the immutable generated floor path so we can always
+  // recover frameSamples even after the displayed samples have been re-projected.
+  reprojectCameraTracks: (floorId, cameraId, H) => set((s) => {
+    const list = s.tracksByFloor[floorId]
+    if (!list || !H) return {}
+    const Hinv = invertHomography(H)
+    if (!Hinv) return {}
+    let changed = false
+    const next = list.map((trk) => {
+      if (trk.cameraId !== cameraId) return trk
+      const base = trk.baseSamples ?? trk.samples
+      const frameSamples = trk.frameSamples
+        ?? base.map((p) => { const q = applyHomography(Hinv, p); return { t: p.t, x: q.x, y: q.y } })
+      const samples = frameSamples.map((p) => {
+        const q = applyHomography(H, p)
+        return { t: p.t, x: q.x, y: q.y }
+      })
+      changed = true
+      return { ...trk, baseSamples: base, frameSamples, samples }
+    })
+    return changed ? { tracksByFloor: { ...s.tracksByFloor, [floorId]: next } } : {}
   }),
 
   setClockSec: (clockSec) => set({

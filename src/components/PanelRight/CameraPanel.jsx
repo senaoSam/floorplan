@@ -156,20 +156,27 @@ function CameraPanel({ floorId, cameraId }) {
           </button>
         </PanelField>
         <PanelField label="熱圖校正" hint="點 4 對點求單應性矩陣，對齊 Verkada 做法">
-          <button
-            type="button"
-            onClick={() => openCalibrate(cameraId)}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              padding: '4px 12px', borderRadius: 8, cursor: 'pointer',
-              border: camera.calibration ? '1px solid rgba(16,185,129,0.5)' : '1px solid rgba(56,189,248,0.5)',
-              background: camera.calibration ? 'rgba(16,185,129,0.12)' : 'rgba(56,189,248,0.12)',
-              color: camera.calibration ? '#10b981' : '#38bdf8', fontSize: 12, fontWeight: 600,
-            }}
-            title="開啟 4 點校正（在平面圖與相機畫面點對應點）"
-          >
-            🎯 {camera.calibration ? '已校正' : '校正熱圖'}
-          </button>
+          <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+            <button
+              type="button"
+              onClick={() => openCalibrate(cameraId)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '4px 12px', borderRadius: 8, cursor: 'pointer',
+                border: camera.calibration ? '1px solid rgba(16,185,129,0.5)' : '1px solid rgba(56,189,248,0.5)',
+                background: camera.calibration ? 'rgba(16,185,129,0.12)' : 'rgba(56,189,248,0.12)',
+                color: camera.calibration ? '#10b981' : '#38bdf8', fontSize: 12, fontWeight: 600,
+              }}
+              title="開啟 4 點校正（在平面圖與相機畫面點對應點）"
+            >
+              🎯 {camera.calibration ? '已校正' : '校正熱圖'}
+            </button>
+            {!camera.calibration && (
+              <span style={{ color: '#f59e0b', fontSize: 11, lineHeight: 1.3 }}>
+                尚未校正：軌跡以平面座標顯示；校正後熱圖更貼合此相機視野
+              </span>
+            )}
+          </span>
         </PanelField>
         <PanelField label="複製" hint="複製這台含所有參數">
           <button

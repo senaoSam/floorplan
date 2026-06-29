@@ -268,6 +268,15 @@ export function attachCamerasLayer({
     graphics.circle(sdx, sdy, 3.4).fill({ color: '#ffffff', alpha: 1 })
     graphics.circle(sdx, sdy, 2.6).fill({ color: STATUS_COLOR[status], alpha: 1 })
 
+    // Calibration badge (stage 2) — top-LEFT of the body, opposite the status
+    // dot. Calibrated = solid emerald dot; uncalibrated = nothing (calibration
+    // is a deliberate manual step).
+    if (camera.calibration) {
+      const cdx = -CAM_RADIUS * 0.72, cdy = -CAM_RADIUS * 0.72
+      graphics.circle(cdx, cdy, 3.4).fill({ color: '#ffffff', alpha: 1 })
+      graphics.circle(cdx, cdy, 2.6).fill({ color: '#10b981', alpha: 1 })
+    }
+
     // Rotate handle — only when selected: axis tick + draggable dot. Hovering
     // the dot inverts it (emerald fill, white ring, slightly larger) so the
     // "this is draggable" affordance is unmistakable.

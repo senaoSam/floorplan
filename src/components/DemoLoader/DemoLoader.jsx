@@ -179,6 +179,10 @@ function DemoLoader() {
         const azimuth = Math.round(
           ((Math.atan2(H / 2 - c.y, W / 2 - c.x) * 180 / Math.PI) + 360) % 360,
         )
+        // No calibration by default — like Verkada, calibration is a deliberate
+        // manual step. Uncalibrated cameras show their tracks in plain floor
+        // coordinates (the projection pipeline leaves them untouched); only a
+        // manually-calibrated camera re-projects its tracks through its matrix.
         cams.addCamera(floor.id, {
           id: generateId('cam'),
           name: cams.nextCameraName(),

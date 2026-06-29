@@ -249,6 +249,13 @@
   - **階段 2（後接）**：把 mock 偵測資料從「直接生平面座標軌跡」改為「**生在相機畫面座標系 → 經校正矩陣投影到平面圖**」。這是讓校正「有意義」的關鍵，屬架構級改動，排程後再開。
 - **真功能 vs 殼的分水嶺**：階段 2 的 mock 資料重構若不做，homography 算了也是恆等對應＝退回成殼。故階段 2 是這條能真正脫離 🔶 的必要條件。
 
+### L5. 階段 2 落地（2026-06-29，✅ 已脫離殼）
+- **核心定位（重要）**：校正是**刻意的手動步驟**，對標 Verkada（Verkada 不提供自動校正）。**沒有 auto 校正**——曾短暫做過 auto 預設 homography，但它的「畫面四角↔地面四點」對應是用正方形硬湊、非真實光學投影（使用者質疑後撤除）。未來 live 版接真實相機主機（如 Verkada key）時校正才對位真實偵測；現在 plan/mock 版只是讓使用者看規劃效果。
+- **設計決策**：① 軌跡綁定到看得到它的相機（FOV 含起點），但 `samples` 維持平面 px → **未校正相機的軌跡直接以平面座標顯示**（demo 不會空）。② 校正只有 `source: 'manual'`。③ 視覺區分：marker 綠實心徽記（已校正）/無（未校正）；清單 ✓校/無；面板按鈕「已校正」/「校正熱圖」+ 未校正時提示「尚未校正：軌跡以平面座標顯示…」。
+- **校正如何「真的有作用」（first-freeze 模型）**：軌跡由 `generateDayTracks` 在平面 px + 避牆生成（frame 空間沒有牆，不能在那生）。每條軌跡保留不可變 `baseSamples`（原始平面路徑）。**第一次**校正某相機：凍結 `frameSamples = H⁻¹·baseSamples`，`samples = H·frameSamples = baseSamples`（不位移，因為軌跡本來就在相機看的位置）。**之後重校** H'：`samples = H'·frameSamples ≠ baseSamples` → 軌跡位移。消費者永遠只讀 `samples`（平面 px）→ 10 個消費者（熱圖/計數線/趨勢/3D…）零改動。
+- **新增/改名**：`utils/homography.js` invertHomography；`features/cameras/frameConstants.js`（FRAME_W/H，原 defaultCalibration.js 刪除 deriveDefaultHomography 後改名）；`features/cameras/projectTracks.js`（bindTracksToCameras 只指派 cameraId）；useTrackingStore.reprojectCameraTracks（first-freeze + baseSamples）；trackingBinder 校正變更訂閱（只寫 trackingStore，無迴圈）。
+- **MCP 驗證**：invert round-trip 誤差 0；demo 0 台校正 / 3028 軌跡 / 1845 綁定 cameraId（未空）；第一次校正位移 (0,0)、第二次校正平移 (150,100) → 軌跡正好位移 (150,100)；未校正面板顯示提示；0 console errors。
+
 ### L4. 用詞對齊（2026-06-29）
 - Verkada 官方：功能標題 `Calibrate Cameras for Heat Maps`、按鈕 `Calibrate for heatmap`。
 - 本專案落地用詞：modal 標題「**相機校正 · 用於人流熱圖**」（對齊官方標題語意——校正的主體是相機，非熱圖）；CameraPanel 按鈕「**校正熱圖 / 已校正**」（對齊官方按鈕）。

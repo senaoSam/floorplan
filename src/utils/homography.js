@@ -68,6 +68,28 @@ export function applyHomography(H, p) {
   return { x: x / w, y: y / w }
 }
 
+// Invert a 3×3 homography (number[9], row-major) via the adjugate / determinant.
+// Returns number[9] (normalised so h22 = 1) or null if singular. Used to map a
+// floorplan point back into camera-frame space (the inverse of applyHomography).
+export function invertHomography(H) {
+  const [a, b, c, d, e, f, g, h, i] = H
+  const A = e * i - f * h
+  const B = -(d * i - f * g)
+  const C = d * h - e * g
+  const det = a * A + b * B + c * C
+  if (Math.abs(det) < 1e-12) return null
+  const inv = 1 / det
+  const m = [
+    A * inv,            (c * h - b * i) * inv, (b * f - c * e) * inv,
+    B * inv,            (a * i - c * g) * inv, (c * d - a * f) * inv,
+    C * inv,            (b * g - a * h) * inv, (a * e - b * d) * inv,
+  ]
+  // normalise so the homogeneous scale (m22) is 1
+  const s = m[8]
+  if (Math.abs(s) < 1e-12) return null
+  return m.map((v) => v / s)
+}
+
 // Mean reprojection error (px): how far each src point lands from its dst target
 // under H. A useful calibration-quality readout for the user.
 export function reprojectionError(H, src, dst) {

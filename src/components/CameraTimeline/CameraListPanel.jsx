@@ -211,6 +211,11 @@ function CameraListPanel() {
                       >
                         <span className="camera-list__dot" style={{ background: STATUS_COLOR[status] }} />
                         <span className="camera-list__name">{cam.name}</span>
+                        {cam.calibration && (
+                          <span className="camera-list__calib camera-list__calib--manual" title="已校正">
+                            ✓校
+                          </span>
+                        )}
                         <span className="camera-list__model">{model.id === 'custom' ? '自訂' : model.label.split(' ')[0]}</span>
                       </span>
                       <button

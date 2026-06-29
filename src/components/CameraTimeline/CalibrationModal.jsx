@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useCameraStore } from '@/store/useCameraStore'
 import { solveHomography } from '@/utils/homography'
+import { FRAME_W, FRAME_H } from '@/features/cameras/frameConstants'
 import './CalibrationModal.sass'
 
 // Heat-map calibration modal (Verkada parity, see verkada-notes §L, stage 1).
@@ -15,8 +16,6 @@ import './CalibrationModal.sass'
 //   floorPts — floorplan IMAGE px (so they survive zoom/pan and match detections)
 //   framePts — camera-frame px (the FRAME_W×FRAME_H mock canvas)
 
-const FRAME_W = 420
-const FRAME_H = 236
 const PLAN_W = 420
 const PLAN_H = 300
 const DOT_COLORS = ['#f97316', '#10b981', '#38bdf8', '#a855f7']   // 1..4
@@ -139,16 +138,19 @@ function CalibrationModal() {
   const save = () => {
     if (!H) return
     updateCamera(activeFloorId, camera.id, {
-      calibration: { floorPts, framePts, H },
+      calibration: { floorPts, framePts, H, source: 'manual' },
     })
     closeCalibrate()
   }
 
-  const step = floorPts.length < 4
-    ? `① 在平面圖點第 ${floorPts.length + 1} 點`
-    : framePts.length < 4
-      ? `② 在相機畫面點對應的第 ${framePts.length + 1} 點`
-      : '✓ 四對點完成，可儲存'
+  // Which pane is active. The step prompt lives ON that pane's label so it
+  // always sits directly above the image the user should be clicking — stage 1
+  // over the floorplan (left), stage 2 over the camera frame (right).
+  const onPlanStage = floorPts.length < 4
+  const onFrameStage = !onPlanStage && framePts.length < 4
+  const allDone = !onPlanStage && !onFrameStage
+  const planStep = onPlanStage ? `① 在平面圖點第 ${floorPts.length + 1} 點` : null
+  const frameStep = onFrameStage ? `② 在相機畫面點對應的第 ${framePts.length + 1} 點` : null
 
   return (
     <div className="calib" onClick={closeCalibrate}>
@@ -158,11 +160,14 @@ function CalibrationModal() {
           <button type="button" className="calib__close" onClick={closeCalibrate}>✕</button>
         </div>
 
-        <div className="calib__step">{step}</div>
+        {allDone && <div className="calib__step">✓ 四對點完成，可儲存</div>}
 
         <div className="calib__panes">
           <div className="calib__pane">
-            <div className="calib__pane-label">平面圖（依序點 4 點）</div>
+            <div className="calib__pane-label">
+              平面圖（依序點 4 點）
+              {planStep && <span className="calib__pane-step">{planStep}</span>}
+            </div>
             <div
               className="calib__plan"
               style={{ width: PLAN_W, height: PLAN_H }}
@@ -193,7 +198,10 @@ function CalibrationModal() {
           </div>
 
           <div className="calib__pane">
-            <div className="calib__pane-label">相機畫面（點相同的 4 點）</div>
+            <div className="calib__pane-label">
+              相機畫面（點相同的 4 點）
+              {frameStep && <span className="calib__pane-step">{frameStep}</span>}
+            </div>
             <div className="calib__frame-wrap" style={{ width: FRAME_W, height: FRAME_H }} onClick={onFrameClick}>
               <canvas ref={frameCanvasRef} width={FRAME_W} height={FRAME_H} className="calib__frame-canvas" />
               {framePts.map((p, i) => (
