@@ -1,6 +1,7 @@
 import { Container, Graphics, Circle, Text, TextStyle } from 'pixi.js'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
+import { useHoverStore } from '@/store/useHoverStore'
 import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from './fovPolygon'
 import { isCameraDetecting, anyDetecting, subscribeDetection } from './detectionBus'
 import { deviceStatus, STATUS_COLOR, DEVICE_STATUS } from './deviceStatus'
@@ -241,7 +242,8 @@ export function attachCamerasLayer({
 
     const editor = useEditorStore.getState()
     const isSelected = editor.selectedId === camera.id && editor.selectedType === 'camera'
-    const isHovered = entry.hovered || useCameraStore.getState().hoverCameraId === camera.id
+    const hover = useHoverStore.getState()
+    const isHovered = entry.hovered || (hover.type === 'camera' && hover.id === camera.id)
     const isInvert = isHovered && !isSelected
 
     const azRad = ((camera.azimuth ?? 0) % 360) * Math.PI / 180
@@ -339,7 +341,7 @@ export function attachCamerasLayer({
       if (!isCameraMode()) return
       entry.hovered = true
       // mirror into the store so the roster panel row highlights in sync
-      useCameraStore.getState().setHoverCamera(entry.camera.id)
+      useHoverStore.getState().setHover(entry.camera.id, 'camera')
       lastHoverId = entry.camera.id
       drawCamera(entry)
       scene.requestRender()
@@ -348,8 +350,9 @@ export function attachCamerasLayer({
       if (!entry.hovered && !entry.handleHover) return
       entry.hovered = false
       entry.handleHover = false
-      if (useCameraStore.getState().hoverCameraId === entry.camera.id) {
-        useCameraStore.getState().setHoverCamera(null)
+      const hover = useHoverStore.getState()
+      if (hover.type === 'camera' && hover.id === entry.camera.id) {
+        useHoverStore.getState().clearHoverIf(entry.camera.id)
         lastHoverId = null
       }
       drawCamera(entry)
@@ -528,10 +531,15 @@ export function attachCamerasLayer({
   }
 
   // Roster-panel hover → highlight the matching marker (and un-highlight the
-  // previous one). Cheap: redraw only the two affected containers.
-  let lastHoverId = useCameraStore.getState().hoverCameraId
+  // previous one). Cheap: redraw only the two affected containers. The hover
+  // bus is shared across object types, so only camera-typed hovers count here.
+  const cameraHoverId = () => {
+    const s = useHoverStore.getState()
+    return s.type === 'camera' ? s.id : null
+  }
+  let lastHoverId = cameraHoverId()
   const onHoverChange = () => {
-    const id = useCameraStore.getState().hoverCameraId
+    const id = cameraHoverId()
     if (id === lastHoverId) return
     const prev = lastHoverId ? containers.get(lastHoverId) : null
     const next = id ? containers.get(id) : null
@@ -541,11 +549,12 @@ export function attachCamerasLayer({
     scene.requestRender()
   }
 
-  const unsubCamera = useCameraStore.subscribe(() => { onHoverChange(); reconcile(); redrawFov(); applyInverseScale() })
+  const unsubCamera = useCameraStore.subscribe(() => { reconcile(); redrawFov(); applyInverseScale() })
   const unsubFloor = useFloorStore.subscribe(() => { reconcile(); redrawFov(); applyInverseScale() })
   const unsubWall = useWallStore.subscribe(redrawFov)
   const unsubEditor = useEditorStore.subscribe(onEditorChange)
   const unsubViewport = useViewportStore.subscribe(applyInverseScale)
+  const unsubHover = useHoverStore.subscribe(onHoverChange)
   // Detection membership changed → repaint cones now and make sure the pulse
   // loop is running (it self-stops when detection clears).
   const unsubDetection = subscribeDetection(() => { redrawFov(); scene.requestRender(); syncPulse() })
@@ -562,6 +571,7 @@ export function attachCamerasLayer({
     unsubWall()
     unsubEditor()
     unsubViewport()
+    unsubHover()
     unsubDetection()
     if (pulseRaf !== 0) cancelAnimationFrame(pulseRaf)
     for (const id of Array.from(containers.keys())) removeContainer(id)

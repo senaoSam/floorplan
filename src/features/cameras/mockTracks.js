@@ -31,6 +31,16 @@ export function mulberry32(seed) {
 export const DAY_START_SEC = 8 * 3600    // 08:00
 export const DAY_END_SEC = 22 * 3600     // 22:00
 
+// Multi-day mock (Tier2 #4 trend report). One simulated week so the trend
+// panel's daily view aggregates real per-day data instead of repeating day 0.
+// Each day's samples are offset by `day * SECONDS_PER_DAY`, so a track's `t`
+// is an ABSOLUTE timestamp from the week's origin and `Math.floor(t / 86400)`
+// recovers its day index. Day 0 keeps t in [DAY_START_SEC, DAY_END_SEC] — i.e.
+// the existing single-day shape — so every current consumer (heatmap /
+// counting / 3D / calibration) reads day 0 exactly as before.
+export const SECONDS_PER_DAY = 24 * 3600
+export const DAYS_PER_WEEK = 7
+
 // On-screen minimums (user ask): baseline relay slots keep at least this many
 // people / cars present at every moment of the day; the hourly spawns below
 // add the rush-hour peaks on top.
@@ -126,9 +136,16 @@ const randIn = (rng, [lo, hi]) => lerp(lo, hi, rng())
 
 // One day of tracks for a floor.
 //   floor: { imageWidth, imageHeight, scale }   walls: Wall[]
-//   opts:  { seed }
+//   opts:  { seed, dayIndex }
+// `dayIndex` (default 0) shifts every timestamp by day*86400 so multiple days
+// can live in one flat track list with absolute `t`. dayIndex 0 reproduces the
+// historical single-day output byte-for-byte (offset 0, same seed).
 export function generateDayTracks(floor, walls, opts = {}) {
   const seed = opts.seed ?? 20260611
+  const dayIndex = opts.dayIndex ?? 0
+  const dayOffsetSec = dayIndex * SECONDS_PER_DAY
+  const dayStart = DAY_START_SEC + dayOffsetSec
+  const dayEnd = DAY_END_SEC + dayOffsetSec
   const rng = mulberry32(seed)
   const pxPerM = floor.scale || 40
   const W = floor.imageWidth
@@ -162,12 +179,12 @@ export function generateDayTracks(floor, walls, opts = {}) {
   }
   const POI_SLOT_SEC = 2 * 3600
   const poiSlots = Array.from(
-    { length: Math.ceil((DAY_END_SEC - DAY_START_SEC) / POI_SLOT_SEC) },
+    { length: Math.ceil((dayEnd - dayStart) / POI_SLOT_SEC) },
     makePoiSet,
   )
   const poisAt = (t) => poiSlots[Math.min(
     poiSlots.length - 1,
-    Math.max(0, Math.floor((t - DAY_START_SEC) / POI_SLOT_SEC)),
+    Math.max(0, Math.floor((t - dayStart) / POI_SLOT_SEC)),
   )]
 
   const tracks = []
@@ -244,8 +261,9 @@ export function generateDayTracks(floor, walls, opts = {}) {
 
     if (samples.length < 2) return null
     return {
-      id: `trk-${seed}-${++trackSeq}`,
+      id: `trk-${seed}-d${dayIndex}-${++trackSeq}`,
       type: isCar ? 'car' : 'person',
+      day: dayIndex,
       t0: samples[0].t,
       t1: samples[samples.length - 1].t,
       samples,
@@ -270,9 +288,9 @@ export function generateDayTracks(floor, walls, opts = {}) {
   // ≥30 people, ≥5 cars at any moment). Each slot is a relay of back-to-back
   // tracks covering 08:00–22:00: when one leaves, the next takes over.
   const relay = (isCar, durRange) => {
-    let t = DAY_START_SEC
-    while (t < DAY_END_SEC - 60) {
-      const tr = buildTrackRetry(t, Math.min(DAY_END_SEC, t + randIn(rng, durRange)), isCar)
+    let t = dayStart
+    while (t < dayEnd - 60) {
+      const tr = buildTrackRetry(t, Math.min(dayEnd, t + randIn(rng, durRange)), isCar)
       if (tr) {
         tracks.push(tr)
         t = tr.t1   // hand over the same second — a 1s seam would dip the minimum
@@ -289,9 +307,9 @@ export function generateDayTracks(floor, walls, opts = {}) {
   for (let hour = 8; hour < 22; hour++) {
     const n = (HOURLY_RATE[hour] ?? 10) * RATE_MULTIPLIER
     for (let i = 0; i < n; i++) {
-      const t0 = hour * 3600 + rng() * 3600
+      const t0 = hour * 3600 + dayOffsetSec + rng() * 3600
       const isCar = rng() < CAR_FRACTION
-      const tEnd = Math.min(DAY_END_SEC, t0 + randIn(rng, isCar ? CAR_DURATION_SEC : TRACK_DURATION_SEC))
+      const tEnd = Math.min(dayEnd, t0 + randIn(rng, isCar ? CAR_DURATION_SEC : TRACK_DURATION_SEC))
       // Retry boxed-in spawns here too — otherwise indoor visitors die young
       // and the surviving population skews toward the open outdoor areas.
       const tr = buildTrackRetry(t0, tEnd, isCar)
@@ -300,6 +318,25 @@ export function generateDayTracks(floor, walls, opts = {}) {
   }
 
   return tracks
+}
+
+// A simulated WEEK of tracks for a floor, as one flat list with absolute
+// timestamps (each track tagged `day` 0..days-1 and offset by day*86400).
+//   opts: { seed, days }   (days defaults to DAYS_PER_WEEK)
+// Day d is generated with seed (seed + d) so every day differs while staying
+// deterministic; each day keeps the bimodal lunch/evening shape and the same
+// wall-avoidance model. Day 0 (seed, dayIndex 0) is identical to
+// generateDayTracks(floor, walls, { seed }) — so the single-day store and the
+// week share day 0 exactly. Use computeDayRollup() to aggregate per day.
+export function generateWeekTracks(floor, walls, opts = {}) {
+  const baseSeed = opts.seed ?? 20260611
+  const days = opts.days ?? DAYS_PER_WEEK
+  const all = []
+  for (let d = 0; d < days; d++) {
+    const dayTracks = generateDayTracks(floor, walls, { seed: baseSeed + d, dayIndex: d })
+    for (const tr of dayTracks) all.push(tr)
+  }
+  return all
 }
 
 // Position of a track at wall-clock second `t` — linear interpolation between

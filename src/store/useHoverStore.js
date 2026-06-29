@@ -6,7 +6,7 @@ import { create } from 'zustand'
 //
 // shape:
 //   id: string | null
-//   type: 'ap' | 'switch' | 'cable_tray' | 'wall' | null
+//   type: 'ap' | 'switch' | 'cable_tray' | 'wall' | 'camera' | null
 export const useHoverStore = create((set, get) => ({
   id: null,
   type: null,

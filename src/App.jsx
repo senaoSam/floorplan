@@ -1,6 +1,7 @@
 import React from 'react'
 import TopBar from '@/components/TopBar/TopBar'
 import SidebarLeft from '@/components/SidebarLeft/SidebarLeft'
+import CameraListPanel from '@/components/CameraTimeline/CameraListPanel'
 import CanvasArea from '@/components/CanvasArea/CanvasArea'
 import PanelRight from '@/components/PanelRight/PanelRight'
 import ContextMenuMount from '@/components/ContextMenu/ContextMenuMount'
@@ -18,6 +19,7 @@ function App() {
       <TopBar />
       <div className="app__body">
         <SidebarLeft />
+        <CameraListPanel />
         <CanvasArea />
         <PanelRight />
       </div>

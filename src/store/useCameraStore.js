@@ -23,12 +23,11 @@ export const useCameraStore = create((set, get) => ({
   showOverlap: false,
   // Floor-wide occupancy trend panel (Verkada "Occupancy Trends" parity).
   showTrendPanel: false,
-  // Camera list panel: roster of every camera on the floor.
-  showCameraList: false,
+  // Camera list panel: roster of every camera on the floor. Docked as a
+  // left rail in CAMERA mode (Verkada "Device List" parity), so it defaults
+  // visible for discoverability; the timeline-bar chip toggles it.
+  showCameraList: true,
   cameraListCollapsed: false,
-  // List ↔ marker hover link (Verkada parity §J3): the camera id the pointer is
-  // hovering in the roster panel, so its canvas marker highlights in sync.
-  hoverCameraId: null,
   // Coverage target % — the coverage panel flags pass/fail against this.
   coverageTargetPct: 80,
   // Live-view popover (Verkada parity): the camera whose feed is open, or
@@ -163,7 +162,6 @@ export const useCameraStore = create((set, get) => ({
   toggleShowTrendPanel: () => set((s) => ({ showTrendPanel: !s.showTrendPanel })),
   toggleShowCameraList: () => set((s) => ({ showCameraList: !s.showCameraList })),
   toggleCameraListCollapsed: () => set((s) => ({ cameraListCollapsed: !s.cameraListCollapsed })),
-  setHoverCamera: (hoverCameraId) => set((s) => (s.hoverCameraId === hoverCameraId ? s : { hoverCameraId })),
   setCoverageTargetPct: (coverageTargetPct) =>
     set({ coverageTargetPct: Math.max(0, Math.min(100, coverageTargetPct)) }),
   openLiveView: (cameraId) => set({ liveViewCameraId: cameraId }),

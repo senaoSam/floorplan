@@ -182,6 +182,54 @@ export function computeFloorTrend(tracks, dayStartSec, dayEndSec) {
   }
 }
 
+// ── Multi-day rollup (trend report, daily view) ─────────────────────────────
+// Per-DAY distinct people/cars + accumulated person-seconds across a week of
+// tracks (generateWeekTracks). Distinct counts use DAY-LEVEL Sets — the same
+// allPeople/allCars pattern as computeFloorTrend — so a person seen in many
+// hours counts once per day. NEVER sum hourly distinct counts: a track present
+// at 10:00 and 14:00 would otherwise be double-counted.
+//
+// Each track is assigned to a day via its `day` tag (set by generateDayTracks),
+// falling back to floor(t0 / 86400) for untagged data. Returns one entry per
+// day that has any tracks, ascending: [{ day, people, cars, presentSec }].
+const SECONDS_PER_DAY = 24 * 3600
+
+export function computeDayRollup(tracks) {
+  const peopleByDay = new Map()   // day → Set(id)
+  const carsByDay = new Map()
+  const presentSecByDay = new Map()
+
+  for (const track of tracks ?? []) {
+    const day = track.day ?? Math.floor((track.t0 ?? 0) / SECONDS_PER_DAY)
+    const isCar = track.type === 'car'
+    const byDay = isCar ? carsByDay : peopleByDay
+    let set = byDay.get(day)
+    if (!set) { set = new Set(); byDay.set(day, set) }
+    set.add(track.id)
+
+    // person-seconds: sum each leg's duration (sparse waypoint samples).
+    let sec = presentSecByDay.get(day) ?? 0
+    const s = track.samples
+    for (let i = 0; i + 1 < s.length; i++) {
+      const dt = s[i + 1].t - s[i].t
+      if (dt > 0) sec += dt
+    }
+    presentSecByDay.set(day, sec)
+  }
+
+  const days = new Set([...peopleByDay.keys(), ...carsByDay.keys()])
+  const rollup = []
+  for (const day of [...days].sort((a, b) => a - b)) {
+    rollup.push({
+      day,
+      people: peopleByDay.get(day)?.size ?? 0,
+      cars: carsByDay.get(day)?.size ?? 0,
+      presentSec: presentSecByDay.get(day) ?? 0,
+    })
+  }
+  return rollup
+}
+
 // ── Flow grid ─────────────────────────────────────────────────────────────
 // Average movement vector per cell over the window. Dwell steps (zero
 // velocity) are skipped — the flow map shows WHERE PEOPLE MOVE, the dwell

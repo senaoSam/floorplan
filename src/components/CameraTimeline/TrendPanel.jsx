@@ -1,23 +1,66 @@
 import React, { useMemo, useRef, useState, useCallback } from 'react'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
+import { useWallStore } from '@/store/useWallStore'
 import { useTrackingStore } from '@/store/useTrackingStore'
 import { useCameraStore } from '@/store/useCameraStore'
-import { computeFloorTrend } from '@/features/cameras/analyticsStats'
-import { DAY_START_SEC, DAY_END_SEC, formatClock } from '@/features/cameras/mockTracks'
+import { computeFloorTrend, computeDayRollup } from '@/features/cameras/analyticsStats'
+import {
+  DAY_START_SEC, DAY_END_SEC, generateWeekTracks, formatClock,
+} from '@/features/cameras/mockTracks'
 import './TrendPanel.sass'
 
 // Floor-wide occupancy trend panel (Verkada "Occupancy Trends" parity).
-// A bar chart of distinct people present per hour across the whole day, with
-// the busiest-hour callout and day totals. The clock's current hour column is
-// highlighted so the chart and the live canvas read together.
+// Two views, switchable:
+//   • hourly (default) — distinct presence per hour across day 0, with the
+//     busiest-hour callout, day totals, and the live clock's current hour
+//     highlighted; click a bar to seek the playback clock to that hour.
+//   • daily  — distinct presence per day across a simulated WEEK
+//     (generateWeekTracks). Real per-day aggregation via computeDayRollup
+//     (day-level Sets, never summed hourly counts).
+// A metric toggle re-keys both views to head-count / person-seconds / cars.
+// Counts are RAW (the mock keeps a baseline crowd present, so quiet hours are
+// never zero) — this is a head-count trend, not an occupancy percentage.
 //
 // The panel is a DRAGGABLE floating window — it first appears at the
 // bottom-left of the canvas (out of the way of the cameras) and can be moved
 // anywhere by its title bar.
 
-// First spawn position: bottom-left corner of the canvas area.
-const INITIAL_POS = { x: 18, y: null }   // y:null → resolved to "near bottom" via CSS bottom
+const WEEKDAY_LABELS = ['週一', '週二', '週三', '週四', '週五', '週六', '週日']
+
+const METRICS = [
+  { value: 'people',     label: '人數',   field: 'people' },
+  { value: 'presentSec', label: '人·秒',  field: 'presentSec' },
+  { value: 'cars',       label: '車數',   field: 'cars' },
+]
+
+// person-seconds → compact "1.2 萬秒" feel; keep raw seconds in the title.
+function formatPersonSec(sec) {
+  if (sec >= 3600) return `${(sec / 3600).toFixed(1)} 人時`
+  if (sec >= 60) return `${Math.round(sec / 60)} 人分`
+  return `${Math.round(sec)} 人秒`
+}
+
+function metricValueLabel(metric, v) {
+  return metric === 'presentSec' ? formatPersonSec(v) : String(v)
+}
+
+function dayLabel(day) {
+  return WEEKDAY_LABELS[day % 7] ?? `第 ${day + 1} 天`
+}
+
+function downloadCsv(filename, rows) {
+  const text = rows.map((r) => r.join(',')).join('\r\n')
+  const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
 
 function TrendPanel() {
   const inCameraMode = useEditorStore((s) => s.editorMode === EDITOR_MODE.CAMERA)
@@ -25,8 +68,12 @@ function TrendPanel() {
   const toggle = useCameraStore((s) => s.toggleShowTrendPanel)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
   const tracks = useTrackingStore((s) => s.tracksByFloor[activeFloorId] ?? [])
+  const seed = useTrackingStore((s) => s.seedByFloor[activeFloorId])
   const clockSec = useTrackingStore((s) => s.clockSec)
   const setClockSec = useTrackingStore((s) => s.setClockSec)
+
+  const [view, setView] = useState('hourly')     // 'hourly' | 'daily'
+  const [metric, setMetric] = useState('people')  // 'people' | 'presentSec' | 'cars'
 
   // null pos → not yet dragged, use the CSS default (bottom-left). After the
   // first drag we switch to explicit top/left coordinates.
@@ -59,17 +106,97 @@ function TrendPanel() {
     [tracks],
   )
 
+  // §K: the daily rollup needs a full simulated week, which is expensive to
+  // generate — memoize on [activeFloorId, tracks, seed] so it rebuilds only
+  // when the crowd is regenerated / the floor switches, NEVER on a clockSec
+  // tick. (tracks is day 0; it shares its seed with day 0 of the week, so the
+  // two stay consistent.)
+  const daily = useMemo(() => {
+    if (!activeFloorId) return []
+    const floor = useFloorStore.getState().floors.find((f) => f.id === activeFloorId)
+    if (!floor || !floor.imageWidth) return []
+    const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
+    const week = generateWeekTracks(floor, walls, { seed: seed ?? undefined })
+    return computeDayRollup(week)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFloorId, tracks, seed])
+
   if (!inCameraMode || !activeFloorId || !show) return null
 
-  const maxPeople = Math.max(1, ...trend.hourly.map((h) => h.people))
+  const field = METRICS.find((m) => m.value === metric)?.field ?? 'people'
   const curHour = Math.floor(clockSec / 3600)
-  const style = pos ? { left: pos.left, top: pos.top, bottom: 'auto' } : undefined
+
+  // Bars for the active view, normalised so the tallest fills the chart.
+  const bars = view === 'hourly'
+    ? trend.hourly.map((h) => ({
+        key: h.hour,
+        value: h[field],
+        label: String(h.hour).padStart(2, '0'),
+        isPeak: h.hour === trend.peakHour,
+        isNow: h.hour === curHour,
+        title: `${formatClock(h.hour * 3600)}：${metricValueLabel(metric, h[field])}（點擊跳到此時段）`,
+        onClick: () => setClockSec(Math.max(DAY_START_SEC, h.hour * 3600)),
+      }))
+    : daily.map((d) => ({
+        key: d.day,
+        value: d[field],
+        label: dayLabel(d.day),
+        isPeak: false,
+        isNow: false,
+        title: `${dayLabel(d.day)}：${metricValueLabel(metric, d[field])}`,
+        onClick: null,
+      }))
+  const maxVal = Math.max(1, ...bars.map((b) => b.value))
+
+  const onExportCsv = () => {
+    const metricLabel = METRICS.find((m) => m.value === metric)?.label ?? metric
+    if (view === 'hourly') {
+      const rows = [['hour', 'people', 'cars', 'presentSec']]
+      for (const h of trend.hourly) rows.push([h.hour, h.people, h.cars, Math.round(h.presentSec)])
+      downloadCsv(`trend-hourly-${metricLabel}.csv`, rows)
+    } else {
+      const rows = [['day', 'weekday', 'people', 'cars', 'presentSec']]
+      for (const d of daily) rows.push([d.day, dayLabel(d.day), d.people, d.cars, Math.round(d.presentSec)])
+      downloadCsv(`trend-daily-${metricLabel}.csv`, rows)
+    }
+  }
 
   return (
-    <div className="trend-panel" style={style} ref={dragRef}>
+    <div className="trend-panel" style={pos ? { left: pos.left, top: pos.top, bottom: 'auto' } : undefined} ref={dragRef}>
       <div className="trend-panel__head trend-panel__head--drag" onPointerDown={onDragStart}>
         <span className="trend-panel__title">占用趨勢</span>
         <button type="button" className="trend-panel__close" onClick={toggle} title="關閉">✕</button>
+      </div>
+
+      <div className="trend-panel__toggles">
+        <div className="trend-panel__seg">
+          <button
+            type="button"
+            className={`trend-panel__seg-btn${view === 'hourly' ? ' trend-panel__seg-btn--active' : ''}`}
+            onClick={() => setView('hourly')}
+          >逐時</button>
+          <button
+            type="button"
+            className={`trend-panel__seg-btn${view === 'daily' ? ' trend-panel__seg-btn--active' : ''}`}
+            onClick={() => setView('daily')}
+          >逐日</button>
+        </div>
+        <div className="trend-panel__seg">
+          {METRICS.map((m) => (
+            <button
+              key={m.value}
+              type="button"
+              className={`trend-panel__seg-btn${metric === m.value ? ' trend-panel__seg-btn--active' : ''}`}
+              onClick={() => setMetric(m.value)}
+            >{m.label}</button>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="trend-panel__csv"
+          onClick={onExportCsv}
+          title="匯出目前檢視為 CSV"
+        >⤓ CSV</button>
       </div>
 
       <div className="trend-panel__summary">
@@ -80,30 +207,33 @@ function TrendPanel() {
       </div>
 
       <div className="trend-panel__chart">
-        {trend.hourly.map((h) => {
-          const pct = Math.round((h.people / maxPeople) * 100)
-          const isPeak = h.hour === trend.peakHour
-          const isNow = h.hour === curHour
+        {bars.map((b) => {
+          const pct = Math.round((b.value / maxVal) * 100)
+          const colCls = `trend-panel__bar-col${b.onClick ? ' trend-panel__bar-col--clickable' : ''}${b.isNow ? ' trend-panel__bar-col--now' : ''}`
           return (
             <div
-              key={h.hour}
-              role="button"
-              className={`trend-panel__bar-col trend-panel__bar-col--clickable${isNow ? ' trend-panel__bar-col--now' : ''}`}
-              title={`${formatClock(h.hour * 3600)}：${h.people} 人、${h.cars} 車（點擊跳到此時段）`}
-              onClick={() => setClockSec(Math.max(DAY_START_SEC, h.hour * 3600))}
+              key={b.key}
+              role={b.onClick ? 'button' : undefined}
+              className={colCls}
+              title={b.title}
+              onClick={b.onClick ?? undefined}
             >
               <div className="trend-panel__bar-track">
                 <div
-                  className={`trend-panel__bar${isPeak ? ' trend-panel__bar--peak' : ''}`}
+                  className={`trend-panel__bar${b.isPeak ? ' trend-panel__bar--peak' : ''}`}
                   style={{ height: `${pct}%` }}
                 />
               </div>
-              <span className="trend-panel__bar-label">{String(h.hour).padStart(2, '0')}</span>
+              <span className="trend-panel__bar-label">{b.label}</span>
             </div>
           )
         })}
       </div>
-      <div className="trend-panel__axis">每小時在場不同人數（綠柱＝尖峰，亮欄＝目前時刻）</div>
+      <div className="trend-panel__axis">
+        {view === 'hourly'
+          ? '每小時在場原始計數（綠柱＝尖峰，亮欄＝目前時刻；非占用率）'
+          : '每日在場原始計數（模擬一週，逐日去重統計；非占用率）'}
+      </div>
     </div>
   )
 }

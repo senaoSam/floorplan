@@ -3,6 +3,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useCameraStore } from '@/store/useCameraStore'
 import { solveHomography } from '@/utils/homography'
 import { FRAME_W, FRAME_H } from '@/features/cameras/frameConstants'
+import { drawCctvFrame } from '@/features/cameras/mockCctv'
 import './CalibrationModal.sass'
 
 // Heat-map calibration modal (Verkada parity, see verkada-notes §L, stage 1).
@@ -70,23 +71,13 @@ function CalibrationModal() {
     if (!camera) return
     const ctx = frameCanvasRef.current?.getContext('2d')
     if (!ctx) return
-    const g = ctx.createLinearGradient(0, 0, 0, FRAME_H)
-    g.addColorStop(0, '#1f2937')
-    g.addColorStop(1, '#0b1220')
-    ctx.fillStyle = g
-    ctx.fillRect(0, 0, FRAME_W, FRAME_H)
-    // perspective floor lines so corners read as a ground plane
-    ctx.strokeStyle = 'rgba(148,163,184,0.18)'
-    ctx.lineWidth = 1
-    for (let y = 40; y < FRAME_H; y += 34) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(FRAME_W, y + 16); ctx.stroke()
-    }
-    for (let x = 40; x < FRAME_W; x += 70) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + 40, FRAME_H); ctx.stroke()
-    }
-    ctx.fillStyle = '#94a3b8'
-    ctx.font = '600 11px ui-monospace, monospace'
-    ctx.fillText(`${camera.name} · 模擬畫面`, 10, 18)
+    drawCctvFrame(ctx, {
+      w: FRAME_W,
+      h: FRAME_H,
+      camera,
+      variant: 'calib',
+      renderMode: 'mock',
+    })
   }, [camera])
 
   if (!camera || !floor) return null

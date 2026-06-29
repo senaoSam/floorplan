@@ -585,6 +585,27 @@ const PHASES = [
     ],
   },
   {
+    phase: 'Phase 36 — Verkada Tier 1&2 擴充',
+    groups: [
+      {
+        layer: 'Layer 36 — Device List + 即時影像',
+        items: [
+          { id: '36-1', done: true, text: 'Device List 側欄（對標 Verkada，只列攝影機）— CameraListPanel 從 floating 浮窗升級成 docked 常駐左欄（SidebarLeft↔CanvasArea 間、預設顯示、切走自動回收空間）' },
+          { id: '36-2', done: true, text: '清單列 📹 鈕直接開即時影像（openLiveView，不誤觸列選取）' },
+          { id: '36-3', done: true, text: '統一 hover store（cameras 遷到 useHoverStore type:camera，刪 hoverCameraId）' },
+          { id: '36-4', done: true, text: '抽共用 mockCctv.drawCctvFrame（合併 3 處重複畫格 + mock|stream seam）' },
+        ],
+      },
+      {
+        layer: 'Layer 37 — 全樓層占用趨勢報表',
+        items: [
+          { id: '36-5', done: true, text: '7 日 mock 軌跡（generateWeekTracks，seed-per-day）+ computeDayRollup（day-level 去重）' },
+          { id: '36-6', done: true, text: 'TrendPanel 逐時/逐日切換 + 人數/人·秒/車數 metric 切換 + CSV 匯出' },
+        ],
+      },
+    ],
+  },
+  {
     phase: 'Phase 9 — AI 輔助',
     groups: [
       {

@@ -2,10 +2,12 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useCameraStore } from '@/store/useCameraStore'
+import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { deviceStatus, STATUS_COLOR, DEVICE_STATUS } from '@/features/cameras/deviceStatus'
 import { cameraModelById, CAMERA_MODEL_LIST } from '@/constants/cameraModels'
 import { isCameraDetecting } from '@/features/cameras/detectionBus'
+import { drawCctvFrame } from '@/features/cameras/mockCctv'
 import './CameraListPanel.sass'
 
 // Compact mock-CCTV thumbnail shown when a roster row is hovered (Verkada
@@ -20,48 +22,26 @@ function HoverThumb({ camera }) {
     const ctx = canvasRef.current?.getContext('2d')
     if (!ctx) return
     const offline = deviceStatus(camera) === DEVICE_STATUS.OFFLINE
-    if (offline) {
-      const img = ctx.createImageData(THUMB_W, THUMB_H)
-      for (let i = 0; i < img.data.length; i += 4) {
-        const n = Math.abs((Math.sin(i * 12.9898) * 43758.5) % 1) * 255
-        img.data[i] = img.data[i + 1] = img.data[i + 2] = n
-        img.data[i + 3] = 255
-      }
-      ctx.putImageData(img, 0, 0)
-      ctx.fillStyle = '#f97316'
-      ctx.font = '600 11px system-ui, sans-serif'
-      ctx.textAlign = 'center'
-      ctx.fillText('無訊號', THUMB_W / 2, THUMB_H / 2 + 4)
-      return
-    }
-    const g = ctx.createLinearGradient(0, 0, 0, THUMB_H)
-    g.addColorStop(0, '#1f2937'); g.addColorStop(1, '#0b1220')
-    ctx.fillStyle = g; ctx.fillRect(0, 0, THUMB_W, THUMB_H)
-    ctx.strokeStyle = 'rgba(148,163,184,0.14)'
-    ctx.lineWidth = 1
-    for (let y = 16; y < THUMB_H; y += 18) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(THUMB_W, y + 8); ctx.stroke()
-    }
-    if (isCameraDetecting(camera.id)) {
-      ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2
-      ctx.strokeRect(THUMB_W * 0.4, THUMB_H * 0.34, 26, 42)
-    }
-    ctx.fillStyle = '#e2e8f0'
-    ctx.font = '600 10px ui-monospace, monospace'
-    ctx.textAlign = 'left'
-    ctx.fillText(camera.name, 8, 16)
-    ctx.fillStyle = '#ef4444'
-    ctx.beginPath(); ctx.arc(THUMB_W - 14, 13, 4, 0, Math.PI * 2); ctx.fill()
+    drawCctvFrame(ctx, {
+      w: THUMB_W,
+      h: THUMB_H,
+      camera,
+      variant: 'thumb',
+      online: !offline,
+      detecting: isCameraDetecting(camera.id),
+      renderMode: 'mock',
+    })
   }, [camera])
   return <canvas ref={canvasRef} width={THUMB_W} height={THUMB_H} className="camera-list__thumb-canvas" />
 }
 
-// Camera roster panel for Camera mode. Lists every camera on the active floor
-// with its model + online status. A row click selects it (opens CameraPanel)
-// and recentres the viewport. Each row also has a checkbox for multi-select:
-// when ≥1 is checked, a batch bar appears to apply a model, toggle online/
-// offline, or delete the whole selection at once. (Self-contained here — it
-// deliberately doesn't touch the canvas marquee-select system.)
+// Camera roster panel for Camera mode (Verkada "Device List" parity). Docked
+// as a full-height left rail (between SidebarLeft and the canvas), it lists
+// every camera on the active floor with its model + online status. A row click
+// selects it (opens CameraPanel) and recentres the viewport. Each row also has
+// a checkbox for multi-select: when ≥1 is checked, a batch bar appears to apply
+// a model, toggle online/offline, or delete the whole selection at once.
+// (Self-contained — it deliberately doesn't touch the canvas marquee-select.)
 
 function CameraListPanel() {
   const inCameraMode = useEditorStore((s) => s.editorMode === EDITOR_MODE.CAMERA)
@@ -77,22 +57,29 @@ function CameraListPanel() {
   const clearSelected = useEditorStore((s) => s.clearSelected)
   const removeCamera = useCameraStore((s) => s.removeCamera)
   const updateCamera = useCameraStore((s) => s.updateCamera)
-  const setHoverCamera = useCameraStore((s) => s.setHoverCamera)
-  const hoverCameraId = useCameraStore((s) => s.hoverCameraId)
+  const openLiveView = useCameraStore((s) => s.openLiveView)
+  const setHover = useHoverStore((s) => s.setHover)
+  const clearHoverIf = useHoverStore((s) => s.clearHoverIf)
+  // Shared hover bus — only camera-typed hovers light up this roster.
+  const hoveredId = useHoverStore((s) => (s.type === 'camera' ? s.id : null))
 
   // Checked rows for batch ops — a Set of camera ids, local to the panel.
   const [checked, setChecked] = useState(() => new Set())
-  // Clear the cross-store hover link when the panel unmounts / hides.
-  useEffect(() => () => setHoverCamera(null), [setHoverCamera])
+  // Clear the cross-store hover link when the panel unmounts / hides — only if
+  // this panel still owns a camera-typed hover (don't stomp another type's).
+  useEffect(() => () => {
+    const h = useHoverStore.getState()
+    if (h.type === 'camera') h.setHover(null, null)
+  }, [])
 
   if (!inCameraMode || !activeFloorId || !show) return null
 
-  // hoverCameraId is written from both directions (this panel's rows AND the
+  // The hover bus is written from both directions (this panel's rows AND the
   // canvas markers), so it's the single source for both the row highlight and
   // the thumbnail — hovering a marker lights up its row + preview too.
-  const enterRow = (id) => setHoverCamera(id)
-  const leaveRow = () => setHoverCamera(null)
-  const hoveredCam = hoverCameraId ? cameras.find((c) => c.id === hoverCameraId) : null
+  const enterRow = (id) => setHover(id, 'camera')
+  const leaveRow = (id) => clearHoverIf(id)
+  const hoveredCam = hoveredId ? cameras.find((c) => c.id === hoveredId) : null
 
   // Drop ids that no longer exist (deleted elsewhere) so the batch bar count
   // stays honest.
@@ -157,7 +144,7 @@ function CameraListPanel() {
   }
 
   return (
-    <div className={`camera-list${collapsed ? ' camera-list--collapsed' : ''}`}>
+    <div className={`camera-list camera-list--docked${collapsed ? ' camera-list--collapsed' : ''}`}>
       <div className="camera-list__head">
         <button
           type="button"
@@ -189,9 +176,9 @@ function CameraListPanel() {
                   return (
                     <div
                       key={cam.id}
-                      className={`camera-list__row${isSel ? ' camera-list__row--sel' : ''}${hoverCameraId === cam.id ? ' camera-list__row--hover' : ''}`}
+                      className={`camera-list__row${isSel ? ' camera-list__row--sel' : ''}${hoveredId === cam.id ? ' camera-list__row--hover' : ''}`}
                       onMouseEnter={() => enterRow(cam.id)}
-                      onMouseLeave={leaveRow}
+                      onMouseLeave={() => leaveRow(cam.id)}
                     >
                       <input
                         type="checkbox"
@@ -218,6 +205,17 @@ function CameraListPanel() {
                         )}
                         <span className="camera-list__model">{model.id === 'custom' ? '自訂' : model.label.split(' ')[0]}</span>
                       </span>
+                      <button
+                        type="button"
+                        className="camera-list__live"
+                        title="開啟即時影像（模擬畫面）"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          openLiveView(cam.id)
+                        }}
+                      >
+                        📹
+                      </button>
                       <button
                         type="button"
                         className="camera-list__del"
