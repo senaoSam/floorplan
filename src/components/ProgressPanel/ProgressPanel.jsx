@@ -600,7 +600,7 @@ const PHASES = [
         layer: 'Layer 37 — 全樓層占用趨勢報表',
         items: [
           { id: '36-5', done: true, text: '7 日 mock 軌跡（generateWeekTracks，seed-per-day）+ computeDayRollup（day-level 去重）' },
-          { id: '36-6', done: true, text: 'TrendPanel 逐時/逐日切換 + 人數/人·秒/車數 metric 切換 + CSV 匯出' },
+          { id: '36-6', done: true, text: 'TrendPanel 逐時/逐日切換 + 人數/人·秒/車數 metric 切換' },
         ],
       },
     ],

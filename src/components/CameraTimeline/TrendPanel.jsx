@@ -49,19 +49,6 @@ function dayLabel(day) {
   return WEEKDAY_LABELS[day % 7] ?? `第 ${day + 1} 天`
 }
 
-function downloadCsv(filename, rows) {
-  const text = rows.map((r) => r.join(',')).join('\r\n')
-  const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
-
 function TrendPanel() {
   const inCameraMode = useEditorStore((s) => s.editorMode === EDITOR_MODE.CAMERA)
   const show = useCameraStore((s) => s.showTrendPanel)
@@ -148,19 +135,6 @@ function TrendPanel() {
       }))
   const maxVal = Math.max(1, ...bars.map((b) => b.value))
 
-  const onExportCsv = () => {
-    const metricLabel = METRICS.find((m) => m.value === metric)?.label ?? metric
-    if (view === 'hourly') {
-      const rows = [['hour', 'people', 'cars', 'presentSec']]
-      for (const h of trend.hourly) rows.push([h.hour, h.people, h.cars, Math.round(h.presentSec)])
-      downloadCsv(`trend-hourly-${metricLabel}.csv`, rows)
-    } else {
-      const rows = [['day', 'weekday', 'people', 'cars', 'presentSec']]
-      for (const d of daily) rows.push([d.day, dayLabel(d.day), d.people, d.cars, Math.round(d.presentSec)])
-      downloadCsv(`trend-daily-${metricLabel}.csv`, rows)
-    }
-  }
-
   return (
     <div className="trend-panel" style={pos ? { left: pos.left, top: pos.top, bottom: 'auto' } : undefined} ref={dragRef}>
       <div className="trend-panel__head trend-panel__head--drag" onPointerDown={onDragStart}>
@@ -191,12 +165,6 @@ function TrendPanel() {
             >{m.label}</button>
           ))}
         </div>
-        <button
-          type="button"
-          className="trend-panel__csv"
-          onClick={onExportCsv}
-          title="匯出目前檢視為 CSV"
-        >⤓ CSV</button>
       </div>
 
       <div className="trend-panel__summary">
