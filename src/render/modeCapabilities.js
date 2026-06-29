@@ -198,6 +198,9 @@ const CLIENT_VIEW_CAP = {
 const CAMERA_CAP = {
   ...emptyCap(),
   cursor: 'crosshair',
+  // Cameras have a right-click context menu (選取/複製/即時影像/校正熱圖/刪除);
+  // ContextMenuMount gates rendering on this flag.
+  allowContextMenu: true,
   dimOthers: [],
   keepLayers: ['floorImage', 'walls'],
 }

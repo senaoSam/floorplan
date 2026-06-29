@@ -310,6 +310,21 @@ export function attachCamerasLayer({
 
     container.on('pointerdown', (e) => {
       if (!isCameraMode()) return
+      // Right-click → context menu (mirror apsLayer.js bindInteractions). While
+      // a tripwire/zone draw tool is armed, right-click means "cancel the draw"
+      // (analyticsLayer's canvas-level contextmenu listener) — so skip the menu
+      // here and let that gesture through.
+      if (e.button === 2) {
+        if (useCameraStore.getState().drawTool) return
+        e.stopPropagation()
+        useEditorStore.getState().openContextMenu({
+          targetType: 'camera',
+          targetId: entry.camera.id,
+          screenX: e.originalEvent?.clientX ?? 0,
+          screenY: e.originalEvent?.clientY ?? 0,
+        })
+        return
+      }
       if ((e.button ?? 0) !== 0) return
       // Armed tripwire/zone tool → the click belongs to the two-click draw
       // (stage handler); don't grab/select the camera underneath.

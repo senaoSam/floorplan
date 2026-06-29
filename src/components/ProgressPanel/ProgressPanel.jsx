@@ -606,6 +606,29 @@ const PHASES = [
     ],
   },
   {
+    phase: 'Phase 37 — Camera 右鍵選單 + 3D 強化',
+    groups: [
+      {
+        layer: 'Layer 38 — Camera 右鍵 context menu',
+        items: [
+          { id: '37-1', done: true, text: 'Camera 右鍵選單（對標 AP）：重新命名/選取/複製相機/📹即時影像/校正熱圖/刪除（CAMERA_CAP allowContextMenu + camerasLayer button=2 + ContextMenuMount camera 分支）' },
+        ],
+      },
+      {
+        layer: 'Layer 39 — 3D camera 三分析圖',
+        items: [
+          { id: '37-2', done: true, text: '3D 顯示盲區/重疊/占用熱圖（CameraOverlay3D：重用 2D rasteriser 投影成地面紋理，跟隨 2D 開關；flow 動線無 3D 等價不投影）' },
+        ],
+      },
+      {
+        layer: 'Layer 40 — 3D 唯一光源光影',
+        items: [
+          { id: '37-3', done: true, text: '3D 唯一主光投影（Canvas shadows + KeyLight directionalLight castShadow 跟樓層 center；弱化 ambient 保留微弱補光；不分 mode）' },
+        ],
+      },
+    ],
+  },
+  {
     phase: 'Phase 9 — AI 輔助',
     groups: [
       {

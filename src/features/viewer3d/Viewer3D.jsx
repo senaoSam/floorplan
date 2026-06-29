@@ -10,6 +10,7 @@ import TrackLayer3D from './TrackLayer3D'
 import APLayer3D from './APLayer3D'
 import ScopeLayer3D from './ScopeLayer3D'
 import HeatmapPlane3D from './HeatmapPlane3D'
+import CameraOverlay3D from './CameraOverlay3D'
 import FloorHoleVolume3D from './FloorHoleVolume3D'
 import RiserLayer3D from './RiserLayer3D'
 import TrayLayer3D from './TrayLayer3D'
@@ -68,6 +69,45 @@ function FloorPlane({ floor, opacity = 1 }) {
         depthWrite={!transparent}
       />
     </mesh>
+  )
+}
+
+// Single shadow-casting directional KEY light. Anchored relative to the active
+// floor centre and aimed at it so the orthographic shadow frustum stays
+// registered on the floor regardless of floor size/position. The light's
+// `target` is an Object3D that must be attached to the scene and pointed at by
+// the light; we wire it imperatively after mount (a ref's `.current` change
+// does not re-render in R3F, so a JSX `target={ref.current}` would be stale on
+// first paint). Frustum half-extent is a generous ±80 m to cover typical floor
+// plans (floor dims are dynamic = image px / scale).
+function KeyLight({ center }) {
+  const lightRef = useRef()
+  const targetRef = useRef()
+  useEffect(() => {
+    if (lightRef.current && targetRef.current) {
+      lightRef.current.target = targetRef.current
+      lightRef.current.target.updateMatrixWorld()
+    }
+  })
+  return (
+    <>
+      <object3D ref={targetRef} position={center} />
+      <directionalLight
+        ref={lightRef}
+        position={[center[0] + 60, center[1] + 90, center[2] + 40]}
+        intensity={1.1}
+        castShadow
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
+        shadow-camera-near={1}
+        shadow-camera-far={500}
+        shadow-camera-left={-80}
+        shadow-camera-right={80}
+        shadow-camera-top={80}
+        shadow-camera-bottom={-80}
+        shadow-bias={-0.0005}
+      />
+    </>
   )
 }
 
@@ -150,6 +190,11 @@ function FloorStack({ floor, elevation, isActive, onAPHover, inCameraMode }) {
         <>
           <CameraLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActive} />
           {isActive && <TrackLayer3D floorId={floor.id} pxToM={pxToM} />}
+          {/* Planning overlays (blind-spot / overlap / occupancy) projected
+              from the 2D PIXI layers onto the floor. Active floor only (like the
+              2D layers, which clear unless active + CAMERA mode); each plane
+              gates itself on its own 2D store flag so 3D mirrors 2D on/off. */}
+          {isActive && <CameraOverlay3D floorId={floor.id} pxToM={pxToM} />}
         </>
       )}
     </group>
@@ -809,14 +854,19 @@ function Viewer3D() {
       )}
 
       <Canvas
+        shadows
         camera={{ position: camPos, fov: 50, near: 0.1, far: 2000 }}
         style={{ width: '100%', height: '100%', background: '#0f172a' }}
         frameloop={isVisible ? 'always' : 'demand'}
         onPointerMissed={() => clearSelected()}
       >
-      <ambientLight intensity={0.6} />
-      <directionalLight position={[10, 20, 10]} intensity={0.8} />
-      <hemisphereLight args={['#e2e8f0', '#1e293b', 0.4]} />
+      {/* Weak ambient so back faces aren't pure black, plus a single
+          shadow-casting directional KEY light (KeyLight) that dominates the
+          scene so the oblique shadows read clearly. A slight hemisphere fill
+          keeps the lighting from going flat. Applies in ALL modes (not gated). */}
+      <ambientLight intensity={0.28} />
+      <KeyLight center={center} />
+      <hemisphereLight args={['#e2e8f0', '#1e293b', 0.25]} />
 
       {floors.length === 0 && <EmptyScene />}
 

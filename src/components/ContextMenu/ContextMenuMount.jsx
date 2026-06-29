@@ -6,6 +6,7 @@ import { useAPStore } from '@/store/useAPStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useCableStore, TRAY_SYSTEMS } from '@/store/useCableStore'
 import { useScopeStore } from '@/store/useScopeStore'
+import { useCameraStore } from '@/store/useCameraStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useDraftStore } from '@/store/useDraftStore'
 import { generateId } from '@/utils/id'
@@ -33,6 +34,7 @@ function ContextMenuMount() {
   const switchesByFloor = useCableStore((s) => s.switchesByFloor)
   const traysByFloor = useCableStore((s) => s.traysByFloor)
   const scopesByFloor = useScopeStore((s) => s.scopesByFloor)
+  const camerasByFloor = useCameraStore((s) => s.camerasByFloor)
   const floorHolesByFloor = useFloorHoleStore((s) => s.floorHolesByFloor)
 
   if (typeof window !== 'undefined' && window.__debugRMB === true) {
@@ -103,6 +105,14 @@ function ContextMenuMount() {
       useScopeStore.getState().removeScope(activeFloorId, targetId)
       clearIfTargetSelected()
     }
+  } else if (targetType === 'camera') {
+    target = (camerasByFloor[activeFloorId] ?? []).find((c) => c.id === targetId)
+    title = target?.name ?? targetId
+    onRename = (name) => useCameraStore.getState().updateCamera(activeFloorId, targetId, { name })
+    onDelete = () => {
+      useCameraStore.getState().removeCamera(activeFloorId, targetId)
+      clearIfTargetSelected()
+    }
   } else if (targetType === 'floor_hole') {
     target = (floorHolesByFloor[activeFloorId] ?? []).find((h) => h.id === targetId)
     title = target?.name ?? targetId
@@ -160,6 +170,8 @@ function ContextMenuMount() {
   const items = []
   if (targetType === 'cable_tray') {
     buildTrayItems(items, ctx, target, activeFloorId, traysByFloor, setSelected, isSelected, onDelete)
+  } else if (targetType === 'camera') {
+    buildCameraItems(items, target, activeFloorId, setSelected, isSelected, onDelete)
   } else {
     if (!isSelected) {
       items.push({
@@ -301,6 +313,63 @@ function buildTrayItems(items, ctx, tray, floorId, traysByFloor, setSelected, is
       swatch: sys.color,
       onClick: () => useCableStore.getState().updateTray(floorId, tray.id, { system: sys.value }),
     })),
+  })
+
+  items.push({ id: 'div-before-delete', kind: 'divider' })
+  items.push({
+    id: 'delete',
+    label: '刪除',
+    danger: true,
+    shortcut: 'Del',
+    onClick: onDelete,
+  })
+}
+
+// Build the camera context-menu items list, mirroring the CameraPanel actions
+// (PanelRight/CameraPanel.jsx): 選取 / 複製相機 / 即時影像 / 校正熱圖 / 刪除.
+// Labels reuse the exact strings/icons from CameraPanel buttons. ObjectContextMenu's
+// `fire()` wrapper closes the menu after every item click, so no explicit close here.
+function buildCameraItems(items, camera, floorId, setSelected, isSelected, onDelete) {
+  if (!isSelected) {
+    items.push({ id: 'select', label: '選取', onClick: () => setSelected(camera.id, 'camera') })
+  }
+
+  // 複製相機 — replicate CameraPanel.handleDuplicate: clone all params except
+  // id/name, offset +24/+24 px, fresh name, then select the copy.
+  items.push({
+    id: 'duplicate',
+    label: '複製相機',
+    icon: '⧉',
+    onClick: () => {
+      const store = useCameraStore.getState()
+      const id = generateId('cam')
+      const { id: _omit, name: _omitName, ...rest } = camera
+      store.addCamera(floorId, {
+        ...rest,
+        id,
+        name: store.nextCameraName(),
+        x: camera.x + 24,
+        y: camera.y + 24,
+      })
+      setSelected(id, 'camera')
+    },
+  })
+
+  // 📹 即時影像 — open the mock live-view popover.
+  items.push({
+    id: 'live-view',
+    label: '即時影像',
+    icon: '📹',
+    onClick: () => useCameraStore.getState().openLiveView(camera.id),
+  })
+
+  // 校正熱圖 — open the 4-point heat-map calibration modal. Label flips to
+  // 已校正 once calibration exists, matching CameraPanel's button text.
+  items.push({
+    id: 'calibrate',
+    label: camera.calibration ? '已校正' : '校正熱圖',
+    icon: '🎯',
+    onClick: () => useCameraStore.getState().openCalibrate(camera.id),
   })
 
   items.push({ id: 'div-before-delete', kind: 'divider' })
