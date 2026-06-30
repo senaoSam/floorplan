@@ -739,6 +739,10 @@ function Viewer3D() {
     } else {
       return
     }
+    // A preset tween moves to a fixed pose, so it cancels the turntable spin
+    // (tweenTo clears autoRotating without autoRotateAfter). Sync the button
+    // state off so it doesn't keep showing as active.
+    setAutoRotate(false)
     state.tweenTo({ camPos, target: tgt, duration: 600 })
   }, [center, diag])
 
@@ -758,16 +762,30 @@ function Viewer3D() {
     setHoveredAP(ap)
   }, [])
 
-  // Toggle the manual turntable spin: drive the rig's autoRotate and keep the
-  // button's state in sync. (The rig also flips `autoRotate` off through
-  // onAutoRotateStop when the user grabs the camera.)
+  // Toggle the manual turntable spin. Turning it ON first tweens the camera
+  // back to the 2D→3D entry pose (the 3/4 iso angle) and only starts the
+  // turntable once it lands — reusing the exact entry animation path
+  // (tweenTo + autoRotateAfter) so the auto-rotate always orbits from the
+  // same angle as just-switched-to-3D, regardless of where the user had
+  // orbited to. Turning it OFF just stops the spin. The rig also flips this
+  // back off via onAutoRotateStop when the user grabs the camera.
   const toggleAutoRotate = useCallback(() => {
     setAutoRotate((on) => {
       const next = !on
-      cameraStateRef.current?.setAutoRotate?.(next)
+      const state = cameraStateRef.current
+      if (next && state?.tweenTo) {
+        state.tweenTo({
+          camPos: entryPose.camPos,
+          target: entryPose.target,
+          duration: entryPose.duration,
+          autoRotateAfter: true,
+        })
+      } else {
+        state?.setAutoRotate?.(false)
+      }
       return next
     })
-  }, [])
+  }, [entryPose])
 
   return (
     <div
