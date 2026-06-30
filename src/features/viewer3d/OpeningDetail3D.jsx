@@ -66,23 +66,23 @@ function Door({ cx, cy, w, h, wallThickness, color }) {
   return (
     <group position={[cx, cy, 0]}>
       {/* Top frame */}
-      <mesh position={[0, halfH - ft / 2, 0]}>
+      <mesh position={[0, halfH - ft / 2, 0]} castShadow receiveShadow>
         <boxGeometry args={[w, ft, fd]} />
         <meshStandardMaterial color={frameColor} roughness={0.7} />
       </mesh>
       {/* Left jamb */}
-      <mesh position={[-halfW + ft / 2, (halfH - ft) / 2 - ft / 2, 0]}>
+      <mesh position={[-halfW + ft / 2, (halfH - ft) / 2 - ft / 2, 0]} castShadow receiveShadow>
         <boxGeometry args={[ft, h - ft, fd]} />
         <meshStandardMaterial color={frameColor} roughness={0.7} />
       </mesh>
       {/* Right jamb */}
-      <mesh position={[ halfW - ft / 2, (halfH - ft) / 2 - ft / 2, 0]}>
+      <mesh position={[ halfW - ft / 2, (halfH - ft) / 2 - ft / 2, 0]} castShadow receiveShadow>
         <boxGeometry args={[ft, h - ft, fd]} />
         <meshStandardMaterial color={frameColor} roughness={0.7} />
       </mesh>
 
       {/* Closed door leaf, centered within the jambs. */}
-      <mesh position={[0, -halfH + leafH / 2 + ft / 2, 0]} castShadow>
+      <mesh position={[0, -halfH + leafH / 2 + ft / 2, 0]} castShadow receiveShadow>
         <boxGeometry args={[leafW, leafH, leafThickness]} />
         <meshStandardMaterial
           color={leafColor}
@@ -151,19 +151,19 @@ function Window({ cx, cy, w, h, wallThickness, color }) {
   return (
     <group position={[cx, cy, 0]}>
       {/* Four-sided frame */}
-      <mesh position={[0, halfH - ft / 2, 0]}>
+      <mesh position={[0, halfH - ft / 2, 0]} castShadow receiveShadow>
         <boxGeometry args={[w, ft, fd]} />
         <meshStandardMaterial color={frameCol} roughness={0.6} />
       </mesh>
-      <mesh position={[0, -halfH + ft / 2, 0]}>
+      <mesh position={[0, -halfH + ft / 2, 0]} castShadow receiveShadow>
         <boxGeometry args={[w, ft, fd]} />
         <meshStandardMaterial color={frameCol} roughness={0.6} />
       </mesh>
-      <mesh position={[-halfW + ft / 2, 0, 0]}>
+      <mesh position={[-halfW + ft / 2, 0, 0]} castShadow receiveShadow>
         <boxGeometry args={[ft, h - ft * 2, fd]} />
         <meshStandardMaterial color={frameCol} roughness={0.6} />
       </mesh>
-      <mesh position={[ halfW - ft / 2, 0, 0]}>
+      <mesh position={[ halfW - ft / 2, 0, 0]} castShadow receiveShadow>
         <boxGeometry args={[ft, h - ft * 2, fd]} />
         <meshStandardMaterial color={frameCol} roughness={0.6} />
       </mesh>
@@ -204,7 +204,7 @@ function Window({ cx, cy, w, h, wallThickness, color }) {
       </mesh>
 
       {/* Sill — sits just below the opening and protrudes from the front. */}
-      <mesh position={[0, -halfH - sillHeight / 2, sillOverhang / 2]}>
+      <mesh position={[0, -halfH - sillHeight / 2, sillOverhang / 2]} castShadow receiveShadow>
         <boxGeometry args={[sillW, sillHeight, sillD]} />
         <meshStandardMaterial color={sillColor} roughness={0.8} />
       </mesh>

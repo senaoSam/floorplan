@@ -52,7 +52,7 @@ function TraySegment({ a, b, dimOpacity, pxToM, color }) {
   return (
     <group position={[cx, 0, cz]} rotation={[0, -yaw, 0]}>
       {/* Body — translucent indigo fill */}
-      <mesh>
+      <mesh castShadow receiveShadow>
         <primitive object={bodyGeom} attach="geometry" />
         <meshStandardMaterial
           color={color}

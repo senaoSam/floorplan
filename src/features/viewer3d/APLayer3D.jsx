@@ -283,7 +283,7 @@ function APMarker({ ap, pxToM, dimOpacity, isActiveFloor, onHover }) {
       */}
       <group position={[0, y, 0]} rotation={isWallMount ? [0, -azimuthRad, 0] : [0, 0, 0]}>
         <group rotation={isWallMount ? [0, 0, -Math.PI / 2] : [0, 0, 0]}>
-          <mesh castShadow>
+          <mesh castShadow receiveShadow>
             <cylinderGeometry args={[BODY_RADIUS_M, BODY_RADIUS_M, BODY_HEIGHT_M, 24]} />
             <meshStandardMaterial color={color} roughness={0.5} metalness={0.2} emissive={accentEmissive} emissiveIntensity={bodyEmissiveIntensity} {...matOpts} />
           </mesh>

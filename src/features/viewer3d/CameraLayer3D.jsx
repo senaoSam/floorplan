@@ -70,7 +70,7 @@ function CameraBody({ camera, pxToM, dimOpacity, isActiveFloor }) {
           like a real wall/ceiling-mounted unit; stem + label stay level */}
       <group rotation={[0, 0, -tilt]}>
         {/* body — small housing box, long axis = view axis */}
-        <mesh castShadow>
+        <mesh castShadow receiveShadow>
           <boxGeometry args={[0.42, 0.16, 0.16]} />
           <meshStandardMaterial
             color={BODY_COLOR} roughness={0.6} metalness={0.2}

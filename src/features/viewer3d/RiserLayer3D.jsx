@@ -64,7 +64,7 @@ export default function RiserLayer3D({ activeFloorId }) {
         const yCenter = (it.yTop + it.yBottom) / 2
         return (
           <group key={it.key} position={[it.x, yCenter, it.z]}>
-            <mesh>
+            <mesh castShadow receiveShadow>
               <cylinderGeometry args={[RADIUS_M, RADIUS_M, height, 16]} />
               <meshStandardMaterial
                 color={RISER_COLOR}

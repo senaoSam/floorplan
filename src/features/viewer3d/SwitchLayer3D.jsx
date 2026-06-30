@@ -48,13 +48,13 @@ function SwitchMarker({ sw, pxToM, dimOpacity }) {
   return (
     <group position={[x, 0, z]}>
       {y > 0 && (
-        <mesh position={[0, y / 2, 0]}>
+        <mesh position={[0, y / 2, 0]} castShadow receiveShadow>
           <cylinderGeometry args={[POLE_R, POLE_R, y, 8]} />
           <meshStandardMaterial color="#64748b" roughness={0.7} {...matOpts} />
         </mesh>
       )}
       {/* Body — dark "metal" chassis */}
-      <mesh position={[0, y, 0]}>
+      <mesh position={[0, y, 0]} castShadow receiveShadow>
         <boxGeometry args={[bodyW, bodyH, bodyD]} />
         <meshStandardMaterial
           color={BODY_COLOR}

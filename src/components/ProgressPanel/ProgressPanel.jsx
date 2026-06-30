@@ -617,13 +617,15 @@ const PHASES = [
       {
         layer: 'Layer 39 — 3D camera 三分析圖',
         items: [
-          { id: '37-2', done: true, text: '3D 顯示盲區/重疊/占用熱圖（CameraOverlay3D：重用 2D rasteriser 投影成地面紋理，跟隨 2D 開關；flow 動線無 3D 等價不投影）' },
+          { id: '37-2', done: true, text: '3D 顯示盲區/重疊/占用熱圖（CameraOverlay3D：重用 2D rasteriser 投影成地面紋理，跟隨 2D 開關）' },
+          { id: '37-4', done: true, text: '3D 動線（flow）立體箭頭（FlowArrows3D：單一 InstancedMesh cyan cone，重用 computeFlowGrid，580 箭頭效能無虞）' },
         ],
       },
       {
         layer: 'Layer 40 — 3D 唯一光源光影',
         items: [
           { id: '37-3', done: true, text: '3D 唯一主光投影（Canvas shadows + KeyLight directionalLight castShadow 跟樓層 center；弱化 ambient 保留微弱補光；不分 mode）' },
+          { id: '37-5', done: true, text: '全物件參與陰影（Switch/Tray/Riser/Track 人車 castShadow；AP/相機/門框窗框 receiveShadow；line/sprite/玻璃 three.js 無法投影故跳過）' },
         ],
       },
     ],

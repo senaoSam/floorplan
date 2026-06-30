@@ -57,12 +57,16 @@ function makePerson(geo) {
   const g = new THREE.Group()
   const head = new THREE.Mesh(geo.head, mat)
   head.position.y = 1.56
+  head.castShadow = true
   const torso = new THREE.Mesh(geo.torso, mat)
   torso.position.y = 1.08
+  torso.castShadow = true
   const legL = new THREE.Mesh(geo.leg, mat)
   legL.position.set(0, 0.41, -0.09)
+  legL.castShadow = true
   const legR = new THREE.Mesh(geo.leg, mat)
   legR.position.set(0, 0.41, 0.09)
+  legR.castShadow = true
   g.add(head, torso, legL, legR)
   g.visible = false
   g.userData.tintMat = mat
@@ -79,13 +83,16 @@ function makeCar(geo) {
   const g = new THREE.Group()
   const body = new THREE.Mesh(geo.carBody, tintMat)
   body.position.y = 0.75
+  body.castShadow = true
   const cabin = new THREE.Mesh(geo.carCabin, darkMat)
   cabin.position.set(-0.35, 1.25, 0)
+  cabin.castShadow = true
   g.add(body, cabin)
   for (const [wx, wz] of [[1.35, 0.78], [1.35, -0.78], [-1.35, 0.78], [-1.35, -0.78]]) {
     const wheel = new THREE.Mesh(geo.wheel, darkMat)
     wheel.rotation.x = Math.PI / 2
     wheel.position.set(wx, 0.32, wz)
+    wheel.castShadow = true
     g.add(wheel)
   }
   g.visible = false

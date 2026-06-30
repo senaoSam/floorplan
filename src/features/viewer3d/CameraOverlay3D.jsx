@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
@@ -6,6 +6,7 @@ import { useCameraStore } from '@/store/useCameraStore'
 import { useTrackingStore } from '@/store/useTrackingStore'
 import { rasterizeCoverageCounts } from '@/features/cameras/fovRasterize'
 import { computeOccupancyGrid, renderOccupancyCanvas } from '@/features/cameras/occupancyGrid'
+import { computeFlowGrid } from '@/features/cameras/analyticsStats'
 
 const EMPTY = Object.freeze([])
 
@@ -28,9 +29,14 @@ const FALLBACK_PX_PER_M = 40
 //                        useCameraStore.showOverlap.
 //   OccupancyPlane3D  ← computeOccupancyGrid + renderOccupancyCanvas (occupancy
 //                        grid module, same as occupancyLayer.js). Gated on
-//                        useTrackingStore.occupancyMode !== 'off'. The 'flow'
-//                        mode (arrow vectors, not a raster) has no 3D analogue
-//                        yet — only the traffic/dwell heatmap projects.
+//                        useTrackingStore.occupancyMode being 'traffic'/'dwell'.
+//                        The 'flow' mode is a vector field, not a raster, so it
+//                        projects via FlowArrows3D instead of a plane.
+//   FlowArrows3D      ← computeFlowGrid (same module + common params as
+//                        occupancyLayer.drawFlow). Gated on occupancyMode ===
+//                        'flow'. Renders one InstancedMesh of cyan cones, one
+//                        per visible cell, pointing along each cell's net
+//                        movement vector projected onto the floor plane.
 //
 // Each plane wraps its offscreen canvas as a CanvasTexture on a floor-sized
 // PlaneGeometry (image px × pxToM = metres) sitting a hair above the floor.
@@ -55,6 +61,13 @@ const BLIND_RGBA = [15, 23, 42, 133] // rgba(15,23,42,0.52) → 0.52*255 ≈ 133
 const Y_OCCUPANCY = 0.03
 const Y_OVERLAP   = 0.04
 const Y_BLIND     = 0.05
+const Y_FLOW      = 0.06   // flow arrows sit above all the heatmap planes
+
+// Flow-arrow styling mirrored from occupancyLayer.js exactly.
+const FLOW_COLOR = '#06b6d4'          // FLOW_COLOR in occupancyLayer.js
+const FLOW_MIN_COUNT_FRAC = 0.04      // hide cells with too few movement samples
+const FLOW_ARROW_LEN_FRAC = 0.42      // arrow half-length = cellPx * 0.42 (2D parity)
+const MAX_FLOW_INSTANCES = 4000       // sane cap on the InstancedMesh count
 
 // Build a CanvasTexture from an offscreen canvas (sRGB, flagged for upload).
 function makeTexture(canvas) {
@@ -212,6 +225,119 @@ function OccupancyPlane3D({ floorId, pxToM }) {
   )
 }
 
+// 3D projection of the 2D flow map (occupancyMode === 'flow'). The 2D layer
+// draws a cyan arrow per grid cell that has a clear net movement direction
+// (occupancyLayer.drawFlow). Here each surviving cell becomes one instance of a
+// single THREE.InstancedMesh — one cone geometry, instanceCount = visible cells
+// — so the whole flow field is one draw call. Matrices are computed off-frame
+// in a useMemo keyed on the SAME deps as OccupancyPlane3D's canvas memo (no
+// per-frame work; only rebuilds when the flow inputs change).
+//
+// Reuses computeFlowGrid verbatim with the SAME common params the 2D layer
+// feeds it — no re-implemented velocity math. Cell pixel centre / frac filter /
+// length scaling all mirror occupancyLayer.drawFlow.
+//
+// px → world mapping (matches OverlayMesh / HeatmapPlane3D): the floor plane is
+// rotated [-π/2,0,0] and centred at [wM/2, y, hM/2], so image pixel (px,py)
+// lands at world (px*pxToM, y, py*pxToM) — world +X = image +X, world +Z =
+// image +Y (downward). A pixel-space velocity (vx,vy) therefore points along
+// world (vx, 0, vy) on the floor plane.
+function FlowArrows3D({ floorId, pxToM }) {
+  const floors = useFloorStore((s) => s.floors)
+  const floor  = floors.find((f) => f.id === floorId) ?? null
+  const tracks = useTrackingStore((s) => s.tracksByFloor[floorId] ?? EMPTY)
+  const occupancyMode    = useTrackingStore((s) => s.occupancyMode)
+  const occupancyFromSec = useTrackingStore((s) => s.occupancyFromSec)
+  const occupancyToSec   = useTrackingStore((s) => s.occupancyToSec)
+
+  // Cone geometry: apex along +Y by default. Length 1, radius 1; per-instance
+  // scale stretches it to the desired arrow length / width.
+  const geometry = useMemo(() => new THREE.ConeGeometry(0.5, 1, 12), [])
+  const material = useMemo(
+    () => new THREE.MeshStandardMaterial({
+      color: FLOW_COLOR,
+      transparent: true,
+      depthWrite: false,
+    }),
+    [],
+  )
+  useEffect(() => () => { geometry.dispose() }, [geometry])
+  useEffect(() => () => { material.dispose() }, [material])
+
+  // Build the per-instance matrices off-frame. Same deps as the occupancy
+  // canvas memo above (occupancyMode/from/to/floor/tracks) so this only
+  // recomputes when the flow inputs change, never per render frame.
+  const { matrices, count } = useMemo(() => {
+    if (occupancyMode !== 'flow' || !floor?.imageWidth) return { matrices: null, count: 0 }
+    const flow = computeFlowGrid({
+      tracks,
+      tFromSec: occupancyFromSec,
+      tToSec: occupancyToSec,
+      imageWidth: floor.imageWidth,
+      imageHeight: floor.imageHeight,
+      pxPerM: floor.scale ?? FALLBACK_PX_PER_M,
+    })
+    if (!flow) return { matrices: null, count: 0 }
+
+    const out = []
+    const up = new THREE.Vector3(0, 1, 0)       // cone's default apex axis
+    const dir = new THREE.Vector3()
+    const quat = new THREE.Quaternion()
+    const pos = new THREE.Vector3()
+    const scl = new THREE.Vector3()
+    const m = new THREE.Matrix4()
+
+    for (const cell of flow.cells) {
+      if (out.length >= MAX_FLOW_INSTANCES) break
+      const frac = cell.count / (flow.maxCount || 1)
+      if (frac < FLOW_MIN_COUNT_FRAC) continue   // mirror 2D drawFlow
+
+      // Pixel centre → world floor position (px → world mapping above).
+      const cxPx = (cell.cx + 0.5) * flow.cellPx
+      const cyPx = (cell.cy + 0.5) * flow.cellPx
+      const mag = Math.hypot(cell.vx, cell.vy)
+      if (mag <= 0) continue
+      const ux = cell.vx / mag
+      const uy = cell.vy / mag
+
+      // Arrow full length in metres — mirrors 2D (cellPx*0.42 was the half-len;
+      // the 2D arrow spans ±len, i.e. cellPx*0.84 end-to-end). Cone length =
+      // full span so the cone reads like the 2D arrow head+shaft.
+      const lenM = flow.cellPx * FLOW_ARROW_LEN_FRAC * 2 * pxToM
+      const widthM = flow.cellPx * 0.32 * pxToM   // cone base diameter ~ shaft+head
+
+      // Floor-plane direction: pixel (ux,uy) → world (ux,0,uy).
+      dir.set(ux, 0, uy).normalize()
+      quat.setFromUnitVectors(up, dir)            // rotate cone apex onto dir
+      pos.set(cxPx * pxToM, Y_FLOW, cyPx * pxToM)
+      scl.set(widthM, lenM, widthM)
+      m.compose(pos, quat, scl)
+      out.push(m.clone())
+    }
+    if (out.length === 0) return { matrices: null, count: 0 }
+    return { matrices: out, count: out.length }
+  }, [occupancyMode, occupancyFromSec, occupancyToSec, floor, tracks, pxToM])
+
+  const meshRef = useRef(null)
+  useEffect(() => {
+    const mesh = meshRef.current
+    if (!mesh || !matrices) return
+    for (let i = 0; i < matrices.length; i++) mesh.setMatrixAt(i, matrices[i])
+    mesh.instanceMatrix.needsUpdate = true
+  }, [matrices])
+
+  if (occupancyMode !== 'flow' || !matrices || count === 0) return null
+  // key forces a fresh InstancedMesh when the count changes — instanced buffers
+  // are sized to count and can't grow in place.
+  return (
+    <instancedMesh
+      key={count}
+      ref={meshRef}
+      args={[geometry, material, count]}
+    />
+  )
+}
+
 // Mounts all three Camera-mode overlays for one (active) floor. Each child gates
 // itself on its own 2D store flag, so this can mount unconditionally in CAMERA
 // mode and each overlay mirrors its 2D switch. Caller is responsible for only
@@ -221,6 +347,7 @@ export default function CameraOverlay3D({ floorId, pxToM }) {
   return (
     <>
       <OccupancyPlane3D floorId={floorId} pxToM={pxToM} />
+      <FlowArrows3D floorId={floorId} pxToM={pxToM} />
       <OverlapPlane3D floorId={floorId} pxToM={pxToM} />
       <BlindSpotPlane3D floorId={floorId} pxToM={pxToM} />
     </>
