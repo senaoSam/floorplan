@@ -78,8 +78,10 @@ function makePerson(geo) {
 // wheels. Body takes the state tint; cabin/wheels stay dark but fade with
 // the ghost opacity.
 function makeCar(geo) {
-  const tintMat = new THREE.MeshStandardMaterial({ color: CAR_COLOR, roughness: 0.5, metalness: 0.25 })
-  const darkMat = new THREE.MeshStandardMaterial({ color: DARK_PART_COLOR, roughness: 0.7 })
+  // DoubleSide so the dark cabin/roof never culls away at grazing angles
+  // (a thin box seen edge-on can drop its front face under back-face culling).
+  const tintMat = new THREE.MeshStandardMaterial({ color: CAR_COLOR, roughness: 0.5, metalness: 0.25, side: THREE.DoubleSide })
+  const darkMat = new THREE.MeshStandardMaterial({ color: DARK_PART_COLOR, roughness: 0.7, side: THREE.DoubleSide })
   const g = new THREE.Group()
   const body = new THREE.Mesh(geo.carBody, tintMat)
   body.position.y = 0.75
@@ -106,11 +108,17 @@ function applyState(group, detected, baseColor) {
   tintMat.color.set(detected ? baseColor : UNDETECTED_COLOR)
   tintMat.opacity = detected ? 1 : GHOST_OPACITY
   tintMat.transparent = !detected
-  tintMat.depthWrite = detected
+  // Keep depthWrite ON even when ghosted. A car is several overlapping meshes
+  // (body + cabin + wheels); with depthWrite off, three.js sorts the whole
+  // transparent meshes by distance and the cabin (roof) can be drawn behind
+  // the body from some angles and vanish. Writing depth makes each fragment
+  // occlude correctly, so the roof never drops out. (Minor cost: a ghost car
+  // doesn't show its own far side through itself — acceptable for a solid car.)
+  tintMat.depthWrite = true
   if (darkMat) {
     darkMat.opacity = detected ? 1 : GHOST_OPACITY
     darkMat.transparent = !detected
-    darkMat.depthWrite = detected
+    darkMat.depthWrite = true
   }
 }
 
