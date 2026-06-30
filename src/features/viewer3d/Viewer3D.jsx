@@ -208,13 +208,15 @@ function FloorStack({ floor, elevation, isActive, onAPHover, inCameraMode }) {
 // sidebar) we tween target + camera position together for a short window so
 // the view glides instead of snapping. Outside that window OrbitControls owns
 // the camera fully — keeping it hijacked per-frame breaks orbit/pan/zoom.
-function CameraRig({ target, cameraStateRef, onAutoRotateStop, initialTargetRef }) {
+function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart, initialTargetRef }) {
   const controlsRef = useRef()
   const { camera, gl } = useThree()
-  // Keep the latest stop-callback in a ref so the one-time `start` listener
-  // (registered in an empty-dep effect) always calls the current handler.
+  // Keep the latest stop/start callbacks in refs so the listeners and useFrame
+  // (registered with stable deps) always call the current handler.
   const onAutoRotateStopRef = useRef(onAutoRotateStop)
   onAutoRotateStopRef.current = onAutoRotateStop
+  const onAutoRotateStartRef = useRef(onAutoRotateStart)
+  onAutoRotateStartRef.current = onAutoRotateStart
 
   // Configure the idle turntable spin + stop it the instant the user grabs the
   // controls. autoRotateSpeed is intentionally low for a gentle showcase turn
@@ -438,6 +440,10 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop, initialTargetRef 
         if (wantAutoRotateAfterTween.current) {
           wantAutoRotateAfterTween.current = false
           autoRotating.current = true
+          // Light up the parent's 自動旋轉 button — the 2D→3D entry starts the
+          // spin internally (ref only), so without this the button stays dark
+          // while the camera is clearly orbiting.
+          onAutoRotateStartRef.current?.()
         }
       }
       return
@@ -1043,7 +1049,7 @@ function Viewer3D() {
         />
       )}
 
-      <CameraRig target={center} cameraStateRef={cameraStateRef} onAutoRotateStop={() => setAutoRotate(false)} initialTargetRef={initialTargetRef} />
+      <CameraRig target={center} cameraStateRef={cameraStateRef} onAutoRotateStop={() => setAutoRotate(false)} onAutoRotateStart={() => setAutoRotate(true)} initialTargetRef={initialTargetRef} />
       </Canvas>
     </div>
   )
