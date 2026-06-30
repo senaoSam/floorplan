@@ -628,6 +628,14 @@ const PHASES = [
           { id: '37-5', done: true, text: '全物件參與陰影（Switch/Tray/Riser/Track 人車 castShadow；AP/相機/門框窗框 receiveShadow；line/sprite/玻璃 three.js 無法投影故跳過）' },
         ],
       },
+      {
+        layer: 'Layer 41 — 3D 控制面板整理',
+        items: [
+          { id: '37-6', done: true, text: '移除 Log Camera（debug-only）' },
+          { id: '37-7', done: true, text: '新增「🔄 自動旋轉」toggle（沿用 OrbitControls autoRotate idle spin，拖曳即停並同步按鈕狀態）' },
+          { id: '37-8', done: true, text: '右上角控制項整理成統一深色玻璃面板（外框+標題「3D 視圖」+ 可收合）' },
+        ],
+      },
     ],
   },
   {

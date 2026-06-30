@@ -207,9 +207,13 @@ function FloorStack({ floor, elevation, isActive, onAPHover, inCameraMode }) {
 // sidebar) we tween target + camera position together for a short window so
 // the view glides instead of snapping. Outside that window OrbitControls owns
 // the camera fully — keeping it hijacked per-frame breaks orbit/pan/zoom.
-function CameraRig({ target, cameraStateRef }) {
+function CameraRig({ target, cameraStateRef, onAutoRotateStop }) {
   const controlsRef = useRef()
   const { camera, gl } = useThree()
+  // Keep the latest stop-callback in a ref so the one-time `start` listener
+  // (registered in an empty-dep effect) always calls the current handler.
+  const onAutoRotateStopRef = useRef(onAutoRotateStop)
+  onAutoRotateStopRef.current = onAutoRotateStop
 
   // Configure the idle turntable spin + stop it the instant the user grabs the
   // controls. autoRotateSpeed is intentionally low for a gentle showcase turn
@@ -224,6 +228,9 @@ function CameraRig({ target, cameraStateRef }) {
       autoRotating.current = false
       wantAutoRotateAfterTween.current = false
       controls.autoRotate = false
+      // Let the parent's toggle button reflect that the user interaction
+      // ended the spin (so it doesn't keep showing "on").
+      onAutoRotateStopRef.current?.()
     }
     controls.addEventListener('start', stopSpin)
     return () => controls.removeEventListener('start', stopSpin)
@@ -272,6 +279,13 @@ function CameraRig({ target, cameraStateRef }) {
         tweenStartMs.current = performance.now()
         tweenDurMs.current = duration > 0 ? duration : 0
         tweening.current = true
+      },
+      // Manual turntable toggle (same idle spin the 2D→3D entry kicks off).
+      // Turning it on starts the gentle orbit immediately; the OrbitControls
+      // `start` listener still stops it the instant the user grabs the camera.
+      setAutoRotate: (on) => {
+        autoRotating.current = !!on
+        if (controlsRef.current) controlsRef.current.autoRotate = !!on
       },
     }
     return () => {
@@ -629,6 +643,12 @@ function Viewer3D() {
   const camPos = [w / 2, activeElev + 1.0 + diag * 1.3, h / 2 + 0.001]
 
   const cameraStateRef = useRef(null)
+  // Manual turntable toggle (the same gentle spin the 2D→3D entry kicks off).
+  // The rig's OrbitControls `start` listener flips this back off when the user
+  // grabs the camera, via onAutoRotateStop below.
+  const [autoRotate, setAutoRotate] = useState(false)
+  // Top-right control panel collapse (just its header bar when collapsed).
+  const [panelCollapsed, setPanelCollapsed] = useState(false)
 
   // 「2D → 3D 落地」鏡頭過渡：俯瞰起手 → 3/4 perspective。Pose 是當下測試
   // 樓層手動 tune 出來的世界座標，後續可改成相對 target 的 offset 讓多樓層
@@ -738,36 +758,16 @@ function Viewer3D() {
     setHoveredAP(ap)
   }, [])
 
-  const handleLogCamera = () => {
-    const state = cameraStateRef.current
-    if (!state) {
-      console.warn('[Viewer3D] camera not ready')
-      return
-    }
-    const { camera, controls } = state
-    const fmt = (v) => Number(v.toFixed(3))
-    const pos = camera.position
-    const tgt = controls?.target
-    // Azimuth (yaw around world Y) + polar (tilt from world Y) describe the
-    // orbit angles OrbitControls itself uses internally. Compute from the
-    // camera→target offset so the numbers stay in sync with what the user
-    // sees, regardless of camera.rotation order.
-    let azimuthDeg = null
-    let polarDeg = null
-    if (tgt) {
-      const off = pos.clone().sub(tgt)
-      const r = off.length()
-      azimuthDeg = fmt(THREE.MathUtils.radToDeg(Math.atan2(off.x, off.z)))
-      polarDeg   = fmt(THREE.MathUtils.radToDeg(Math.acos(Math.min(1, Math.max(-1, off.y / r)))))
-    }
-    console.log('[Viewer3D] camera pose', {
-      camera: { x: fmt(pos.x), y: fmt(pos.y), z: fmt(pos.z) },
-      target: tgt ? { x: fmt(tgt.x), y: fmt(tgt.y), z: fmt(tgt.z) } : null,
-      distance: tgt ? fmt(pos.distanceTo(tgt)) : null,
-      azimuthDeg,   // 0° = 從 +Z 方向看；繞 Y 軸水平旋轉
-      polarDeg,     // 0° = 正上往下俯瞰；90° = 水平視角
+  // Toggle the manual turntable spin: drive the rig's autoRotate and keep the
+  // button's state in sync. (The rig also flips `autoRotate` off through
+  // onAutoRotateStop when the user grabs the camera.)
+  const toggleAutoRotate = useCallback(() => {
+    setAutoRotate((on) => {
+      const next = !on
+      cameraStateRef.current?.setAutoRotate?.(next)
+      return next
     })
-  }
+  }, [])
 
   return (
     <div
@@ -776,12 +776,25 @@ function Viewer3D() {
       onPointerMove={handleContainerPointerMove}
       onPointerLeave={() => setHoveredAP(null)}
     >
-      {/* All 3D controls are consolidated into a single top-right panel so
-          nothing overlaps the host product's top toolbar (塗層 / 設備檢測…)
-          which stays visible in the top-left now that Viewer3D is always
-          mounted. Rows top→bottom: floor-visibility + camera log, camera
-          presets, floor selector. */}
-      <div className="viewer3d__panel">
+      {/* All 3D controls are grouped into a single dark-glass top-right panel
+          (collapsible) so they read as one panel and don't clash with the
+          host product's top-left toolbar. Rows: floor-visibility + auto-rotate,
+          camera presets, floor selector. */}
+      <div className={`viewer3d__panel${panelCollapsed ? ' viewer3d__panel--collapsed' : ''}`}>
+        <div className="viewer3d__panel-head">
+          <button
+            type="button"
+            className="viewer3d__panel-caret"
+            onClick={() => setPanelCollapsed((c) => !c)}
+            title={panelCollapsed ? '展開' : '收合'}
+          >
+            {panelCollapsed ? '▸' : '▾'}
+          </button>
+          <span className="viewer3d__panel-title">3D 視圖</span>
+        </div>
+
+        {!panelCollapsed && (
+        <>
         <div className="viewer3d__panel-row">
           <button
             type="button"
@@ -793,11 +806,11 @@ function Viewer3D() {
           </button>
           <button
             type="button"
-            className="viewer3d__floors-btn"
-            onClick={handleLogCamera}
-            title="把目前相機位置與 target 印到 console"
+            className={`viewer3d__floors-btn${autoRotate ? ' viewer3d__floors-btn--active' : ''}`}
+            onClick={toggleAutoRotate}
+            title={autoRotate ? '停止自動旋轉' : '自動旋轉（轉盤環繞，拖曳即停）'}
           >
-            📷 Log Camera
+            🔄 自動旋轉
           </button>
         </div>
 
@@ -841,6 +854,8 @@ function Viewer3D() {
               onSelect={(id) => { if (id !== activeFloorId) setActiveFloor(id) }}
             />
           </div>
+        )}
+        </>
         )}
       </div>
 
@@ -902,7 +917,7 @@ function Viewer3D() {
         />
       )}
 
-      <CameraRig target={center} cameraStateRef={cameraStateRef} />
+      <CameraRig target={center} cameraStateRef={cameraStateRef} onAutoRotateStop={() => setAutoRotate(false)} />
       </Canvas>
     </div>
   )
