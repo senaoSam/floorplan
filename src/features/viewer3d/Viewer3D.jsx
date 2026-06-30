@@ -1,9 +1,10 @@
-import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, extend, useFrame, useLoader, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore, VIEW_MODE, EDITOR_MODE } from '@/store/useEditorStore'
+import { useViewportStore } from '@/store/useViewportStore'
 import WallLayer3D from './WallLayer3D'
 import CameraLayer3D from './CameraLayer3D'
 import TrackLayer3D from './TrackLayer3D'
@@ -207,7 +208,7 @@ function FloorStack({ floor, elevation, isActive, onAPHover, inCameraMode }) {
 // sidebar) we tween target + camera position together for a short window so
 // the view glides instead of snapping. Outside that window OrbitControls owns
 // the camera fully — keeping it hijacked per-frame breaks orbit/pan/zoom.
-function CameraRig({ target, cameraStateRef, onAutoRotateStop }) {
+function CameraRig({ target, cameraStateRef, onAutoRotateStop, initialTargetRef }) {
   const controlsRef = useRef()
   const { camera, gl } = useThree()
   // Keep the latest stop-callback in a ref so the one-time `start` listener
@@ -287,6 +288,28 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop }) {
         autoRotating.current = !!on
         if (controlsRef.current) controlsRef.current.autoRotate = !!on
       },
+      // Hard-park the camera at a pose and CANCEL any in-flight tween/spin.
+      // The 2D→3D entry uses this so a leftover tween (e.g. a target-change
+      // lift fired while the demo was loading) can't keep sliding the camera
+      // after we've set the seamless top-down pose — that was the "first time
+      // looks farther/zoomed-out, then drifts" bug.
+      park: (camPos, tgt) => {
+        autoRotating.current = false
+        wantAutoRotateAfterTween.current = false
+        tweening.current = false
+        tweenDurMs.current = 0
+        camera.position.set(camPos[0], camPos[1], camPos[2])
+        if (controlsRef.current) {
+          controlsRef.current.autoRotate = false
+          controlsRef.current.target.set(tgt[0], tgt[1], tgt[2])
+          controlsRef.current.update()
+        }
+        // Keep the lerp endpoints at the parked pose so the damped fallback in
+        // useFrame (if it ever runs) holds here instead of drifting back.
+        desiredCam.current.set(camPos[0], camPos[1], camPos[2])
+        desiredTarget.current.set(tgt[0], tgt[1], tgt[2])
+        lastTarget.current = [tgt[0], tgt[1], tgt[2]]
+      },
     }
     return () => {
       if (cameraStateRef.current?.camera === camera) cameraStateRef.current = null
@@ -336,7 +359,11 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop }) {
     const controls = controlsRef.current
     if (!controls) return
     if (!mounted.current) {
-      controls.target.set(target[0], target[1], target[2])
+      // First mount: prefer the live entry target (the floor point the 2D view
+      // is centred on) so the first 3D frame is positioned like 2D, not always
+      // the floor's geometric centre. Falls back to the prop target.
+      const init = initialTargetRef?.current ?? target
+      controls.target.set(init[0], init[1], init[2])
       controls.update()
       tweening.current = false
       mounted.current = true
@@ -640,7 +667,51 @@ function Viewer3D() {
   // decomposition picks an arbitrary azimuth, typically 45°). Nudge offset.z
   // a hair so azimuth resolves to 0°. Distance scales with floor diagonal.
   const diag = Math.max(Math.sqrt(w * w + h * h), 8)
-  const camPos = [w / 2, activeElev + 1.0 + diag * 1.3, h / 2 + 0.001]
+  // Top-down eye height (metres above target) that makes the floor fill the
+  // screen at the SAME size it has in 2D — so the 2D→3D entry's first painted
+  // frame matches the 2D view and the switch is seamless. Reads the live 2D
+  // viewport zoom + canvas height; falls back to a diagonal-scaled height when
+  // those aren't readable yet. See topDownEntryCam for the derivation.
+  const FOV_DEG = 50
+  const seamlessEyeHeight = () => {
+    const scale2d = useViewportStore.getState().scale
+    const canvasH = window.__pixiApp?.canvas?.getBoundingClientRect?.().height
+    const floorScale = activeFloor?.scale
+    if (scale2d > 0 && canvasH > 0 && floorScale > 0) {
+      const tanHalf = Math.tan((FOV_DEG * Math.PI) / 360)
+      return canvasH / (2 * tanHalf * floorScale * scale2d)
+    }
+    return diag * 1.6
+  }
+  // The floor-world point the 2D view is centred on right now, so the 3D
+  // top-down entry looks at the SAME spot (not always the floor's geometric
+  // centre). 2D maps canvasPos = (screenPos − viewport.{x,y}) / scale; the
+  // screen centre is (canvasW/2, canvasH/2), giving the centred canvas px,
+  // which × pxToM (= 1/floorScale) becomes world metres on the XZ floor plane.
+  // Falls back to the floor centre when the 2D viewport/canvas aren't readable.
+  const seamlessTopDownTarget = () => {
+    const vp = useViewportStore.getState()
+    const rect = window.__pixiApp?.canvas?.getBoundingClientRect?.()
+    const floorScale = activeFloor?.scale
+    if (rect?.width > 0 && rect?.height > 0 && vp.scale > 0 && floorScale > 0) {
+      const cxCanvas = (rect.width / 2 - vp.x) / vp.scale
+      const cyCanvas = (rect.height / 2 - vp.y) / vp.scale
+      return [cxCanvas / floorScale, center[1], cyCanvas / floorScale]
+    }
+    return [center[0], center[1], center[2]]
+  }
+  // Initial <Canvas camera> position. This is what r3f paints on the FIRST
+  // frame the very first time 3D mounts — before the pre-position effect can
+  // run (cameraStateRef is still null then) — so it must already match the 2D
+  // view's size AND position, otherwise the first entry flashes a wrong pose.
+  // Subsequent switches are handled by the layout effect below.
+  const camInitTarget = seamlessTopDownTarget()
+  const camPos = [camInitTarget[0], camInitTarget[1] + seamlessEyeHeight(), camInitTarget[2] + 0.001]
+  // Live entry target (the floor point 2D is centred on) for CameraRig's first
+  // mount, so the initial 3D frame matches the 2D position. Kept current each
+  // render via the ref so whenever CameraRig mounts it reads the latest value.
+  const initialTargetRef = useRef(camInitTarget)
+  initialTargetRef.current = camInitTarget
 
   const cameraStateRef = useRef(null)
   // Manual turntable toggle (the same gentle spin the 2D→3D entry kicks off).
@@ -650,24 +721,41 @@ function Viewer3D() {
   // Top-right control panel collapse (just its header bar when collapsed).
   const [panelCollapsed, setPanelCollapsed] = useState(false)
 
-  // 「2D → 3D 落地」鏡頭過渡：俯瞰起手 → 3/4 perspective。Pose 是當下測試
-  // 樓層手動 tune 出來的世界座標，後續可改成相對 target 的 offset 讓多樓層
-  // 通用。Viewer3D 現在常駐 mount（切換無縫），所以入場動畫不再綁 CameraRig
-  // 的首次 mount，而是每次「2D→3D」切換時由下方 effect 主動觸發重播。
+  // 3/4 iso pose used by the 自動旋轉 button (it tweens here, then spins).
+  // Entering 3D no longer auto-tweens to this — it parks top-down instead.
   const entryPose = useMemo(
     () => ({ camPos: [41.617, 31.053, 56.264], target: center, duration: 1500 }),
     [center],
   )
 
-  // 每次切到 3D 重播落地動畫。偵測 isVisible 由 false→true 的那一刻：先把
-  // 相機瞬移到俯瞰起手位（top-down，避開 OrbitControls gimbal singularity），
-  // 再 tween 到 3/4 透視。frameloop 此時剛從 'demand' 升成 'always'，用一個
-  // rAF 等 r3f 把 loop 起來再下命令，確保 tween 的每一幀都會被畫出來。
-  // The top-down pose the 2D→3D entry animation starts from. Z nudged a hair
-  // off-target to dodge the OrbitControls azimuth singularity.
-  const entryStartCam = useMemo(
-    () => [center[0], center[1] + diag * 1.6, center[2] + 0.001],
-    [center, diag],
+  // The top-down park pose 3D enters at. Its HEIGHT is
+  // chosen so the floor fills the screen at the SAME size it had in 2D, making
+  // the switch seamless (no "shrink then zoom" pop). Derivation: with a
+  // vertical-FOV perspective camera looking straight down from height H, one
+  // world metre spans  canvasH / (2·H·tan(fov/2))  screen px. In 2D one world
+  // metre spans  floorScale · scale2d  screen px (floorScale = px per metre,
+  // scale2d = viewport zoom). Equating the two and solving for H:
+  //   H = canvasH / (2·tan(fov/2)·floorScale·scale2d)
+  // Falls back to the old diagonal-scaled height if the 2D viewport/canvas
+  // aren't readable yet. Z nudged a hair off-target to dodge the OrbitControls
+  // azimuth singularity.
+  // Top-down entry pose: camera sits straight above the 2D-centred floor point
+  // at the seamless height, so BOTH the size and the position match the 2D
+  // view at the moment of switching. Returns { cam, target }. Camera Z nudged a
+  // hair off-target to dodge the OrbitControls gimbal singularity.
+  const topDownEntryCam = useCallback(
+    () => {
+      const tgt = seamlessTopDownTarget()
+      const h = seamlessEyeHeight()
+      return {
+        cam: [tgt[0], tgt[1] + h, tgt[2] + 0.001],
+        target: tgt,
+      }
+    },
+    // seamlessEyeHeight / seamlessTopDownTarget read live stores/DOM each call;
+    // depend on the inputs that change their result.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [center, diag, activeFloor],
   )
 
   // PRE-POSITION the camera while still in 2D (hidden). The <Canvas camera>
@@ -687,34 +775,54 @@ function Viewer3D() {
     const state = cameraStateRef.current
     if (!state) return
     const { camera, controls } = state
-    camera.position.set(entryStartCam[0], entryStartCam[1], entryStartCam[2])
+    const { cam, target } = topDownEntryCam()
+    camera.position.set(cam[0], cam[1], cam[2])
     if (controls) {
-      controls.target.set(center[0], center[1], center[2])
+      controls.target.set(target[0], target[1], target[2])
       controls.update()
     }
-  }, [isVisible, entryStartCam, center])
+  }, [isVisible, topDownEntryCam, center])
 
-  // Replay the landing animation every time we enter 3D. The tween is told its
-  // explicit start (top-down) via fromCam/fromTarget so it never inherits the
-  // stale initial camera — and useFrame snaps the camera to that start on the
-  // first tween frame, overwriting any stale pose before it's visible.
+  // Entering 3D plays a 3-stage landing: (1) PARK straight-down at the seamless
+  // top-down height (same on-screen floor size + position as 2D — a clean
+  // hand-off from the 2D view), (2) after a short beat, smoothly tween to the
+  // 3/4 iso pose, (3) then start the gentle turntable spin. park() runs in a
+  // layout effect BEFORE the first paint and cancels any in-flight tween, so
+  // the first frame is always the seamless top-down — the very first switch and
+  // every later one look identical (no stale-seed flash, no drift). The tween
+  // is fired from a timer so the user actually sees the top-down beat first.
   const wasVisibleRef = useRef(isVisible)
-  useEffect(() => {
+  const entryTimerRef = useRef(null)
+  useLayoutEffect(() => {
     const becameVisible = isVisible && !wasVisibleRef.current
     wasVisibleRef.current = isVisible
+    if (entryTimerRef.current) { clearTimeout(entryTimerRef.current); entryTimerRef.current = null }
     if (!becameVisible) return
     hasEnteredRef.current = true
     const state = cameraStateRef.current
-    if (!state || !state.tweenTo) return
-    state.tweenTo({
-      fromCam: entryStartCam,
-      fromTarget: center,
-      camPos: entryPose.camPos,
-      target: entryPose.target,
-      duration: entryPose.duration,
-      autoRotateAfter: true,   // gentle turntable spin once landed
-    })
-  }, [isVisible, center, entryStartCam, entryPose])
+    if (!state) return
+    const { cam, target } = topDownEntryCam()
+    // Stage 1: park top-down (cancels any leftover tween → no first-entry drift).
+    if (state.park) state.park(cam, target)
+    // Stages 2+3: after a short top-down beat, glide to the iso pose and then
+    // spin. fromCam/fromTarget = the parked top-down pose so the move starts
+    // exactly where the hand-off left the camera.
+    entryTimerRef.current = setTimeout(() => {
+      entryTimerRef.current = null
+      const st = cameraStateRef.current
+      if (!st || !st.tweenTo) return
+      st.tweenTo({
+        fromCam: cam,
+        fromTarget: target,
+        camPos: entryPose.camPos,
+        target: entryPose.target,
+        duration: entryPose.duration,
+        autoRotateAfter: true,
+      })
+    }, 300)
+  }, [isVisible, center, topDownEntryCam, entryPose])
+  // Clear any pending entry tween on unmount.
+  useEffect(() => () => { if (entryTimerRef.current) clearTimeout(entryTimerRef.current) }, [])
   // 28-3 Camera presets: top-down / iso / front. Distance scales with the
   // floor diagonal so small and large plans both frame well. Tween via the
   // CameraRig's tweenTo so OrbitControls picks up the new pose cleanly.
@@ -935,7 +1043,7 @@ function Viewer3D() {
         />
       )}
 
-      <CameraRig target={center} cameraStateRef={cameraStateRef} onAutoRotateStop={() => setAutoRotate(false)} />
+      <CameraRig target={center} cameraStateRef={cameraStateRef} onAutoRotateStop={() => setAutoRotate(false)} initialTargetRef={initialTargetRef} />
       </Canvas>
     </div>
   )
