@@ -1,7 +1,7 @@
 import { Sprite, Texture, Graphics } from 'pixi.js'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { computeOccupancyGrid, renderOccupancyCanvas } from './occupancyGrid'
-import { computeFlowGrid } from './analyticsStats'
+import { computeFlowGrid, computeStreamlines } from './analyticsStats'
 import { FALLBACK_PX_PER_M } from './camerasLayer'
 
 // Occupancy heatmap sprite for Camera mode (Phase 34-3). Sits at the BOTTOM
@@ -19,9 +19,12 @@ const RECOMPUTE_DEBOUNCE_MS = 120
 // resetting forever and freezing the heatmap.
 const RECOMPUTE_MAX_WAIT_MS = 200
 
-// Flow-map arrows (occupancyMode 'flow').
-const FLOW_COLOR = '#06b6d4'
-const FLOW_MIN_COUNT_FRAC = 0.04   // hide cells with too few movement samples
+// Flow map (occupancyMode 'flow') — rendered as streamlines: continuous
+// glowing "movement corridors" traced through the velocity field, with a slow
+// dash crawl so the direction of travel reads at a glance.
+const FLOW_COLOR = 0x22d3ee          // cyan-400, matches the camera-mode palette
+const FLOW_DASH_PX = 26              // spacing between flow chevrons (canvas px)
+const FLOW_CRAWL_PX_PER_SEC = 34     // how fast the chevrons march along the line
 
 export function attachOccupancyLayer({
   scene,
@@ -44,31 +47,88 @@ export function attachOccupancyLayer({
     sprite = null
   }
 
-  // Flow arrows: one per cell with a clear net direction; length follows the
-  // cell pitch, opacity follows how much traffic the cell saw.
-  const drawFlow = (flow) => {
-    for (const cell of flow.cells) {
-      const frac = cell.count / (flow.maxCount || 1)
-      if (frac < FLOW_MIN_COUNT_FRAC) continue
-      const cx = (cell.cx + 0.5) * flow.cellPx
-      const cy = (cell.cy + 0.5) * flow.cellPx
-      const mag = Math.hypot(cell.vx, cell.vy)
-      const ux = cell.vx / mag
-      const uy = cell.vy / mag
-      const len = flow.cellPx * 0.42
-      const alpha = 0.35 + 0.65 * Math.min(1, frac * 3)
-      const w = 1.5 + 1.5 * Math.min(1, frac * 3)
-      const x0 = cx - ux * len, y0 = cy - uy * len
-      const x1 = cx + ux * len, y1 = cy + uy * len
-      flowG.moveTo(x0, y0).lineTo(x1, y1)
-        .stroke({ width: w, color: FLOW_COLOR, alpha, cap: 'round' })
-      // arrowhead
-      const hw = len * 0.45
-      flowG.poly([
-        x1, y1,
-        x1 - ux * hw - uy * hw * 0.6, y1 - uy * hw + ux * hw * 0.6,
-        x1 - ux * hw + uy * hw * 0.6, y1 - uy * hw - ux * hw * 0.6,
-      ]).fill({ color: FLOW_COLOR, alpha })
+  // Cached streamlines for the active window — each line carries its polyline
+  // plus a precomputed cumulative arc-length table so the crawl animation can
+  // place flow chevrons at exact distances without re-measuring every frame.
+  let streamlines = null
+
+  // Walk a streamline's cumulative-length table to the point at arc-length `d`,
+  // returning { x, y, ux, uy } (position + unit tangent).
+  const pointAtArc = (line, d) => {
+    const { pts, cum } = line
+    const total = cum[cum.length - 1]
+    if (total <= 0) return null
+    const dd = Math.min(Math.max(d, 0), total)
+    let i = 1
+    while (i < cum.length && cum[i] < dd) i++
+    if (i >= cum.length) i = cum.length - 1
+    const a = pts[i - 1], b = pts[i]
+    const seg = cum[i] - cum[i - 1] || 1
+    const f = (dd - cum[i - 1]) / seg
+    const mag = Math.hypot(b.x - a.x, b.y - a.y) || 1
+    return {
+      x: a.x + (b.x - a.x) * f,
+      y: a.y + (b.y - a.y) * f,
+      ux: (b.x - a.x) / mag,
+      uy: (b.y - a.y) / mag,
+    }
+  }
+
+  // Draw the cached streamlines. Each line is exactly ONE polyline stroke plus
+  // a handful of flow chevrons — never a per-segment stroke (that piles up
+  // hundreds of separate geometries per line and overflows PIXI's batch vertex
+  // buffer, blanking the whole canvas). `crawl` (px) slides the chevrons
+  // downstream so the direction of travel reads at a glance.
+  const drawStreamlines = (crawl) => {
+    flowG.clear()
+    if (!streamlines) return
+    for (const line of streamlines.lines) {
+      const pts = line.pts
+      if (pts.length < 2) continue
+      const total = line.cum[line.cum.length - 1]
+      if (total <= 0) continue
+      const alpha = 0.30 + 0.55 * Math.min(1, line.strength * 2.2)
+      const w = 2 + 4 * Math.min(1, line.strength * 2.2)
+
+      // core line — a single stroke for the whole polyline
+      flowG.moveTo(pts[0].x, pts[0].y)
+      for (let i = 1; i < pts.length; i++) flowG.lineTo(pts[i].x, pts[i].y)
+      flowG.stroke({ width: w, color: FLOW_COLOR, alpha: alpha * 0.55, cap: 'round', join: 'round' })
+
+      // flow chevrons — one ">" every FLOW_DASH_PX, all shifted by `crawl` so
+      // they march downstream. Count is bounded by length / pitch, so the layer
+      // stays at a few hundred tiny polys total.
+      const hw = 4 + 3 * Math.min(1, line.strength * 2.2)
+      const start = ((crawl % FLOW_DASH_PX) + FLOW_DASH_PX) % FLOW_DASH_PX
+      for (let d = start; d < total; d += FLOW_DASH_PX) {
+        const p = pointAtArc(line, d)
+        if (!p) continue
+        const nx = -p.uy, ny = p.ux   // left normal
+        flowG.poly([
+          p.x, p.y,
+          p.x - p.ux * hw + nx * hw * 0.8, p.y - p.uy * hw + ny * hw * 0.8,
+          p.x - p.ux * hw * 0.4, p.y - p.uy * hw * 0.4,
+          p.x - p.ux * hw - nx * hw * 0.8, p.y - p.uy * hw - ny * hw * 0.8,
+        ]).fill({ color: FLOW_COLOR, alpha })
+      }
+    }
+  }
+
+  // ── Streamline crawl loop ───────────────────────────────────────────────
+  // Self-contained rAF (same shape as camerasLayer's FOV pulse): runs only
+  // while flow streamlines exist and we're in Camera mode, so render-on-demand
+  // idle is preserved otherwise. Stops itself when streamlines clear.
+  let flowRaf = 0
+  const flowTick = (ts) => {
+    if (!isCameraMode() || !streamlines) { flowRaf = 0; return }
+    const crawl = (ts / 1000) * FLOW_CRAWL_PX_PER_SEC
+    drawStreamlines(crawl)
+    scene.requestRender()
+    flowRaf = requestAnimationFrame(flowTick)
+  }
+  const syncFlow = () => {
+    if (isCameraMode() && streamlines && flowRaf === 0) {
+      flowRaf = requestAnimationFrame(flowTick)
     }
   }
 
@@ -77,6 +137,7 @@ export function attachOccupancyLayer({
     const { floors, activeFloorId } = useFloorStore.getState()
     const floor = floors.find((f) => f.id === activeFloorId)
     flowG.clear()
+    streamlines = null
     if (!isCameraMode() || tr.occupancyMode === 'off' || !floor?.imageWidth) {
       clearSprite()
       scene.requestRender()
@@ -92,8 +153,14 @@ export function attachOccupancyLayer({
     }
     if (tr.occupancyMode === 'flow') {
       clearSprite()
-      const flow = computeFlowGrid(common)
-      if (flow) drawFlow(flow)
+      // Coarser cells than the heatmap (1.5 m vs 0.5 m): over a long window a
+      // fine grid splinters into many short divergent bundles, so a slightly
+      // bigger cell averages each octant bin over more samples → steadier
+      // direction field and longer, cleaner streamlines.
+      const flow = computeFlowGrid({ ...common, cellM: 1.5 })
+      streamlines = flow ? computeStreamlines(flow) : null
+      drawStreamlines(0)
+      syncFlow()              // start the crawl loop if we have lines
       scene.requestRender()
       return
     }
@@ -162,6 +229,7 @@ export function attachOccupancyLayer({
 
   return () => {
     if (timer) clearTimeout(timer)
+    if (flowRaf) cancelAnimationFrame(flowRaf)
     unsubTracking()
     unsubFloor()
     unsubEditor()
