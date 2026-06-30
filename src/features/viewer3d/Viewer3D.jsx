@@ -727,11 +727,27 @@ function Viewer3D() {
   // Top-right control panel collapse (just its header bar when collapsed).
   const [panelCollapsed, setPanelCollapsed] = useState(false)
 
-  // 3/4 iso pose used by the 自動旋轉 button (it tweens here, then spins).
-  // Entering 3D no longer auto-tweens to this — it parks top-down instead.
+  // Shared 3/4 iso camera offset (relative to target), scaled to the floor
+  // diagonal so every iso view frames the same regardless of floor size. ONE
+  // source of truth for: the 2D→3D entry tween's landing pose, the auto-rotate
+  // orbit position, and the 等角 preset — they must match or switching between
+  // them visibly jumps the camera. ISO_FRAC pulls the camera in (was 0.95 →
+  // looked too far / objects too small); 0.95 vertical keeps the iso tilt.
+  const ISO_FRAC = 0.7
+  const isoOffset = useMemo(() => {
+    const off = Math.max(diag, 8) * ISO_FRAC
+    return [off, off * 0.95, off]
+  }, [diag])
+  const isoCamPos = useMemo(
+    () => [center[0] + isoOffset[0], center[1] + isoOffset[1], center[2] + isoOffset[2]],
+    [center, isoOffset],
+  )
+
+  // 3/4 iso pose used by the 自動旋轉 button (it tweens here, then spins) and the
+  // 2D→3D entry tween. Entering 3D parks top-down first, then glides here.
   const entryPose = useMemo(
-    () => ({ camPos: [41.617, 31.053, 56.264], target: center, duration: 1500 }),
-    [center],
+    () => ({ camPos: isoCamPos, target: center, duration: 1500 }),
+    [isoCamPos, center],
   )
 
   // The top-down park pose 3D enters at. Its HEIGHT is
@@ -843,9 +859,9 @@ function Viewer3D() {
       // gimbal singularity (offset = (0, *, 0) collapses azimuth).
       camPos = [tgt[0], tgt[1] + d * 1.6, tgt[2] + 0.001]
     } else if (preset === 'iso') {
-      // 3/4 view: 45° azimuth, ~55° polar. offset.x = offset.z, offset.y
-      // tuned so the polar reads as a typical iso camera tilt.
-      const off = d * 0.95
+      // 3/4 view — reuse the shared iso pose so it matches the 2D→3D entry and
+      // the auto-rotate orbit exactly (same ISO_FRAC, same tilt).
+      const off = d * ISO_FRAC
       camPos = [tgt[0] + off, tgt[1] + off * 0.95, tgt[2] + off]
     } else if (preset === 'front') {
       // Look from -Z toward the floor, eye-level above mid-floor height.
