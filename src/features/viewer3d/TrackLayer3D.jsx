@@ -26,6 +26,12 @@ const UNDETECTED_COLOR = '#64748b'
 const GHOST_OPACITY = 0.4
 const DARK_PART_COLOR = '#1e293b'
 
+// Walk-cycle tuning (people only).
+const STRIDE_M = 0.75        // metres of travel per full leg-swing cycle
+const LEG_SWING_MAX = 0.5    // rad — max hip swing at full walking speed
+const WALK_FULL_SPEED = 1.4  // m/s — speed at which the stride is at full amp
+const BODY_BOB_M = 0.05      // m — vertical torso bob amplitude
+
 function pointInPoly(x, y, pts) {
   const n = pts.length / 2
   let inside = false
@@ -50,27 +56,50 @@ function buildGeometries() {
   }
 }
 
-// Little person: head + tapered torso + two legs, ~1.7 m tall, single
-// state-tinted material (matches the single-colour 2D icon).
+// Hip height the legs swing from (top of an 0.82 m leg whose centre sits at
+// 0.41). Each leg hangs from a pivot Group placed here so rotating the pivot
+// swings the leg about the hip — not its midpoint — giving a real stride.
+const HIP_Y = 0.82
+
+// Little person: head + tapered torso + two hip-pivoted legs, ~1.7 m tall,
+// single state-tinted material (matches the single-colour 2D icon). The body
+// parts above the hips live in a `body` group so the walk cycle can bob the
+// whole upper body without disturbing the leg pivots.
 function makePerson(geo) {
   const mat = new THREE.MeshStandardMaterial({ color: PERSON_COLOR, roughness: 0.8 })
   const g = new THREE.Group()
+
+  const body = new THREE.Group()
   const head = new THREE.Mesh(geo.head, mat)
   head.position.y = 1.56
   head.castShadow = true
   const torso = new THREE.Mesh(geo.torso, mat)
   torso.position.y = 1.08
   torso.castShadow = true
-  const legL = new THREE.Mesh(geo.leg, mat)
-  legL.position.set(0, 0.41, -0.09)
-  legL.castShadow = true
-  const legR = new THREE.Mesh(geo.leg, mat)
-  legR.position.set(0, 0.41, 0.09)
-  legR.castShadow = true
-  g.add(head, torso, legL, legR)
+  body.add(head, torso)
+
+  // Leg pivots at the hip; the leg mesh hangs down so its centre lands at 0.41.
+  const makeLeg = (z) => {
+    const pivot = new THREE.Group()
+    pivot.position.set(0, HIP_Y, z)
+    const leg = new THREE.Mesh(geo.leg, mat)
+    leg.position.y = -(HIP_Y - 0.41)   // mesh centre back to 0.41 world-ish
+    leg.castShadow = true
+    pivot.add(leg)
+    return pivot
+  }
+  const legL = makeLeg(-0.09)
+  const legR = makeLeg(0.09)
+
+  g.add(body, legL, legR)
   g.visible = false
   g.userData.tintMat = mat
   g.userData.darkMat = null
+  // Walk-cycle handles + per-figure phase so figures don't march in lockstep.
+  g.userData.body = body
+  g.userData.legL = legL
+  g.userData.legR = legR
+  g.userData.walkPhase = 0
   return g
 }
 
@@ -138,12 +167,14 @@ export default function TrackLayer3D({ floorId, pxToM }) {
   // FOV polygons in CANVAS PX space for detection — cached on refs.
   const fovCache = useRef({ cams: null, walls: null, polys: [] })
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     const tr = useTrackingStore.getState()
     const cams = useCameraStore.getState().camerasByFloor[floorId] ?? []
     const walls = useWallStore.getState().wallsByFloor[floorId] ?? []
     const tracks = tr.tracksByFloor[floorId] ?? []
     const t = tr.clockSec
+    // Clamp delta so a tab-switch hiccup doesn't fling the walk phase.
+    const dtSec = Math.min(delta, 0.05)
 
     if (fovCache.current.cams !== cams || fovCache.current.walls !== walls) {
       const segs = buildBlockingSegments(walls)
@@ -189,6 +220,32 @@ export default function TrackLayer3D({ floorId, pxToM }) {
       // (yaw = −heading per the wall convention).
       fig.rotation.y = -trackHeadingAt(track, t)
       applyState(fig, detected, isCar ? CAR_COLOR : PERSON_COLOR)
+
+      // Walk cycle for people. Drive the stride from the figure's ACTUAL
+      // ground movement this frame (distance between last frame's world
+      // position and this one), so it stays correct at any playback speed,
+      // when scrubbing, or paused — a still person stops stepping, a fast one
+      // steps faster. Legs swing about the hips in anti-phase; the torso bobs
+      // twice per stride. Per-frame wall-clock delta gives a speed estimate
+      // for the swing amplitude.
+      if (!isCar) {
+        const ud = fig.userData
+        const wx = pos.x * pxToM, wz = pos.y * pxToM
+        let stepDist = 0
+        if (ud.hasLast) stepDist = Math.hypot(wx - ud.lastX, wz - ud.lastZ)
+        ud.lastX = wx; ud.lastZ = wz; ud.hasLast = true
+        // Advance phase by metres walked / stride length (× 2π per stride).
+        ud.walkPhase += (stepDist / STRIDE_M) * Math.PI * 2
+        // Amplitude from instantaneous speed (distance this frame / dt), eased
+        // in and capped so a near-still person barely moves.
+        const speedMps = dtSec > 0 ? stepDist / dtSec : 0
+        const amp = Math.min(1, speedMps / WALK_FULL_SPEED) * LEG_SWING_MAX
+        const sw = Math.sin(ud.walkPhase)
+        ud.legL.rotation.x = sw * amp
+        ud.legR.rotation.x = -sw * amp
+        // Vertical bob: lowest at mid-stride (legs splayed), twice per cycle.
+        ud.body.position.y = -Math.abs(sw) * amp * BODY_BOB_M
+      }
     }
     for (let i = pi; i < POOL_PERSON; i++) personPool[i].visible = false
     for (let i = ci; i < POOL_CAR; i++) carPool[i].visible = false
