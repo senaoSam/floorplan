@@ -189,9 +189,14 @@ export function attachTracksLayer({
     g.clear()
     activeIcons = []
     if (!isCameraMode()) { root.visible = false; label.visible = false; resetDetection(); return }
-    root.visible = true
     const fid = useFloorStore.getState().activeFloorId
     const tr = useTrackingStore.getState()
+    // When an occupancy/flow heatmap is on, the live people/car icons clutter
+    // the aggregate view — hide them (and the hover label + FOV pulse) so the
+    // heatmap reads cleanly. `occupancyMode` lives in this same store, so the
+    // existing subscription re-runs redraw the moment it toggles.
+    if (tr.occupancyMode !== 'off') { root.visible = false; label.visible = false; resetDetection(); return }
+    root.visible = true
     const tracks = tr.tracksByFloor[fid] ?? []
     if (tracks.length === 0) { label.visible = false; resetDetection(); return }
     detectingThisFrame.clear()
