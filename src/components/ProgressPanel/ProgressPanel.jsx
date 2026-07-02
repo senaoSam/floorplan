@@ -670,7 +670,7 @@ function ProgressPanel() {
   const totalCount = ALL_ITEMS.length
 
   return (
-    <>
+    <div className="progress-wrap">
       {/* 觸發按鈕 */}
       <button
         className={`progress-trigger${sidebarCollapsed ? ' progress-trigger--compact' : ''}`}
@@ -756,7 +756,7 @@ function ProgressPanel() {
           </div>
         </div>
       )}
-    </>
+    </div>
   )
 }
 

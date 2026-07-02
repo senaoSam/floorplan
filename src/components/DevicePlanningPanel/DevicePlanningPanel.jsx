@@ -3,6 +3,7 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
+import Icon from '@/components/Icon/Icon'
 import './DevicePlanningPanel.sass'
 
 function DevicePlanningPanel() {
@@ -42,7 +43,7 @@ function DevicePlanningPanel() {
       <div className="device-planning__header" onClick={() => setCollapsed((v) => !v)}>
         <span className="device-planning__icon">📡</span>
         <span className="device-planning__title">設備規劃</span>
-        <span className={`device-planning__arrow${collapsed ? ' device-planning__arrow--collapsed' : ''}`}>▾</span>
+        <span className={`device-planning__arrow${collapsed ? ' device-planning__arrow--collapsed' : ''}`}><Icon name="chevronDown" size={11} /></span>
       </div>
 
       {!collapsed && (

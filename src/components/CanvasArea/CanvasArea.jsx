@@ -36,20 +36,29 @@ function CanvasArea() {
       </div>
       <Toolbar />
       <ActiveModeBadge />
-      <div className="canvas-area__top-left">
+      {/* Top-left stack: layer toggle row → regulatory → coverage report
+          (CoveragePanel self-gates to CAMERA mode). Flow-stacked so a taller
+          LayerToggle can never overlap the panel below it. */}
+      <div className="canvas-area__overlay canvas-area__overlay--tl">
         <div className="canvas-area__top-left-row">
           <LayerToggle />
           {!inCameraMode && <DevicePlanningPanel />}
         </div>
         {!inCameraMode && <RegulatorySelector />}
+        <CoveragePanel />
       </div>
-      {hasFloor && !inCameraMode && <HeatmapControl />}
-      {hasFloor && !inCameraMode && <CableSummaryPanel />}
+      {/* Bottom-left stack (bottom-up): heatmap control lowest, cable summary
+          above it. TrendPanel starts here and can be dragged out of the flow.
+          Dev widgets (demo/stress/progress) live in SidebarLeft, NOT here —
+          they'll be removed for production and must not skew canvas UIUX. */}
+      <div className="canvas-area__overlay canvas-area__overlay--bl">
+        <TrendPanel />
+        {hasFloor && !inCameraMode && <CableSummaryPanel />}
+        {hasFloor && !inCameraMode && <HeatmapControl />}
+      </div>
       <ClientPanelMount />
       <ClientViewMenuMount />
       <CameraTimelineBar />
-      <CoveragePanel />
-      <TrendPanel />
       <LiveViewModal />
       <CalibrationModal />
       <ScaleBarMount />

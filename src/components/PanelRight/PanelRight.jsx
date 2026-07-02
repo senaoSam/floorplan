@@ -14,6 +14,7 @@ import TripwirePanel from './TripwirePanel'
 import ZonePanel from './ZonePanel'
 import AlignFloorPanel from './AlignFloorPanel'
 import BatchPanel from './BatchPanel'
+import Icon from '@/components/Icon/Icon'
 import './PanelRight.sass'
 
 // Right-panel router — keyed off selectedType / batch count. Adds the
@@ -37,6 +38,14 @@ function PanelRight() {
   const isAlignMode  = editorMode === EDITOR_MODE.ALIGN_FLOOR
   const hasSelection = !!selectedId || isBatch || isAlignMode
   const isOpen       = hasSelection && !panelCollapsed
+
+  // Right-dock avoidance (ui-spec §2.1-2): publish the dock's occupied width
+  // as a CSS variable so top-right floating panels (3D control panel /
+  // ClientPanel) and the scale bar shift left instead of being covered.
+  React.useEffect(() => {
+    document.documentElement.style.setProperty('--right-dock', isOpen ? '300px' : '0px')
+    return () => document.documentElement.style.setProperty('--right-dock', '0px')
+  }, [isOpen])
 
   let body = null
   if (isAlignMode && activeFloorId) {
@@ -70,7 +79,7 @@ function PanelRight() {
               {selectedType}
             </div>
             <div className="panel-right__placeholder-hint">
-              此類型的屬性面板尚未在 PIXI 版本上線
+              此類型的屬性面板即將推出
             </div>
           </div>
         )}
@@ -83,7 +92,7 @@ function PanelRight() {
           title={panelCollapsed ? '展開面板' : '收合面板'}
           aria-label={panelCollapsed ? '展開面板' : '收合面板'}
         >
-          {panelCollapsed ? '‹' : '›'}
+          <Icon name={panelCollapsed ? 'chevronLeft' : 'chevronRight'} size={12} />
         </button>
       )}
     </>

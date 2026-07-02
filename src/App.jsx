@@ -5,9 +5,7 @@ import CameraListPanel from '@/components/CameraTimeline/CameraListPanel'
 import CanvasArea from '@/components/CanvasArea/CanvasArea'
 import PanelRight from '@/components/PanelRight/PanelRight'
 import ContextMenuMount from '@/components/ContextMenu/ContextMenuMount'
-import ProgressPanel from '@/components/ProgressPanel/ProgressPanel'
-import DemoLoader from '@/components/DemoLoader/DemoLoader'
-import StressLoader from '@/components/StressLoader/StressLoader'
+import UiToast from '@/components/UiToast/UiToast'
 import '@/styles/App.sass'
 
 // Standalone-mode shell. The embeddable boundary is `<FloorplanSystem />`
@@ -23,9 +21,7 @@ function App() {
         <CanvasArea />
         <PanelRight />
       </div>
-      <StressLoader />
-      <DemoLoader />
-      <ProgressPanel />
+      <UiToast />
       <ContextMenuMount />
     </div>
   )

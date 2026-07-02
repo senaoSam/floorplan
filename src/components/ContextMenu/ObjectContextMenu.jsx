@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import Icon from '@/components/Icon/Icon'
 import './TrayContextMenu.sass'
 
 // 23-2d Generic right-click object context menu.
@@ -142,7 +143,7 @@ function ObjectContextMenu({
             {item.hintInline && <span className="tray-ctx-menu__hint">{item.hintInline}</span>}
           </span>
           {hasSub && (
-            <span className="tray-ctx-menu__caret">{expanded ? '▾' : '▸'}</span>
+            <span className="tray-ctx-menu__caret"><Icon name={expanded ? 'chevronDown' : 'chevronRight'} size={11} /></span>
           )}
           {item.shortcut && (
             <span className="tray-ctx-menu__shortcut">{item.shortcut}</span>

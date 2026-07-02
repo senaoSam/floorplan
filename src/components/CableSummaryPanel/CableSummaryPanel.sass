@@ -1,13 +1,10 @@
 @use '@/styles/variables' as *
 
 .cable-summary
-  // Sit next to HeatmapControl on the canvas bottom-left strip. Offset is
-  // tuned to clear HeatmapControl's collapsed-header width (~270 px). If
-  // HeatmapControl's panel is expanded the two may visually approach; both
-  // collapse independently so the user can always make room.
-  position: absolute
-  bottom: 12px
-  left: 290px
+  // Member of the bottom-left stack container (CanvasArea __overlay--bl,
+  // ui-spec §2.1) — stacked above HeatmapControl, so the two can no longer
+  // collide when either expands. Relative so the export dropdown anchors.
+  position: relative
   background: rgba(18, 18, 30, 0.92)
   backdrop-filter: blur(8px)
   border: 1px solid rgba(255, 255, 255, 0.12)
@@ -15,7 +12,6 @@
   min-width: 220px
   max-width: 320px
   user-select: none
-  z-index: 50
   color: $text-primary
 
   &__header

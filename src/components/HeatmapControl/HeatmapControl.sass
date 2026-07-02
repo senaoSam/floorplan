@@ -1,12 +1,8 @@
 @use '@/styles/variables' as *
 
 .heatmap-control
-  // Absolutely positioned inside the canvas area (bottom-left corner),
-  // mirroring LayerToggle's top-left placement.
-  position: absolute
-  bottom: 12px
-  left: 12px
-  z-index: 400
+  // Member of the bottom-left stack container (CanvasArea __overlay--bl,
+  // ui-spec §2.1) — position comes from the stack, not from here.
   display: flex
   flex-direction: column
   align-items: flex-start
@@ -81,6 +77,9 @@
     background: conic-gradient(from 180deg, #ef4444, #f59e0b, #eab308, #84cc16, #22c55e, #ef4444)
 
   &__more
+    display: inline-flex
+    align-items: center
+    gap: 4px
     height: 34px
     padding: 0 10px
     border: 1px solid rgba(255, 255, 255, 0.18)
@@ -173,6 +172,9 @@
       color: $text-primary
 
   &__formula-btn
+    display: inline-flex
+    align-items: center
+    gap: 4px
     margin-top: 4px
     background: transparent
     border: 1px solid rgba(255, 255, 255, 0.15)

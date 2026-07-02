@@ -3,8 +3,10 @@
 .client-panel
   position: absolute
   top: 12px
-  right: 12px
-  z-index: 400
+  // Right-dock avoidance (ui-spec §2.1-2): shift left while PanelRight is open.
+  right: calc(12px + var(--right-dock, 0px))
+  z-index: $z-canvas-overlay
+  transition: right 0.2s ease
   width: 248px
   // The advanced params make this tall; cap it to the viewport and scroll.
   max-height: calc(100vh - 24px)

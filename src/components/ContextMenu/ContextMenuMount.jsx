@@ -9,6 +9,7 @@ import { useScopeStore } from '@/store/useScopeStore'
 import { useCameraStore } from '@/store/useCameraStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useDraftStore } from '@/store/useDraftStore'
+import { showUiToast } from '@/store/useUiToastStore'
 import { generateId } from '@/utils/id'
 import ObjectContextMenu from './ObjectContextMenu'
 
@@ -166,6 +167,21 @@ function ContextMenuMount() {
 
   const selectedId = useEditorStore.getState().selectedId
   const isSelected = selectedId === targetId
+
+  // Undo-hint toast on every context-menu delete (ui-spec §2.4). 移除底圖 is
+  // not history-tracked (floor images aren't snapshotted) so it skips the
+  // Ctrl+Z promise.
+  if (onDelete) {
+    const rawDelete = onDelete
+    onDelete = () => {
+      rawDelete()
+      showUiToast(
+        targetType === 'floor_image'
+          ? '已移除底圖'
+          : `已刪除「${title}」（Ctrl+Z 可復原）`,
+      )
+    }
+  }
 
   const items = []
   if (targetType === 'cable_tray') {

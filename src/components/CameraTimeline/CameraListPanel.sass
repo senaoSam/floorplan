@@ -1,45 +1,25 @@
 @use '@/styles/variables' as *
 
-// Camera roster — floats bottom-left, stacked just above the occupancy trend
-// panel (which sits at bottom:12px). Collapsible to just its title bar.
+// Camera roster — docked left-rail (Verkada "Device List"): a full-height
+// column in the flex body between SidebarLeft and the canvas (it pushes the
+// canvas rather than floating over it). The old floating variant was removed
+// (ui-spec A7 dead code) — the JSX always renders --docked.
 
 .camera-list
-  position: absolute
-  left: 12px
-  bottom: 254px
-  z-index: 389
-  width: 320px
-  max-height: 42vh
   display: flex
   flex-direction: column
-  gap: 6px
   padding: 10px 12px 11px
-  background: rgba(15, 23, 42, 0.9)
-  border: 1px solid rgba(255, 255, 255, 0.12)
-  border-left: 3px solid #10b981
-  border-radius: 12px
-  backdrop-filter: blur(6px)
   color: $text-primary
   font-size: 12px
   user-select: none
-  &--collapsed
-    max-height: none
-    padding-bottom: 10px
 
-  // Docked left-rail form (Verkada "Device List"): a full-height column that
-  // sits in the flex body between SidebarLeft and the canvas (so it pushes the
-  // canvas rather than floating over it). Overrides the floating chrome above.
   &--docked
     position: static
     width: $device-list-width
-    max-height: none
     height: 100%
     flex-shrink: 0
     gap: 8px
-    border: none
     border-right: 1px solid $border-color
-    border-radius: 0
-    backdrop-filter: none
     background: $bg-secondary
     transition: width 0.18s ease
     .camera-list__rows
@@ -48,6 +28,7 @@
       width: 36px
       align-items: stretch
       overflow: visible
+      padding-bottom: 10px
       // 36px rail is too narrow for the title/close — keep only the caret.
       .camera-list__title, .camera-list__close
         display: none
@@ -62,7 +43,7 @@
     border-radius: 10px
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5)
     pointer-events: none
-    z-index: 391
+    z-index: $z-badge
 
   &__thumb-canvas
     display: block

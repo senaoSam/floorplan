@@ -9,7 +9,9 @@
   top: 12px
   left: 50%
   transform: translateX(-50%)
-  z-index: 90
+  // Above the mode badge so an open tool dropdown covers it (hint is
+  // always-rendered now); badge itself sits at $z-canvas-overlay.
+  z-index: $z-badge
   display: flex
   align-items: center
   gap: 4px

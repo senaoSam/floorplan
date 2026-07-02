@@ -180,6 +180,12 @@ const ICONS = {
       strokeLinecap="round" strokeLinejoin="round" />
   ),
 
+  // Chevron left (expand toward the left / collapse a right dock)
+  chevronLeft: (
+    <path d="M15 5 L8 12 L15 19" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" />
+  ),
+
   // Chevron down (expanded)
   chevronDown: (
     <path d="M5 9 L12 16 L19 9" fill="none" stroke="currentColor" strokeWidth="2"

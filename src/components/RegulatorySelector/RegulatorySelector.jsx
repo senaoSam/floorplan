@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useEditorStore } from '@/store/useEditorStore'
 import { REGULATORY_LIST } from '@/constants/regulatoryDomains'
+import Icon from '@/components/Icon/Icon'
 import './RegulatorySelector.sass'
 
 function RegulatorySelector() {
@@ -13,7 +14,7 @@ function RegulatorySelector() {
       <div className="regulatory-selector__header" onClick={() => setCollapsed((v) => !v)}>
         <span className="regulatory-selector__icon">🌐</span>
         <span className="regulatory-selector__title">國家頻段</span>
-        <span className={`regulatory-selector__arrow${collapsed ? ' regulatory-selector__arrow--collapsed' : ''}`}>▾</span>
+        <span className={`regulatory-selector__arrow${collapsed ? ' regulatory-selector__arrow--collapsed' : ''}`}><Icon name="chevronDown" size={11} /></span>
       </div>
       {!collapsed && (
         <div className="regulatory-selector__body">

@@ -1,12 +1,9 @@
 @use '@/styles/variables' as *
 
-// Sits directly above the DemoLoader pill (bottom: 60px, height: 34px,
-// padding gap ≈ 8px → bottom: 60 + 34 + 8 = 102px).
+// Member of the bottom-left stack container (CanvasArea __overlay--bl),
+// stacked directly above the DemoLoader pill by flex order.
 .stress-loader
-  position: fixed
-  bottom: 102px
-  left: 16px
-  z-index: 500
+  position: relative
   display: flex
   gap: 6px
 
@@ -14,7 +11,6 @@
   &--compact
     flex-direction: column
     gap: 4px
-    bottom: 156px
 
     .stress-loader__btn
       width: 30px

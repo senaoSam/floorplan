@@ -3,6 +3,7 @@ import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
 import { HEATMAP_MODE_LIST, getModeConfig } from '@/features/heatmap/modes'
 import FormulaNote from '@/components/FormulaNote/FormulaNote'
+import Icon from '@/components/Icon/Icon'
 import HeatmapLegend from './HeatmapLegend'
 import './HeatmapControl.sass'
 
@@ -110,14 +111,16 @@ function HeatmapControl() {
       )}
 
       <div className="heatmap-control__row">
+        {/* Toggle idiom (ui-spec §2.3-3): fixed label, state shown by the
+            filled --active style — same pattern as the timeline chips. */}
         <button
           type="button"
           className={`heatmap-control__btn${enabled ? ' heatmap-control__btn--active' : ''}`}
           onClick={() => setEnabled(!enabled)}
-          title="開啟/關閉熱圖"
+          title={enabled ? '關閉熱圖' : '開啟熱圖'}
         >
           <span className="heatmap-control__dot" />
-          <span>熱圖 {enabled ? '已開啟' : '已關閉'}</span>
+          <span>熱圖</span>
         </button>
         {enabled && (
           <>
@@ -137,7 +140,7 @@ function HeatmapControl() {
               onClick={() => setPanelOpen((v) => !v)}
               title="熱圖設定"
             >
-              {panelOpen ? '▾' : '▸'} 設定
+              <Icon name={panelOpen ? 'chevronDown' : 'chevronRight'} size={11} /> 設定
             </button>
           </>
         )}
@@ -212,7 +215,7 @@ function HeatmapControl() {
             className="heatmap-control__formula-btn"
             onClick={() => setFormulaOpen((v) => !v)}
           >
-            {formulaOpen ? '▾' : '▸'} 公式說明
+            <Icon name={formulaOpen ? 'chevronDown' : 'chevronRight'} size={11} /> 公式說明
           </button>
           {formulaOpen && <FormulaNote />}
         </div>

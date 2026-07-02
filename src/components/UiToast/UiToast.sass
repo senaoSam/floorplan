@@ -1,0 +1,30 @@
+@use '@/styles/variables' as *
+
+.ui-toast
+  position: fixed
+  bottom: 130px
+  left: 50%
+  transform: translateX(-50%)
+  z-index: $z-toast
+  max-width: 60vw
+  padding: 9px 18px
+  background: rgba(0, 0, 0, 0.82)
+  border: 1px solid rgba(255, 255, 255, 0.15)
+  border-radius: 8px
+  backdrop-filter: blur(8px)
+  color: $text-primary
+  font-size: 13px
+  line-height: 1.4
+  pointer-events: none
+  user-select: none
+  animation: ui-toast-fade 3s ease-out forwards
+
+@keyframes ui-toast-fade
+  0%
+    opacity: 0
+    transform: translate(-50%, 6px)
+  8%, 75%
+    opacity: 1
+    transform: translate(-50%, 0)
+  100%
+    opacity: 0

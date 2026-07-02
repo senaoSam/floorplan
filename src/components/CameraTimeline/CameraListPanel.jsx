@@ -8,6 +8,9 @@ import { deviceStatus, STATUS_COLOR, DEVICE_STATUS } from '@/features/cameras/de
 import { cameraModelById, CAMERA_MODEL_LIST } from '@/constants/cameraModels'
 import { isCameraDetecting } from '@/features/cameras/detectionBus'
 import { drawCctvFrame } from '@/features/cameras/mockCctv'
+import { showUiToast } from '@/store/useUiToastStore'
+import Icon from '@/components/Icon/Icon'
+import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import './CameraListPanel.sass'
 
 // Compact mock-CCTV thumbnail shown when a roster row is hovered (Verkada
@@ -68,6 +71,8 @@ function CameraListPanel() {
 
   // Checked rows for batch ops — a Set of camera ids, local to the panel.
   const [checked, setChecked] = useState(() => new Set())
+  // Batch delete awaiting confirmation (ui-spec §2.4 delete policy).
+  const [confirmingBatchDelete, setConfirmingBatchDelete] = useState(false)
   // Free-text filter (Verkada "Filter by device name") — narrows both the
   // placed roster and the unplaced pool by name, case-insensitive.
   const [query, setQuery] = useState('')
@@ -159,11 +164,14 @@ function CameraListPanel() {
     for (const id of checkedLive) updateCamera(activeFloorId, id, { status })
   }
   const batchDelete = () => {
+    const count = checkedLive.length
     for (const id of checkedLive) {
       removeCamera(activeFloorId, id)
       if (selectedId === id) clearSelected()
     }
     clearChecked()
+    setConfirmingBatchDelete(false)
+    showUiToast(`已刪除 ${count} 台相機（Ctrl+Z 可復原）`)
   }
 
   return (
@@ -175,10 +183,22 @@ function CameraListPanel() {
           onClick={toggleCollapsed}
           title={collapsed ? '展開' : '收合'}
         >
-          {collapsed ? '▸' : '▾'}
+          <Icon name={collapsed ? 'chevronRight' : 'chevronDown'} size={12} />
         </button>
         <span className="camera-list__title">相機清單（{cameras.length}）</span>
-        <button type="button" className="camera-list__close" onClick={toggle} title="關閉">✕</button>
+        <button
+          type="button"
+          className="camera-list__close"
+          onClick={() => {
+            toggle()
+            // Closing hides the whole rail — point at the re-open entry so the
+            // ✕ never reads as "gone for good" (ui-spec §2.3-4).
+            showUiToast('相機清單已關閉，可從下方時間軸的「📋 清單」重新開啟')
+          }}
+          title="關閉（可從時間軸「📋 清單」重新開啟）"
+        >
+          ✕
+        </button>
       </div>
 
       {!collapsed && (
@@ -238,7 +258,7 @@ function CameraListPanel() {
                             ✓校
                           </span>
                         )}
-                        <span className="camera-list__model">{model.id === 'custom' ? '自訂' : model.label.split(' ')[0]}</span>
+                        <span className="camera-list__model" title={model.id === 'custom' ? '自訂' : model.label}>{model.id === 'custom' ? '自訂' : model.label.split(' ')[0]}</span>
                       </span>
                       <button
                         type="button"
@@ -259,6 +279,7 @@ function CameraListPanel() {
                           e.stopPropagation()
                           removeCamera(activeFloorId, cam.id)
                           if (selectedId === cam.id) clearSelected()
+                          showUiToast(`已刪除「${cam.name}」（Ctrl+Z 可復原）`)
                         }}
                       >
                         ✕
@@ -291,9 +312,21 @@ function CameraListPanel() {
                 </select>
                 <button type="button" onClick={() => batchSetStatus(DEVICE_STATUS.ONLINE)} title="設為在線">在線</button>
                 <button type="button" onClick={() => batchSetStatus(DEVICE_STATUS.OFFLINE)} title="設為離線">離線</button>
-                <button type="button" className="camera-list__batch-del" onClick={batchDelete} title="刪除所選">刪除</button>
+                <button type="button" className="camera-list__batch-del" onClick={() => setConfirmingBatchDelete(true)} title="刪除所選">刪除</button>
               </div>
             </div>
+          )}
+
+          {confirmingBatchDelete && (
+            <ConfirmDialog
+              title="刪除多台相機"
+              message={`確定要刪除選取的 ${checkedLive.length} 台相機？（刪除後可用 Ctrl+Z 復原）`}
+              confirmLabel="刪除"
+              cancelLabel="取消"
+              danger
+              onConfirm={batchDelete}
+              onCancel={() => setConfirmingBatchDelete(false)}
+            />
           )}
 
           {/* Unplaced pool (Verkada "Add Cameras"): spare cameras not yet on

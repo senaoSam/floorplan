@@ -14,6 +14,11 @@ import { useCableStore } from '@/store/useCableStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorImport } from '@/features/importer/useFloorImport'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
+import Icon from '@/components/Icon/Icon'
+import { showUiToast } from '@/store/useUiToastStore'
+import ProgressPanel from '@/components/ProgressPanel/ProgressPanel'
+import DemoLoader from '@/components/DemoLoader/DemoLoader'
+import StressLoader from '@/components/StressLoader/StressLoader'
 import { capturePlanPng, triggerImageDownload } from '@/features/exportPng/exportPlanView'
 import { getSceneRefs } from '@/render/sceneRegistry'
 import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
@@ -134,8 +139,7 @@ function SidebarLeft() {
       // broke PNG export in production). See render/sceneRegistry.js.
       const refs = getSceneRefs()
       if (!refs) {
-        // eslint-disable-next-line no-alert
-        alert('PIXI scene 還沒就緒，請等載入完再試一次。')
+        showUiToast('畫布尚未載入完成，請稍候再試一次匯出')
         return
       }
       const png = capturePlanPng({
@@ -214,7 +218,7 @@ function SidebarLeft() {
           title="展開樓層面板"
           onClick={toggleSidebarCollapsed}
         >
-          ›
+          <Icon name="chevronRight" size={12} />
         </button>
         <ul className="sidebar-left__floor-list sidebar-left__floor-list--collapsed">
           {floors.map((floor) => {
@@ -231,6 +235,11 @@ function SidebarLeft() {
             )
           })}
         </ul>
+        <div className="sidebar-left__dev sidebar-left__dev--collapsed">
+          <StressLoader />
+          <DemoLoader />
+          <ProgressPanel />
+        </div>
       </aside>
     )
   }
@@ -253,7 +262,7 @@ function SidebarLeft() {
             title="收合樓層面板"
             onClick={toggleSidebarCollapsed}
           >
-            ‹
+            <Icon name="chevronLeft" size={12} />
           </button>
           <input
             ref={fileInputRef}
@@ -283,12 +292,22 @@ function SidebarLeft() {
                   isDragOver ? 'sidebar-left__floor-item--drop-target' : '',
                 ].filter(Boolean).join(' ')}
                 onClick={() => !isEditing && requestSetActive(floor.id)}
-                draggable={!isEditing}
-                onDragStart={(e) => handleDragStart(e, idx)}
                 onDragOver={(e) => handleDragOver(e, idx)}
                 onDrop={(e) => handleDrop(e, idx)}
                 onDragEnd={handleDragEnd}
               >
+                {/* Reorder affordance (ui-spec B11): dragging starts from the
+                    grip only, so row clicks (= switch floor) can't turn into
+                    accidental drags. */}
+                <span
+                  className="sidebar-left__floor-grip"
+                  title="拖曳調整樓層順序"
+                  draggable={!isEditing}
+                  onDragStart={(e) => handleDragStart(e, idx)}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  ⠿
+                </span>
                 <span className="sidebar-left__floor-icon">▣</span>
                 {isEditing ? (
                   <input
@@ -401,6 +420,15 @@ function SidebarLeft() {
           })}
         </ul>
       </section>
+
+      {/* Dev widgets (demo / stress / progress) — pinned to the sidebar
+          bottom, OUTSIDE the canvas overlays: this whole block is removed
+          for production, so it must not participate in canvas UIUX. */}
+      <div className="sidebar-left__dev">
+        <StressLoader />
+        <DemoLoader />
+        <ProgressPanel />
+      </div>
 
       {pendingRemove && (
         <ConfirmDialog

@@ -3,10 +3,11 @@
 .scale-bar
   position: absolute
   bottom: 12px
-  right: 12px
-  // Intentionally lower than PanelRight (z-index: 100) so the right-side
-  // properties panel covers the scale bar when open.
-  z-index: 50
+  // Right-dock avoidance (ui-spec §2.1-2): shift left while PanelRight is
+  // open instead of being covered by it.
+  right: calc(12px + var(--right-dock, 0px))
+  transition: right 0.2s ease
+  z-index: $z-canvas-overlay
   display: flex
   flex-direction: column
   align-items: center

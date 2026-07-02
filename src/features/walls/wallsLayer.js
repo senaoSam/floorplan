@@ -6,6 +6,7 @@ import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlaySt
 import { useDraftStore } from '@/store/useDraftStore'
 import { OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { generateId } from '@/utils/id'
+import { isTypingTarget } from '@/utils/isTypingTarget'
 import { getModeCapability } from '@/render/modeCapabilities'
 import { snapToWallForTray } from '@/features/draft/traySnap'
 
@@ -626,8 +627,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
   // Esc clears the half-finished click pair. Mode is now driven entirely by
   // DRAW_DOOR / DRAW_WINDOW selection — no per-mode toggle key.
   const onKeyDown = (e) => {
-    const tag = e.target?.tagName
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    if (isTypingTarget(e.target)) return
     if (!isDoorWindowMode(useEditorStore.getState().editorMode)) return
     if (e.key === 'Escape') {
       dw.wallId = null

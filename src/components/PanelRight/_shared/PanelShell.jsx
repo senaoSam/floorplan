@@ -1,4 +1,5 @@
 import React from 'react'
+import { showUiToast } from '@/store/useUiToastStore'
 import './shared.sass'
 
 // 24-3 Canonical right-panel layout primitives.
@@ -42,6 +43,16 @@ export function PanelShell({ accent, children, className = '' }) {
 // right. `onDelete` is rendered as the canonical 「刪除」 button — keep
 // destructive actions consistent across panels.
 export function PanelHeader({ title, meta, onDelete, deleteLabel = '刪除' }) {
+  // Unified delete policy (ui-spec §2.4): single-object deletes are instant
+  // but always leave an undo-hint toast so the action never feels lossy.
+  const handleDelete = () => {
+    onDelete()
+    showUiToast(
+      deleteLabel === '刪除'
+        ? `已刪除「${title}」（Ctrl+Z 可復原）`
+        : `已${deleteLabel}`,
+    )
+  }
   return (
     <header className="pnl__header">
       <div className="pnl__header-text">
@@ -52,7 +63,7 @@ export function PanelHeader({ title, meta, onDelete, deleteLabel = '刪除' }) {
         <button
           type="button"
           className="pnl__delete"
-          onClick={onDelete}
+          onClick={handleDelete}
         >
           {deleteLabel}
         </button>

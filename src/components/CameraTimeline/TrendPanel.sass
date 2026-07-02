@@ -1,14 +1,16 @@
 @use '@/styles/variables' as *
 
-// Floor-wide occupancy trend panel — floats top-right over the canvas, same
-// dark-glass family as the camera timeline bar.
+// Floor-wide occupancy trend panel — starts life inside the bottom-left
+// stack container (CanvasArea __overlay--bl, ui-spec §2.1). Dragging it by
+// the title bar tears it out of the flow (--floating) and it becomes an
+// absolutely-positioned window inside the same overlay container.
 
 .trend-panel
-  position: absolute
-  left: 12px
-  bottom: 12px
-  z-index: 390
   width: 320px
+
+  &--floating
+    position: absolute
+    z-index: $z-floating
   display: flex
   flex-direction: column
   gap: 8px

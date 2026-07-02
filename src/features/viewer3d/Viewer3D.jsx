@@ -18,6 +18,7 @@ import TrayLayer3D from './TrayLayer3D'
 import SwitchLayer3D from './SwitchLayer3D'
 import CableLayer3D from './CableLayer3D'
 import { computeFloorElevations } from '@/utils/floorStacking'
+import Icon from '@/components/Icon/Icon'
 import './Viewer3D.sass'
 
 // r3f v7 doesn't include drei by default. Make OrbitControls available as a
@@ -536,7 +537,7 @@ function FloorSelector({ floors, activeFloorId, onSelect }) {
         title={activeFloor?.name ?? '選擇樓層'}
       >
         <span className="viewer3d__floor-trigger-label">{activeFloor?.name ?? '—'}</span>
-        <span className="viewer3d__floor-trigger-caret">▾</span>
+        <span className="viewer3d__floor-trigger-caret"><Icon name="chevronDown" size={10} /></span>
       </button>
       {open && (
         <ul className="viewer3d__floor-list" role="listbox" aria-label="樓層選擇">
@@ -936,9 +937,17 @@ function Viewer3D() {
             onClick={() => setPanelCollapsed((c) => !c)}
             title={panelCollapsed ? '展開' : '收合'}
           >
-            {panelCollapsed ? '▸' : '▾'}
+            <Icon name={panelCollapsed ? 'chevronRight' : 'chevronDown'} size={12} />
           </button>
           <span className="viewer3d__panel-title">3D 視圖</span>
+          {/* 3D is view-only (ui-spec §2.5): objects can be selected (right
+              panel opens for edits) but geometry is edited back in 2D. */}
+          <span
+            className="viewer3d__panel-badge"
+            title="3D 僅供檢視：點選物件可開啟右側屬性面板編輯參數；移動 / 繪製請回 2D"
+          >
+            唯讀
+          </span>
         </div>
 
         {!panelCollapsed && (

@@ -10,6 +10,7 @@ import { buildPlanningBOMCsv, triggerCSVDownload } from '@/features/cable/export
 import { buildPlanningPdf, triggerPdfDownload } from '@/features/cable/exportPlanningPdf'
 import { getSceneRefs } from '@/render/sceneRegistry'
 // Phase 25 — PIXI scene replaces Konva stage
+import Icon from '@/components/Icon/Icon'
 import './CableSummaryPanel.sass'
 
 // Building-wide cable BOM + per-route-status counts + unroutable list.
@@ -252,7 +253,7 @@ function CableSummaryPanel() {
         <span className="cable-summary__icon">🔌</span>
         <span className="cable-summary__title">線纜總結</span>
         <span className="cable-summary__total">{stats.totalM.toFixed(1)} m</span>
-        <span className={`cable-summary__arrow${collapsed ? ' cable-summary__arrow--collapsed' : ''}`}>▾</span>
+        <span className={`cable-summary__arrow${collapsed ? ' cable-summary__arrow--collapsed' : ''}`}><Icon name="chevronDown" size={11} /></span>
       </div>
       {!collapsed && (
         <div className="cable-summary__body">

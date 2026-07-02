@@ -54,10 +54,29 @@ import { useCameraStore } from '@/store/useCameraStore'
 import { useTrackingStore } from '@/store/useTrackingStore'
 import { useDraftStore } from '@/store/useDraftStore'
 import { useMaterialToastStore } from '@/store/useMaterialToastStore'
+import { showUiToast } from '@/store/useUiToastStore'
 import { MATERIAL_LIST } from '@/constants/materials'
 import { generateId } from '@/utils/id'
+import { isTypingTarget } from '@/utils/isTypingTarget'
 import MaterialToast from '@/components/MaterialToast/MaterialToast'
+import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import './FloorplanSystem.sass'
+
+// Unified delete policy (ui-spec §2.4): single objects delete immediately
+// with an undo-hint toast; batches (>1) confirm first. Labels for the toast.
+const DELETE_TYPE_LABEL = {
+  ap: 'AP', wall: '牆', switch: 'Switch', cable_tray: '線槽', scope: '範圍',
+  floor_hole: '中庭', cable_riser: 'Riser', camera: '相機',
+  tripwire: '計數線', camera_zone: '分析區域',
+}
+
+// One-time (per session) explainer toasts for modes that repaint the canvas
+// so drastically that panels appear to "vanish" (ui-spec §2.4).
+const MODE_ENTRY_TOAST = {
+  [EDITOR_MODE.CAMERA]: '已進入 Camera 模式：畫布只顯示底圖與牆，RF / 佈線面板暫時隱藏，切回其他模式即恢復',
+  [EDITOR_MODE.CLIENT_VIEW]: '已進入 Client 視角：左鍵點畫布放置模擬裝置，拖曳觀察漫遊',
+}
+const seenModeToasts = new Set()
 
 // Integration boundary the host product will mount. Owns the PIXI scene
 // lifecycle + all layer adapters. External chrome (TopBar / SidebarLeft /
@@ -66,6 +85,9 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
   const containerRef = useRef(null)
   const [scaleDialog, setScaleDialog] = React.useState(null)
   // { p0, p1 } | null
+  // Marquee batch delete awaiting confirmation (ui-spec §2.4): the snapshot
+  // of selectedItems taken when Delete was pressed. null = no pending ask.
+  const [pendingBatchDelete, setPendingBatchDelete] = React.useState(null)
 
   useEffect(() => {
     const el = containerRef.current
@@ -506,12 +528,43 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (draftMode != null && draftMode !== m) {
         useDraftStore.getState().clearDraft()
       }
+      // World-switch explainer (ui-spec §2.4): entering CAMERA / CLIENT_VIEW
+      // hides whole panel families — tell the user once per session so the
+      // vanishing panels don't read as data loss.
+      const msg = MODE_ENTRY_TOAST[m]
+      if (msg && !seenModeToasts.has(m)) {
+        seenModeToasts.add(m)
+        showUiToast(msg, { duration: 5000 })
+      }
     })
 
     const onKeyDown = (e) => {
-      // Don't fire while typing in inputs/textareas (e.g. AP name field).
-      const tag = e.target.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      // Don't fire while typing in any form control (ui-spec §2.4 guard —
+      // includes <select> and contentEditable, not just INPUT/TEXTAREA).
+      if (isTypingTarget(e.target)) return
+
+      // F2 = rename the selected object (the context menu advertises this
+      // shortcut): open the right panel if collapsed, then focus its 名稱
+      // field. Single selection only — batches have no name field.
+      if (e.key === 'F2') {
+        const s = useEditorStore.getState()
+        if (s.selectedId && s.selectedItems.length <= 1) {
+          e.preventDefault()
+          if (s.panelCollapsed) s.togglePanelCollapsed()
+          setTimeout(() => {
+            const fields = document.querySelectorAll('.panel-right .pnl__field')
+            for (const f of fields) {
+              const label = f.querySelector('.pnl__field-label')
+              if (label && label.textContent.trim().startsWith('名稱')) {
+                const input = f.querySelector('input')
+                if (input) { input.focus(); input.select() }
+                return
+              }
+            }
+          }, 60)
+        }
+        return
+      }
 
       // Backspace during a draw steps back the last placed vertex / wall
       // segment (draftCtrl decides per mode). Must run BEFORE the Delete/
@@ -542,14 +595,16 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         return
       }
 
-      // ALIGN_FLOOR mode swallows Escape / Delete / Backspace so the
-      // panel stays open and alignment progress isn't accidentally lost.
-      // User must exit via the panel's 「完成」 button (or floor switch
-      // triggers the clear). Matches oldSrc Editor2D line 457-459.
+      // ALIGN_FLOOR mode: Esc = 完成 (same as the panel's 完成 button —
+      // ui-spec §2.4 unifies "how do I leave this tool" on Esc; the adjusted
+      // offset/scale/rotation persist either way). Delete/Backspace are still
+      // swallowed so alignment work isn't lost to a stray keypress.
       if (useEditorStore.getState().editorMode === EDITOR_MODE.ALIGN_FLOOR) {
-        if (e.key === 'Escape' || e.key === 'Delete' || e.key === 'Backspace') {
+        if (e.key === 'Escape') {
+          useEditorStore.getState().setEditorMode(EDITOR_MODE.SELECT)
           return
         }
+        if (e.key === 'Delete' || e.key === 'Backspace') return
       }
 
       if (e.key === 'Escape') {
@@ -647,25 +702,18 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         const fid = useFloorStore.getState().activeFloorId
         if (!fid) return
 
-        // Batch (marquee multi-select) takes priority over single selection.
-        // Bundle 19: removes all selected types, not just APs.
+        // Batch (marquee multi-select): confirm before deleting >1 objects
+        // (ui-spec §2.4 delete policy) — the actual removal happens in the
+        // ConfirmDialog rendered below.
         if (s.selectedItems.length > 1) {
-          const byType = {}
-          for (const it of s.selectedItems) {
-            (byType[it.type] ??= []).push(it.id)
-          }
-          if (byType.ap?.length)         useAPStore.getState().removeAPs(fid, byType.ap)
-          if (byType.wall?.length)       useWallStore.getState().removeWalls(fid, byType.wall)
-          if (byType.scope?.length)      useScopeStore.getState().removeScopes(fid, byType.scope)
-          if (byType.floor_hole?.length) useFloorHoleStore.getState().removeFloorHoles(fid, byType.floor_hole)
-          if (byType.switch?.length)     useCableStore.getState().removeSwitches(fid, byType.switch)
-          if (byType.cable_tray?.length) useCableStore.getState().removeTrays(fid, byType.cable_tray)
-          if (byType.cable_riser?.length) useCableStore.getState().removeRisers(byType.cable_riser)
-          s.clearSelected()
+          setPendingBatchDelete([...s.selectedItems])
           return
         }
 
         if (!s.selectedId) return
+        // Single object: delete immediately + undo-hint toast (ui-spec §2.4).
+        const typeLabel = DELETE_TYPE_LABEL[s.selectedType]
+        if (typeLabel) showUiToast(`已刪除 ${typeLabel}（Ctrl+Z 可復原）`)
         if (s.selectedType === 'ap') {
           useAPStore.getState().removeAP(fid, s.selectedId)
           s.clearSelected()
@@ -777,6 +825,28 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     return unsub
   }, [])
 
+  // Marquee batch delete — runs the same per-type removals the keydown
+  // handler used to do inline, now behind a ConfirmDialog (ui-spec §2.4).
+  const confirmBatchDelete = () => {
+    const items = pendingBatchDelete ?? []
+    setPendingBatchDelete(null)
+    const fid = useFloorStore.getState().activeFloorId
+    if (!fid || items.length === 0) return
+    const byType = {}
+    for (const it of items) {
+      (byType[it.type] ??= []).push(it.id)
+    }
+    if (byType.ap?.length)          useAPStore.getState().removeAPs(fid, byType.ap)
+    if (byType.wall?.length)        useWallStore.getState().removeWalls(fid, byType.wall)
+    if (byType.scope?.length)       useScopeStore.getState().removeScopes(fid, byType.scope)
+    if (byType.floor_hole?.length)  useFloorHoleStore.getState().removeFloorHoles(fid, byType.floor_hole)
+    if (byType.switch?.length)      useCableStore.getState().removeSwitches(fid, byType.switch)
+    if (byType.cable_tray?.length)  useCableStore.getState().removeTrays(fid, byType.cable_tray)
+    if (byType.cable_riser?.length) useCableStore.getState().removeRisers(byType.cable_riser)
+    useEditorStore.getState().clearSelected()
+    showUiToast(`已刪除 ${items.length} 個物件（Ctrl+Z 可復原）`)
+  }
+
   // Subscribe to viewMode so the 2D ↔ 3D switch re-renders the canvas
   // visibility. The PIXI canvas stays mounted (cheaper than tearing it
   // down on every toggle); CSS just hides it when 3D is up.
@@ -805,6 +875,17 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         <Viewer3D />
       </div>
       <MaterialToast />
+      {pendingBatchDelete && (
+        <ConfirmDialog
+          title="刪除多個物件"
+          message={`確定要刪除選取的 ${pendingBatchDelete.length} 個物件？（刪除後可用 Ctrl+Z 復原）`}
+          confirmLabel="刪除"
+          cancelLabel="取消"
+          danger
+          onConfirm={confirmBatchDelete}
+          onCancel={() => setPendingBatchDelete(null)}
+        />
+      )}
       {scaleDialog && (
         <ScaleDialog
           pixelDist={pxDist}

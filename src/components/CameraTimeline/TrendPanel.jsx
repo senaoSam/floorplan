@@ -8,6 +8,7 @@ import { computeFloorTrend, computeDayRollup } from '@/features/cameras/analytic
 import {
   DAY_START_SEC, DAY_END_SEC, generateWeekTracks, formatClock,
 } from '@/features/cameras/mockTracks'
+import { showUiToast } from '@/store/useUiToastStore'
 import './TrendPanel.sass'
 
 // Floor-wide occupancy trend panel (Verkada "Occupancy Trends" parity).
@@ -74,10 +75,14 @@ function TrendPanel() {
     const parent = panel.parentElement.getBoundingClientRect()
     const offX = e.clientX - rect.left
     const offY = e.clientY - rect.top
+    // Clamp inside the overlay container so the panel can't be dragged off
+    // the canvas (ui-spec §2.1-4).
+    const maxLeft = Math.max(0, parent.width - rect.width)
+    const maxTop = Math.max(0, parent.height - rect.height)
     const onMove = (ev) => {
       setPos({
-        left: Math.max(0, ev.clientX - parent.left - offX),
-        top: Math.max(0, ev.clientY - parent.top - offY),
+        left: Math.min(maxLeft, Math.max(0, ev.clientX - parent.left - offX)),
+        top: Math.min(maxTop, Math.max(0, ev.clientY - parent.top - offY)),
       })
     }
     const onUp = () => {
@@ -136,10 +141,24 @@ function TrendPanel() {
   const maxVal = Math.max(1, ...bars.map((b) => b.value))
 
   return (
-    <div className="trend-panel" style={pos ? { left: pos.left, top: pos.top, bottom: 'auto' } : undefined} ref={dragRef}>
+    <div
+      className={`trend-panel${pos ? ' trend-panel--floating' : ''}`}
+      style={pos ? { left: pos.left, top: pos.top } : undefined}
+      ref={dragRef}
+    >
       <div className="trend-panel__head trend-panel__head--drag" onPointerDown={onDragStart}>
         <span className="trend-panel__title">占用趨勢</span>
-        <button type="button" className="trend-panel__close" onClick={toggle} title="關閉">✕</button>
+        <button
+          type="button"
+          className="trend-panel__close"
+          onClick={() => {
+            toggle()
+            showUiToast('占用趨勢已關閉，可從下方時間軸的「📊 趨勢」重新開啟')
+          }}
+          title="關閉（可從時間軸「📊 趨勢」重新開啟）"
+        >
+          ✕
+        </button>
       </div>
 
       <div className="trend-panel__toggles">
