@@ -6,6 +6,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { computeCoverageStats } from '@/features/cameras/coverageStats'
 import { flashGapMarker } from '@/features/cameras/gapMarkerBus'
 import { useViewportStore } from '@/store/useViewportStore'
+import { getSceneRefs } from '@/render/sceneRegistry'
 import { NumberInput } from '@/components/PanelRight/_shared/PanelControls'
 import '@/components/PanelRight/_shared/shared.sass'
 import './CoveragePanel.sass'
@@ -138,7 +139,7 @@ function CoveragePanel() {
           className="coverage-panel__gap"
           onClick={() => {
             const vp = useViewportStore.getState()
-            const canvas = window.__pixiApp?.canvas
+            const canvas = getSceneRefs()?.app?.canvas
             if (canvas && vp.setViewport) {
               const rect = canvas.getBoundingClientRect()
               const scale = vp.scale || 1

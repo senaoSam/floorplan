@@ -4,6 +4,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useCameraStore } from '@/store/useCameraStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
+import { getSceneRefs } from '@/render/sceneRegistry'
 import { deviceStatus, STATUS_COLOR, DEVICE_STATUS } from '@/features/cameras/deviceStatus'
 import { cameraModelById, CAMERA_MODEL_LIST } from '@/constants/cameraModels'
 import { isCameraDetecting } from '@/features/cameras/detectionBus'
@@ -109,7 +110,7 @@ function CameraListPanel() {
   const focusCamera = (cam) => {
     setSelected(cam.id, 'camera')
     const vp = useViewportStore.getState()
-    const canvas = window.__pixiApp?.canvas
+    const canvas = getSceneRefs()?.app?.canvas
     if (canvas && vp.setViewport) {
       const rect = canvas.getBoundingClientRect()
       const scale = vp.scale || 1

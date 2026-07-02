@@ -5,6 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore, VIEW_MODE, EDITOR_MODE } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
+import { getSceneRefs } from '@/render/sceneRegistry'
 import { SWITCH_KINDS, getSwitchKindColor } from '@/store/useCableStore'
 import { cameraModelById } from '@/constants/cameraModels'
 import { deviceStatus, STATUS_COLOR, STATUS_LABEL } from '@/features/cameras/deviceStatus'
@@ -734,7 +735,7 @@ function Viewer3D() {
   const FOV_DEG = 50
   const seamlessEyeHeight = () => {
     const scale2d = useViewportStore.getState().scale
-    const canvasH = window.__pixiApp?.canvas?.getBoundingClientRect?.().height
+    const canvasH = getSceneRefs()?.app?.canvas?.getBoundingClientRect?.().height
     const floorScale = activeFloor?.scale
     if (scale2d > 0 && canvasH > 0 && floorScale > 0) {
       const tanHalf = Math.tan((FOV_DEG * Math.PI) / 360)
@@ -750,7 +751,7 @@ function Viewer3D() {
   // Falls back to the floor centre when the 2D viewport/canvas aren't readable.
   const seamlessTopDownTarget = () => {
     const vp = useViewportStore.getState()
-    const rect = window.__pixiApp?.canvas?.getBoundingClientRect?.()
+    const rect = getSceneRefs()?.app?.canvas?.getBoundingClientRect?.()
     const floorScale = activeFloor?.scale
     if (rect?.width > 0 && rect?.height > 0 && vp.scale > 0 && floorScale > 0) {
       const cxCanvas = (rect.width / 2 - vp.x) / vp.scale
