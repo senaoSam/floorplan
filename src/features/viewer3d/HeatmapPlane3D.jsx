@@ -130,6 +130,13 @@ export default function HeatmapPlane3D({ floorId, elevation }) {
   // textureRev tells the JSX below to recreate the CanvasTexture (Three.js
   // doesn't notice canvas pixel changes without an explicit needsUpdate +
   // signal, and the cleanest signal is a fresh texture).
+  // 400 ms trailing debounce (matches heatmapAdapter): each scenario change
+  // re-runs this effect, whose cleanup clears the pending timer — so a burst
+  // of rapid AP edits (holding ↑ on azimuth, dragging the pattern preview)
+  // costs ONE recompute at rest instead of one per keystroke. This matters
+  // double here because Viewer3D stays mounted (hidden) in 2D mode, so this
+  // plane recomputes even when the 3D view isn't visible.
+  const COMPUTE_DEBOUNCE_MS = 400
   useEffect(() => {
     if (!enabled || !scenario || !floor?.scale) return
     let cancelled = false
@@ -165,7 +172,7 @@ export default function HeatmapPlane3D({ floorId, elevation }) {
         anchors: modeCfg.anchors,
       })
       setTextureRev((v) => v + 1)
-    }, 0)
+    }, COMPUTE_DEBOUNCE_MS)
     return () => { cancelled = true; clearTimeout(id) }
   }, [enabled, mode, engine, scenario, reflections, diffraction,
       gridStepM, blur, showContours, floor?.scale])

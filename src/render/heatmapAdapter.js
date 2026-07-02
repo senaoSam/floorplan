@@ -489,19 +489,42 @@ export function attachHeatmapLayer({
   //      split across tasks instead of stacked, which is why oldSrc's drag-end
   //      stall reads markedly lower than the synchronous path did.
   let pendingComputeId = 0
+  let debounceId = 0
+  const runCompute = () => {
+    // Whichever scheduler fires, the compute reads the LATEST store state, so
+    // any other pending timer is redundant — cancel it instead of paying a
+    // second full recompute right after this one.
+    if (pendingComputeId !== 0) { clearTimeout(pendingComputeId); pendingComputeId = 0 }
+    if (debounceId !== 0) { clearTimeout(debounceId); debounceId = 0 }
+    compute()
+    // PIXI renders on demand. Pre-debounce, the store change's own layer
+    // redraw scheduled a rAF render that happened to paint AFTER the 0ms
+    // compute; with the 250ms debounce that rAF is long gone by the time the
+    // texture updates, so the fresh pixels would sit unpresented until the
+    // NEXT interaction (heatmap looked one-change-behind). Present explicitly.
+    if (typeof scene.requestRender === 'function') scene.requestRender()
+  }
   const scheduleCompute = () => {
     if (pendingComputeId !== 0) return // already queued; coalesce
-    pendingComputeId = setTimeout(() => {
-      pendingComputeId = 0
-      compute()
-    }, 0)
+    pendingComputeId = setTimeout(runCompute, 0)
+  }
+  // Trailing debounce for DATA-store edits (AP / wall / scope / hole / floor).
+  // Rapid parameter changes — holding ↑ on the azimuth input, dragging the
+  // pattern-preview lobe — fire one store update per event, each previously a
+  // full-quality recompute. 400 ms of quiet collapses the burst into ONE.
+  // Drag-overlay / editor-mode / heatmap-toggle changes stay on the immediate
+  // path: drags need the per-frame solo/live render, toggles are single events.
+  const DEBOUNCE_MS = 400
+  const scheduleComputeDebounced = () => {
+    if (debounceId !== 0) clearTimeout(debounceId)
+    debounceId = setTimeout(runCompute, DEBOUNCE_MS)
   }
   const unsubHM = useHeatmapStore.subscribe(scheduleCompute)
-  const unsubFloor = useFloorStore.subscribe(scheduleCompute)
-  const unsubWall = useWallStore.subscribe(scheduleCompute)
-  const unsubAP = useAPStore.subscribe(scheduleCompute)
-  const unsubScope = useScopeStore ? useScopeStore.subscribe(scheduleCompute) : () => {}
-  const unsubHole  = useFloorHoleStore ? useFloorHoleStore.subscribe(scheduleCompute) : () => {}
+  const unsubFloor = useFloorStore.subscribe(scheduleComputeDebounced)
+  const unsubWall = useWallStore.subscribe(scheduleComputeDebounced)
+  const unsubAP = useAPStore.subscribe(scheduleComputeDebounced)
+  const unsubScope = useScopeStore ? useScopeStore.subscribe(scheduleComputeDebounced) : () => {}
+  const unsubHole  = useFloorHoleStore ? useFloorHoleStore.subscribe(scheduleComputeDebounced) : () => {}
   // Drag overlay drives the live / solo drag render (AP follow, freeze,
   // single-AP overlay). Without this the dragMode control is inert.
   const unsubDrag = useDragOverlayStore ? useDragOverlayStore.subscribe(scheduleCompute) : () => {}
@@ -510,7 +533,7 @@ export function attachHeatmapLayer({
   // field. Without this subscription the heatmap would stay frozen until some
   // other store changed.
   const unsubEditor = useEditorStore ? useEditorStore.subscribe(scheduleCompute) : () => {}
-  compute()
+  runCompute()
 
   return () => {
     unsubHM()
@@ -522,6 +545,7 @@ export function attachHeatmapLayer({
     unsubDrag()
     unsubEditor()
     if (pendingComputeId !== 0) { clearTimeout(pendingComputeId); pendingComputeId = 0 }
+    if (debounceId !== 0) { clearTimeout(debounceId); debounceId = 0 }
     if (snapSprite) {
       snapSprite.mask = null
       layer.removeChild(snapSprite)
