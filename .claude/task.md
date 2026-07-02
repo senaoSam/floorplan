@@ -16,11 +16,30 @@
 **Phase 36 Verkada Tier 1&2 擴充完成（2026-06-29 驗收 ok，見下表）。**
 **Phase 37 camera 右鍵選單 + 3D camera 三圖 + 3D 唯一光源光影 完成（2026-06-29 使用者驗收 ok，見下表）。**
 **Phase 38 熱圖綁定 FOV + 未放置裝置清單 + 3D 動線流線化 完成（2026-07-02 使用者驗收 ok，見下表）。**
-**Phase 39 UIUX 規範落地（`.claude/ui-spec.md` U1–U4 全部）完成（2026-07-02 使用者驗收 ok，見下表）。下一個 phase 未定。**
+**Phase 39 UIUX 規範落地（`.claude/ui-spec.md` U1–U4 全部）完成（2026-07-02 使用者驗收 ok，見下表）。**
+**下一個 phase：Phase 40 天線俯仰角（tilt），已規劃未開工（見下方）。**
 
 ---
 
 ## 還沒做的事
+
+### Phase 40 — 天線俯仰角 tilt（天線 3D 朝向）
+
+> 2026-07-02 與使用者確立：天線朝向對標 Ekahau/Hamina = **方位角 azimuth（0–360，水平）+ 俯仰角 tilt（-90~+90，垂直，預設 0）兩個自由度**。
+> 繞 boresight 的 roll 對輻射場型無意義，**不做**（不是 trackball 三軸）。
+> 現況：引擎 `propagation.js apGainDbi` 只取水平夾角查 pattern（垂直等於全向近似）；AP 資料無 tiltDeg；preview 上下拖曳僅為觀察視角。
+
+| # | 範圍 | 內容 |
+|---|------|------|
+| 40-1 | 資料 | AP 加 `tiltDeg`（-90~+90，預設 0）；directional / custom 適用 |
+| 40-2 | 引擎 | **JS（propagation.js）+ shader（propagationGL）兩邊同步**（架構規則：物理公式兩邊一致，見 memory `project_clientview_js_engine_role`）。gain = Gh(水平偏角) + Gv(垂直偏角 − tilt)；垂直偏角由 rx/AP 高度差 + 水平距離算（crossFloor 幾何現成，rxHeight 1.0m） |
+| 40-3 | UI | APPanel 加俯仰角欄位（與方位角並排）；PatternPreview3D 上下拖曳從「調觀察視角」改成「調 tilt」（觀察視角改配 modifier 鍵或按鈕）；放開才 commit（沿用 azimuth 拖曳規則） |
+| 40-4 | 3D | APLayer3D lobe / 定向 cone 跟著 tilt 俯仰 |
+
+**開工前必須先與使用者確認的規格**（不確認不動工）：
+1. 垂直 pattern 來源——custom 用同組水平樣本近似（與現行 3D lobe/preview 一致）？directional 用 beamwidth 同錐？omni 要不要 dipole 環（會改變 omni 現有結果）？
+2. `mountType`（ceiling/wall）與 tilt 預設值的互動（例如 wall-mount 預設 downtilt？）
+3. **語意變更警示**：現有所有熱圖 = tilt 0 + 垂直無衰減；40-2 上線後同場景結果會變，是否需要 legacy 對照開關
 
 ### Phase 25 效能家族（全部暫緩，防重做）
 
