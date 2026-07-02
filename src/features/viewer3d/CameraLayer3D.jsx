@@ -28,7 +28,7 @@ function cameraTiltRad(camera) {
 // The only editable object in CAMERA-mode 3D: click selects (CameraPanel
 // opens for azimuth/FOV/range/height edits, mirrored live), hover lights up.
 // Same 3D-read-only principle as walls/APs — no 3D dragging.
-function CameraBody({ camera, pxToM, dimOpacity, isActiveFloor }) {
+function CameraBody({ camera, pxToM, dimOpacity, isActiveFloor, onHover }) {
   const x = camera.x * pxToM
   const z = camera.y * pxToM
   const y = Math.max(0.3, camera.z ?? 2.5)
@@ -55,8 +55,12 @@ function CameraBody({ camera, pxToM, dimOpacity, isActiveFloor }) {
     if (!isActiveFloor) return
     e.stopPropagation()
     setHovered(true)
+    if (onHover) onHover(camera)
   }
-  const onPointerOut = () => setHovered(false)
+  const onPointerOut = () => {
+    setHovered(false)
+    if (onHover) onHover(null)
+  }
 
   return (
     <group
@@ -178,7 +182,7 @@ function FovGround({ poly, pxToM, dimOpacity, selected = false }) {
   )
 }
 
-export default function CameraLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true }) {
+export default function CameraLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true, onCameraHover }) {
   const cameras = useCameraStore((s) => s.camerasByFloor[floorId] ?? [])
   const walls = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
   const selectedId = useEditorStore((s) => s.selectedId)
@@ -205,7 +209,7 @@ export default function CameraLayer3D({ floorId, pxToM, dimOpacity = 1, isActive
         const isSelected = isActiveFloor && selectedType === 'camera' && selectedId === cam.id
         return (
           <group key={cam.id}>
-            <CameraBody camera={cam} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActiveFloor} />
+            <CameraBody camera={cam} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActiveFloor} onHover={isActiveFloor ? onCameraHover : undefined} />
             {polys[i] && (
               <>
                 <FovVolume

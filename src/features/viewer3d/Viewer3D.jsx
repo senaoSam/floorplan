@@ -5,6 +5,9 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore, VIEW_MODE, EDITOR_MODE } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
+import { SWITCH_KINDS, getSwitchKindColor } from '@/store/useCableStore'
+import { cameraModelById } from '@/constants/cameraModels'
+import { deviceStatus, STATUS_COLOR, STATUS_LABEL } from '@/features/cameras/deviceStatus'
 import WallLayer3D from './WallLayer3D'
 import CameraLayer3D from './CameraLayer3D'
 import TrackLayer3D from './TrackLayer3D'
@@ -121,7 +124,7 @@ function KeyLight({ center }) {
 // CAMERA mode (Phase 34) mirrors the 2D rule "walls + floor image only":
 // every RF/cable layer is unmounted and the surveillance layers (camera
 // bodies + FOV ground polygons + live tracking targets) mount instead.
-function FloorStack({ floor, elevation, isActive, onAPHover, inCameraMode }) {
+function FloorStack({ floor, elevation, isActive, onAPHover, onSwitchHover, onCameraHover, inCameraMode }) {
   const pxToM = 1 / (floor.scale || 100)
   const dimOpacity = isActive ? 1 : 0.28
 
@@ -175,7 +178,7 @@ function FloorStack({ floor, elevation, isActive, onAPHover, inCameraMode }) {
               so the ceiling preset can resolve against floor.floorHeight). */}
           <TrayLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
           {/* Switch / IDF / MDF / Router chassis at their mountHeight. */}
-          <SwitchLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
+          <SwitchLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActive} onSwitchHover={onSwitchHover} />
           {/* Cable routes (AP↔switch + S2S) lifted to 3D so the user sees the
               full plenum-routed path, not just the tray geometry. */}
           <CableLayer3D  floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
@@ -190,7 +193,7 @@ function FloorStack({ floor, elevation, isActive, onAPHover, inCameraMode }) {
       )}
       {inCameraMode && (
         <>
-          <CameraLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActive} />
+          <CameraLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActive} onCameraHover={onCameraHover} />
           {isActive && <TrackLayer3D floorId={floor.id} pxToM={pxToM} />}
           {/* Planning overlays (blind-spot / overlap / occupancy) projected
               from the 2D PIXI layers onto the floor. Active floor only (like the
@@ -562,25 +565,84 @@ function FloorSelector({ floors, activeFloorId, onSelect }) {
   )
 }
 
-// Per-AP tooltip while hovering in 3D. Lives outside the r3f tree as plain
-// HTML so we don't need drei <Html> (would force a React 18 / drei upgrade
-// the rest of the project hasn't taken). Position is pure container-local
-// pixels, computed from the parent's pointer state.
+// Per-device tooltip while hovering in 3D (APs, switches, cameras). Lives
+// outside the r3f tree as plain HTML so we don't need drei <Html> (would
+// force a React 18 / drei upgrade the rest of the project hasn't taken).
+// Position is pure container-local pixels, computed from the parent's
+// pointer state.
 //
 // Tooltip flips to the cursor's opposite side when it would overflow the
 // viewer container — keeps it on screen at every corner.
 const FREQ_LABEL_3D = { 2.4: '2.4 GHz', 5: '5 GHz', 6: '6 GHz' }
 const TOOLTIP_OFFSET_PX = 14
-function APHoverReadout({ ap, pointer, container }) {
+
+// Type-specific tooltip body: { title, pill: {text, color}, rows: [...] }.
+// Rows render left→right in the primary line, meta rows in the dimmer line.
+function buildReadoutContent(type, d) {
+  if (type === 'ap') {
+    const freqLabel = FREQ_LABEL_3D[d.frequency] ?? `${d.frequency} GHz`
+    const channelLabel = d.channel != null
+      ? `Ch ${d.channel}${d.channelWidth ? `/${d.channelWidth}MHz` : ''}`
+      : null
+    const txLabel = d.txPower != null ? `${d.txPower} dBm` : null
+    const mountLabel = d.z != null ? `掛 ${Number(d.z).toFixed(1)} m` : null
+    const mode = d.antennaMode ?? 'omni'
+    const antennaLabel = mode === 'omni' ? '全向'
+      : mode === 'directional' ? `定向 ${d.azimuth ?? 0}° / ${d.beamwidth ?? 60}°`
+      : mode === 'custom' ? '自訂'
+      : mode
+    return {
+      title: d.name ?? d.id,
+      pill: { text: freqLabel, color: FREQ_COLOR_3D[d.frequency] ?? '#4fc3f7' },
+      main: [channelLabel, txLabel],
+      meta: [mountLabel, antennaLabel],
+    }
+  }
+  if (type === 'switch') {
+    const kind = SWITCH_KINDS.find((k) => k.value === (d.kind ?? 'switch'))
+    const poeLabel = d.poeBudget > 0 ? `PoE ${d.poeBudget} W` : null
+    return {
+      title: d.name ?? d.id,
+      pill: { text: kind?.label ?? 'Switch', color: getSwitchKindColor(d.kind ?? 'switch') },
+      main: [d.portCount != null ? `${d.portCount} 埠` : null, poeLabel],
+      meta: [
+        `掛 ${Number(d.mountHeight ?? 0.5).toFixed(1)} m`,
+        d.model || null,
+      ],
+    }
+  }
+  if (type === 'camera') {
+    const model = cameraModelById(d.modelId)
+    const status = deviceStatus(d)
+    return {
+      title: d.name ?? d.id,
+      // Long catalog labels carry a（use-case）suffix — keep the short name.
+      pill: { text: (model?.label ?? '相機').split('（')[0], color: '#10b981' },
+      status: { text: STATUS_LABEL[status], color: STATUS_COLOR[status] },
+      main: [
+        (d.fovDeg ?? 90) >= 360 ? 'FOV 360°' : `FOV ${d.fovDeg ?? 90}°`,
+        `範圍 ${d.rangeM ?? 0} m`,
+      ],
+      meta: [
+        `掛 ${Number(d.z ?? 2.5).toFixed(1)} m`,
+        `方位 ${Math.round(d.azimuth ?? 0)}°`,
+        d.tiltDeg != null ? `俯角 ${d.tiltDeg}°` : null,
+      ],
+    }
+  }
+  return null
+}
+
+function DeviceHoverReadout({ hovered, pointer, container }) {
   const elRef = useRef(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
 
-  // Re-measure when the tooltip content changes (different AP hovered).
+  // Re-measure when the tooltip content changes (different device hovered).
   useEffect(() => {
     if (!elRef.current) return
     const rect = elRef.current.getBoundingClientRect()
     setSize({ w: rect.width, h: rect.height })
-  }, [ap.id, ap.name, ap.frequency, ap.channel, ap.channelWidth, ap.txPower])
+  }, [hovered.type, hovered.data])
 
   const containerRect = container?.getBoundingClientRect()
   const maxX = containerRect?.width  ?? 99999
@@ -594,19 +656,8 @@ function APHoverReadout({ ap, pointer, container }) {
   if (x < 0) x = 0
   if (y < 0) y = 0
 
-  const freqLabel = FREQ_LABEL_3D[ap.frequency] ?? `${ap.frequency} GHz`
-  const channelLabel = ap.channel != null
-    ? `Ch ${ap.channel}${ap.channelWidth ? `/${ap.channelWidth}MHz` : ''}`
-    : null
-  const txLabel = ap.txPower != null ? `${ap.txPower} dBm` : null
-  const mountLabel = ap.z != null ? `掛 ${Number(ap.z).toFixed(1)} m` : null
-  const antennaLabel = (() => {
-    const mode = ap.antennaMode ?? 'omni'
-    if (mode === 'omni') return '全向'
-    if (mode === 'directional') return `定向 ${ap.azimuth ?? 0}° / ${ap.beamwidth ?? 60}°`
-    if (mode === 'custom') return '自訂'
-    return mode
-  })()
+  const content = buildReadoutContent(hovered.type, hovered.data)
+  if (!content) return null
 
   return (
     <div
@@ -614,15 +665,16 @@ function APHoverReadout({ ap, pointer, container }) {
       className="viewer3d__hover-readout"
       style={{ left: `${x}px`, top: `${y}px` }}
     >
-      <div className="viewer3d__hover-readout-title">{ap.name ?? ap.id}</div>
+      <div className="viewer3d__hover-readout-title">{content.title}</div>
       <div className="viewer3d__hover-readout-row">
-        <span className="viewer3d__hover-readout-pill" style={{ background: FREQ_COLOR_3D[ap.frequency] ?? '#4fc3f7' }}>{freqLabel}</span>
-        {channelLabel && <span>{channelLabel}</span>}
-        {txLabel && <span>{txLabel}</span>}
+        <span className="viewer3d__hover-readout-pill" style={{ background: content.pill.color }}>{content.pill.text}</span>
+        {content.status && (
+          <span style={{ color: content.status.color }}>● {content.status.text}</span>
+        )}
+        {content.main.filter(Boolean).map((t) => <span key={t}>{t}</span>)}
       </div>
       <div className="viewer3d__hover-readout-row viewer3d__hover-readout-row--meta">
-        {mountLabel && <span>{mountLabel}</span>}
-        <span>{antennaLabel}</span>
+        {content.meta.filter(Boolean).map((t) => <span key={t}>{t}</span>)}
       </div>
     </div>
   )
@@ -877,11 +929,12 @@ function Viewer3D() {
     state.tweenTo({ camPos, target: tgt, duration: 600 })
   }, [center, diag])
 
-  // 28-4 Hover readout state: which AP the pointer is over (or null), plus
-  // last screen-space pointer position so the HTML tooltip can follow the
-  // mouse. Mouse position is tracked at the viewer3d container level so the
-  // tooltip lives outside the r3f canvas tree (avoids drei dependency).
-  const [hoveredAP, setHoveredAP] = useState(null)
+  // 28-4 Hover readout state: which device (AP / switch / camera) the pointer
+  // is over (or null), plus last screen-space pointer position so the HTML
+  // tooltip can follow the mouse. Mouse position is tracked at the viewer3d
+  // container level so the tooltip lives outside the r3f canvas tree (avoids
+  // drei dependency).
+  const [hoveredDevice, setHoveredDevice] = useState(null)
   const [pointer, setPointer] = useState({ x: 0, y: 0 })
   const containerRef = useRef(null)
   const handleContainerPointerMove = (e) => {
@@ -890,8 +943,17 @@ function Viewer3D() {
     setPointer({ x: e.clientX - rect.left, y: e.clientY - rect.top })
   }
   const handleAPHover = useCallback((ap) => {
-    setHoveredAP(ap)
+    setHoveredDevice(ap ? { type: 'ap', data: ap } : null)
   }, [])
+  const handleSwitchHover = useCallback((sw) => {
+    setHoveredDevice(sw ? { type: 'switch', data: sw } : null)
+  }, [])
+  const handleCameraHover = useCallback((cam) => {
+    setHoveredDevice(cam ? { type: 'camera', data: cam } : null)
+  }, [])
+  // Entering/leaving CAMERA mode unmounts the layer whose marker is hovered,
+  // so its onPointerOut never fires — clear the readout or it lingers.
+  useEffect(() => { setHoveredDevice(null) }, [inCameraMode])
 
   // Toggle the manual turntable spin. Turning it ON first tweens the camera
   // back to the 2D→3D entry pose (the 3/4 iso angle) and only starts the
@@ -923,7 +985,7 @@ function Viewer3D() {
       className="viewer3d"
       ref={containerRef}
       onPointerMove={handleContainerPointerMove}
-      onPointerLeave={() => setHoveredAP(null)}
+      onPointerLeave={() => setHoveredDevice(null)}
     >
       {/* All 3D controls are grouped into a single dark-glass top-right panel
           (collapsible) so they read as one panel and don't clash with the
@@ -1016,13 +1078,13 @@ function Viewer3D() {
         )}
       </div>
 
-      {/* 28-4 AP hover readout — floating HTML tooltip. Pointer is captured at
-          the viewer3d container level so the tooltip can position itself in
-          local coordinates regardless of where the 3D AP marker is. The
-          tooltip flips to the left/up side of the cursor when it would
-          overflow the container. */}
-      {hoveredAP && (
-        <APHoverReadout ap={hoveredAP} pointer={pointer} container={containerRef.current} />
+      {/* 28-4 Device hover readout (AP / switch / camera) — floating HTML
+          tooltip. Pointer is captured at the viewer3d container level so the
+          tooltip can position itself in local coordinates regardless of where
+          the 3D marker is. The tooltip flips to the left/up side of the
+          cursor when it would overflow the container. */}
+      {hoveredDevice && (
+        <DeviceHoverReadout hovered={hoveredDevice} pointer={pointer} container={containerRef.current} />
       )}
 
       <Canvas
@@ -1049,6 +1111,8 @@ function Viewer3D() {
           elevation={elevations[f.id] ?? 0}
           isActive={f.id === activeFloorId}
           onAPHover={handleAPHover}
+          onSwitchHover={handleSwitchHover}
+          onCameraHover={handleCameraHover}
           inCameraMode={inCameraMode}
         />
       ))}

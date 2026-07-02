@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useCableStore, getSwitchKindColor } from '@/store/useCableStore'
 import { useEditorStore } from '@/store/useEditorStore'
 
@@ -23,13 +23,28 @@ const STRIPE_THICKNESS = 0.012  // 1.2 cm front-panel LED strip
 const STRIPE_INSET     = 0.008  // peek the strip outside the body so the
                                 // emissive isn't drowned by the dark face
 
-function SwitchMarker({ sw, pxToM, dimOpacity }) {
+function SwitchMarker({ sw, pxToM, dimOpacity, isActiveFloor, onHover }) {
   const x = (sw.x ?? 0) * pxToM
   const z = (sw.y ?? 0) * pxToM
   const y = sw.mountHeight ?? 0.5
   const kindColor = getSwitchKindColor(sw.kind ?? 'switch')
   const transparent = dimOpacity < 1
   const matOpts = { transparent, opacity: dimOpacity, depthWrite: !transparent }
+
+  // Hover readout (28-4 parity with APs): light the chassis and surface the
+  // device info tooltip via the parent-provided onHover callback.
+  const [hovered, setHovered] = useState(false)
+  const isHovered = isActiveFloor && hovered
+  const onPointerOver = (e) => {
+    if (!isActiveFloor) return
+    e.stopPropagation()
+    setHovered(true)
+    if (onHover) onHover(sw)
+  }
+  const onPointerOut = () => {
+    setHovered(false)
+    if (onHover) onHover(null)
+  }
 
   // 29-6 dimensions
   const portCount = sw.portCount ?? 24
@@ -46,7 +61,11 @@ function SwitchMarker({ sw, pxToM, dimOpacity }) {
   const stripeZ = bodyD / 2 + STRIPE_INSET / 2
 
   return (
-    <group position={[x, 0, z]}>
+    <group
+      position={[x, 0, z]}
+      onPointerOver={onPointerOver}
+      onPointerOut={onPointerOut}
+    >
       {y > 0 && (
         <mesh position={[0, y / 2, 0]} castShadow receiveShadow>
           <cylinderGeometry args={[POLE_R, POLE_R, y, 8]} />
@@ -60,6 +79,8 @@ function SwitchMarker({ sw, pxToM, dimOpacity }) {
           color={BODY_COLOR}
           roughness={0.6}
           metalness={0.45}
+          emissive={isHovered ? '#ffffff' : '#000000'}
+          emissiveIntensity={isHovered ? 0.3 : 0}
           {...matOpts}
         />
       </mesh>
@@ -104,7 +125,7 @@ function SwitchMarker({ sw, pxToM, dimOpacity }) {
   )
 }
 
-export default function SwitchLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
+export default function SwitchLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true, onSwitchHover }) {
   const allSwitches = useCableStore((s) => s.switchesByFloor[floorId] ?? [])
   // Keep 2D and 3D visibility in sync — same per-kind filter.
   const showSwitchKind = useEditorStore((s) => s.showSwitchKind)
@@ -113,7 +134,14 @@ export default function SwitchLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
   return (
     <group>
       {switches.map((sw) => (
-        <SwitchMarker key={sw.id} sw={sw} pxToM={pxToM} dimOpacity={dimOpacity} />
+        <SwitchMarker
+          key={sw.id}
+          sw={sw}
+          pxToM={pxToM}
+          dimOpacity={dimOpacity}
+          isActiveFloor={isActiveFloor}
+          onHover={isActiveFloor ? onSwitchHover : undefined}
+        />
       ))}
     </group>
   )

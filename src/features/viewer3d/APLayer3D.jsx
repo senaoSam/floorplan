@@ -25,30 +25,49 @@ const DIRECTIONAL_MIN_BEAM = 10     // avoid degenerate razor-thin cones
 const DIRECTIONAL_MAX_BEAM = 170    // avoid near-sphere cones (omni-like)
 const DIRECTIONAL_OPACITY = 0.28
 
-// Custom-pattern horizontal lobe — a polar polygon authored in XY at the AP's
-// install height, scaled so the peak gain reaches this radius in meters.
+// Custom-pattern 3D lobe — a volumetric radiation surface centered on the AP,
+// scaled so the peak gain reaches this radius in meters.
 const CUSTOM_PEAK_RADIUS_M = 3.5
 const CUSTOM_MIN_DB = -25           // floor for pattern samples; matches APLayer
 const CUSTOM_OPACITY = 0.30
+const LOBE_AZ_SEGS = 64
+const LOBE_EL_SEGS = 32
 
-// Build a closed XY polygon (in the AP's local XY plane) describing the horizontal
-// antenna lobe. Positive X points along azimuth=0; sample[0] is boresight.
-function buildCustomLobeGeometry(pattern, azimuthRad, peakRadius, minDb) {
-  const samples = pattern.samples
-  const n = samples.length
-  const shape = new THREE.Shape()
-  for (let i = 0; i < n; i++) {
-    const db = Math.max(samples[i], minDb)
-    // Normalize [-minDb, 0] → [0, peakRadius].
-    const r = ((db - minDb) / -minDb) * peakRadius
-    const ang = azimuthRad + i * (2 * Math.PI / n)
-    const x = r * Math.cos(ang)
-    const y = r * Math.sin(ang)
-    if (i === 0) shape.moveTo(x, y)
-    else         shape.lineTo(x, y)
+// Volumetric antenna lobe: a spherical parametric surface where the radius at
+// (azimuth, elevation) is the normalized combined gain. The catalog only
+// authors a horizontal cut, so the vertical cut reuses the same samples
+// (patch/sector antennas are roughly symmetric) — combined in dB space:
+//   r(az, el) = normalize(Gh(az) + Gv(el)) · peakRadius
+// Local axes: boresight (az 0) = +X, canvas +Y = local +Z, elevation on ±Y.
+function buildCustomLobeGeometry(pattern, peakRadius, minDb) {
+  const positions = new Float32Array((LOBE_EL_SEGS + 1) * (LOBE_AZ_SEGS + 1) * 3)
+  let p = 0
+  for (let j = 0; j <= LOBE_EL_SEGS; j++) {
+    const el = -Math.PI / 2 + (j / LOBE_EL_SEGS) * Math.PI
+    const gv = sampleGain(pattern, el)
+    for (let i = 0; i <= LOBE_AZ_SEGS; i++) {
+      const az = i * (2 * Math.PI / LOBE_AZ_SEGS)
+      const db = Math.max(sampleGain(pattern, az) + gv, minDb)
+      // Normalize [-minDb, 0] → [0, peakRadius].
+      const r = ((db - minDb) / -minDb) * peakRadius
+      positions[p++] = r * Math.cos(el) * Math.cos(az)
+      positions[p++] = r * Math.sin(el)
+      positions[p++] = r * Math.cos(el) * Math.sin(az)
+    }
   }
-  shape.closePath()
-  return new THREE.ShapeGeometry(shape)
+  const indices = []
+  for (let j = 0; j < LOBE_EL_SEGS; j++) {
+    for (let i = 0; i < LOBE_AZ_SEGS; i++) {
+      const a = j * (LOBE_AZ_SEGS + 1) + i
+      const b = a + LOBE_AZ_SEGS + 1
+      indices.push(a, b, a + 1, b, b + 1, a + 1)
+    }
+  }
+  const geom = new THREE.BufferGeometry()
+  geom.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  geom.setIndex(indices)
+  geom.computeVertexNormals()
+  return geom
 }
 
 // Directional beam cone: a downward-pointing cone centered at the AP, tilted
@@ -101,17 +120,17 @@ function CustomLobe({ patternId, azimuthDeg, color, opacity, matOpts }) {
   const pattern = useMemo(() => getPatternById(patternId), [patternId])
   const azimuthRad = (azimuthDeg ?? 0) * Math.PI / 180
   const geom = useMemo(
-    () => buildCustomLobeGeometry(pattern, 0, CUSTOM_PEAK_RADIUS_M, CUSTOM_MIN_DB),
+    () => buildCustomLobeGeometry(pattern, CUSTOM_PEAK_RADIUS_M, CUSTOM_MIN_DB),
     [pattern],
   )
   React.useEffect(() => () => geom.dispose(), [geom])
 
-  // Polygon is authored in XY (local). Lay it flat on XZ and rotate around +Y
-  // by −azimuth so the lobe orientation matches APLayer's convention (+x = 0°,
-  // clockwise in canvas = clockwise in world when viewed from above).
+  // Lobe is authored with boresight = local +X. Rotate around +Y by −azimuth
+  // so the orientation matches APLayer's convention (+x = 0°, clockwise in
+  // canvas = clockwise in world when viewed from above).
   return (
     <group rotation={[0, -azimuthRad, 0]}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh>
         <primitive object={geom} attach="geometry" />
         <meshStandardMaterial
           color={color}
@@ -320,7 +339,7 @@ function APMarker({ ap, pxToM, dimOpacity, isActiveFloor, onHover }) {
         </group>
       )}
 
-      {/* Custom pattern horizontal lobe — laid flat at the AP's install height. */}
+      {/* Custom pattern volumetric lobe — centered on the AP body. */}
       {isCustom && (
         <group position={[0, y - BODY_HEIGHT_M / 2 - 0.01, 0]}>
           <CustomLobe
