@@ -210,5 +210,5 @@ const isTypingTarget = (el) =>
 - **z-index 例外**：面板「內部」的小型 dropdown/submenu（CableSummary 匯出選單 z60、Toolbar 選單 z1、Sidebar 樓層選單 z20、DropZone z10、viewer3d wrapper z2）保留裸數字——它們只在自己的 stacking context 內競爭，不是浮動面板。
 - **Toolbar 與 badge 的階層互換**：hint 常駐後，工具下拉選單必須蓋得過 badge，所以 Toolbar 用 `$z-badge`、ActiveModeBadge 用 `$z-canvas-overlay`（選單展開時實體蓋住 badge，收起即恢復）。
 - **Dev widget（Demo/Stress/Progress）最終落點＝SidebarLeft 最下方**（2026-07-02 使用者指示）：不放進畫布 overlay——這整塊正式版會移除，放畫布會影響後續 UIUX 設計考量。收合側欄時三者以 icon-only 顯示；進度 popup 改 fixed 視窗左下（避開側欄 overflow clip）。
-- **已知殘留（小）**：1366 寬 + CAMERA 模式時，時間軸 bar 第二排 chips 較寬，最右側的「動線」chip 可能與 ScaleBar 視覺相近；如介意可後續把 chips 收斂成下拉。
+- ~~**已知殘留（小）**：1366 寬 + CAMERA 模式時，時間軸 bar 最右側 chip 與 ScaleBar 視覺相近~~ **已解（2026-07-02）**：`.camera-timeline` 加 `max-width: calc(100% - 240px)` + row `flex-wrap`，窄視窗自動換行（MCP 實測 1366 下 bar 右緣 1155 < ScaleBar 左緣 1264；截圖 `ui-07`）。**至此 A1–A7、B1–B15 全數處理完畢。**
 - MCP 驗證截圖：`.playwright-mcp/ui-01`~`ui-05`；全程 0 console errors。

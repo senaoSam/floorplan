@@ -13,6 +13,9 @@
   flex-direction: column
   gap: 7px
   padding: 8px 14px
+  // Cap the bar on narrow windows so it never reaches the bottom-right
+  // scale bar (ui-spec B15 residual); rows wrap into extra lines instead.
+  max-width: calc(100% - 240px)
   background: rgba(15, 23, 42, 0.88)
   border: 1px solid rgba(255, 255, 255, 0.12)
   border-left: 3px solid #10b981
@@ -26,6 +29,8 @@
   &__row
     display: inline-flex
     align-items: center
+    flex-wrap: wrap
+    row-gap: 6px
     gap: 10px
 
   &__play
