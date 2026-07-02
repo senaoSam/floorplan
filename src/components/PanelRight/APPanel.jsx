@@ -8,7 +8,7 @@ import { AP_MODEL_LIST, DEFAULT_AP_MODEL_ID, getAPModelById } from '@/constants/
 import { ANTENNA_PATTERN_LIST, DEFAULT_PATTERN_ID, getPatternById } from '@/constants/antennaPatterns'
 import { channelEntries, isChannelAllowed, allowedChannels } from '@/constants/regulatoryDomains'
 import { CHANNEL_WIDTHS, DEFAULT_CHANNEL_WIDTH, allowedWidthsForBand } from '@/constants/channelWidths'
-import PatternPreview from './PatternPreview'
+import PatternPreview3D from './PatternPreview3D'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { TextInput, NumberInput, Select } from './_shared/PanelControls'
 import { wrapAzimuth } from '@/utils/angle'
@@ -345,8 +345,14 @@ function APPanel({ floorId, apId }) {
                     </PanelField>
                     <div className="ap-panel__hint">{pattern.description}</div>
                     <div className="ap-panel__pattern-preview">
-                      <PatternPreview pattern={pattern} color={freqColor} azimuth={effAz} />
+                      <PatternPreview3D
+                        pattern={pattern}
+                        color={freqColor}
+                        azimuth={effAz}
+                        onAzimuthChange={(deg) => updateAP(floorId, apId, { azimuth: deg })}
+                      />
                     </div>
+                    <div className="ap-panel__hint">左右拖曳＝旋轉方位角（放開才套用）；上下拖曳＝調整觀察視角</div>
                   </>
                 )
               })()}
