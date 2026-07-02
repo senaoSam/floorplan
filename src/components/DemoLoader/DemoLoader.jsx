@@ -196,6 +196,20 @@ function DemoLoader() {
         })
       }
 
+      // Unplaced-pool seed (Verkada "Add Cameras") — two spare cameras not yet
+      // on the plan, so the Device List's 尚未放置 section has something to drop.
+      for (let i = 0; i < 2; i++) {
+        cams.addUnplacedCamera({
+          id: generateId('cam'),
+          name: cams.nextCameraName(),
+          z: 2.5,
+          azimuth: 0,
+          tiltDeg: DEMO_CAMERA_TILT_DEG,
+          fovDeg: DEMO_CAMERA_FOV_DEG,
+          rangeM: DEMO_CAMERA_RANGE_M,
+        })
+      }
+
       setHeatmapEnabled(true)
     } catch (e) {
       console.error('[DemoLoader] load failed', e)

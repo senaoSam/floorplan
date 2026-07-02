@@ -58,3 +58,51 @@ export function rasterizeCoverageCounts({ cameras, walls, floor, maxCanvasPx }) 
 
   return { counts, cw, ch, k, total }
 }
+
+// Per-cell FOV coverage mask aligned to an occupancy/flow grid (cols × rows of
+// `cellPx`-sized cells). Returns Uint8Array(cols*rows) where 1 = at least one
+// ONLINE camera's wall-clipped FOV polygon covers that cell (Verkada renders
+// footfall only inside FOV coverage). Same online-only + wall-clip semantics as
+// rasterizeCoverageCounts, so the heatmap mask matches the blind-spot / overlap
+// reports. Rasterised directly at cell resolution (one canvas px per cell) so
+// the mask drops straight onto the grid's linear index `cy * cols + cx`.
+// Returns null when there's nothing to mask (no online cameras / no floor).
+export function buildFovMaskGrid({ cameras, walls, floor, cols, rows, cellPx }) {
+  if (!floor?.imageWidth || !floor?.imageHeight || !cols || !rows) return null
+  const scale = floor.scale ?? 40   // px per metre (FALLBACK_PX_PER_M)
+  const online = (cameras ?? []).filter((c) => deviceStatus(c) !== DEVICE_STATUS.OFFLINE)
+  if (online.length === 0) return null
+  const segs = buildBlockingSegments(walls)
+
+  // Scale canvas-px FOV polygons down to cell space: 1 canvas px per cell.
+  const sx = 1 / cellPx
+  const scratch = document.createElement('canvas')
+  scratch.width = cols
+  scratch.height = rows
+  const ctx = scratch.getContext('2d', { willReadFrequently: true })
+  ctx.fillStyle = '#fff'
+
+  for (const cam of online) {
+    const { minRangePx, rangePx } = cameraCoverageRadii(cam, scale)
+    const poly = computeFovPolygon({
+      cx: cam.x, cy: cam.y,
+      azimuthDeg: cam.azimuth ?? 0,
+      fovDeg: cam.fovDeg ?? 90,
+      rangePx, minRangePx,
+      segments: segs,
+    })
+    if (!poly || poly.length < 6) continue
+    ctx.beginPath()
+    ctx.moveTo(poly[0] * sx, poly[1] * sx)
+    for (let i = 2; i < poly.length; i += 2) ctx.lineTo(poly[i] * sx, poly[i + 1] * sx)
+    ctx.closePath()
+    ctx.fill()
+  }
+
+  const data = ctx.getImageData(0, 0, cols, rows).data
+  const mask = new Uint8Array(cols * rows)
+  for (let p = 0, px = 0; p < data.length; p += 4, px++) {
+    if (data[p + 3] > ALPHA_HIT) mask[px] = 1
+  }
+  return mask
+}

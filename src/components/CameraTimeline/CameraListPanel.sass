@@ -123,6 +123,22 @@
     font-size: 11px
     line-height: 1.4
 
+  // Name filter (Verkada "Filter by device name")
+  &__search
+    width: 100%
+    box-sizing: border-box
+    padding: 5px 9px
+    background: rgba(255, 255, 255, 0.06)
+    border: 1px solid rgba(255, 255, 255, 0.16)
+    border-radius: 7px
+    color: $text-primary
+    font-size: 12px
+    &::placeholder
+      color: $text-secondary
+    &:focus
+      outline: none
+      border-color: rgba(16, 185, 129, 0.6)
+
   &__rows
     display: flex
     flex-direction: column
@@ -278,3 +294,42 @@
   &__batch-del:hover
     border-color: rgba(239, 68, 68, 0.6) !important
     color: #ef4444 !important
+
+  // ── Unplaced pool (Verkada "Add Cameras") ──
+  &__unplaced
+    display: flex
+    flex-direction: column
+    gap: 2px
+    margin-top: 2px
+    padding-top: 7px
+    border-top: 1px dashed rgba(255, 255, 255, 0.16)
+
+  &__group--unplaced
+    color: #f59e0b
+
+  &__row--unplaced:hover
+    background: rgba(245, 158, 11, 0.08)
+    .camera-list__del, .camera-list__place
+      opacity: 1
+
+  &__rowmain--static
+    cursor: default
+
+  &__dot--unplaced
+    background: transparent
+    border: 1.5px dashed #f59e0b
+    box-sizing: border-box
+
+  &__place
+    flex: none
+    padding: 2px 8px
+    background: rgba(245, 158, 11, 0.14)
+    border: 1px solid rgba(245, 158, 11, 0.5)
+    border-radius: 6px
+    color: #f59e0b
+    font-size: 10.5px
+    font-weight: 600
+    cursor: pointer
+    white-space: nowrap
+    &:hover
+      background: rgba(245, 158, 11, 0.24)

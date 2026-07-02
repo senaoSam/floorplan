@@ -51,6 +51,9 @@ function CameraListPanel() {
   const toggleCollapsed = useCameraStore((s) => s.toggleCameraListCollapsed)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
   const cameras = useCameraStore((s) => s.camerasByFloor[activeFloorId] ?? [])
+  const unplaced = useCameraStore((s) => s.unplacedCameras)
+  const placeCamera = useCameraStore((s) => s.placeCamera)
+  const removeUnplacedCamera = useCameraStore((s) => s.removeUnplacedCamera)
   const selectedId = useEditorStore((s) => s.selectedId)
   const selectedType = useEditorStore((s) => s.selectedType)
   const setSelected = useEditorStore((s) => s.setSelected)
@@ -65,6 +68,9 @@ function CameraListPanel() {
 
   // Checked rows for batch ops — a Set of camera ids, local to the panel.
   const [checked, setChecked] = useState(() => new Set())
+  // Free-text filter (Verkada "Filter by device name") — narrows both the
+  // placed roster and the unplaced pool by name, case-insensitive.
+  const [query, setQuery] = useState('')
   // Clear the cross-store hover link when the panel unmounts / hides — only if
   // this panel still owns a camera-typed hover (don't stomp another type's).
   useEffect(() => () => {
@@ -106,13 +112,30 @@ function CameraListPanel() {
     }
   }
 
+  // Apply the name filter (case-insensitive substring) to both lists.
+  const q = query.trim().toLowerCase()
+  const matchName = (c) => !q || (c.name ?? '').toLowerCase().includes(q)
+  const filteredCameras = cameras.filter(matchName)
+  const filteredUnplaced = unplaced.filter(matchName)
+
+  // Drop an unplaced camera onto the active floor at the image centre — the
+  // user nudges it from there. Matches Verkada's "place on plan" intent without
+  // a drag interaction (which the canvas doesn't expose for the roster).
+  const placeHere = (cam) => {
+    const floor = useFloorStore.getState().floors.find((f) => f.id === activeFloorId)
+    const cx = (floor?.imageWidth ?? 800) / 2
+    const cy = (floor?.imageHeight ?? 600) / 2
+    placeCamera(activeFloorId, cam.id, cx, cy)
+    setSelected(cam.id, 'camera')
+  }
+
   // Group cameras by their `group` label for the roster. Unlabelled cameras
   // fall into 未分組. Group headers only show once ≥1 camera has a real group
   // (otherwise everything is 未分組 and headers would be noise). Named groups
   // sort alphabetically; 未分組 always sorts last.
   const UNGROUPED = '未分組'
   const groupMap = new Map()
-  for (const cam of cameras) {
+  for (const cam of filteredCameras) {
     const key = (cam.group ?? '').trim() || UNGROUPED
     if (!groupMap.has(key)) groupMap.set(key, [])
     groupMap.get(key).push(cam)
@@ -158,10 +181,22 @@ function CameraListPanel() {
         <button type="button" className="camera-list__close" onClick={toggle} title="關閉">✕</button>
       </div>
 
-      {!collapsed && (cameras.length === 0 ? (
-        <div className="camera-list__empty">本樓層還沒有相機。點畫布空白處放置。</div>
-      ) : (
+      {!collapsed && (
         <>
+          <input
+            type="search"
+            className="camera-list__search"
+            placeholder="搜尋相機名稱…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="搜尋相機名稱"
+          />
+
+          {cameras.length === 0 ? (
+            <div className="camera-list__empty">本樓層還沒有相機。點畫布空白處放置。</div>
+          ) : filteredCameras.length === 0 ? (
+            <div className="camera-list__empty">沒有符合「{query}」的相機。</div>
+          ) : (
           <div className="camera-list__rows">
             {groups.map(([groupName, groupCams]) => (
               <React.Fragment key={groupName}>
@@ -234,6 +269,7 @@ function CameraListPanel() {
               </React.Fragment>
             ))}
           </div>
+          )}
 
           {checkedLive.length > 0 && (
             <div className="camera-list__batch">
@@ -259,8 +295,42 @@ function CameraListPanel() {
               </div>
             </div>
           )}
+
+          {/* Unplaced pool (Verkada "Add Cameras"): spare cameras not yet on
+              any floor. "＋放置" drops one onto the active floor's centre. */}
+          {filteredUnplaced.length > 0 && (
+            <div className="camera-list__unplaced">
+              <div className="camera-list__group camera-list__group--unplaced">
+                尚未放置（{filteredUnplaced.length}）
+              </div>
+              {filteredUnplaced.map((cam) => (
+                <div key={cam.id} className="camera-list__row camera-list__row--unplaced">
+                  <span className="camera-list__rowmain camera-list__rowmain--static">
+                    <span className="camera-list__dot camera-list__dot--unplaced" />
+                    <span className="camera-list__name">{cam.name}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="camera-list__place"
+                    title="放到目前樓層（置中後可拖曳調整）"
+                    onClick={() => placeHere(cam)}
+                  >
+                    ＋放置
+                  </button>
+                  <button
+                    type="button"
+                    className="camera-list__del"
+                    title="從未放置清單移除"
+                    onClick={() => removeUnplacedCamera(cam.id)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </>
-      ))}
+      )}
 
       {hoveredCam && (
         <div className="camera-list__thumb">

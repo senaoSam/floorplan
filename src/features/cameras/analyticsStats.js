@@ -247,13 +247,18 @@ export function computeDayRollup(tracks) {
 // coherent bundle, so long windows still trace clean lines per direction.
 const FLOW_BINS = 8
 export function computeFlowGrid({
-  tracks, tFromSec, tToSec, imageWidth, imageHeight, pxPerM, cellM = 1,
+  tracks, tFromSec, tToSec, imageWidth, imageHeight, pxPerM, cellM = 1, maskFn,
 }) {
   if (!tracks || tracks.length === 0 || !imageWidth || !imageHeight) return null
   const cellPx = Math.max(4, cellM * (pxPerM || 40))
   const cols = Math.max(1, Math.ceil(imageWidth / cellPx))
   const rows = Math.max(1, Math.ceil(imageHeight / cellPx))
   const n = cols * rows
+  // Clip the flow field to camera FOV coverage when a mask is supplied (same
+  // Verkada "footfall only inside FOV" rule as the occupancy heatmap). The
+  // mask is aligned to THIS grid's cols/rows/cellPx; cells outside it never
+  // emit a flow entry, so no streamline seeds or traces leave coverage.
+  const mask = maskFn ? maskFn(cols, rows, cellPx) : null
   // Per-cell, per-bin running sums (bin-major within each cell):
   // binSumX[idx * FLOW_BINS + bin]. cnt is the same layout.
   const binSumX = new Float32Array(n * FLOW_BINS)
@@ -303,6 +308,7 @@ export function computeFlowGrid({
   let maxCount = 0
   for (let cy = 0; cy < rows; cy++) {
     for (let cx = 0; cx < cols; cx++) {
+      if (mask && !mask[cy * cols + cx]) continue   // outside camera FOV coverage
       const base = (cy * cols + cx) * FLOW_BINS
       for (let bin = 0; bin < FLOW_BINS; bin++) {
         const c = binCnt[base + bin]
@@ -317,8 +323,11 @@ export function computeFlowGrid({
   }
   if (cells.length === 0) return null
   // Hand back the raw per-bin fields so streamlines can bilinearly sample the
-  // direction field for whichever bin a line belongs to.
-  return { cells, cols, rows, cellPx, maxCount, bins: FLOW_BINS, binSumX, binSumY, binCnt }
+  // direction field for whichever bin a line belongs to. `mask` (or null) lets
+  // the streamline integrator stop a line the moment it leaves FOV coverage —
+  // the field is already clipped, but bilinear sampling across the boundary
+  // would otherwise let a line drift one or two cells past the edge.
+  return { cells, cols, rows, cellPx, maxCount, bins: FLOW_BINS, binSumX, binSumY, binCnt, mask }
 }
 
 // ── Streamlines ─────────────────────────────────────────────────────────────
@@ -370,8 +379,18 @@ const STREAM_SEED_SPACING_CELLS = 3    // a new seed must be this far (in cells)
 
 export function computeStreamlines(flow) {
   if (!flow) return null
-  const { cols, rows, cellPx, maxCount, bins, binSumX, binSumY, binCnt } = flow
+  const { cols, rows, cellPx, maxCount, bins, binSumX, binSumY, binCnt, mask } = flow
   if (!binCnt) return null
+
+  // A point is inside coverage if no mask, or its cell is set. Used to stop a
+  // streamline the instant it crosses the FOV boundary (clip-to-FOV mode).
+  const inMask = (px, py) => {
+    if (!mask) return true
+    const cx = Math.floor(px / cellPx)
+    const cy = Math.floor(py / cellPx)
+    if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) return false
+    return mask[cy * cols + cx] === 1
+  }
 
   // Bilinearly sample the (normalised) velocity field of bin `b` at a point.
   // Reads the per-bin sums (bin-major within each cell).
@@ -429,6 +448,7 @@ export function computeStreamlines(flow) {
       prevHx = hx; prevHy = hy; haveHeading = true
       px += hx * step
       py += hy * step
+      if (!inMask(px, py)) break   // stop at the FOV coverage boundary
       pts.push({ x: px, y: py })
     }
     return pts

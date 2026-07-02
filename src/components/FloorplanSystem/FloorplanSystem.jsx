@@ -328,6 +328,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         scene: s,
         useFloorStore,
         useTrackingStore,
+        useCameraStore,
+        useWallStore,
       })
       detachBlindSpots = attachBlindSpotLayer({
         scene: s,

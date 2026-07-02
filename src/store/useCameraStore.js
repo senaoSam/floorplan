@@ -10,6 +10,12 @@ import { create } from 'zustand'
 export const useCameraStore = create((set, get) => ({
   camerasByFloor: {},
   globalCameraCounter: 0,
+  // Unplaced cameras (Verkada "Add Cameras" parity): an org-level pool of
+  // cameras that exist but aren't on any floor yet, waiting to be dropped onto
+  // the plan. Same camera shape minus a meaningful x/y. The Device List panel
+  // lists them under "尚未放置" with a "place here" action. Not per-floor —
+  // an unplaced camera belongs to no floor until placed.
+  unplacedCameras: [],
   // Analytics objects (Phase 34-5), per floor like cameras:
   //   Tripwire = { id, name, x1, y1, x2, y2 }      — counting line
   //   Zone     = { id, name, x, y, w, h }          — rectangular analysis zone
@@ -23,6 +29,10 @@ export const useCameraStore = create((set, get) => ({
   showOverlap: false,
   // Floor-wide occupancy trend panel (Verkada "Occupancy Trends" parity).
   showTrendPanel: false,
+  // Clip the occupancy/flow heatmap to camera FOV coverage (Verkada renders
+  // footfall only inside FOV). On by default to match Command; off shows the
+  // raw floor-wide footfall for comparison. Only online cameras contribute.
+  clipHeatmapToFov: true,
   // Camera list panel: roster of every camera on the floor. Docked as a
   // left rail in CAMERA mode (Verkada "Device List" parity), so it defaults
   // visible for discoverability; the timeline-bar chip toggles it.
@@ -85,6 +95,34 @@ export const useCameraStore = create((set, get) => ({
     set((state) => ({
       camerasByFloor: { ...state.camerasByFloor, [floorId]: cameras },
     })),
+
+  // ── Unplaced camera pool (Verkada "Add Cameras") ──────────────────────────
+  // Add a camera to the unplaced pool. Bumps the global counter so its auto
+  // name keeps marching with placed cameras (CAM-05, CAM-06…).
+  addUnplacedCamera: (camera) =>
+    set((state) => ({
+      globalCameraCounter: state.globalCameraCounter + 1,
+      unplacedCameras: [...state.unplacedCameras, camera],
+    })),
+  removeUnplacedCamera: (cameraId) =>
+    set((state) => ({
+      unplacedCameras: state.unplacedCameras.filter((c) => c.id !== cameraId),
+    })),
+  // Drop an unplaced camera onto a floor at (x, y): move it out of the pool and
+  // into camerasByFloor with real coordinates. No counter bump — it already
+  // got its number when it entered the pool.
+  placeCamera: (floorId, cameraId, x, y) =>
+    set((state) => {
+      const cam = state.unplacedCameras.find((c) => c.id === cameraId)
+      if (!cam) return {}
+      return {
+        unplacedCameras: state.unplacedCameras.filter((c) => c.id !== cameraId),
+        camerasByFloor: {
+          ...state.camerasByFloor,
+          [floorId]: [...(state.camerasByFloor[floorId] ?? []), { ...cam, x, y }],
+        },
+      }
+    }),
 
   clearFloor: (floorId) =>
     set((state) => {
@@ -160,6 +198,7 @@ export const useCameraStore = create((set, get) => ({
   toggleShowBlindSpots: () => set((s) => ({ showBlindSpots: !s.showBlindSpots })),
   toggleShowOverlap: () => set((s) => ({ showOverlap: !s.showOverlap })),
   toggleShowTrendPanel: () => set((s) => ({ showTrendPanel: !s.showTrendPanel })),
+  toggleClipHeatmapToFov: () => set((s) => ({ clipHeatmapToFov: !s.clipHeatmapToFov })),
   toggleShowCameraList: () => set((s) => ({ showCameraList: !s.showCameraList })),
   toggleCameraListCollapsed: () => set((s) => ({ cameraListCollapsed: !s.cameraListCollapsed })),
   setCoverageTargetPct: (coverageTargetPct) =>

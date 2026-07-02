@@ -51,6 +51,8 @@ function CameraTimelineBar() {
   const toggleShowOverlap = useCameraStore((s) => s.toggleShowOverlap)
   const showTrendPanel = useCameraStore((s) => s.showTrendPanel)
   const toggleShowTrendPanel = useCameraStore((s) => s.toggleShowTrendPanel)
+  const clipHeatmapToFov = useCameraStore((s) => s.clipHeatmapToFov)
+  const toggleClipHeatmapToFov = useCameraStore((s) => s.toggleClipHeatmapToFov)
   const showCameraList = useCameraStore((s) => s.showCameraList)
   const toggleShowCameraList = useCameraStore((s) => s.toggleShowCameraList)
   const drawTool = useCameraStore((s) => s.drawTool)
@@ -222,6 +224,14 @@ function CameraTimelineBar() {
               title="時間推移：固定統計時段寬度（自動縮成 2 小時），沿整天自動滑動播放，看活動熱點隨時間演變"
             >
               {occupancyLapsePlaying ? '⏸ 推移' : '⏱ 推移'}
+            </button>
+            <button
+              type="button"
+              className={`camera-timeline__chip${clipHeatmapToFov ? ' camera-timeline__chip--active' : ''}`}
+              onClick={toggleClipHeatmapToFov}
+              title="只在相機 FOV 覆蓋範圍內渲染熱圖（對標 Verkada；僅計線上相機）。關閉則顯示整層原始人流"
+            >
+              FOV 內
             </button>
           </span>
         )}

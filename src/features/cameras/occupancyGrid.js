@@ -11,6 +11,12 @@ export const OCCUPANCY_CELL_M = 0.5
 
 // Returns { grid: Float32Array(cols*rows), cols, rows, cellPx, maxVal, p95 }
 // or null when there's nothing to integrate.
+//
+// `maskFn` (optional): (cols, rows, cellPx) => Uint8Array(cols*rows) | null.
+// When it returns a mask, cells where mask[idx] === 0 are zeroed out — used to
+// clip the heatmap to camera FOV coverage (Verkada renders footfall only inside
+// FOV). Built by the caller (it owns cameras/walls) but applied here so it lands
+// on the SAME grid this function computed.
 export function computeOccupancyGrid({
   tracks,
   tFromSec,
@@ -19,6 +25,7 @@ export function computeOccupancyGrid({
   imageHeight,
   pxPerM,
   mode,             // 'traffic' | 'dwell'
+  maskFn,
 }) {
   if (!tracks || tracks.length === 0 || !imageWidth || !imageHeight) return null
   const cellPx = Math.max(2, OCCUPANCY_CELL_M * (pxPerM || 40))
@@ -57,6 +64,14 @@ export function computeOccupancyGrid({
         }
       }
     }
+  }
+
+  // Clip to camera FOV coverage if a mask is supplied — zero every cell no
+  // online camera can see, so the heatmap renders only inside FOV (and p99
+  // below normalises against visible cells only, not the dark floor).
+  const mask = maskFn ? maskFn(cols, rows, cellPx) : null
+  if (mask) {
+    for (let i = 0; i < grid.length; i++) if (!mask[i]) grid[i] = 0
   }
 
   // Robust scale anchor — p99 of non-zero cells: keeps a single extreme POI

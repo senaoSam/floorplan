@@ -2,6 +2,7 @@ import { Sprite, Texture, Graphics } from 'pixi.js'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { computeOccupancyGrid, renderOccupancyCanvas } from './occupancyGrid'
 import { computeFlowGrid, computeStreamlines } from './analyticsStats'
+import { buildFovMaskGrid } from './fovRasterize'
 import { FALLBACK_PX_PER_M } from './camerasLayer'
 
 // Occupancy heatmap sprite for Camera mode (Phase 34-3). Sits at the BOTTOM
@@ -22,7 +23,13 @@ const RECOMPUTE_MAX_WAIT_MS = 200
 // Flow map (occupancyMode 'flow') — rendered as streamlines: continuous
 // glowing "movement corridors" traced through the velocity field, with a slow
 // dash crawl so the direction of travel reads at a glance.
-const FLOW_COLOR = 0x22d3ee          // cyan-400, matches the camera-mode palette
+const FLOW_COLOR = 0xe879f9          // fuchsia-400 — deliberately OUTSIDE the
+                                     // camera-mode teal/cyan family so the lines
+                                     // never blend into FOV cones or car bodies
+// Chevrons are BLACK ">>" strokes (two nested angle marks) — same-hue fills
+// melted into the corridor and the line read as a featureless band, and a
+// filled dart read as an aeroplane. Plain stroked chevrons read as direction.
+const FLOW_CHEVRON_COLOR = 0x000000
 const FLOW_DASH_PX = 26              // spacing between flow chevrons (canvas px)
 const FLOW_CRAWL_PX_PER_SEC = 34     // how fast the chevrons march along the line
 
@@ -30,6 +37,8 @@ export function attachOccupancyLayer({
   scene,
   useFloorStore,
   useTrackingStore,
+  useCameraStore,
+  useWallStore,
 }) {
   const layer = scene.layers.cameraFov
   let sprite = null
@@ -95,21 +104,34 @@ export function attachOccupancyLayer({
       for (let i = 1; i < pts.length; i++) flowG.lineTo(pts[i].x, pts[i].y)
       flowG.stroke({ width: w, color: FLOW_COLOR, alpha: alpha * 0.55, cap: 'round', join: 'round' })
 
-      // flow chevrons — one ">" every FLOW_DASH_PX, all shifted by `crawl` so
-      // they march downstream. Count is bounded by length / pitch, so the layer
-      // stays at a few hundred tiny polys total.
-      const hw = 4 + 3 * Math.min(1, line.strength * 2.2)
+      // flow chevrons — one ">>" (two nested stroked angle marks) every
+      // FLOW_DASH_PX, all shifted by `crawl` so they march downstream. Count is
+      // bounded by length / pitch, so the layer stays at a few hundred tiny
+      // strokes total.
+      // Sized/weighted BELOW the corridor stroke — the corridor stays the main
+      // element, the chevrons are just direction ticks riding on it.
+      const hw = 3 + 2 * Math.min(1, line.strength * 2.2)
+      const chevW = 1.2 + 0.6 * Math.min(1, line.strength * 2.2)
       const start = ((crawl % FLOW_DASH_PX) + FLOW_DASH_PX) % FLOW_DASH_PX
       for (let d = start; d < total; d += FLOW_DASH_PX) {
         const p = pointAtArc(line, d)
         if (!p) continue
         const nx = -p.uy, ny = p.ux   // left normal
-        flowG.poly([
-          p.x, p.y,
-          p.x - p.ux * hw + nx * hw * 0.8, p.y - p.uy * hw + ny * hw * 0.8,
-          p.x - p.ux * hw * 0.4, p.y - p.uy * hw * 0.4,
-          p.x - p.ux * hw - nx * hw * 0.8, p.y - p.uy * hw - ny * hw * 0.8,
-        ]).fill({ color: FLOW_COLOR, alpha })
+        // two ">" marks, the second set back along the tangent
+        for (const off of [0, hw * 0.7]) {
+          const tx = p.x - p.ux * off
+          const ty = p.y - p.uy * off
+          flowG.moveTo(tx - p.ux * hw + nx * hw * 0.8, ty - p.uy * hw + ny * hw * 0.8)
+          flowG.lineTo(tx, ty)
+          flowG.lineTo(tx - p.ux * hw - nx * hw * 0.8, ty - p.uy * hw - ny * hw * 0.8)
+        }
+        flowG.stroke({
+          width: chevW,
+          color: FLOW_CHEVRON_COLOR,
+          alpha,
+          cap: 'round',
+          join: 'round',
+        })
       }
     }
   }
@@ -143,6 +165,17 @@ export function attachOccupancyLayer({
       scene.requestRender()
       return
     }
+    // Verkada renders footfall only inside camera FOV coverage. When the
+    // "clip to FOV" toggle is on, hand the grid builders a maskFn that
+    // rasterises the online cameras' wall-clipped FOV at the grid's own
+    // resolution — so traffic/dwell/flow all clip identically and stay aligned.
+    let maskFn = null
+    if (useCameraStore?.getState().clipHeatmapToFov) {
+      const cameras = useCameraStore.getState().camerasByFloor[activeFloorId] ?? []
+      const walls = useWallStore?.getState().wallsByFloor[activeFloorId] ?? []
+      maskFn = (cols, rows, cellPx) =>
+        buildFovMaskGrid({ cameras, walls, floor, cols, rows, cellPx })
+    }
     const common = {
       tracks: tr.tracksByFloor[activeFloorId] ?? [],
       tFromSec: tr.occupancyFromSec,
@@ -150,6 +183,7 @@ export function attachOccupancyLayer({
       imageWidth: floor.imageWidth,
       imageHeight: floor.imageHeight,
       pxPerM: floor.scale ?? FALLBACK_PX_PER_M,
+      maskFn,
     }
     if (tr.occupancyMode === 'flow') {
       clearSprite()
@@ -205,6 +239,7 @@ export function attachOccupancyLayer({
   function snapshot() {
     const tr = useTrackingStore.getState()
     const fid = useFloorStore.getState().activeFloorId
+    const cam = useCameraStore?.getState()
     return {
       mode: tr.occupancyMode,
       from: tr.occupancyFromSec,
@@ -212,12 +247,18 @@ export function attachOccupancyLayer({
       tracks: tr.tracksByFloor[fid],
       fid,
       inCamera: isCameraMode(),
+      // FOV clip inputs — moving/adding a camera, editing a wall, or toggling
+      // the clip changes the mask, so the heatmap must rebuild.
+      clip: cam?.clipHeatmapToFov,
+      cameras: cam?.camerasByFloor[fid],
+      walls: useWallStore?.getState().wallsByFloor[fid],
     }
   }
   const onChange = () => {
     const cur = snapshot()
     if (cur.mode === prev.mode && cur.from === prev.from && cur.to === prev.to
-      && cur.tracks === prev.tracks && cur.fid === prev.fid && cur.inCamera === prev.inCamera) return
+      && cur.tracks === prev.tracks && cur.fid === prev.fid && cur.inCamera === prev.inCamera
+      && cur.clip === prev.clip && cur.cameras === prev.cameras && cur.walls === prev.walls) return
     prev = cur
     scheduleRebuild()
   }
@@ -225,6 +266,8 @@ export function attachOccupancyLayer({
   const unsubTracking = useTrackingStore.subscribe(onChange)
   const unsubFloor = useFloorStore.subscribe(onChange)
   const unsubEditor = useEditorStore.subscribe(onChange)
+  const unsubCamera = useCameraStore?.subscribe(onChange)
+  const unsubWall = useWallStore?.subscribe(onChange)
   rebuild()
 
   return () => {
@@ -233,6 +276,8 @@ export function attachOccupancyLayer({
     unsubTracking()
     unsubFloor()
     unsubEditor()
+    unsubCamera?.()
+    unsubWall?.()
     clearSprite()
     layer.removeChild(flowG)
     flowG.destroy()

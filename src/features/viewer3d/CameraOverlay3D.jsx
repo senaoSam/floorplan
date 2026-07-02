@@ -4,9 +4,10 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useCameraStore } from '@/store/useCameraStore'
 import { useTrackingStore } from '@/store/useTrackingStore'
-import { rasterizeCoverageCounts } from '@/features/cameras/fovRasterize'
+import { rasterizeCoverageCounts, buildFovMaskGrid } from '@/features/cameras/fovRasterize'
 import { computeOccupancyGrid, renderOccupancyCanvas } from '@/features/cameras/occupancyGrid'
-import { computeFlowGrid } from '@/features/cameras/analyticsStats'
+import { useFrame } from '@react-three/fiber'
+import { computeFlowGrid, computeStreamlines } from '@/features/cameras/analyticsStats'
 
 const EMPTY = Object.freeze([])
 
@@ -31,12 +32,13 @@ const FALLBACK_PX_PER_M = 40
 //                        grid module, same as occupancyLayer.js). Gated on
 //                        useTrackingStore.occupancyMode being 'traffic'/'dwell'.
 //                        The 'flow' mode is a vector field, not a raster, so it
-//                        projects via FlowArrows3D instead of a plane.
-//   FlowArrows3D      ← computeFlowGrid (same module + common params as
-//                        occupancyLayer.drawFlow). Gated on occupancyMode ===
-//                        'flow'. Renders one InstancedMesh of cyan cones, one
-//                        per visible cell, pointing along each cell's net
-//                        movement vector projected onto the floor plane.
+//                        projects via FlowPlane3D (streamline plane) instead.
+//   FlowPlane3D       ← computeFlowGrid + computeStreamlines (same modules +
+//                        params as occupancyLayer's flow branch). Gated on
+//                        occupancyMode === 'flow'. Paints the SAME streamline
+//                        picture as 2D (canvas 2D port of drawStreamlines)
+//                        onto a floor plane, chevron-crawl animated via
+//                        useFrame.
 //
 // Each plane wraps its offscreen canvas as a CanvasTexture on a floor-sized
 // PlaneGeometry (image px × pxToM = metres) sitting a hair above the floor.
@@ -63,11 +65,17 @@ const Y_OVERLAP   = 0.04
 const Y_BLIND     = 0.05
 const Y_FLOW      = 0.06   // flow arrows sit above all the heatmap planes
 
-// Flow-arrow styling mirrored from occupancyLayer.js exactly.
-const FLOW_COLOR = '#06b6d4'          // FLOW_COLOR in occupancyLayer.js
-const FLOW_MIN_COUNT_FRAC = 0.04      // hide cells with too few movement samples
-const FLOW_ARROW_LEN_FRAC = 0.42      // arrow half-length = cellPx * 0.42 (2D parity)
-const MAX_FLOW_INSTANCES = 4000       // sane cap on the InstancedMesh count
+// Flow streamline styling mirrored from occupancyLayer.js exactly — the 3D
+// flow view is the SAME streamline picture as 2D, painted on a floor plane.
+const FLOW_COLOR_CSS = '#e879f9'      // FLOW_COLOR in occupancyLayer.js (fuchsia-400)
+// Chevrons: black ">>" strokes, mirroring occupancyLayer's FLOW_CHEVRON_COLOR
+// — same hue as the corridor made the arrows invisible, and a filled dart
+// read as an aeroplane.
+const FLOW_CHEVRON_CSS = '#000000'
+const FLOW_DASH_PX = 26               // spacing between flow chevrons (canvas px)
+const FLOW_CRAWL_PX_PER_SEC = 34      // how fast the chevrons march along the line
+const MAX_CANVAS_PX_FLOW = 2048       // cap on the flow canvas's long edge
+const FLOW_REDRAW_FPS = 30            // crawl redraw throttle inside useFrame
 
 // Build a CanvasTexture from an offscreen canvas (sRGB, flagged for upload).
 function makeTexture(canvas) {
@@ -191,13 +199,21 @@ function OccupancyPlane3D({ floorId, pxToM }) {
   const occupancyMode    = useTrackingStore((s) => s.occupancyMode)
   const occupancyFromSec = useTrackingStore((s) => s.occupancyFromSec)
   const occupancyToSec   = useTrackingStore((s) => s.occupancyToSec)
+  const cameras    = useCameraStore((s) => s.camerasByFloor[floorId] ?? EMPTY)
+  const walls      = useWallStore((s) => s.wallsByFloor[floorId] ?? EMPTY)
+  const clipToFov  = useCameraStore((s) => s.clipHeatmapToFov)
 
   // Reuse the occupancy grid module verbatim (same compute + colourise as
   // occupancyLayer.js). 'off' renders nothing; 'flow' (arrow vectors) has no 3D
-  // raster yet, so only 'traffic' / 'dwell' project.
+  // raster yet, so only 'traffic' / 'dwell' project. When "clip to FOV" is on,
+  // the SAME maskFn the 2D layer uses clips cells outside camera coverage so 3D
+  // and 2D stay pixel-identical.
   const canvas = useMemo(() => {
     if (occupancyMode === 'off' || occupancyMode === 'flow') return null
     if (!floor?.imageWidth) return null
+    const maskFn = clipToFov
+      ? (cols, rows, cellPx) => buildFovMaskGrid({ cameras, walls, floor, cols, rows, cellPx })
+      : null
     const result = computeOccupancyGrid({
       tracks,
       tFromSec: occupancyFromSec,
@@ -206,10 +222,11 @@ function OccupancyPlane3D({ floorId, pxToM }) {
       imageHeight: floor.imageHeight,
       pxPerM: floor.scale ?? FALLBACK_PX_PER_M,
       mode: occupancyMode,
+      maskFn,
     })
     if (!result) return null
     return renderOccupancyCanvas(result)
-  }, [occupancyMode, occupancyFromSec, occupancyToSec, floor, tracks])
+  }, [occupancyMode, occupancyFromSec, occupancyToSec, floor, tracks, clipToFov, cameras, walls])
 
   const texture = useMemo(() => (canvas ? makeTexture(canvas) : null), [canvas])
   useEffect(() => () => { texture?.dispose() }, [texture])
@@ -225,50 +242,116 @@ function OccupancyPlane3D({ floorId, pxToM }) {
   )
 }
 
-// 3D projection of the 2D flow map (occupancyMode === 'flow'). The 2D layer
-// draws a cyan arrow per grid cell that has a clear net movement direction
-// (occupancyLayer.drawFlow). Here each surviving cell becomes one instance of a
-// single THREE.InstancedMesh — one cone geometry, instanceCount = visible cells
-// — so the whole flow field is one draw call. Matrices are computed off-frame
-// in a useMemo keyed on the SAME deps as OccupancyPlane3D's canvas memo (no
-// per-frame work; only rebuilds when the flow inputs change).
+// 3D projection of the 2D flow map (occupancyMode === 'flow') — the SAME
+// streamline picture the 2D layer draws (computeFlowGrid + computeStreamlines,
+// identical params), painted with canvas 2D onto a floor-aligned plane like
+// the occupancy heatmap, chevron-crawl animation included. Earlier this was an
+// InstancedMesh of upright cones ("one arrow per cell"), which stopped making
+// sense once the 2D side moved to streamlines — and read as noise from any
+// angle. A textured plane is byte-for-byte the 2D look, just lying on the
+// floor.
 //
-// Reuses computeFlowGrid verbatim with the SAME common params the 2D layer
-// feeds it — no re-implemented velocity math. Cell pixel centre / frac filter /
-// length scaling all mirror occupancyLayer.drawFlow.
-//
-// px → world mapping (matches OverlayMesh / HeatmapPlane3D): the floor plane is
-// rotated [-π/2,0,0] and centred at [wM/2, y, hM/2], so image pixel (px,py)
-// lands at world (px*pxToM, y, py*pxToM) — world +X = image +X, world +Z =
-// image +Y (downward). A pixel-space velocity (vx,vy) therefore points along
-// world (vx, 0, vy) on the floor plane.
-function FlowArrows3D({ floorId, pxToM }) {
+// The polyline/chevron maths and styling numbers are ported 1:1 from
+// occupancyLayer.js (drawStreamlines/pointAtArc) with PIXI Graphics swapped
+// for canvas 2D. The crawl redraws the offscreen canvas inside useFrame
+// (throttled to FLOW_REDRAW_FPS) and flags the texture for re-upload — the 3D
+// frameloop is 'always' while visible, so the chevrons march exactly like 2D.
+
+// Walk a streamline's cumulative-length table to the point at arc-length `d`,
+// returning { x, y, ux, uy } (position + unit tangent). Port of
+// occupancyLayer.js pointAtArc.
+function flowPointAtArc(line, d) {
+  const { pts, cum } = line
+  const total = cum[cum.length - 1]
+  if (total <= 0) return null
+  const dd = Math.min(Math.max(d, 0), total)
+  let i = 1
+  while (i < cum.length && cum[i] < dd) i++
+  if (i >= cum.length) i = cum.length - 1
+  const a = pts[i - 1], b = pts[i]
+  const seg = cum[i] - cum[i - 1] || 1
+  const f = (dd - cum[i - 1]) / seg
+  const mag = Math.hypot(b.x - a.x, b.y - a.y) || 1
+  return {
+    x: a.x + (b.x - a.x) * f,
+    y: a.y + (b.y - a.y) * f,
+    ux: (b.x - a.x) / mag,
+    uy: (b.y - a.y) / mag,
+  }
+}
+
+// Draw the streamlines + crawling chevrons into `canvas` at supersample `k`
+// (canvas px = image px × k). Same alpha/width/chevron formulas as the 2D
+// drawStreamlines, so the plane texture matches the 2D canvas exactly.
+function drawFlowCanvas(canvas, streamlines, k, crawl) {
+  const ctx = canvas.getContext('2d')
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  ctx.setTransform(k, 0, 0, k, 0, 0)   // draw in image-px coordinates
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  for (const line of streamlines.lines) {
+    const pts = line.pts
+    if (pts.length < 2) continue
+    const total = line.cum[line.cum.length - 1]
+    if (total <= 0) continue
+    const s = Math.min(1, line.strength * 2.2)
+    const alpha = 0.30 + 0.55 * s
+    const w = 2 + 4 * s
+
+    // core line — a single stroke for the whole polyline
+    ctx.strokeStyle = FLOW_COLOR_CSS
+    ctx.globalAlpha = alpha * 0.55
+    ctx.lineWidth = w
+    ctx.beginPath()
+    ctx.moveTo(pts[0].x, pts[0].y)
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
+    ctx.stroke()
+
+    // flow chevrons — one ">>" (two nested stroked angle marks) every
+    // FLOW_DASH_PX, shifted by `crawl` so they march downstream.
+    // Sized/weighted BELOW the corridor stroke — direction ticks, not the star.
+    const hw = 3 + 2 * s
+    ctx.strokeStyle = FLOW_CHEVRON_CSS
+    ctx.lineWidth = 1.2 + 0.6 * s
+    ctx.globalAlpha = alpha
+    const start = ((crawl % FLOW_DASH_PX) + FLOW_DASH_PX) % FLOW_DASH_PX
+    for (let d = start; d < total; d += FLOW_DASH_PX) {
+      const p = flowPointAtArc(line, d)
+      if (!p) continue
+      const nx = -p.uy, ny = p.ux   // left normal
+      ctx.beginPath()
+      // two ">" marks, the second set back along the tangent
+      for (const off of [0, hw * 0.7]) {
+        const tx = p.x - p.ux * off
+        const ty = p.y - p.uy * off
+        ctx.moveTo(tx - p.ux * hw + nx * hw * 0.8, ty - p.uy * hw + ny * hw * 0.8)
+        ctx.lineTo(tx, ty)
+        ctx.lineTo(tx - p.ux * hw - nx * hw * 0.8, ty - p.uy * hw - ny * hw * 0.8)
+      }
+      ctx.stroke()
+    }
+  }
+  ctx.globalAlpha = 1
+}
+
+function FlowPlane3D({ floorId, pxToM }) {
   const floors = useFloorStore((s) => s.floors)
   const floor  = floors.find((f) => f.id === floorId) ?? null
   const tracks = useTrackingStore((s) => s.tracksByFloor[floorId] ?? EMPTY)
   const occupancyMode    = useTrackingStore((s) => s.occupancyMode)
   const occupancyFromSec = useTrackingStore((s) => s.occupancyFromSec)
   const occupancyToSec   = useTrackingStore((s) => s.occupancyToSec)
+  const cameras    = useCameraStore((s) => s.camerasByFloor[floorId] ?? EMPTY)
+  const walls      = useWallStore((s) => s.wallsByFloor[floorId] ?? EMPTY)
+  const clipToFov  = useCameraStore((s) => s.clipHeatmapToFov)
 
-  // Cone geometry: apex along +Y by default. Length 1, radius 1; per-instance
-  // scale stretches it to the desired arrow length / width.
-  const geometry = useMemo(() => new THREE.ConeGeometry(0.5, 1, 12), [])
-  const material = useMemo(
-    () => new THREE.MeshStandardMaterial({
-      color: FLOW_COLOR,
-      transparent: true,
-      depthWrite: false,
-    }),
-    [],
-  )
-  useEffect(() => () => { geometry.dispose() }, [geometry])
-  useEffect(() => () => { material.dispose() }, [material])
-
-  // Build the per-instance matrices off-frame. Same deps as the occupancy
-  // canvas memo above (occupancyMode/from/to/floor/tracks) so this only
-  // recomputes when the flow inputs change, never per render frame.
-  const { matrices, count } = useMemo(() => {
-    if (occupancyMode !== 'flow' || !floor?.imageWidth) return { matrices: null, count: 0 }
+  // Same field + streamline computation as the 2D layer (cellM 1.5, FOV mask).
+  const streamlines = useMemo(() => {
+    if (occupancyMode !== 'flow' || !floor?.imageWidth) return null
+    const maskFn = clipToFov
+      ? (cols, rows, cellPx) => buildFovMaskGrid({ cameras, walls, floor, cols, rows, cellPx })
+      : null
     const flow = computeFlowGrid({
       tracks,
       tFromSec: occupancyFromSec,
@@ -276,64 +359,44 @@ function FlowArrows3D({ floorId, pxToM }) {
       imageWidth: floor.imageWidth,
       imageHeight: floor.imageHeight,
       pxPerM: floor.scale ?? FALLBACK_PX_PER_M,
+      cellM: 1.5,          // same coarse pitch as the 2D flow field
+      maskFn,
     })
-    if (!flow) return { matrices: null, count: 0 }
+    return flow ? computeStreamlines(flow) : null
+  }, [occupancyMode, occupancyFromSec, occupancyToSec, floor, tracks, clipToFov, cameras, walls])
 
-    const out = []
-    const up = new THREE.Vector3(0, 1, 0)       // cone's default apex axis
-    const dir = new THREE.Vector3()
-    const quat = new THREE.Quaternion()
-    const pos = new THREE.Vector3()
-    const scl = new THREE.Vector3()
-    const m = new THREE.Matrix4()
+  // Persistent offscreen canvas + texture, supersampled ×2 (capped) so the
+  // lines stay crisp when the camera leans in. Redrawn per crawl tick below.
+  const { canvas, texture, k } = useMemo(() => {
+    if (!streamlines || !floor?.imageWidth) return { canvas: null, texture: null, k: 1 }
+    const kk = Math.min(2, MAX_CANVAS_PX_FLOW / Math.max(floor.imageWidth, floor.imageHeight))
+    const cv = document.createElement('canvas')
+    cv.width = Math.max(1, Math.round(floor.imageWidth * kk))
+    cv.height = Math.max(1, Math.round(floor.imageHeight * kk))
+    drawFlowCanvas(cv, streamlines, kk, 0)
+    return { canvas: cv, texture: makeTexture(cv), k: kk }
+  }, [streamlines, floor])
+  useEffect(() => () => { texture?.dispose() }, [texture])
 
-    for (const cell of flow.cells) {
-      if (out.length >= MAX_FLOW_INSTANCES) break
-      const frac = cell.count / (flow.maxCount || 1)
-      if (frac < FLOW_MIN_COUNT_FRAC) continue   // mirror 2D drawFlow
+  // Chevron crawl — throttled canvas redraw + texture re-upload. The 3D canvas
+  // runs frameloop 'always' while visible, so this ticks just like the 2D rAF.
+  const lastDrawRef = useRef(-1)
+  useFrame(({ clock }) => {
+    if (!canvas || !texture || !streamlines) return
+    const t = clock.elapsedTime
+    if (lastDrawRef.current >= 0 && t - lastDrawRef.current < 1 / FLOW_REDRAW_FPS) return
+    lastDrawRef.current = t
+    drawFlowCanvas(canvas, streamlines, k, t * FLOW_CRAWL_PX_PER_SEC)
+    texture.needsUpdate = true
+  })
 
-      // Pixel centre → world floor position (px → world mapping above).
-      const cxPx = (cell.cx + 0.5) * flow.cellPx
-      const cyPx = (cell.cy + 0.5) * flow.cellPx
-      const mag = Math.hypot(cell.vx, cell.vy)
-      if (mag <= 0) continue
-      const ux = cell.vx / mag
-      const uy = cell.vy / mag
-
-      // Arrow full length in metres — mirrors 2D (cellPx*0.42 was the half-len;
-      // the 2D arrow spans ±len, i.e. cellPx*0.84 end-to-end). Cone length =
-      // full span so the cone reads like the 2D arrow head+shaft.
-      const lenM = flow.cellPx * FLOW_ARROW_LEN_FRAC * 2 * pxToM
-      const widthM = flow.cellPx * 0.32 * pxToM   // cone base diameter ~ shaft+head
-
-      // Floor-plane direction: pixel (ux,uy) → world (ux,0,uy).
-      dir.set(ux, 0, uy).normalize()
-      quat.setFromUnitVectors(up, dir)            // rotate cone apex onto dir
-      pos.set(cxPx * pxToM, Y_FLOW, cyPx * pxToM)
-      scl.set(widthM, lenM, widthM)
-      m.compose(pos, quat, scl)
-      out.push(m.clone())
-    }
-    if (out.length === 0) return { matrices: null, count: 0 }
-    return { matrices: out, count: out.length }
-  }, [occupancyMode, occupancyFromSec, occupancyToSec, floor, tracks, pxToM])
-
-  const meshRef = useRef(null)
-  useEffect(() => {
-    const mesh = meshRef.current
-    if (!mesh || !matrices) return
-    for (let i = 0; i < matrices.length; i++) mesh.setMatrixAt(i, matrices[i])
-    mesh.instanceMatrix.needsUpdate = true
-  }, [matrices])
-
-  if (occupancyMode !== 'flow' || !matrices || count === 0) return null
-  // key forces a fresh InstancedMesh when the count changes — instanced buffers
-  // are sized to count and can't grow in place.
+  if (occupancyMode !== 'flow' || !texture || !floor?.imageWidth) return null
   return (
-    <instancedMesh
-      key={count}
-      ref={meshRef}
-      args={[geometry, material, count]}
+    <OverlayMesh
+      texture={texture}
+      wM={floor.imageWidth * pxToM}
+      hM={floor.imageHeight * pxToM}
+      yLift={Y_FLOW}
     />
   )
 }
@@ -347,7 +410,7 @@ export default function CameraOverlay3D({ floorId, pxToM }) {
   return (
     <>
       <OccupancyPlane3D floorId={floorId} pxToM={pxToM} />
-      <FlowArrows3D floorId={floorId} pxToM={pxToM} />
+      <FlowPlane3D floorId={floorId} pxToM={pxToM} />
       <OverlapPlane3D floorId={floorId} pxToM={pxToM} />
       <BlindSpotPlane3D floorId={floorId} pxToM={pxToM} />
     </>
