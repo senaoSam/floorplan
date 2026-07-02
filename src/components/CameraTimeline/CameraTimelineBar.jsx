@@ -168,6 +168,10 @@ function CameraTimelineBar() {
 
         <span className="camera-timeline__divider" aria-hidden="true" />
 
+        {/* Label + chips share one non-wrapping group so a narrow window
+            moves the whole 熱圖 cluster to the next line instead of
+            splitting the label from its chips. */}
+        <span className="camera-timeline__group">
         <span className="camera-timeline__label">熱圖</span>
         <div className="camera-timeline__speeds">
           {OCCUPANCY_MODES.map((m) => (
@@ -185,8 +189,13 @@ function CameraTimelineBar() {
             </button>
           ))}
         </div>
+        </span>
+      </div>
 
-        {occupancyMode !== 'off' && (
+      {/* Heatmap sub-options live on their own third row so the 熱圖 chips
+          (second row) and their sub-controls never wrap-split arbitrarily. */}
+      {occupancyMode !== 'off' && (
+        <div className="camera-timeline__row">
           <span className="camera-timeline__window" title="統計時段（熱圖／計數線／區域共用）">
             <select
               className="camera-timeline__select"
@@ -234,8 +243,8 @@ function CameraTimelineBar() {
               FOV 內
             </button>
           </span>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
