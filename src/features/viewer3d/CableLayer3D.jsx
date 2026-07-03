@@ -81,7 +81,14 @@ function buildLineGeom(pts3) {
   return g
 }
 
-function PolylineTube({ pts3, color, dimOpacity, dashed = false, dashSize = 0.18, gapSize = 0.10 }) {
+// Memoized BY VALUE (see comparator below): computeRoutes rebuilds every
+// route object on any AP/cable-store change, so the pts3 arrays are always
+// fresh references even when the cable didn't move. Reference-based memo
+// would never bail out — on a 300-AP scene every AP edit recreated ~2000
+// segment geometries (the dominant share of a ~2 s stall on drag release,
+// with the 3D view hidden). Comparing the handful of coordinates is cheap
+// and lets unchanged segments keep their geometry + VAO.
+const PolylineTube = React.memo(function PolylineTube({ pts3, color, dimOpacity, dashed = false, dashSize = 0.18, gapSize = 0.10 }) {
   const geom = useMemo(() => buildLineGeom(pts3), [pts3])
   React.useEffect(() => () => geom.dispose(), [geom])
   // Critical for dashed lines: distance attribute drives the dash UV.
@@ -114,7 +121,16 @@ function PolylineTube({ pts3, color, dimOpacity, dashed = false, dashSize = 0.18
       />
     </line>
   )
-}
+}, (a, b) => {
+  if (a.color !== b.color || a.dimOpacity !== b.dimOpacity ||
+      a.dashed !== b.dashed || a.dashSize !== b.dashSize || a.gapSize !== b.gapSize) return false
+  const p = a.pts3, q = b.pts3
+  if (p.length !== q.length) return false
+  for (let i = 0; i < p.length; i++) {
+    if (p[i][0] !== q[i][0] || p[i][1] !== q[i][1] || p[i][2] !== q[i][2]) return false
+  }
+  return true
+})
 
 // Filter a route's points down to the on-floor segments. Returns the
 // (aIdx, bIdx) pairs so the caller can index into a pre-lifted pts3 array

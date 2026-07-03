@@ -229,7 +229,13 @@ function APLabel({ text, position, opacity }) {
 const SELECT_EMISSIVE = '#e74c3c'
 const HOVER_EMISSIVE  = '#ffffff'
 
-function APMarker({ ap, pxToM, dimOpacity, isActiveFloor, onHover }) {
+// Memoized: updateAP replaces only the edited AP's object (per-item immutable
+// map in useAPStore), so a single-AP move re-renders ONE marker instead of
+// all N. Without this, a 300-AP scene rebuilt every marker's subtree on any
+// AP edit — measured as the dominant share of a ~2 s main-thread stall on
+// drag release (three.js re-created VAOs + walked every object), even while
+// the 3D view was hidden (Viewer3D stays mounted in 2D mode).
+const APMarker = React.memo(function APMarker({ ap, pxToM, dimOpacity, isActiveFloor, onHover }) {
   const color = FREQ_COLOR[ap.frequency] ?? DEFAULT_COLOR
   const x = (ap.x ?? 0) * pxToM
   const z = (ap.y ?? 0) * pxToM
@@ -365,7 +371,7 @@ function APMarker({ ap, pxToM, dimOpacity, isActiveFloor, onHover }) {
       )}
     </group>
   )
-}
+})
 
 export default function APLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true, onAPHover }) {
   const allAPs = useAPStore((s) => s.apsByFloor[floorId] ?? [])

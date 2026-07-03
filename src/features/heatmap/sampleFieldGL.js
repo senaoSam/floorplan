@@ -58,6 +58,12 @@ function canUseAggregated(scenario, opts) {
 }
 
 export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
+  // Any synchronous compute invalidates in-flight async computes (see
+  // syncEpoch below): the solo-drag path bakes a 1-AP LOS/geo set, which
+  // EVICTS every other AP's cache textures (deleteTexture) — an async job
+  // paused between batches would otherwise resume and bind the deleted
+  // textures (GL INVALID_OPERATION + garbage grids in the output cache).
+  syncEpoch++
   const gl = getGL()
   const { w, h } = scenario.size
   // Optional padding extends the sampled grid outside the scenario rectangle
@@ -322,6 +328,13 @@ const yieldMacro = () => new Promise((r) => setTimeout(r, 0))
 // clobber programs/uniforms mid-flight. Serialising also avoids queueing two
 // redundant heavyweight GPU passes at once.
 let asyncQueueTail = Promise.resolve()
+// Bumped by every SYNC sampleFieldGL call. The sync path shares the GL
+// instance and its caches with async jobs but can't be queued behind the
+// mutex — instead, any sync activity marks every in-flight async compute
+// stale (they re-check at each await and abort). This is what makes the
+// solo-drag path's aggressive cache eviction safe.
+let syncEpoch = 0
+
 export function sampleFieldGLAsync(scenario, gridStepM = 0.5, opts = {}) {
   const run = asyncQueueTail.then(() => sampleFieldGLAsyncInner(scenario, gridStepM, opts))
   asyncQueueTail = run.catch(() => {})
@@ -344,7 +357,9 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
   const ny = Math.ceil(totalH / gridStepM) + 1
   const mask = scenario.scopeMaskFn ?? (() => true)
   const rxZM = scenario.rxElevationM ?? 0
-  const isStale = opts.isStale ?? (() => false)
+  const callerStale = opts.isStale ?? (() => false)
+  const epoch0 = syncEpoch
+  const isStale = () => callerStale() || syncEpoch !== epoch0
 
   const boundaries = scenario.floorBoundaries ?? []
   gl.uploadWalls(scenario.walls)
