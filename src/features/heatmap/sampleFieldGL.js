@@ -299,6 +299,282 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
   return { rssi, sinr, snr, cci, nx, ny, gridStepM, originX, originY }
 }
 
+// ---- Phase 41-5/41-6: async variant ----
+// Same output shape and physics as sampleFieldGL, but the main thread never
+// stalls on the GPU: readbacks go through PBO + fence (awaited off the hot
+// path) and the host-side CPU loops yield to the event loop every ~5 ms so
+// rAF-driven work (the heatmap transition animation) keeps painting.
+//
+// opts.isStale — optional callback polled after every await; when it returns
+// true the compute aborts and resolves null (the caller's generation moved
+// on, so finishing the work would only waste time and PBOs).
+//
+// Duplication note: the grid/mask/aggregate logic intentionally mirrors the
+// sync path above rather than sharing one parameterised body — the sync path
+// is the byte-identical-verified baseline (Phase 25) and stays untouched.
+
+const CHUNK_BUDGET_MS = 5
+const yieldMacro = () => new Promise((r) => setTimeout(r, 0))
+
+// Serialise all async computes through one queue. Two consumers share the
+// propagationGL instance (2D adapter + 3D plane) and the banded/batched
+// paths hold GL state across awaits — interleaving two async computes would
+// clobber programs/uniforms mid-flight. Serialising also avoids queueing two
+// redundant heavyweight GPU passes at once.
+let asyncQueueTail = Promise.resolve()
+export function sampleFieldGLAsync(scenario, gridStepM = 0.5, opts = {}) {
+  const run = asyncQueueTail.then(() => sampleFieldGLAsyncInner(scenario, gridStepM, opts))
+  asyncQueueTail = run.catch(() => {})
+  return run
+}
+
+async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
+  const gl = getGL()
+  const { w, h } = scenario.size
+  const pad = opts.padding ?? { left: 0, right: 0, top: 0, bottom: 0 }
+  const padL = pad.left   ?? 0
+  const padR = pad.right  ?? 0
+  const padT = pad.top    ?? 0
+  const padB = pad.bottom ?? 0
+  const totalW = w + padL + padR
+  const totalH = h + padT + padB
+  const originX = -padL
+  const originY = -padT
+  const nx = Math.ceil(totalW / gridStepM) + 1
+  const ny = Math.ceil(totalH / gridStepM) + 1
+  const mask = scenario.scopeMaskFn ?? (() => true)
+  const rxZM = scenario.rxElevationM ?? 0
+  const isStale = opts.isStale ?? (() => false)
+
+  const boundaries = scenario.floorBoundaries ?? []
+  gl.uploadWalls(scenario.walls)
+  gl.uploadCorners(scenario.corners ?? [])
+  const slabMeta = gl.uploadSlabs(boundaries)
+
+  if (canUseAggregated(scenario, opts)) {
+    const apsForGL = scenario.aps.map((ap) => ({
+      ...ap,
+      _antGainDbi: AP_ANT_GAIN_DBI,
+    }))
+    gl.uploadAps(apsForGL)
+    const out = await gl.renderFieldAsync(scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta, {
+      _rxGainDbi: RX_ANT_GAIN_DBI,
+      noiseDbm: NOISE_FLOOR_DBM,
+      cullFloorDbm: opts.cullFloorDbm ?? CULL_FLOOR_DBM,
+      rssiOnly: !!opts.rssiOnly,
+      gridSize: { nx, ny },
+      isStale,
+    })
+    if (out === null || isStale()) return null
+
+    const { rssi, sinr, snr, cci } = out
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        const idx = j * nx + i
+        const x = originX + i * gridStepM
+        const y = originY + j * gridStepM
+        const insidePlan = (x >= 0 && x <= w && y >= 0 && y <= h)
+        if (insidePlan && !mask(x, y)) {
+          rssi[idx] = NaN; sinr[idx] = NaN; snr[idx] = NaN; cci[idx] = NaN
+          continue
+        }
+        if (cci[idx] < CCI_MIN_DBM) cci[idx] = CCI_MIN_DBM
+      }
+    }
+    return { rssi, sinr, snr, cci, nx, ny, gridStepM, originX, originY }
+  }
+
+  // ---- per-AP fallback (refl on, diff on, or custom AP present) ----
+  const losEnabled = opts.losEnabled !== false
+  const losMap = losEnabled
+    ? gl.bakeLos(
+        scenario.aps.map((ap, i) => ({ ap, key: ap.id ?? `_idx_${i}` })),
+        gridStepM, { x: originX, y: originY }, rxZM, nx, ny,
+        scenario.walls.length,
+      )
+    : null
+  const apGeoEnabled = opts.apGeoEnabled !== false
+  const apGeoMap = apGeoEnabled
+    ? gl.bakeApGeo(scenario.aps.map((ap, i) => ({ ap, key: ap.id ?? `_idx_${i}` })))
+    : null
+
+  const gridCacheOn =
+    opts.gridCacheEnabled !== false &&
+    typeof gl.getCachedGrid === 'function' &&
+    typeof gl.setCachedGrid === 'function'
+  const geomSig = gridCacheOn
+    ? [
+        gl.getWallsVersion(),
+        scenario.corners?.length ?? 0,
+        boundaries.length,
+        boundaries.map((b) => `${b.elevationM ?? b.yM ?? 0}:${b.slabDb ?? b.slabAttenuationDb ?? 0}`).join(','),
+        rxZM, gridStepM, nx, ny, originX, originY,
+        opts.maxReflOrder ?? 0,
+        opts.enableDiffraction ? 1 : 0,
+        opts.freqOverrideN ?? 0,
+        opts.cullFloorDbm ?? '',
+        opts.losFastMode ? 1 : 0,
+      ].join('|')
+    : null
+
+  // Submit cache-miss APs in small batches. Submitting ALL APs before the
+  // first fence looks tempting (one wait covers everything) but backfires on
+  // big scenes: hundreds of heavy refl/diff draws fill the driver's command
+  // buffer and the GL calls themselves start BLOCKING (backpressure) — a
+  // 300-AP scene measured as ONE 13 s main-thread task. Fencing every
+  // SUBMIT_BATCH draws bounds the in-flight GPU work (and PBO count), so the
+  // submit loop always yields quickly and animation frames interleave.
+  // 4 (not 8): a refl+diff draw on a big scene can run hundreds of ms of GPU
+  // time, and ANY GL call from ANY context (PIXI included) blocks while the
+  // queue is deep — the batch size is the worst-case UI stall knob.
+  const SUBMIT_BATCH = 4
+  const perApGrids = new Array(scenario.aps.length)
+  const pending = [] // { k, apKey, hash, handle }
+
+  const flushPending = async () => {
+    if (pending.length === 0) return true
+    const batch = pending.splice(0, pending.length)
+    const grids = await gl.resolveApReads(batch.map((p) => p.handle))
+    if (isStale()) return false
+    for (let p = 0; p < batch.length; p++) {
+      const { k, apKey, hash } = batch[p]
+      const ap = scenario.aps[k]
+      let grid = grids[p]
+      if (ap.antennaMode === 'custom') {
+        // Custom-pattern AP: replace the shader grid with the JS lobe,
+        // chunked so the row loop never owns the thread for > ~5 ms.
+        grid = await customApGridChunked(ap, scenario, boundaries, opts, nx, ny, originX, originY, gridStepM, rxZM, isStale)
+        if (grid === null) return false
+      }
+      if (gridCacheOn) gl.setCachedGrid(apKey, hash, grid, nx, ny)
+      perApGrids[k] = grid
+    }
+    return true
+  }
+
+  for (let k = 0; k < scenario.aps.length; k++) {
+    const ap = scenario.aps[k]
+    const apForGL = {
+      ...ap,
+      _antGainDbi: AP_ANT_GAIN_DBI,
+      _rxGainDbi: RX_ANT_GAIN_DBI,
+    }
+    const apKey = ap.id ?? `_idx_${k}`
+
+    let hash = null
+    if (gridCacheOn) {
+      const apSig = [
+        ap.id ?? `idx${k}`,
+        ap.pos?.x ?? ap.x, ap.pos?.y ?? ap.y, ap.zM ?? 0,
+        ap.txDbm, ap.centerMHz ?? '', ap.channelWidth ?? '',
+        ap.antennaMode ?? 'omni', ap.azimuthDeg ?? 0, ap.beamwidthDeg ?? 0,
+        ap.tiltDeg ?? 0, ap.patternId ?? '',
+        AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI,
+      ].join('|')
+      hash = apSig + '#' + geomSig
+      const cached = gl.getCachedGrid(apKey, hash)
+      if (cached) {
+        perApGrids[k] = cached.grid
+        continue
+      }
+    }
+
+    const losEntry = losMap?.get(apKey)
+    const apGeoEntry = apGeoMap?.get(apKey)
+    const handle = gl.renderApSubmit(
+      apForGL, scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta,
+      {
+        ...opts,
+        gridSize: { nx, ny },
+        losTex: losEntry?.tex,
+        losFastMode: opts.losFastMode === true,
+        apGeoEntry,
+      },
+    )
+    pending.push({ k, apKey, hash, handle })
+    if (pending.length >= SUBMIT_BATCH) {
+      if (isStale()) {
+        gl.discardApReads(pending.map((p) => p.handle))
+        return null
+      }
+      if (!(await flushPending())) return null
+    }
+  }
+
+  if (isStale()) {
+    gl.discardApReads(pending.map((p) => p.handle))
+    return null
+  }
+  if (!(await flushPending())) return null
+
+  return aggregateChunked(perApGrids, scenario, nx, ny, originX, originY, gridStepM, w, h, mask, isStale)
+}
+
+async function customApGridChunked(ap, scenario, boundaries, opts, nx, ny, originX, originY, gridStepM, rxZM, isStale) {
+  const corrected = new Float32Array(nx * ny)
+  let sliceStart = performance.now()
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const idx = j * nx + i
+      const x = originX + i * gridStepM
+      const y = originY + j * gridStepM
+      const rx = { x, y, zM: rxZM }
+      const { rssiDbm } = rssiFromAp(ap, rx, scenario.walls, scenario.corners, {
+        ...opts,
+        floorBoundaries: boundaries,
+      })
+      corrected[idx] = rssiDbm
+    }
+    if (j < ny - 1 && performance.now() - sliceStart > CHUNK_BUDGET_MS) {
+      await yieldMacro()
+      if (isStale()) return null
+      sliceStart = performance.now()
+    }
+  }
+  return corrected
+}
+
+// Phase 41-6: the O(grid × N_AP) fold, sliced by rows on a ~5 ms budget with
+// a macrotask yield between slices so animation frames interleave.
+async function aggregateChunked(perApGrids, scenario, nx, ny, originX, originY, gridStepM, w, h, mask, isStale) {
+  const rssi = new Float32Array(nx * ny)
+  const sinr = new Float32Array(nx * ny)
+  const snr  = new Float32Array(nx * ny)
+  const cci  = new Float32Array(nx * ny)
+  const perApScratch = new Array(scenario.aps.length)
+  let sliceStart = performance.now()
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const idx = j * nx + i
+      const x = originX + i * gridStepM
+      const y = originY + j * gridStepM
+      const insidePlan = (x >= 0 && x <= w && y >= 0 && y <= h)
+      if (insidePlan && !mask(x, y)) {
+        rssi[idx] = NaN; sinr[idx] = NaN; snr[idx] = NaN; cci[idx] = NaN
+        continue
+      }
+      if (scenario.aps.length === 0) {
+        rssi[idx] = -120; sinr[idx] = -50; snr[idx] = -50; cci[idx] = CCI_MIN_DBM
+        continue
+      }
+      for (let k = 0; k < scenario.aps.length; k++) {
+        perApScratch[k] = perApGrids[k][idx]
+      }
+      const agg = aggregateApContributions(perApScratch, scenario.aps, NOISE_FLOOR_DBM)
+      rssi[idx] = agg.rssiDbm
+      sinr[idx] = agg.sinrDb
+      snr[idx]  = agg.snrDb
+      cci[idx]  = isFinite(agg.cciDbm) ? agg.cciDbm : CCI_MIN_DBM
+    }
+    if (j < ny - 1 && performance.now() - sliceStart > CHUNK_BUDGET_MS) {
+      await yieldMacro()
+      if (isStale()) return null
+      sliceStart = performance.now()
+    }
+  }
+  return { rssi, sinr, snr, cci, nx, ny, gridStepM, originX, originY }
+}
+
 export function disposeGL() {
   if (glInstance) {
     glInstance.dispose()

@@ -8,7 +8,7 @@ import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { buildScenario } from '@/features/heatmap/buildScenario'
 import { sampleField } from '@/features/heatmap/sampleField'
-import { sampleFieldGL } from '@/features/heatmap/sampleFieldGL'
+import { sampleFieldGLAsync } from '@/features/heatmap/sampleFieldGL'
 import { getModeConfig } from '@/features/heatmap/modes'
 import { computeFloorElevations } from '@/utils/floorStacking'
 import { createHeatmapGL } from '@/features/heatmap/heatmapGL.js'
@@ -140,7 +140,7 @@ export default function HeatmapPlane3D({ floorId, elevation }) {
   useEffect(() => {
     if (!enabled || !scenario || !floor?.scale) return
     let cancelled = false
-    const id = setTimeout(() => {
+    const id = setTimeout(async () => {
       const gl = getGL()
       if (!gl) return
       const wM = scenario.size.w
@@ -155,7 +155,12 @@ export default function HeatmapPlane3D({ floorId, elevation }) {
       }
       if (engine === 'shader') {
         try {
-          field = sampleFieldGL(scenario, gridStepM, opts)
+          // Phase 41-5: async readback (PBO + fence) — the 3D plane's
+          // recompute no longer stalls the main thread either.
+          field = await sampleFieldGLAsync(scenario, gridStepM, {
+            ...opts,
+            isStale: () => cancelled,
+          })
         } catch (e) {
           console.warn('[Heatmap3D] shader engine failed, falling back to JS:', e.message)
           field = sampleField(scenario, gridStepM, opts)
@@ -163,7 +168,7 @@ export default function HeatmapPlane3D({ floorId, elevation }) {
       } else {
         field = sampleField(scenario, gridStepM, opts)
       }
-      if (cancelled) return
+      if (cancelled || field === null) return
 
       const modeCfg = getModeConfig(mode)
       const activeField = field[modeCfg.field] ?? field.rssi

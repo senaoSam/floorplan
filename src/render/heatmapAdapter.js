@@ -1,7 +1,7 @@
 import { Sprite, Texture, Graphics } from 'pixi.js'
 import { createHeatmapGL } from '@/features/heatmap/heatmapGL'
 import { buildScenario } from '@/features/heatmap/buildScenario'
-import { sampleFieldGL } from '@/features/heatmap/sampleFieldGL'
+import { sampleFieldGL, sampleFieldGLAsync } from '@/features/heatmap/sampleFieldGL'
 import { sampleField } from '@/features/heatmap/sampleField'
 import { getModeConfig } from '@/features/heatmap/modes'
 import { computeFloorElevations } from '@/utils/floorStacking'
@@ -29,9 +29,23 @@ import { EDITOR_MODE } from '@/store/useEditorStore'
 //          snapshot. On drag end the normal store-driven recompute restores
 //          full quality.
 //
-// (Fingerprint-skip from oldSrc is NOT ported — render-on-demand already
-// coalesces redundant repaints, so re-running compute() on an unchanged scene
-// is the cost of one field sample, not a wasted GPU frame loop.)
+// Phase 41 (無感重算):
+//   41-1 idle recomputes run in TWO async stages — a coarse pass (≥1.0 m,
+//        refl/diff off) paints within a frame or two, then the fine
+//        user-quality pass retargets the transition when it lands.
+//   41-2 landed fields paint IMMEDIATELY at full size; a decaying noise
+//        ripple perturbs the contours while the fine stage computes (each
+//        frame costs one perturbation pass + the heatmapGL colormap passes).
+//        NOT an old→new dBm lerp — that read as coverage blobs
+//        growing/shrinking when an AP moved (user-rejected 2026-07-03).
+//   41-5 all idle GPU readbacks are PBO + fence (no main-thread stall);
+//   41-6 per-AP CPU folds are sliced ~5 ms with macrotask yields.
+//   Drag (solo/live) paths stay fully synchronous — they are the realtime
+//   path and already run at degraded LOD.
+//
+// (Fingerprint-skip from oldSrc IS ported for idle computes — with the
+// transition animation, a redundant recompute would show a visible morph
+// pulse, not just waste a field sample. See lastIdleInputs.)
 //
 // The shader → JS fallback mirrors oldSrc HeatmapLayer.
 
@@ -64,6 +78,67 @@ function computePadding(scenario) {
     top:    onTop    ? 0 : PAD_M,
     bottom: onBottom ? 0 : PAD_M,
   }
+}
+
+// ---- Phase 41-1/41-2 constants + pure helpers ----
+// Coarse first-stage grid step: max(user step, 1.0 m). Same visual sweet spot
+// as the drag-LOD step — near-indistinguishable once blur/bicubic upsample
+// runs, ~3.9× fewer grid points than 0.5 m.
+const COARSE_STEP_M = 1.0
+
+// 41-2 wobble parameters. The transition is NOT an old→new dBm lerp — that
+// reads as coverage blobs growing/shrinking (a moved AP's old blob collapses
+// inward while the new one inflates from its centre), which the user
+// rejected as physically wrong. Instead the new field paints IMMEDIATELY at
+// full size and a drifting value-noise perturbation (±WOBBLE_AMP_DB) makes
+// every contour line ripple while the fine result is still computing; when
+// it lands the base swaps underneath (masked by the ripple) and the
+// amplitude decays to zero.
+const WOBBLE_AMP_DB = 1.6      // peak contour perturbation
+const WOBBLE_LAMBDA_M = 2      // ripple wavelength (metres, world space)
+const WOBBLE_DECAY_MS = 900    // amplitude ramp-down once the final field is in
+const WOBBLE_HOLD_MAX_MS = 4000 // safety cap if the fine stage never lands
+
+// Wrapped-bilinear sample of a latN×latN random lattice, output ≈ [-1, 1].
+function latticeSample(lat, latN, u, v) {
+  let x = u % latN; if (x < 0) x += latN
+  let y = v % latN; if (y < 0) y += latN
+  const x0 = x | 0, y0 = y | 0
+  const x1 = (x0 + 1) % latN, y1 = (y0 + 1) % latN
+  const fx = x - x0, fy = y - y0
+  const a = lat[y0 * latN + x0], b = lat[y0 * latN + x1]
+  const c = lat[y1 * latN + x0], d = lat[y1 * latN + x1]
+  return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy
+}
+
+// out = base + amp × noise(worldXY drifting over time). Two counter-drifting
+// samples interfere into a watery shimmer instead of one sliding pattern.
+// NaN (scope-mask holes) stays NaN.
+function wobbleInto(out, base, ampDb, tSec, lat, latN, nx, ny, stepM, originX, originY) {
+  const inv = 1 / WOBBLE_LAMBDA_M
+  const du1 = tSec * 0.55, dv1 = tSec * 0.40
+  const du2 = -tSec * 0.37, dv2 = tSec * 0.29
+  for (let j = 0; j < ny; j++) {
+    const wy = (originY + j * stepM) * inv
+    for (let i = 0; i < nx; i++) {
+      const idx = j * nx + i
+      const b = base[idx]
+      if (Number.isNaN(b)) { out[idx] = NaN; continue }
+      const wx = (originX + i * stepM) * inv
+      const n = 0.6 * latticeSample(lat, latN, wx + du1, wy + dv1)
+              + 0.4 * latticeSample(lat, latN, wx + du2 + 7.3, wy + dv2 + 3.1)
+      out[idx] = b + ampDb * n
+    }
+  }
+}
+
+// Shallow ===-compare of the idle-input snapshot. Store slices are replaced
+// on every mutation (zustand immutability), so reference equality is exact.
+function idleInputsEqual(a, b) {
+  for (const k in a) {
+    if (a[k] !== b[k]) return false
+  }
+  return true
 }
 export function attachHeatmapLayer({
   scene,
@@ -122,9 +197,128 @@ export function attachHeatmapLayer({
     return sprite
   }
 
+  // ---- Phase 41 state ----
+  // generation: bumped on EVERY compute() entry; in-flight async idle results
+  // compare against it and drop themselves when stale.
+  let generation = 0
+  // anim: live wobble state or null.
+  //   { base:{grid,nx,ny,stepM,originX,originY}, ctx, t0, decayAt, lattice,
+  //     latN, scratch, raf }
+  // base is always the LATEST landed field (painted at full size instantly);
+  // the raf loop only perturbs it. decayAt === null while the fine stage is
+  // still pending (ripple keeps running as the "computing" signal).
+  let anim = null
+  // Inputs of the last COMPLETED idle compute. When nothing that feeds the
+  // field changed (store refs + heatmap settings), compute() skips entirely —
+  // without this, unrelated store events (editor-mode churn etc.) would fire
+  // a redundant two-stage recompute plus a visible ripple pulse.
+  let lastIdleInputs = null
+
+  const cancelAnim = (finishToTarget = false) => {
+    if (!anim) return
+    const a = anim
+    if (a.raf) cancelAnimationFrame(a.raf)
+    anim = null
+    if (finishToTarget) paintCanvas(a.base.grid, a.base.nx, a.base.ny, a.ctx)
+  }
+
   const hide = () => {
+    cancelAnim(false)
+    lastIdleInputs = null
     if (sprite) sprite.visible = false
     if (snapSprite) snapSprite.visible = false
+  }
+
+  // Render one scalar grid through heatmapGL and present it: PIXI texture
+  // update, sprite placement, floor-rect mask, on-demand render. Every paint —
+  // drag frames, idle stages, animation frames — funnels through here.
+  const paintCanvas = (grid, nx, ny, ctx) => {
+    gl.render({ rssi: grid, nx, ny }, ctx.outW, ctx.outH, 1 / ctx.scale, ctx.blur, ctx.contours, {
+      anchors: ctx.anchors,
+    })
+    // PIXI v8 CanvasSource caches its dimensions at create-time; resize so
+    // the GPU texture upload reuploads at the new resolution after heatmapGL
+    // mutates canvas.width/height in-place.
+    if (texture.source.width !== gl.canvas.width || texture.source.height !== gl.canvas.height) {
+      texture.source.resize(gl.canvas.width, gl.canvas.height)
+    }
+    texture.source.update()
+    // Anchor sprite top-left at (-padLpx, -padTpx) so the unpadded floor-plan
+    // rect aligns with (0,0)→(imgW,imgH) in world space.
+    sprite.x = -ctx.padLpx
+    sprite.y = -ctx.padTpx
+    sprite.scale.set(ctx.fullW / gl.canvas.width, ctx.fullH / gl.canvas.height)
+    sprite.visible = true
+    // Idle paints replace whatever the solo snapshot was covering; during an
+    // active solo drag the caller re-dims it right after.
+    if (snapSprite && !soloActive) snapSprite.visible = false
+    if (maskG) {
+      maskG.clear()
+      maskG.rect(0, 0, ctx.imgW, ctx.imgH)
+        .fill({ color: 0xffffff, alpha: 1 })
+    }
+    if (typeof scene.requestRender === 'function') scene.requestRender()
+  }
+
+  // Phase 41-2: Hamina-style ripple transition. The landed field paints
+  // IMMEDIATELY at full size (a moved AP's old blob vanishes at once and the
+  // new one appears at its final contour size — no grow/shrink morph), then
+  // every contour ripples under a decaying noise perturbation:
+  //   coarse lands → paint + ripple at full amplitude (signals "computing")
+  //   fine lands   → base swaps underneath (masked by the ripple) → decay
+  // Each frame costs one wobbleInto pass + the heatmapGL passes; no
+  // propagation recompute.
+  const presentField = (target, ctx, awaitingFine) => {
+    // 41-4 software renderer: every ripple frame would re-run the colormap
+    // passes on the CPU — paint directly instead.
+    if (useHeatmapStore.getState().isSoftwareRender) {
+      cancelAnim(false)
+      paintCanvas(target.grid, target.nx, target.ny, ctx)
+      return
+    }
+    const now = performance.now()
+    if (anim) {
+      // Retarget: swap the base under the running ripple. Fine arriving
+      // (awaitingFine=false) arms the decay.
+      anim.base = target
+      anim.ctx = ctx
+      if (!awaitingFine && anim.decayAt === null) anim.decayAt = now
+      return
+    }
+    const latN = 32
+    const lattice = new Float32Array(latN * latN)
+    for (let i = 0; i < lattice.length; i++) lattice[i] = Math.random() * 2 - 1
+    const state = {
+      base: target, ctx, t0: now,
+      decayAt: awaitingFine ? null : now,
+      lattice, latN, scratch: null, raf: 0,
+    }
+    anim = state
+    const tick = () => {
+      if (anim !== state) return
+      const t = performance.now()
+      // Safety cap: never ripple forever if the fine stage errored/stalled.
+      if (state.decayAt === null && t - state.t0 > WOBBLE_HOLD_MAX_MS) state.decayAt = t
+      let amp = WOBBLE_AMP_DB
+      if (state.decayAt !== null) {
+        const d = (t - state.decayAt) / WOBBLE_DECAY_MS
+        if (d >= 1) {
+          anim = null
+          paintCanvas(state.base.grid, state.base.nx, state.base.ny, state.ctx)
+          return
+        }
+        amp *= (1 - d) * (1 - d)
+      }
+      const b = state.base
+      if (!state.scratch || state.scratch.length !== b.grid.length) {
+        state.scratch = new Float32Array(b.grid.length)
+      }
+      wobbleInto(state.scratch, b.grid, amp, (t - state.t0) / 1000, state.lattice, state.latN,
+        b.nx, b.ny, b.stepM, b.originX, b.originY)
+      paintCanvas(state.scratch, b.nx, b.ny, state.ctx)
+      state.raf = requestAnimationFrame(tick)
+    }
+    tick()
   }
 
   // Copy the current heatmap pixels into the snapshot sprite and show it. Used
@@ -163,6 +357,9 @@ export function attachHeatmapLayer({
   }
 
   const compute = () => {
+    // Any newer compute invalidates in-flight async idle stages (they poll
+    // this via isStale and drop their result instead of painting stale data).
+    generation++
     const hm = useHeatmapStore.getState()
     if (!hm.enabled) {
       hide()
@@ -316,11 +513,19 @@ export function attachHeatmapLayer({
     // Solo-drag snapshot transitions. Snapshot once on idle→solo so the frozen
     // pre-drag field is available; restore on solo→idle.
     if (isSolo && !soloActive) {
+      // Finish a mid-flight transition first so the snapshot freezes the
+      // settled field, not an interpolation frame.
+      cancelAnim(true)
       takeSnapshot()
       soloActive = true
     } else if (!isSolo && soloActive) {
       soloActive = false
-      if (snapSprite) snapSprite.visible = false
+      // Release: change NOTHING visually — keep the exact drag-time composite
+      // (dimmed pre-drag snapshot + bright single-AP overlay) until the first
+      // idle paint swaps the new full field in. Restoring the snapshot to
+      // full alpha here (an earlier attempt) flashed the moved AP's OLD blob
+      // back and dropped its new contour for the whole coarse-compute window
+      // — very visible on big scenes where that window is 1-2 s.
     }
 
     // ----- Solo freeze (dragging wall / scope, no AP) -----
@@ -334,15 +539,6 @@ export function attachHeatmapLayer({
     }
 
     const padding = computePadding(scenario)
-
-    // Solo-AP: render ONLY the dragged AP at full quality over a dimmed
-    // snapshot. Live-drag (lodActive): full recompute with LOD compromises
-    // (reflections/diffraction/blur/contours off, faraway APs culled at
-    // -95 dBm). Idle: full quality. (oldSrc HeatmapLayer 322-495.)
-    const soloScenario = isSoloAP
-      ? { ...scenario, aps: scenario.aps.filter((a) => a.id === dragAP.id) }
-      : scenario
-    const renderScenario = isSoloAP ? soloScenario : scenario
 
     // 任務 4 (b): large-scene downgrade. The per-AP path cost scales with
     // wall×AP (each AP's pass scans the walls for penetration + reflection +
@@ -366,110 +562,192 @@ export function attachHeatmapLayer({
     // store subscription that drives compute).
     useHeatmapStore.getState().setSimplifiedLargeScene(forceAggregated)
 
-    const opts = isSoloAP
-      ? {
-          // Single AP — keep refl/diff at user settings (cheap for 1 AP and
-          // most visible when positioning near walls). Stays on the per-AP
-          // path; the drag speedup for solo comes from the coarser grid below.
-          // forceAggregated overrides even here: a huge scene's snapshot/
-          // single-AP overlay should also skip the expensive refl/diff scan.
-          maxReflOrder: forceAggregated ? 0 : (hm.reflections ? 1 : 0),
-          enableDiffraction: forceAggregated ? false : hm.diffraction,
-          padding,
-        }
-      : {
-          maxReflOrder: (lodActive || forceAggregated) ? 0 : (hm.reflections ? 1 : 0),
-          enableDiffraction: (lodActive || forceAggregated) ? false : hm.diffraction,
-          padding,
-          // Cull faraway APs to the noise floor during a live drag — lossless
-          // within colormap resolution, skips their per-fragment work.
-          ...(lodActive ? { cullFloorDbm: -95 } : {}),
-        }
-
-    // Coarsen the sample grid while dragging (任務 1). 0.5 m → 1.0 m drops the
-    // grid point count ~3.9× (nx×ny), the dominant per-frame cost on a software
-    // renderer (per-AP readback + the host aggregate loop both scale with
-    // nx×ny). 1.0 m is the visual sweet spot — near-indistinguishable from
-    // 0.5 m once the blur upsample runs, while 1.5/2.0 visibly coarsen contours;
-    // coarser values trade clarity for diminishing SW speedups (verified the
-    // point-count drop is the lever, exact ms is SW-machine-dependent). Drag end
-    // recomputes at the user's full gridStepM. max() so a user who already chose
-    // a coarser grid via the HeatmapControl slider is never refined.
-    const DRAG_GRID_STEP_M = 1.0
-    const isDragRender = isSoloAP || lodActive
-    const stepM = isDragRender ? Math.max(hm.gridStepM, DRAG_GRID_STEP_M) : hm.gridStepM
-
-    let field
-    if (hm.engine === 'shader') {
-      try {
-        field = sampleFieldGL(renderScenario, stepM, opts)
-      } catch (e) {
-        console.warn('[heatmap] shader engine failed, falling back to JS:', e.message)
-        field = sampleField(renderScenario, stepM, opts)
-      }
-    } else {
-      field = sampleField(renderScenario, stepM, opts)
-    }
-
-    // Solo-AP always renders in RSSI (a single AP has no SINR / CCI). Live LOD
-    // drops blur + contours; idle and solo-AP keep the user settings.
-    const modeCfg = isSoloAP ? getModeConfig('rssi') : getModeConfig(hm.mode)
-    const activeField = field[modeCfg.field] ?? field.rssi
-    const renderField = { rssi: activeField, nx: field.nx, ny: field.ny }
-    const useBlur     = isSoloAP ? hm.blur         : (lodActive ? 0     : hm.blur)
-    const useContours = isSoloAP ? hm.showContours : (lodActive ? false : hm.showContours)
-
     // The padded region IS sampled (so the kernel resolves correctly at
     // the floor-plan edge) but spills past the image extent — sprite
-    // position + size compensate so the floor-rect-aligned portion lines
-    // up perfectly with the floor image, and the padding bleeds into the
-    // dark canvas background outside it.
+    // position + size compensate (in paintCanvas) so the floor-rect-aligned
+    // portion lines up perfectly with the floor image, and the padding
+    // bleeds into the dark canvas background outside it (clipped by maskG).
     const totalWm = scenario.size.w + padding.left + padding.right
     const totalHm = scenario.size.h + padding.top  + padding.bottom
-    const outW = Math.max(1, Math.round(totalWm * floor.scale))
-    const outH = Math.max(1, Math.round(totalHm * floor.scale))
-
-    gl.render(renderField, outW, outH, 1 / floor.scale, useBlur, useContours, {
-      anchors: modeCfg.anchors,
-    })
-
-    // PIXI v8 CanvasSource caches its dimensions at create-time; resize so
-    // the GPU texture upload reuploads at the new resolution after heatmapGL
-    // mutates canvas.width/height in-place.
-    if (texture.source.width !== gl.canvas.width || texture.source.height !== gl.canvas.height) {
-      texture.source.resize(gl.canvas.width, gl.canvas.height)
+    const ctxBase = {
+      outW: Math.max(1, Math.round(totalWm * floor.scale)),
+      outH: Math.max(1, Math.round(totalHm * floor.scale)),
+      scale: floor.scale,
+      padLpx: padding.left * floor.scale,
+      padTpx: padding.top  * floor.scale,
+      fullW: totalWm * floor.scale,
+      fullH: totalHm * floor.scale,
+      imgW: floor.imageWidth,
+      imgH: floor.imageHeight,
+      floorId: floor.id,
     }
-    texture.source.update()
 
-    // Anchor sprite top-left at (-padLpx, -padTpx) so the unpadded
-    // floor-plan rect (scenario.size.w × h) aligns with (0,0)→(imgW,imgH)
-    // in world space. Mirrors oldSrc KonvaImage offsetX/offsetY trick.
-    const padLpx = padding.left * floor.scale
-    const padTpx = padding.top  * floor.scale
-    const fullW  = totalWm * floor.scale
-    const fullH  = totalHm * floor.scale
-    s.x = -padLpx
-    s.y = -padTpx
-    s.scale.set(fullW / gl.canvas.width, fullH / gl.canvas.height)
-    s.visible = true
-    // Solo-AP: dim the frozen snapshot underneath to 0.3 so the single moving
-    // AP reads clearly on top (oldSrc displayMode 'solo-ap'). Otherwise the
-    // snapshot is hidden (idle / live both show only the live sprite).
-    if (snapSprite) {
-      if (isSoloAP && snapCanvas) {
-        snapSprite.visible = true
-        snapSprite.alpha = 0.3
+    const isDragRender = isSoloAP || lodActive
+    if (isDragRender) {
+      // Drag frames stay fully synchronous — they ARE the realtime path.
+      cancelAnim(false)
+      lastIdleInputs = null
+
+      // Solo-AP: render ONLY the dragged AP at full quality over a dimmed
+      // snapshot. Live-drag (lodActive): full recompute with LOD compromises
+      // (reflections/diffraction/blur/contours off, faraway APs culled at
+      // -95 dBm). (oldSrc HeatmapLayer 322-495.)
+      const renderScenario = isSoloAP
+        ? { ...scenario, aps: scenario.aps.filter((a) => a.id === dragAP.id) }
+        : scenario
+
+      const opts = isSoloAP
+        ? {
+            // Single AP — keep refl/diff at user settings (cheap for 1 AP and
+            // most visible when positioning near walls). Stays on the per-AP
+            // path; the drag speedup for solo comes from the coarser grid below.
+            // forceAggregated overrides even here: a huge scene's snapshot/
+            // single-AP overlay should also skip the expensive refl/diff scan.
+            maxReflOrder: forceAggregated ? 0 : (hm.reflections ? 1 : 0),
+            enableDiffraction: forceAggregated ? false : hm.diffraction,
+            padding,
+          }
+        : {
+            maxReflOrder: 0,
+            enableDiffraction: false,
+            padding,
+            // Cull faraway APs to the noise floor during a live drag — lossless
+            // within colormap resolution, skips their per-fragment work.
+            cullFloorDbm: -95,
+          }
+
+      // Coarsen the sample grid while dragging (任務 1). 0.5 m → 1.0 m drops the
+      // grid point count ~3.9× (nx×ny), the dominant per-frame cost on a software
+      // renderer (per-AP readback + the host aggregate loop both scale with
+      // nx×ny). 1.0 m is the visual sweet spot — near-indistinguishable from
+      // 0.5 m once the blur upsample runs, while 1.5/2.0 visibly coarsen contours;
+      // coarser values trade clarity for diminishing SW speedups (verified the
+      // point-count drop is the lever, exact ms is SW-machine-dependent). Drag end
+      // recomputes at the user's full gridStepM. max() so a user who already chose
+      // a coarser grid via the HeatmapControl slider is never refined.
+      const DRAG_GRID_STEP_M = 1.0
+      const stepM = Math.max(hm.gridStepM, DRAG_GRID_STEP_M)
+
+      let field
+      if (hm.engine === 'shader') {
+        try {
+          field = sampleFieldGL(renderScenario, stepM, opts)
+        } catch (e) {
+          console.warn('[heatmap] shader engine failed, falling back to JS:', e.message)
+          field = sampleField(renderScenario, stepM, opts)
+        }
       } else {
-        snapSprite.visible = false
+        field = sampleField(renderScenario, stepM, opts)
+      }
+
+      // Solo-AP always renders in RSSI (a single AP has no SINR / CCI). Live
+      // LOD drops blur + contours; solo-AP keeps the user settings.
+      const modeCfg = isSoloAP ? getModeConfig('rssi') : getModeConfig(hm.mode)
+      const activeField = field[modeCfg.field] ?? field.rssi
+      paintCanvas(activeField, field.nx, field.ny, {
+        ...ctxBase,
+        blur:     isSoloAP ? hm.blur         : 0,
+        contours: isSoloAP ? hm.showContours : false,
+        anchors:  modeCfg.anchors,
+      })
+      // Solo-AP: dim the frozen snapshot underneath to 0.3 so the single
+      // moving AP reads clearly on top (oldSrc displayMode 'solo-ap').
+      if (snapSprite) {
+        if (isSoloAP && snapCanvas) {
+          snapSprite.visible = true
+          snapSprite.alpha = 0.3
+        } else {
+          snapSprite.visible = false
+        }
+      }
+      return
+    }
+
+    // ---- idle: Phase 41-1 two-stage async compute ----
+    // Skip entirely when nothing that feeds the field changed — unrelated
+    // store events (editor-mode churn, selection) would otherwise fire a
+    // redundant recompute plus a visible transition pulse.
+    const idleInputs = {
+      floorId: activeFloorId, scale: floor.scale,
+      // wallsByFloor (not just the active floor's list): other floors' walls
+      // feed the cross-floor penetration term, so their edits must recompute.
+      wallsAll: useWallStore.getState().wallsByFloor,
+      apsAll: apsByFloorAll, scopes,
+      holes: useFloorHoleStore ? useFloorHoleStore.getState().floorHolesByFloor : null,
+      floors,
+      mode: hm.mode, engine: hm.engine, gridStepM: hm.gridStepM,
+      blur: hm.blur, contours: hm.showContours,
+      reflections: hm.reflections, diffraction: hm.diffraction,
+      forceAggregated,
+    }
+    if (lastIdleInputs && idleInputsEqual(idleInputs, lastIdleInputs)) return
+    runIdle(generation, scenario, hm, ctxBase, forceAggregated, padding, idleInputs)
+  }
+
+  // Phase 41-1: idle recompute in two stages. The coarse stage (≥1.0 m grid,
+  // refl/diff off → aggregated single pass) lands within a frame or two and
+  // starts the fluid transition; the fine stage (user-quality) computes in
+  // the background — GPU work behind a fence, CPU folds sliced ~5 ms — and
+  // retargets the transition when it arrives. Every await checks the
+  // generation so a newer compute() drops this one wholesale.
+  const runIdle = async (gen, scenario, hm, ctxBase, forceAggregated, padding, idleInputs) => {
+    const isStale = () => gen !== generation
+    const baseOpts = {
+      maxReflOrder: forceAggregated ? 0 : (hm.reflections ? 1 : 0),
+      enableDiffraction: forceAggregated ? false : hm.diffraction,
+      padding,
+    }
+    const modeCfg = getModeConfig(hm.mode)
+    const ctx = { ...ctxBase, blur: hm.blur, contours: hm.showContours, anchors: modeCfg.anchors }
+    const present = (field, awaitingFine) => {
+      const activeField = field[modeCfg.field] ?? field.rssi
+      presentField({
+        grid: activeField, nx: field.nx, ny: field.ny,
+        stepM: field.gridStepM, originX: field.originX, originY: field.originY,
+      }, ctx, awaitingFine)
+    }
+    const stage = async (stepM, opts) => {
+      try {
+        return await sampleFieldGLAsync(scenario, stepM, { ...opts, isStale })
+      } catch (e) {
+        console.warn('[heatmap] async shader engine failed, falling back to JS:', e.message)
+        return sampleField(scenario, stepM, opts)
       }
     }
-    // Clip the padded sprite to the floor image rect so the padding
-    // sample region — which we WANT for kernel correctness near edges
-    // — never bleeds visually past the floor extent.
-    if (maskG) {
-      maskG.clear()
-      maskG.rect(0, 0, floor.imageWidth, floor.imageHeight)
-        .fill({ color: 0xffffff, alpha: 1 })
+    try {
+      // JS engine: single synchronous stage (pre-41 behaviour) + a short
+      // settle ripple.
+      if (hm.engine !== 'shader') {
+        const field = sampleField(scenario, hm.gridStepM, baseOpts)
+        if (isStale()) return
+        present(field, false)
+        lastIdleInputs = idleInputs
+        return
+      }
+      const coarseStep = Math.max(hm.gridStepM, COARSE_STEP_M)
+      const fineNeeded = hm.gridStepM < coarseStep || baseOpts.maxReflOrder > 0 || baseOpts.enableDiffraction
+      // gridCacheEnabled:false on a non-final coarse stage — its per-AP grids
+      // (custom-AP scenes) would evict the fine-quality cache entries that
+      // make unchanged-AP recomputes cheap.
+      const coarse = await stage(coarseStep, fineNeeded
+        ? { ...baseOpts, maxReflOrder: 0, enableDiffraction: false, gridCacheEnabled: false }
+        : baseOpts)
+      if (coarse === null || isStale()) return
+      present(coarse, fineNeeded)
+      if (!fineNeeded) {
+        lastIdleInputs = idleInputs
+        return
+      }
+      // Task boundary so the first ripple frames paint before the fine
+      // stage's (small) synchronous command encoding runs.
+      await new Promise((r) => setTimeout(r, 0))
+      if (isStale()) return
+      const fine = await stage(hm.gridStepM, baseOpts)
+      if (fine === null || isStale()) return
+      present(fine, false)
+      lastIdleInputs = idleInputs
+    } catch (e) {
+      console.warn('[heatmap] idle compute failed:', e.message)
     }
   }
 
@@ -536,6 +814,8 @@ export function attachHeatmapLayer({
   runCompute()
 
   return () => {
+    generation++ // orphan any in-flight idle stages
+    cancelAnim(false)
     unsubHM()
     unsubFloor()
     unsubWall()

@@ -2707,10 +2707,101 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     return out
   }
 
-  // Render one AP and read back nx*ny floats (dBm). Caller can override the
-  // grid extent via opts.gridSize when sampling beyond scenario.size (padded
-  // grids — see sampleFieldGL).
-  function renderAp(ap, scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
+  // ---- Phase 41-5: PBO + fence async readback plumbing ----
+  // A sync readPixels stalls the main thread until the GPU drains every
+  // queued command. The async path instead enqueues readPixels into a
+  // PIXEL_PACK_BUFFER (non-blocking), drops a fence after the last enqueue,
+  // polls it with clientWaitSync(0) off the hot path, and only then copies
+  // out with getBufferSubData (a plain memcpy, 1-2 ms).
+  //
+  // Pool note: per-AP batches can be hundreds of PBOs in flight at once; the
+  // pool retains up to PBO_POOL_MAX so steady-state reuse is allocation-free
+  // while a one-off giant batch doesn't pin memory forever. Discarding a
+  // stale handle just releases the buffer — a pending GPU write into it is
+  // harmless because any future readback into the same buffer is enqueued
+  // AFTER it (GL commands on one context are ordered).
+  const pboPool = []
+  const PBO_POOL_MAX = 32
+  function pboAcquire(sizeBytes) {
+    for (let i = 0; i < pboPool.length; i++) {
+      if (pboPool[i].size === sizeBytes) return pboPool.splice(i, 1)[0]
+    }
+    const buf = gl.createBuffer()
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buf)
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, sizeBytes, gl.STREAM_READ)
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
+    return { buf, size: sizeBytes }
+  }
+  function pboRelease(pbo) {
+    if (pboPool.length < PBO_POOL_MAX) pboPool.push(pbo)
+    else gl.deleteBuffer(pbo.buf)
+  }
+  // Resolves when every command issued before the fence has executed. Polls
+  // at ~8 ms so waiting never blocks; timeout guards against a wedged
+  // context (TDR) that would otherwise leave the caller pending forever.
+  function waitFence(sync, timeoutMs = 10000) {
+    return new Promise((resolve, reject) => {
+      const t0 = performance.now()
+      const poll = () => {
+        if (gl.isContextLost()) {
+          gl.deleteSync(sync)
+          reject(new Error('GL context lost while awaiting fence'))
+          return
+        }
+        const st = gl.clientWaitSync(sync, 0, 0)
+        if (st === gl.ALREADY_SIGNALED || st === gl.CONDITION_SATISFIED) {
+          gl.deleteSync(sync)
+          resolve()
+          return
+        }
+        if (st === gl.WAIT_FAILED) {
+          gl.deleteSync(sync)
+          reject(new Error('clientWaitSync failed'))
+          return
+        }
+        if (performance.now() - t0 > timeoutMs) {
+          gl.deleteSync(sync)
+          reject(new Error('fence wait timed out'))
+          return
+        }
+        setTimeout(poll, 8)
+      }
+      poll()
+    })
+  }
+  // fenceSync alone sits in the CPU-side queue; flush pushes it (and the
+  // work before it) to the GPU so the fence can actually signal.
+  function fenceFlush() {
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)
+    gl.flush()
+    return sync
+  }
+  function readPboInto(pbo, out) {
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo.buf)
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, out)
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
+    pboRelease(pbo)
+  }
+  // Wait for the whole submitted batch (one fence covers every handle since
+  // enqueue order is preserved), then copy each grid out.
+  async function resolveApReads(handles) {
+    if (handles.length === 0) return []
+    const sync = fenceFlush()
+    await waitFence(sync)
+    return handles.map((h) => {
+      const out = new Float32Array(h.nx * h.ny)
+      readPboInto(h.pbo, out)
+      return out
+    })
+  }
+  // Stale-generation cleanup: recycle the buffers without reading them.
+  function discardApReads(handles) {
+    for (const h of handles) pboRelease(h.pbo)
+  }
+
+  // Uniform setup + draw for one AP, leaving outFbo bound so the caller
+  // picks its readback flavour (sync readPixels vs PBO enqueue).
+  function renderApDraw(ap, scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
     const nx = opts.gridSize?.nx ?? (Math.ceil(scenario.size.w / gridStepM) + 1)
     const ny = opts.gridSize?.ny ?? (Math.ceil(scenario.size.h / gridStepM) + 1)
     ensureOutSize(nx, ny)
@@ -2811,12 +2902,34 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
 
     gl.bindVertexArray(vao)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
+    return { nx, ny }
+  }
 
+  // Render one AP and read back nx*ny floats (dBm). Caller can override the
+  // grid extent via opts.gridSize when sampling beyond scenario.size (padded
+  // grids — see sampleFieldGL).
+  function renderAp(ap, scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
+    const { nx, ny } = renderApDraw(ap, scenario, gridStepM, originM, rxZM, slabMeta, opts)
     const out = new Float32Array(nx * ny)
     if (gl.isContextLost()) throw new Error('GL context lost during renderAp (likely TDR on heavy brute-force scene)')
     gl.readPixels(0, 0, nx, ny, gl.RED, gl.FLOAT, out)
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     return { rssi: out, nx, ny }
+  }
+
+  // Phase 41-5: draw + enqueue the readback into a pooled PBO without
+  // waiting. Returns a handle for resolveApReads / discardApReads. Submitting
+  // the whole AP batch first and fencing once removes the per-AP GPU stall
+  // that made the sync loop O(N) round-trips.
+  function renderApSubmit(ap, scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
+    const { nx, ny } = renderApDraw(ap, scenario, gridStepM, originM, rxZM, slabMeta, opts)
+    if (gl.isContextLost()) throw new Error('GL context lost during renderApSubmit')
+    const pbo = pboAcquire(nx * ny * 4)
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo.buf)
+    gl.readPixels(0, 0, nx, ny, gl.RED, gl.FLOAT, 0)
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    return { pbo, nx, ny }
   }
 
   // HM-F5g: aggregated all-AP single-pass render. Only valid for the scalar
@@ -2826,7 +2939,14 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   //
   // cullFloorDbm is the per-AP free-space-RSSI threshold below which an AP is
   // skipped entirely; -120 dBm matches the JS aggregateApContributions floor.
-  function renderField(scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
+  //
+  // renderFieldPrep does everything up to (but not including) the main-pass
+  // drawArrays — cascade mask pass, program, uniforms, textures, FBO — so
+  // renderField can issue one draw (sync path) while renderFieldAsync can
+  // split the same draw into scissored row bands (the aggregated pass over
+  // many APs is a single uninterruptible GPU atom; on a 300-AP scene it
+  // measured ~2.4 s, stalling every GL call from every context).
+  function renderFieldPrep(scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
     const nx = opts.gridSize?.nx ?? (Math.ceil(scenario.size.w / gridStepM) + 1)
     const ny = opts.gridSize?.ny ?? (Math.ceil(scenario.size.h / gridStepM) + 1)
     ensureOutFieldSize(nx, ny)
@@ -2922,14 +3042,18 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.uniform1i(gl.getUniformLocation(progField, 'uCascadeFactor'), cascadeFactor)
 
     gl.bindVertexArray(vao)
+    return { nx, ny }
+  }
+
+  function renderFieldDraw(scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
+    const dims = renderFieldPrep(scenario, gridStepM, originM, rxZM, slabMeta, opts)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
+    return dims
+  }
 
-    const packed = new Float32Array(nx * ny * 4)
-    if (gl.isContextLost()) throw new Error('GL context lost during renderField (likely TDR on heavy brute-force scene)')
-    gl.readPixels(0, 0, nx, ny, gl.RGBA, gl.FLOAT, packed)
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
-
-    // De-interleave into the 4 channel arrays the host already expects.
+  // De-interleave the packed RGBA float readback into the 4 channel arrays
+  // the host expects.
+  function deinterleaveField(packed, nx, ny) {
     const n = nx * ny
     const rssi = new Float32Array(n)
     const sinr = new Float32Array(n)
@@ -2943,6 +3067,63 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       cci[i]  = packed[o + 3]
     }
     return { rssi, sinr, snr, cci, nx, ny }
+  }
+
+  function renderField(scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
+    const { nx, ny } = renderFieldDraw(scenario, gridStepM, originM, rxZM, slabMeta, opts)
+    const packed = new Float32Array(nx * ny * 4)
+    if (gl.isContextLost()) throw new Error('GL context lost during renderField (likely TDR on heavy brute-force scene)')
+    gl.readPixels(0, 0, nx, ny, gl.RGBA, gl.FLOAT, packed)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    return deinterleaveField(packed, nx, ny)
+  }
+
+  // Phase 41-5: aggregated single-pass render with async readback. The main
+  // thread never waits on the GPU — draw + readPixels-to-PBO are enqueued,
+  // then we await a fence before the memcpy out.
+  //
+  // Many-AP scenes additionally split the main pass into scissored row bands
+  // with a drained fence between bands: the per-fragment AP loop makes ONE
+  // full-grid draw an uninterruptible multi-second GPU atom, and while it
+  // runs every GL call from every context (PIXI render, the transition
+  // animation's texture upload) blocks behind it. Bands keep the atom small
+  // so foreground GPU work interleaves. Callers MUST NOT run two
+  // renderFieldAsync calls concurrently on this instance — GL state persists
+  // across the between-band awaits (sampleFieldGL serialises its callers).
+  async function renderFieldAsync(scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
+    const { nx, ny } = renderFieldPrep(scenario, gridStepM, originM, rxZM, slabMeta, opts)
+    if (gl.isContextLost()) throw new Error('GL context lost during renderFieldAsync')
+    const bands = Math.max(1, Math.min(ny, Math.ceil(apCount / 24)))
+    if (bands > 1) {
+      gl.enable(gl.SCISSOR_TEST)
+      const rowsPer = Math.ceil(ny / bands)
+      for (let y0 = 0; y0 < ny; y0 += rowsPer) {
+        gl.scissor(0, y0, nx, Math.min(rowsPer, ny - y0))
+        gl.drawArrays(gl.TRIANGLES, 0, 6)
+        await waitFence(fenceFlush())
+        // Abort between bands when the caller's generation moved on — a
+        // synchronous drag-path render may have clobbered our GL state
+        // across the await, and the result is doomed to be dropped anyway.
+        if (opts.isStale && opts.isStale()) {
+          gl.disable(gl.SCISSOR_TEST)
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+          return null
+        }
+      }
+      gl.disable(gl.SCISSOR_TEST)
+    } else {
+      gl.drawArrays(gl.TRIANGLES, 0, 6)
+    }
+    const pbo = pboAcquire(nx * ny * 16)
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo.buf)
+    gl.readPixels(0, 0, nx, ny, gl.RGBA, gl.FLOAT, 0)
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    const sync = fenceFlush()
+    await waitFence(sync)
+    const packed = new Float32Array(nx * ny * 4)
+    readPboInto(pbo, packed)
+    return deinterleaveField(packed, nx, ny)
   }
 
   function dispose() {
@@ -2964,10 +3145,17 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     }
     apGeoCache.clear()
     outGridCache.clear()
+    for (const p of pboPool) gl.deleteBuffer(p.buf)
+    pboPool.length = 0
     gl.deleteFramebuffer(outFbo)
     gl.deleteFramebuffer(outFieldFbo)
     gl.deleteFramebuffer(maskFbo)
   }
 
-  return { uploadWalls, uploadCorners, uploadSlabs, uploadAps, bakeLos, bakeApGeo, renderAp, renderField, getWallsVersion, getCachedGrid, setCachedGrid, setUseGrid, dispose, gl }
+  return {
+    uploadWalls, uploadCorners, uploadSlabs, uploadAps, bakeLos, bakeApGeo,
+    renderAp, renderField,
+    renderFieldAsync, renderApSubmit, resolveApReads, discardApReads,
+    getWallsVersion, getCachedGrid, setCachedGrid, setUseGrid, dispose, gl,
+  }
 }
