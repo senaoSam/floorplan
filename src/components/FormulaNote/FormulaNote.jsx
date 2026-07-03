@@ -122,22 +122,25 @@ function FormulaNote() {
       <section>
         <h4>7. 天線方向性（發射端增益）</h4>
         <p>
-          每條離開 AP 的射線（直射終點、反射點、繞射 corner）依其離軸角
-          <code>|Δθ|</code> 取天線增益：
+          每條離開 AP 的射線（直射終點、反射點、繞射 corner）依其水平離軸角
+          <code>|Δθ|</code> 與垂直離軸角 <code>|Δε|</code>（射線仰角 − 俯仰角
+          <code>tilt</code>，仰角由高度差與水平距離算出）取天線增益：
         </p>
         <ul>
-          <li>Omni：固定 <code>G_tx = AP_ANT_GAIN_DBI</code>（3 dBi）</li>
+          <li>Omni：固定 <code>G_tx = AP_ANT_GAIN_DBI</code>（3 dBi），垂直不衰減</li>
           <li>
-            Directional：半波瓣寬 <code>φ/2</code> 內為峰值增益，
-            外側 15° 線性跌到 <code>−20 dB</code> 的背瓣。
+            Directional：水平與垂直各套同一組扇區錐 —— 半波瓣寬 <code>φ/2</code>
+            內為 0 dB，外側 15° 線性跌到 <code>−20 dB</code> 背瓣，兩者相加。
           </li>
           <li>
-            Custom pattern：<code>G_tx = 峰值 + sampleGain(pattern, |Δθ|)</code>，
-            pattern 為 36 個 10° 取樣（bore-sight = 0 dB）
+            Custom pattern：<code>G_tx = 峰值 + sampleGain(pattern, |Δθ|) +
+            sampleGain(pattern, |Δε|)</code>，垂直切面重用同一組 36 個 10°
+            水平取樣（bore-sight = 0 dB）
           </li>
         </ul>
         <p className="muted">
           方位角 <code>azimuth</code> 用 canvas 座標（+x = 0°、+y = 90°），與 APLayer 顯示一致。
+          俯仰角 <code>tilt</code>（−90°~+90°，+上仰，預設 0）。
           接收端仍當 omni（<code>G_rx = RX_ANT_GAIN_DBI</code>）。
         </p>
       </section>

@@ -135,7 +135,7 @@ function collectCorners(segments) {
 //     apsByFloor: [                      APs from every floor with their
 //       { id, name, posPx:{x,y}, z, elevationM, floorScale,
 //         txPower, frequency, channel, channelWidth,
-//         antennaMode, azimuth, beamwidth, patternId }
+//         antennaMode, azimuth, tilt, beamwidth, patternId }
 //     ],
 //     otherFloorWalls?: [                 non-active floors' walls (HM-F2c);
 //       { elevationM, scale, walls: Wall[] }    each floor keeps its own
@@ -198,6 +198,7 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
     centerMHz: channelCenterMHz(ap.frequency ?? 5, ap.channel ?? 36),
     antennaMode: ap.antennaMode ?? 'omni',
     azimuthDeg: ap.azimuth ?? 0,
+    tiltDeg: ap.tilt ?? 0,
     beamwidthDeg: ap.beamwidth ?? 60,
     patternId: ap.patternId ?? null,
   })

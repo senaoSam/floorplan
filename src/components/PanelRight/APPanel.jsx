@@ -33,6 +33,10 @@ const DEFAULT_AZIMUTH   = 0
 const DEFAULT_BEAMWIDTH = 60
 const MIN_BEAMWIDTH     = 10
 const MAX_BEAMWIDTH     = 180
+const DEFAULT_TILT      = 0
+const MIN_TILT          = -90
+const MAX_TILT          = 90
+const clampTilt = (v) => Math.max(MIN_TILT, Math.min(MAX_TILT, v))
 
 const MOUNT_OPTIONS = [
   { value: 'ceiling', label: '天花板' },
@@ -297,6 +301,9 @@ function APPanel({ floorId, apId }) {
           const rawAz = ap.azimuth ?? DEFAULT_AZIMUTH
           const effAz = wrapAzimuth(rawAz)
           const azChanged = effAz !== rawAz
+          const rawTilt = ap.tilt ?? DEFAULT_TILT
+          const effTilt = clampTilt(rawTilt)
+          const tiltChanged = effTilt !== rawTilt
           return (
             <>
               <PanelField
@@ -309,6 +316,19 @@ function APPanel({ floorId, apId }) {
                   unit="度"
                   width={70}
                   onChange={(v) => { if (!isNaN(v)) updateAP(floorId, apId, { azimuth: v }) }}
+                />
+              </PanelField>
+
+              <PanelField
+                label="俯仰角"
+                hint={tiltChanged ? `實際 ${effTilt}°` : '+上仰，−下俯'}
+              >
+                <NumberInput
+                  value={rawTilt}
+                  step={1}
+                  unit="度"
+                  width={70}
+                  onChange={(v) => { if (!isNaN(v)) updateAP(floorId, apId, { tilt: clampTilt(v) }) }}
                 />
               </PanelField>
 
@@ -349,10 +369,12 @@ function APPanel({ floorId, apId }) {
                         pattern={pattern}
                         color={freqColor}
                         azimuth={effAz}
+                        tilt={effTilt}
                         onAzimuthChange={(deg) => updateAP(floorId, apId, { azimuth: deg })}
+                        onTiltChange={(deg) => updateAP(floorId, apId, { tilt: clampTilt(deg) })}
                       />
                     </div>
-                    <div className="ap-panel__hint">左右拖曳＝旋轉方位角（放開才套用）；上下拖曳＝調整觀察視角</div>
+                    <div className="ap-panel__hint">左右拖曳＝方位角、上下拖曳＝俯仰角（放開才套用）；Shift+上下＝觀察視角</div>
                   </>
                 )
               })()}

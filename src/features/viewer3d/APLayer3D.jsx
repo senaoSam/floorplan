@@ -37,14 +37,19 @@ const LOBE_EL_SEGS = 32
 // (azimuth, elevation) is the normalized combined gain. The catalog only
 // authors a horizontal cut, so the vertical cut reuses the same samples
 // (patch/sector antennas are roughly symmetric) — combined in dB space:
-//   r(az, el) = normalize(Gh(az) + Gv(el)) · peakRadius
+//   r(az, el) = normalize(Gh(az) + Gv(el − tilt)) · peakRadius
+// tiltDeg (Phase 40) shifts the vertical cut so the surface matches the exact
+// engine formula in apGainDbi — baked into the geometry rather than a rigid
+// group rotation, because the engine's Gv depends only on el − tilt (the back
+// lobe rises WITH the boresight, unlike a rigid rotation).
 // Local axes: boresight (az 0) = +X, canvas +Y = local +Z, elevation on ±Y.
-function buildCustomLobeGeometry(pattern, peakRadius, minDb) {
+function buildCustomLobeGeometry(pattern, peakRadius, minDb, tiltDeg) {
+  const tiltRad = (tiltDeg ?? 0) * Math.PI / 180
   const positions = new Float32Array((LOBE_EL_SEGS + 1) * (LOBE_AZ_SEGS + 1) * 3)
   let p = 0
   for (let j = 0; j <= LOBE_EL_SEGS; j++) {
     const el = -Math.PI / 2 + (j / LOBE_EL_SEGS) * Math.PI
-    const gv = sampleGain(pattern, el)
+    const gv = sampleGain(pattern, el - tiltRad)
     for (let i = 0; i <= LOBE_AZ_SEGS; i++) {
       const az = i * (2 * Math.PI / LOBE_AZ_SEGS)
       const db = Math.max(sampleGain(pattern, az) + gv, minDb)
@@ -71,8 +76,9 @@ function buildCustomLobeGeometry(pattern, peakRadius, minDb) {
 }
 
 // Directional beam cone: a downward-pointing cone centered at the AP, tilted
-// to face the azimuth. Half-angle = beamwidth / 2.
-function DirectionalCone({ azimuthDeg, beamwidthDeg, color, opacity, matOpts }) {
+// to face the azimuth. Half-angle = beamwidth / 2. tiltDeg (Phase 40) pitches
+// the cone axis out of the horizontal plane (+up / −down).
+function DirectionalCone({ azimuthDeg, beamwidthDeg, tiltDeg, color, opacity, matOpts }) {
   const bw = Math.max(DIRECTIONAL_MIN_BEAM, Math.min(DIRECTIONAL_MAX_BEAM, beamwidthDeg))
   const halfAngleRad = (bw / 2) * Math.PI / 180
   const reach = DIRECTIONAL_REACH_M
@@ -95,33 +101,37 @@ function DirectionalCone({ azimuthDeg, beamwidthDeg, color, opacity, matOpts }) 
   // Rotate the cone so its −Y axis lines up with the azimuth direction in XZ.
   // Azimuth 0° = +X; canvas convention has +Y (dy) = +Z (world). A rotation
   // around +Z by +90° sends −Y → +X (azimuth 0). Then a rotation around +Y
-  // by −azimuth sweeps to the target azimuth.
+  // by −azimuth sweeps to the target azimuth. The inner group pitches the
+  // axis by +tilt around local Z (+X → up), applied after the azimuth spin.
   const azimuthRad = (azimuthDeg ?? 0) * Math.PI / 180
+  const tiltRad    = (tiltDeg ?? 0) * Math.PI / 180
 
   return (
     <group rotation={[0, -azimuthRad, 0]}>
-      <mesh rotation={[0, 0, -Math.PI / 2]}>
-        <primitive object={geom} attach="geometry" />
-        <meshStandardMaterial
-          color={color}
-          emissive={color}
-          emissiveIntensity={0.35}
-          transparent
-          opacity={opacity * (matOpts.opacity ?? 1)}
-          side={THREE.DoubleSide}
-          depthWrite={false}
-        />
-      </mesh>
+      <group rotation={[0, 0, tiltRad]}>
+        <mesh rotation={[0, 0, -Math.PI / 2]}>
+          <primitive object={geom} attach="geometry" />
+          <meshStandardMaterial
+            color={color}
+            emissive={color}
+            emissiveIntensity={0.35}
+            transparent
+            opacity={opacity * (matOpts.opacity ?? 1)}
+            side={THREE.DoubleSide}
+            depthWrite={false}
+          />
+        </mesh>
+      </group>
     </group>
   )
 }
 
-function CustomLobe({ patternId, azimuthDeg, color, opacity, matOpts }) {
+function CustomLobe({ patternId, azimuthDeg, tiltDeg, color, opacity, matOpts }) {
   const pattern = useMemo(() => getPatternById(patternId), [patternId])
   const azimuthRad = (azimuthDeg ?? 0) * Math.PI / 180
   const geom = useMemo(
-    () => buildCustomLobeGeometry(pattern, CUSTOM_PEAK_RADIUS_M, CUSTOM_MIN_DB),
-    [pattern],
+    () => buildCustomLobeGeometry(pattern, CUSTOM_PEAK_RADIUS_M, CUSTOM_MIN_DB, tiltDeg ?? 0),
+    [pattern, tiltDeg],
   )
   React.useEffect(() => () => geom.dispose(), [geom])
 
@@ -332,6 +342,7 @@ function APMarker({ ap, pxToM, dimOpacity, isActiveFloor, onHover }) {
           <DirectionalCone
             azimuthDeg={ap.azimuth ?? 0}
             beamwidthDeg={ap.beamwidth ?? 60}
+            tiltDeg={ap.tilt ?? 0}
             color={color}
             opacity={DIRECTIONAL_OPACITY}
             matOpts={matOpts}
@@ -345,6 +356,7 @@ function APMarker({ ap, pxToM, dimOpacity, isActiveFloor, onHover }) {
           <CustomLobe
             patternId={ap.patternId}
             azimuthDeg={ap.azimuth ?? 0}
+            tiltDeg={ap.tilt ?? 0}
             color={color}
             opacity={CUSTOM_OPACITY}
             matOpts={matOpts}

@@ -190,16 +190,29 @@ function makeReflectedPath(txPowerDbm, apGainDbi, pathLossDb, distanceM, gammaPe
 }
 
 // Per-ray AP antenna gain (dBi) at the departure direction from the AP.
-// - omni:        flat AP_ANT_GAIN_DBI
-// - directional: peak AP_ANT_GAIN_DBI within half-beamwidth, linearly tapered
-//                to a -20 dB back lobe outside an edge-taper zone.
-// - custom:      peak AP_ANT_GAIN_DBI + pattern sample at the ray offset angle.
+// - omni:        flat AP_ANT_GAIN_DBI (no vertical pattern — dipole ring was
+//                explicitly rejected so existing omni results stay unchanged)
+// - directional: peak AP_ANT_GAIN_DBI, sector taper applied to BOTH the
+//                horizontal and the vertical offset (same beamwidth cone).
+// - custom:      peak AP_ANT_GAIN_DBI + Gh(horizontal offset) + Gv(vertical
+//                offset), both cuts sampled from the same catalog pattern
+//                (matches the 3D lobe / preview surface r = Gh(az) + Gv(el)).
 // Azimuth/angles are taken in the canvas frame (+x = 0°, +y = 90°) to match
 // APLayer's rendering convention. The pattern samples array is indexed in the
 // same +x-origin, clockwise direction, so no frame conversion is required.
+// Vertical offset (Phase 40) = ray elevation (atan2 of Z difference over
+// horizontal distance, positive = up) − tiltDeg (boresight elevation,
+// positive = up, default 0). targetZM is the target's absolute Z in metres.
 const DIRECTIONAL_BACK_DB = 20
 const DIRECTIONAL_EDGE_DEG = 15
-function apGainDbi(ap, targetPoint) {
+// Relative sector taper (≤ 0 dB): flat inside half-beamwidth, linear fall to
+// the -20 dB back lobe across the edge-taper zone.
+function sectorTaperDb(absOffDeg, halfBwDeg) {
+  if (absOffDeg <= halfBwDeg) return 0
+  if (absOffDeg >= halfBwDeg + DIRECTIONAL_EDGE_DEG) return -DIRECTIONAL_BACK_DB
+  return -DIRECTIONAL_BACK_DB * (absOffDeg - halfBwDeg) / DIRECTIONAL_EDGE_DEG
+}
+function apGainDbi(ap, targetPoint, targetZM = 0) {
   const mode = ap.antennaMode ?? 'omni'
   if (mode === 'omni') return AP_ANT_GAIN_DBI
 
@@ -211,19 +224,22 @@ function apGainDbi(ap, targetPoint) {
   let off = rayDeg - az
   off = ((off + 540) % 360) - 180   // wrap to [-180, 180]
   const absOff = Math.abs(off)
+  // Vertical offset: ray elevation vs boresight tilt. Elevation ∈ [-90, 90]
+  // and tilt ∈ [-90, 90], so the difference needs no wrapping (|off| ≤ 180).
+  const dxy = Math.sqrt(dx * dx + dy * dy)
+  const elevDeg = Math.atan2(targetZM - (ap.zM ?? 0), dxy) * 180 / Math.PI
+  const vertOff = Math.abs(elevDeg - (ap.tiltDeg ?? 0))
 
   if (mode === 'custom') {
     const pattern = getPatternById(ap.patternId)
     const relDb = sampleGain(pattern, absOff * Math.PI / 180)
+      + sampleGain(pattern, vertOff * Math.PI / 180)
     return AP_ANT_GAIN_DBI + relDb
   }
 
-  // directional (built-in sector approximation)
+  // directional (built-in sector approximation, same cone both planes)
   const half = (ap.beamwidthDeg ?? 60) / 2
-  if (absOff <= half) return AP_ANT_GAIN_DBI
-  if (absOff >= half + DIRECTIONAL_EDGE_DEG) return AP_ANT_GAIN_DBI - DIRECTIONAL_BACK_DB
-  const t = (absOff - half) / DIRECTIONAL_EDGE_DEG
-  return AP_ANT_GAIN_DBI - DIRECTIONAL_BACK_DB * t
+  return AP_ANT_GAIN_DBI + sectorTaperDb(absOff, half) + sectorTaperDb(vertOff, half)
 }
 
 // Pick frequency sample count for the channel-wide coherent sum.
@@ -341,7 +357,7 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   const dDir   = Math.sqrt(dxyDir * dxyDir + dzDir * dzDir)
   const wallScan = accumulateWallLoss(ap.pos, rx, walls, apZM, rxZM, fOver24)
   const plDir = pathLossDb(dDir, freqMhz) + wallScan.totalLoss + slabLossDirect
-  paths.push(makeScalarPath(ap.txDbm, apGainDbi(ap, rx), plDir, dDir))
+  paths.push(makeScalarPath(ap.txDbm, apGainDbi(ap, rx, rxZM), plDir, dDir))
 
   // 1st-order image-source reflections with per-polarization Fresnel.
   // Cross-floor APs skip reflections — walls are 2D in this iteration and
@@ -381,7 +397,7 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       const dTot = d1 + d2
 
       const plRef = pathLossDb(dTot, freqMhz) + leg1.totalLoss + leg2.totalLoss
-      paths.push(makeReflectedPath(ap.txDbm, apGainDbi(ap, reflPt), plRef, dTot, gPerp, gPara, rough))
+      paths.push(makeReflectedPath(ap.txDbm, apGainDbi(ap, reflPt, reflZM), plRef, dTot, gPerp, gPara, rough))
     }
   }
 
@@ -400,7 +416,7 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       if (!isFinite(diff) || diff > 40) continue
       const dTot = d1 + d2
       const plDiff = pathLossDb(dTot, freqMhz) + s1.totalLoss + s2.totalLoss + diff
-      paths.push(makeScalarPath(ap.txDbm, apGainDbi(ap, c), plDiff, dTot))
+      paths.push(makeScalarPath(ap.txDbm, apGainDbi(ap, c, cZM), plDiff, dTot))
     }
   }
 

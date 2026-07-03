@@ -78,6 +78,7 @@ uniform float uAntGainDbi;     // base AP antenna gain (constant per AP)
 uniform int   uAntMode;        // 0 = omni, 1 = directional, 2 = treat as omni (custom — host fallback handles real pattern)
 uniform float uAntAzimuthDeg;
 uniform float uAntBeamwidthDeg;
+uniform float uAntTiltDeg;     // boresight elevation, degrees (+up, Phase 40)
 uniform float uRxGainDbi;
 uniform float uRxZM;
 
@@ -818,9 +819,20 @@ vec2 accumulateWallLossWithHits(vec2 ap, float apZ, vec2 rx, float rxZ) {
   return accumulateWallLossWithHitsGrid(ap, apZ, rx, rxZ);
 }
 
+// Relative sector taper (≤ 0 dB): flat inside half-beamwidth, linear fall to
+// the -20 dB back lobe. Mirrors sectorTaperDb in propagation.js.
+float sectorTaperDb(float absOffDeg, float halfBwDeg) {
+  if (absOffDeg <= halfBwDeg) return 0.0;
+  if (absOffDeg >= halfBwDeg + DIRECTIONAL_EDGE_DEG) return -DIRECTIONAL_BACK_DB;
+  return -DIRECTIONAL_BACK_DB * (absOffDeg - halfBwDeg) / DIRECTIONAL_EDGE_DEG;
+}
+
 // AP antenna gain in dBi for a ray heading from AP to target. Mirrors
 // apGainDbi in propagation.js modulo custom-pattern (host falls back).
-float apGainDbi(vec2 target) {
+// Phase 40: the same sector taper also applies to the vertical offset
+// (ray elevation − uAntTiltDeg), so a tilted directional AP loses gain
+// toward rays leaving its beamwidth cone vertically.
+float apGainDbi(vec2 target, float targetZ) {
   if (uAntMode == 0) return uAntGainDbi;
   if (uAntMode == 2) return uAntGainDbi;   // custom — caller already routes to JS path
   vec2 dxy = target - uApPos.xy;
@@ -829,11 +841,10 @@ float apGainDbi(vec2 target) {
   float off = rayDeg - uAntAzimuthDeg;
   off = mod(off + 540.0, 360.0) - 180.0;
   float absOff = abs(off);
+  float elevDeg = atan(targetZ - uApPos.z, length(dxy)) * 180.0 / PI;
+  float vertOff = abs(elevDeg - uAntTiltDeg);
   float halfBw = uAntBeamwidthDeg * 0.5;
-  if (absOff <= halfBw) return uAntGainDbi;
-  if (absOff >= halfBw + DIRECTIONAL_EDGE_DEG) return uAntGainDbi - DIRECTIONAL_BACK_DB;
-  float t = (absOff - halfBw) / DIRECTIONAL_EDGE_DEG;
-  return uAntGainDbi - DIRECTIONAL_BACK_DB * t;
+  return uAntGainDbi + sectorTaperDb(absOff, halfBw) + sectorTaperDb(vertOff, halfBw);
 }
 
 // Cap on the number of frequency samples in the band-sweep coherent sum.
@@ -939,7 +950,7 @@ float rssiWithReflections(vec2 rx, float rxZ) {
   }
 
   // Direct path → complex H. amp = sqrt(rxLin) / sqrt(2); perp = para = (amp, 0).
-  float rxDbDir = uTxDbm + apGainDbi(rx) + uRxGainDbi - plDir;
+  float rxDbDir = uTxDbm + apGainDbi(rx, rxZ) + uRxGainDbi - plDir;
   float ampDir = sqrt(dbToLin(rxDbDir)) / SQRT2;
   float tauDir = dDir / C_LIGHT;
   vec2  perpDir = vec2(ampDir, 0.0);
@@ -1040,7 +1051,7 @@ float rssiWithReflections(vec2 rx, float rxZ) {
       float leg2 = accumulateWallLossExcept(reflPt, reflZ, rx, rxZ, w);
       float plRef = pathLossDb(dTot, uCenterMHz) + leg1 + leg2;
 
-      float rxDbRef = uTxDbm + apGainDbi(reflPt) + uRxGainDbi - plRef;
+      float rxDbRef = uTxDbm + apGainDbi(reflPt, reflZ) + uRxGainDbi - plRef;
       float ampRef = sqrt(dbToLin(rxDbRef)) / SQRT2;
       vec2  baseR = vec2(ampRef * rough, 0.0);
       vec2  perpR = cmul(baseR, gPerp);
@@ -1099,7 +1110,7 @@ float rssiWithReflections(vec2 rx, float rxZ) {
       if (s1.y > 1.0 || s2.y > 1.0) continue;
 
       float plDiff = pathLossDb(dTotC, uCenterMHz) + s1.x + s2.x + diff;
-      float rxDbD  = uTxDbm + apGainDbi(corner) + uRxGainDbi - plDiff;
+      float rxDbD  = uTxDbm + apGainDbi(corner, cZM) + uRxGainDbi - plDiff;
       float ampD   = sqrt(dbToLin(rxDbD)) / SQRT2;
       vec2  perpD  = vec2(ampD, 0.0);
       vec2  paraD  = vec2(ampD, 0.0);
@@ -1149,7 +1160,7 @@ void main() {
   float slabLoss = accumulateSlabLoss(uApPos.xy, uApPos.z, rx, rxZ);
 
   float pl = pathLossDb(dDir, uCenterMHz) + wallLoss + slabLoss;
-  float rxDb = uTxDbm + apGainDbi(rx) + uRxGainDbi - pl;
+  float rxDb = uTxDbm + apGainDbi(rx, rxZ) + uRxGainDbi - pl;
   outColor = vec4(rxDb, 0.0, 0.0, 1.0);
 }`
 
@@ -1163,8 +1174,9 @@ void main() {
 //   t2 = (azimuthDeg, beamwidthDeg, freqLoMHz, freqHiMHz)
 //        [freqLo, freqHi] = AP's occupied band; SINR co-channel test compares
 //        against the serving AP's range (same band + interval intersect).
-//   t3 = (band, _, _, _)
+//   t3 = (band, tiltDeg, _, _)
 //        band: 1=2.4 GHz, 2=5 GHz, 3=6 GHz. Cross-band APs never co-channel.
+//        tiltDeg: boresight elevation in degrees (+up, Phase 40).
 //
 // Distance culling: free-space PL gives the maximum possible RSSI an AP can
 // contribute to this fragment. If that's below uCullFloorDbm we skip the AP
@@ -1432,9 +1444,20 @@ float pathLossDbField(float d, float freqMhz) {
     + indoorLossPerM(freqMhz) * dEff;
 }
 
+// Relative sector taper (≤ 0 dB) — same helper as the per-AP shader; mirrors
+// sectorTaperDb in propagation.js.
+float sectorTaperDb(float absOffDeg, float halfBwDeg) {
+  if (absOffDeg <= halfBwDeg) return 0.0;
+  if (absOffDeg >= halfBwDeg + DIRECTIONAL_EDGE_DEG) return -DIRECTIONAL_BACK_DB;
+  return -DIRECTIONAL_BACK_DB * (absOffDeg - halfBwDeg) / DIRECTIONAL_EDGE_DEG;
+}
+
 // Per-AP gain at the fragment. apMode: 0 omni, 1 directional. azimuth/beamwidth
-// only consulted when mode=1; matches apGainDbi in propagation.js.
-float apGainAt(vec2 apPos, vec2 target, int mode, float gainDbi, float azDeg, float bwDeg) {
+// /tilt only consulted when mode=1; matches apGainDbi in propagation.js.
+// Phase 40: sector taper applies to the vertical offset (ray elevation −
+// tiltDeg) as well as the horizontal one.
+float apGainAt(vec2 apPos, float apZ, vec2 target, float targetZ, int mode,
+               float gainDbi, float azDeg, float bwDeg, float tiltDeg) {
   if (mode == 0) return gainDbi;
   vec2 dxy = target - apPos;
   if (abs(dxy.x) < 1e-9 && abs(dxy.y) < 1e-9) return gainDbi;
@@ -1442,11 +1465,10 @@ float apGainAt(vec2 apPos, vec2 target, int mode, float gainDbi, float azDeg, fl
   float off = rayDeg - azDeg;
   off = mod(off + 540.0, 360.0) - 180.0;
   float absOff = abs(off);
+  float elevDeg = atan(targetZ - apZ, length(dxy)) * 180.0 / PI;
+  float vertOff = abs(elevDeg - tiltDeg);
   float halfBw = bwDeg * 0.5;
-  if (absOff <= halfBw) return gainDbi;
-  if (absOff >= halfBw + DIRECTIONAL_EDGE_DEG) return gainDbi - DIRECTIONAL_BACK_DB;
-  float t = (absOff - halfBw) / DIRECTIONAL_EDGE_DEG;
-  return gainDbi - DIRECTIONAL_BACK_DB * t;
+  return gainDbi + sectorTaperDb(absOff, halfBw) + sectorTaperDb(vertOff, halfBw);
 }
 
 float dbToLin(float db) { return pow(10.0, db * 0.1); }
@@ -1511,9 +1533,10 @@ void main() {
     vec4 t0 = texelFetch(uAps, ivec2((base    ) % 4096, (base    ) / 4096), 0);
     vec4 t1 = texelFetch(uAps, ivec2((base + 1) % 4096, (base + 1) / 4096), 0);
     vec4 t2 = texelFetch(uAps, ivec2((base + 2) % 4096, (base + 2) / 4096), 0);
+    vec4 t3 = texelFetch(uAps, ivec2((base + 3) % 4096, (base + 3) / 4096), 0);
     vec3 apPos = t0.xyz; float txDbm = t0.w;
     float centerMHz = t1.x; float antGain = t1.z; int antMode = int(t1.w);
-    float azDeg = t2.x; float bwDeg = t2.y;
+    float azDeg = t2.x; float bwDeg = t2.y; float tiltDeg = t3.y;
 
     // Cull by free-space-only RSSI: txDbm + max possible gain - PL(d) < floor.
     vec2 dxy = rx - apPos.xy;
@@ -1525,7 +1548,7 @@ void main() {
     float fOver24 = (centerMHz / 1000.0) / 2.4;
     float wallLoss = accumulateWallLossField(apPos.xy, apPos.z, rx, rxZ, fOver24);
     float slabLoss = accumulateSlabLossField(apPos.xy, apPos.z, rx, rxZ);
-    float gain = apGainAt(apPos.xy, rx, antMode, antGain, azDeg, bwDeg);
+    float gain = apGainAt(apPos.xy, apPos.z, rx, rxZ, antMode, antGain, azDeg, bwDeg, tiltDeg);
     float pl = pathLossDbField(dDir, centerMHz) + wallLoss + slabLoss;
     float rxDb = txDbm + gain + uRxGainDbi - pl;
 
@@ -1534,7 +1557,6 @@ void main() {
       bestIdx = k;
       bestFreqLo = t2.z;
       bestFreqHi = t2.w;
-      vec4 t3 = texelFetch(uAps, ivec2((base + 3) % 4096, (base + 3) / 4096), 0);
       bestBand = t3.x;
     }
   }
@@ -1573,7 +1595,7 @@ void main() {
 
     vec3 apPos = t0.xyz; float txDbm = t0.w;
     float centerMHz = t1.x; float antGain = t1.z; int antMode = int(t1.w);
-    float azDeg = t2.x; float bwDeg = t2.y;
+    float azDeg = t2.x; float bwDeg = t2.y; float tiltDeg = t3.y;
 
     vec2 dxy = rx - apPos.xy;
     float dz = apPos.z - rxZ;
@@ -1584,7 +1606,7 @@ void main() {
     float fOver24 = (centerMHz / 1000.0) / 2.4;
     float wallLoss = accumulateWallLossField(apPos.xy, apPos.z, rx, rxZ, fOver24);
     float slabLoss = accumulateSlabLossField(apPos.xy, apPos.z, rx, rxZ);
-    float gain = apGainAt(apPos.xy, rx, antMode, antGain, azDeg, bwDeg);
+    float gain = apGainAt(apPos.xy, apPos.z, rx, rxZ, antMode, antGain, azDeg, bwDeg, tiltDeg);
     float pl = pathLossDbField(dDir, centerMHz) + wallLoss + slabLoss;
     float rxDb = txDbm + gain + uRxGainDbi - pl;
 
@@ -2207,8 +2229,9 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   //          (omni) to avoid producing garbage; the host fallback is
   //          authoritative.
   //   t2 = (azimuthDeg, beamwidthDeg, freqLoMHz, freqHiMHz)
-  //   t3 = (band, _, _, _)
+  //   t3 = (band, tiltDeg, _, _)
   //          band 1=2.4 GHz, 2=5 GHz, 3=6 GHz; cross-band APs never co-channel.
+  //          tiltDeg = boresight elevation (+up, Phase 40).
   function uploadAps(apList) {
     apCount = apList?.length ?? 0
     const totalTexels = Math.max(1, apCount * 4)
@@ -2237,6 +2260,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       const f = ap.frequency
       const band = f === 2.4 ? 1 : f === 5 ? 2 : f === 6 ? 3 : 0
       data[o + 12] = band
+      data[o + 13] = ap.tiltDeg ?? 0
     }
     gl.bindTexture(gl.TEXTURE_2D, apsTex)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, tw, th, 0, gl.RGBA, gl.FLOAT, data)
@@ -2712,6 +2736,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       ap.antennaMode === 'directional' ? 1 : (ap.antennaMode === 'custom' ? 2 : 0))
     gl.uniform1f(gl.getUniformLocation(prog, 'uAntAzimuthDeg'), ap.azimuthDeg ?? 0)
     gl.uniform1f(gl.getUniformLocation(prog, 'uAntBeamwidthDeg'), ap.beamwidthDeg ?? 60)
+    gl.uniform1f(gl.getUniformLocation(prog, 'uAntTiltDeg'), ap.tiltDeg ?? 0)
     gl.uniform1f(gl.getUniformLocation(prog, 'uRxGainDbi'), ap._rxGainDbi)
     gl.uniform1f(gl.getUniformLocation(prog, 'uRxZM'), rxZM)
 

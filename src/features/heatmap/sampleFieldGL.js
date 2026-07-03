@@ -209,7 +209,7 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
         ap.pos?.x ?? ap.x, ap.pos?.y ?? ap.y, ap.zM ?? 0,
         ap.txDbm, ap.centerMHz ?? '', ap.channelWidth ?? '',
         ap.antennaMode ?? 'omni', ap.azimuthDeg ?? 0, ap.beamwidthDeg ?? 0,
-        ap.patternId ?? '',
+        ap.tiltDeg ?? 0, ap.patternId ?? '',
         AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI,
       ].join('|')
       hash = apSig + '#' + geomSig
