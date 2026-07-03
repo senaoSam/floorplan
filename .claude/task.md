@@ -17,30 +17,13 @@
 **Phase 37 camera 右鍵選單 + 3D camera 三圖 + 3D 唯一光源光影 完成（2026-06-29 使用者驗收 ok，見下表）。**
 **Phase 38 熱圖綁定 FOV + 未放置裝置清單 + 3D 動線流線化 完成（2026-07-02 使用者驗收 ok，見下表）。**
 **Phase 39 UIUX 規範落地（`.claude/ui-spec.md` U1–U4 全部）完成（2026-07-02 使用者驗收 ok，見下表）。**
+**Phase 40 天線俯仰角 tilt（azimuth + tilt，no roll）完成（2026-07-03，commit e6f4ec1，見下表）。**
 **Phase 41 熱圖無感重算（粗場秒出 + 波紋過渡 + 非同步 readback）完成（2026-07-03 使用者驗收 ok，見下表）。**
-**下一個 phase：Phase 40 天線俯仰角（tilt），已規劃未開工（見下方）。**
+**下一個 phase：無——backlog 已清空，待與使用者確立新方向。**
 
 ---
 
 ## 還沒做的事
-
-### Phase 40 — 天線俯仰角 tilt（天線 3D 朝向）
-
-> 2026-07-02 與使用者確立：天線朝向對標 Ekahau/Hamina = **方位角 azimuth（0–360，水平）+ 俯仰角 tilt（-90~+90，垂直，預設 0）兩個自由度**。
-> 繞 boresight 的 roll 對輻射場型無意義，**不做**（不是 trackball 三軸）。
-> 現況：引擎 `propagation.js apGainDbi` 只取水平夾角查 pattern（垂直等於全向近似）；AP 資料無 tiltDeg；preview 上下拖曳僅為觀察視角。
-
-| # | 範圍 | 內容 |
-|---|------|------|
-| 40-1 | 資料 | AP 加 `tiltDeg`（-90~+90，預設 0）；directional / custom 適用 |
-| 40-2 | 引擎 | **JS（propagation.js）+ shader（propagationGL）兩邊同步**（架構規則：物理公式兩邊一致，見 memory `project_clientview_js_engine_role`）。gain = Gh(水平偏角) + Gv(垂直偏角 − tilt)；垂直偏角由 rx/AP 高度差 + 水平距離算（crossFloor 幾何現成，rxHeight 1.0m） |
-| 40-3 | UI | APPanel 加俯仰角欄位（與方位角並排）；PatternPreview3D 上下拖曳從「調觀察視角」改成「調 tilt」（觀察視角改配 modifier 鍵或按鈕）；放開才 commit（沿用 azimuth 拖曳規則） |
-| 40-4 | 3D | APLayer3D lobe / 定向 cone 跟著 tilt 俯仰 |
-
-**開工前必須先與使用者確認的規格**（不確認不動工）：
-1. 垂直 pattern 來源——custom 用同組水平樣本近似（與現行 3D lobe/preview 一致）？directional 用 beamwidth 同錐？omni 要不要 dipole 環（會改變 omni 現有結果）？
-2. `mountType`（ceiling/wall）與 tilt 預設值的互動（例如 wall-mount 預設 downtilt？）
-3. **語意變更警示**：現有所有熱圖 = tilt 0 + 垂直無衰減；40-2 上線後同場景結果會變，是否需要 legacy 對照開關
 
 ### Phase 25 效能家族（全部暫緩，防重做）
 
@@ -70,6 +53,7 @@
 
 | 38    | **熱圖綁定 FOV + 未放置裝置清單 + 3D 動線流線化**（2026-07-02 使用者驗收 ok）：① **占用/動線熱圖裁切到相機 FOV 覆蓋區**（Verkada §J3「熱圖只渲染在 FOV 內」）：共用 `fovRasterize.buildFovMaskGrid`（online-only、牆裁切、對齊各 grid 自己的 cols/rows/cellPx）；`computeOccupancyGrid`/`computeFlowGrid` 接 `maskFn`（caller 建遮罩、grid 內套用保證對齊）；streamline 積分在遮罩邊界截斷（bilinear 會漏過邊界 1-2 格）；`useCameraStore.clipHeatmapToFov` toggle「FOV 內」預設開（熱圖控制列，推移鈕右邊）；2D/3D 共用同一 maskFn 像素一致。② **未放置裝置清單**（Verkada Add Cameras）：`unplacedCameras` org-level pool（非 per-floor）+ `addUnplacedCamera`（進 pool 就取號，計數器連號）/`placeCamera`（放樓層中心）/`removeUnplacedCamera`；CameraListPanel 加搜尋框（同時過濾已放置+未放置）+「尚未放置」區段（琥珀虛線圈、＋放置鈕）；demo 種 2 台未放置。③ **3D 動線改流線平面**：`FlowArrows3D`（InstancedMesh 圓錐）→ `FlowPlane3D` — octant-bins commit `8c39e49` 後 flow.cells 變每 bin 一筆（一格最多 8 筆），圓錐版同點疊 8 支變糊（回歸）；新版用 2D 同一份 `computeFlowGrid(cellM 1.5)+computeStreamlines` 畫到 offscreen canvas（×2 supersample cap 2048）貼地面 plane（Y_FLOW 0.06），`useFrame` 30fps 重繪爬行動畫（frameloop 可見時 always）。④ **流線配色**（2D/3D 同步）：通道 cyan→**fuchsia 0xe879f9**（跳出 FOV 青綠/藍車色系）；箭頭=**黑色 stroked「>>」**（兩個相連 > 線條，非實心飛鏢），尺寸/線寬低於通道一階當方向記號。**中途撤回**：3D「主導 bin 圓錐」方案（仍是立體物、斜看變噪點，直接對齊 2D 流線） |
 
+| 40    | **天線俯仰角 tilt**（2026-07-03，commit e6f4ec1；azimuth + tilt 兩自由度，no roll）：① AP 加 `tiltDeg`（-90~+90，+為上仰，預設 0；directional/custom 適用，omni 不變）② **雙引擎同步**：propagation.js apGainDbi 垂直偏角 =（rx/AP 高度差 ÷ 水平距離的仰角）− tilt，gain = Gh + Gv；custom 的 Gv 用同組水平樣本近似、directional 兩平面同錐 taper；propagationGL per-AP uniform `uAntTiltDeg` + aggregated AP texture t3.y 打包 tilt，apGainAt 鏡射 JS 公式；sampleFieldGL grid cache 簽名含 tiltDeg ③ APPanel 俯仰角欄位與方位角並排；PatternPreview3D 上下拖曳改為調 tilt（放開才 commit，Shift+拖曳保留觀察視角）④ APLayer3D custom lobe 把 tilt 烘進幾何、directional cone 內層 group 旋轉俯仰；FormulaNote §7 補垂直增益公式。**當時未納入**：AP `mountType`（ceiling/wall）與 tilt 預設值互動、legacy（tilt 前語意）對照開關 |
 | 41    | **熱圖無感重算**（2026-07-03 使用者驗收 ok）：① **二段渲染**——idle 重算先粗場（≥1.0m、關 refl/diff → aggregated）秒級上畫，細場（使用者品質）背景算完無縫換底；drag solo/live 路徑不動 ② **Hamina 式波紋過渡**——新場**立即全尺寸上畫**（移動 AP：舊 blob 立刻消失、新等高線直接最終大小），疊加漂移 value-noise 擾動（`WOBBLE_AMP_DB 1.6`／`LAMBDA 2m`（使用者調校）／`DECAY 900ms`／hold cap 4s，旋鈕在 heatmapAdapter.js）至細場落地後收斂；**撤回**第一版舊場→新場 dBm 內插（舊 blob 內縮/新 blob 從中心長大，觀感錯誤）③ **41-5 非同步 readback**：PBO+fence（不再 sync readPixels stall）+ per-AP 分批送件 `SUBMIT_BATCH=4`（防 GPU command-buffer 反壓，300 AP 曾一個 13s task）+ aggregated 主 pass scissor 分帶 `ceil(apCount/24)`（拆 2.4s 不可搶佔 GPU atom）+ `sampleFieldGLAsync` mutex 序列化（2D/3D 共用 instance）+ generation counter 丟過期結果；3D HeatmapPlane3D 跟進 async ④ 41-6 CPU 聚合切片 ~5ms/塊 ⑤ fingerprint-skip（`lastIdleInputs`）回歸 idle 路徑 ⑥ **solo 放開交棒**：畫面完全不動直到粗場換底（撤回「快照拉回全亮」——舊位置閃回/新位置消失）⑦ isSoftwareRender 關動畫直接跳變。**驗證**：sync/async 引擎 4 field bitwise 一致；5 AP 移動 0 long task；300 AP 冷啟 13s→250ms，殘餘 ~1.9s 經關熱圖對照證實為 apsLayer/3D/routing 既有成本（效能家族範疇，扳機 >500AP）。Worker 方案確認不做，殘餘卡頓再重啟。**41-postfix（2026-07-03 使用者回報 300 AP 放開仍先卡再動畫）**：profiler 歸因出兩個非熱圖元兇 + 一個 41-5 回歸 bug——① `CableLayer3D` 每次 AP 變動全量重算 routes 且 pts3 全新 ref → ~2000 段 line geometry 重建（主因）→ `PolylineTube` 改**值比較 memo**（座標沒變不重建）② `APLayer3D` APMarker 無 memo → 300 marker 全重 render → `React.memo`（updateAP per-item immutable 保證 ref 穩定）③ **syncEpoch guard**：solo 拖曳的 sync 計算會大量淘汰 losCache/apGeoCache（deleteTexture），in-flight 的 3D async job（其 cancelled flag 不知 2D 在拖）batch 醒來 bind 已刪 texture（INVALID_OPERATION + 汙染 grid cache）→ sync `sampleFieldGL` 入口 bump epoch，所有 in-flight async 在下個 await 檢查點作廢。實測 300 AP 放開 max long task **2995ms → 258ms**、GL 警告 97→0；3D 反應性驗證無回歸（纜線重佈/熱圖更新正常） |
 | 39    | **UIUX 規範落地**（2026-07-02 驗收 ok，規範+實作狀態見 `.claude/ui-spec.md`）：① z-index token 化（8 階，`_variables.sass`，禁裸數字）② 四角 stack container（CanvasArea `__overlay--tl/--bl`，面板入堆疊不再寫死座標——A2/A3/A4/A5 消失）③ 右側避讓 `--right-dock` CSS 變數（PanelRight 開啟時 3D 面板/ClientPanel/ScaleBar 平移讓位——修 A1「3D 選物遮右上面板」）④ 全域 UiToast + 刪除策略統一（單刪即刪+undo toast、批次>1 ConfirmDialog，四個刪除入口全覆蓋）⑤ 模式切換一次性說明 toast（CAMERA/CLIENT_VIEW）+ 3D「唯讀」徽記 ⑥ 收合符號統一 SVG chevron、熱圖鈕固定標籤、✕ 關閉配對提示、hint 常駐（Toolbar z 提到 badge 之上蓋過）⑦ ALIGN Esc=完成、F2 改名實作、keyboard guard 補 SELECT/contentEditable（`utils/isTypingTarget`）、alert→toast、內部用語清除、樓層 grip ⠿、`.camera-list` 浮動死碼刪除 ⑧ **dev widget（Demo/Stress/Progress）移至 SidebarLeft 最下方**（使用者指示：不入畫布 overlay，正式版整塊移除）。發現免修：3D 選取 highlight 與切模式清 selection 本already存在。MCP 驗證 0 console errors，截圖 `.playwright-mcp/ui-01~06` |
 
