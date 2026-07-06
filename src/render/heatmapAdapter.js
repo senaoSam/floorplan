@@ -132,6 +132,12 @@ function wobbleInto(out, base, ampDb, tSec, lat, latN, nx, ny, stepM, originX, o
   }
 }
 
+// Stable ref for floors with no scopes. An inline `?? []` here minted a NEW
+// array every compute, so the idleInputs fingerprint never matched — any
+// unrelated store event (toolbar hover toggling toolbarMenuOpen on the editor
+// store) fired a full two-stage recompute plus a visible ripple pulse.
+const EMPTY_SCOPES = []
+
 // Shallow ===-compare of the idle-input snapshot. Store slices are replaced
 // on every mutation (zustand immutability), so reference equality is exact.
 function idleInputsEqual(a, b) {
@@ -429,8 +435,8 @@ export function attachHeatmapLayer({
     // sampleFieldGL apply per-sample. in-scopes restrict the visible
     // heatmap to their interior; out-scopes always exclude theirs.
     const scopes = useScopeStore
-      ? (useScopeStore.getState().scopesByFloor?.[activeFloorId] ?? [])
-      : []
+      ? (useScopeStore.getState().scopesByFloor?.[activeFloorId] ?? EMPTY_SCOPES)
+      : EMPTY_SCOPES
 
     // Cross-floor propagation (oldSrc HeatmapLayer.jsx 200-263 1:1):
     //   * APs from every floor land in apsByFloor[] with their floor's
