@@ -110,6 +110,108 @@
     &:hover
       color: $text-primary
 
+  // 規劃品質 section — dark-glass 家族的內嵌報表，配色對齊 CoveragePanel
+  &__quality
+    display: flex
+    flex-direction: column
+    gap: 7px
+
+  &__empty
+    color: $text-secondary
+    font-size: 11px
+    opacity: 0.75
+    margin: 2px 2px 0
+
+  &__hero
+    display: flex
+    align-items: baseline
+    gap: 6px
+
+  &__hero-num
+    font-size: 24px
+    font-weight: 800
+    line-height: 1
+    font-variant-numeric: tabular-nums
+    color: $text-primary
+    &--fail
+      color: #f59e0b
+
+  &__hero-label
+    font-size: 10px
+    color: $text-secondary
+
+  &__bar
+    position: relative
+    height: 7px
+    border-radius: 4px
+    background: rgba(239, 68, 68, 0.35)
+    overflow: hidden
+
+  &__bar-fill
+    height: 100%
+    background: #10b981
+    border-radius: 4px 0 0 4px
+    transition: width 0.2s ease
+    &--fail
+      background: #f59e0b
+
+  &__bar-target
+    position: absolute
+    top: -2px
+    bottom: -2px
+    width: 2px
+    background: rgba(255, 255, 255, 0.85)
+    transform: translateX(-1px)
+
+  &__verdict
+    display: flex
+    align-items: center
+    justify-content: space-between
+    font-size: 11px
+    font-weight: 600
+    &--pass
+      color: #10b981
+    &--fail
+      color: #f59e0b
+
+  &__target
+    display: inline-flex
+    align-items: center
+    gap: 4px
+    color: $text-secondary
+    font-weight: 400
+
+  &__rows
+    display: flex
+    flex-direction: column
+    gap: 3px
+
+  &__row
+    display: flex
+    align-items: center
+    justify-content: space-between
+    color: $text-secondary
+    font-size: 11px
+    b
+      color: $text-primary
+      font-variant-numeric: tabular-nums
+      font-weight: 600
+
+  &__val--warn
+    color: #f59e0b !important
+
+  &__gap
+    padding: 5px 10px
+    background: rgba(245, 158, 11, 0.12)
+    border: 1px solid rgba(245, 158, 11, 0.5)
+    border-radius: 8px
+    color: #f59e0b
+    font-size: 11px
+    font-weight: 600
+    cursor: pointer
+    &:hover
+      background: rgba(245, 158, 11, 0.22)
+
   &__toast
     margin-top: 8px
     padding: 6px 10px
