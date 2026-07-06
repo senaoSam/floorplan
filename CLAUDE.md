@@ -142,7 +142,6 @@ Default wall material: `MATERIALS.CONCRETE`.
 | `.claude/workflow.md` | 協作流程規範（commit、測試、回應語言） |
 | `.claude/task.md` | 任務進度追蹤 |
 | `.claude/spec.md` | 產品規格書 |
-| `.claude/youtube.md` | Hamina Network Planner 影片筆記 |
 | `.claude/playwright-mcp-notes.md` | Playwright MCP 操作本專案的踩坑筆記（Konva/Zustand/base path） |
 
 ---
