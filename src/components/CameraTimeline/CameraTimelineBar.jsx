@@ -40,6 +40,8 @@ function CameraTimelineBar() {
   const setOccupancyMode = useTrackingStore((s) => s.setOccupancyMode)
   const setOccupancyRange = useTrackingStore((s) => s.setOccupancyRange)
   const setOccupancyLapsePlaying = useTrackingStore((s) => s.setOccupancyLapsePlaying)
+  const resetOccupancyLapse = useTrackingStore((s) => s.resetOccupancyLapse)
+  const setOccupancyWindowStart = useTrackingStore((s) => s.setOccupancyWindowStart)
   const trackCount = useTrackingStore((s) => (s.tracksByFloor[activeFloorId] ?? []).length)
   const setClockSec = useTrackingStore((s) => s.setClockSec)
   const setPlaying = useTrackingStore((s) => s.setPlaying)
@@ -62,57 +64,64 @@ function CameraTimelineBar() {
 
   const toggleTool = (tool) => setDrawTool(drawTool === tool ? null : tool)
 
+  const heatmapOn = occupancyMode !== 'off'
+
   return (
     <div className="camera-timeline">
-      <div className="camera-timeline__row">
-        <button
-          type="button"
-          className="camera-timeline__play"
-          onClick={() => setPlaying(!playing)}
-          title={playing ? '暫停' : '播放'}
-        >
-          {playing ? '⏸' : '▶'}
-        </button>
+      {/* Live-motion playback row. Hidden while a heatmap is on: the heatmap has
+          its own time window (bottom scrubber) and the two clocks side-by-side
+          read as duplicates / falsely linked. */}
+      {!heatmapOn && (
+        <div className="camera-timeline__row">
+          <button
+            type="button"
+            className="camera-timeline__play"
+            onClick={() => setPlaying(!playing)}
+            title={playing ? '暫停' : '播放'}
+          >
+            {playing ? '⏸' : '▶'}
+          </button>
 
-        <span className="camera-timeline__clock">{formatClockSec(clockSec)}</span>
+          <span className="camera-timeline__clock">{formatClockSec(clockSec)}</span>
 
-        <input
-          type="range"
-          className="camera-timeline__scrubber"
-          min={DAY_START_SEC}
-          max={DAY_END_SEC}
-          step={10}
-          value={clockSec}
-          onChange={(e) => setClockSec(Number(e.target.value))}
-          aria-label="時間軸"
-        />
+          <input
+            type="range"
+            className="camera-timeline__scrubber"
+            min={DAY_START_SEC}
+            max={DAY_END_SEC}
+            step={10}
+            value={clockSec}
+            onChange={(e) => setClockSec(Number(e.target.value))}
+            aria-label="時間軸"
+          />
 
-        <span className="camera-timeline__range">
-          {formatClock(DAY_START_SEC)}–{formatClock(DAY_END_SEC)}
-        </span>
+          <span className="camera-timeline__range">
+            {formatClock(DAY_START_SEC)}–{formatClock(DAY_END_SEC)}
+          </span>
 
-        <div className="camera-timeline__speeds">
-          {SPEEDS.map((sp) => (
-            <button
-              key={sp}
-              type="button"
-              className={`camera-timeline__chip${speedX === sp ? ' camera-timeline__chip--active' : ''}`}
-              onClick={() => setSpeedX(sp)}
-            >
-              {sp}x
-            </button>
-          ))}
+          <div className="camera-timeline__speeds">
+            {SPEEDS.map((sp) => (
+              <button
+                key={sp}
+                type="button"
+                className={`camera-timeline__chip${speedX === sp ? ' camera-timeline__chip--active' : ''}`}
+                onClick={() => setSpeedX(sp)}
+              >
+                {sp}x
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            className="camera-timeline__regen"
+            onClick={regenerateActiveFloorTracks}
+            title={`重新產生一天的模擬人流（目前 ${trackCount} 條軌跡）`}
+          >
+            🎲 重新產生
+          </button>
         </div>
-
-        <button
-          type="button"
-          className="camera-timeline__regen"
-          onClick={regenerateActiveFloorTracks}
-          title={`重新產生一天的模擬人流（目前 ${trackCount} 條軌跡）`}
-        >
-          🎲 重新產生
-        </button>
-      </div>
+      )}
 
       <div className="camera-timeline__row">
         <label className="camera-timeline__ghosts" title="灰色 = 目前沒被任何 Camera 拍到的人車；取消勾選就只顯示鏡頭拍得到的目標">
@@ -146,6 +155,19 @@ function CameraTimelineBar() {
         >
           📋 清單
         </button>
+
+        {/* Regenerate lives on the playback row normally; when that row is
+            hidden (heatmap on) it moves here so mock data can still be reseeded. */}
+        {heatmapOn && (
+          <button
+            type="button"
+            className="camera-timeline__regen"
+            onClick={regenerateActiveFloorTracks}
+            title={`重新產生一天的模擬人流（目前 ${trackCount} 條軌跡）`}
+          >
+            🎲 重新產生
+          </button>
+        )}
 
         <span className="camera-timeline__divider" aria-hidden="true" />
 
@@ -220,6 +242,14 @@ function CameraTimelineBar() {
             </select>
             <button
               type="button"
+              className="camera-timeline__chip"
+              onClick={resetOccupancyLapse}
+              title="回到開頭：統計時段跳回一天最早，寬度不變"
+            >
+              ⏮
+            </button>
+            <button
+              type="button"
               className={`camera-timeline__chip${occupancyLapsePlaying ? ' camera-timeline__chip--active' : ''}`}
               onClick={() => {
                 // Starting the lapse with a full-day window shows no motion —
@@ -243,6 +273,31 @@ function CameraTimelineBar() {
               FOV 內
             </button>
           </span>
+        </div>
+      )}
+
+      {/* Timelapse scrubber: a clickable day-long track showing where the
+          stat window currently sits. Dragging it moves the window start
+          (width preserved) and hands control to the user, so we pause the
+          auto-lapse while scrubbing. */}
+      {occupancyMode !== 'off' && (
+        <div className="camera-timeline__row">
+          <span className="camera-timeline__lapse-clock">{formatClock(occupancyFromSec)}</span>
+          <input
+            type="range"
+            className="camera-timeline__scrubber"
+            min={DAY_START_SEC}
+            max={DAY_END_SEC - (occupancyToSec - occupancyFromSec)}
+            step={300}
+            value={occupancyFromSec}
+            onChange={(e) => {
+              if (occupancyLapsePlaying) setOccupancyLapsePlaying(false)
+              setOccupancyWindowStart(Number(e.target.value))
+            }}
+            aria-label="時間推移位置"
+            title="拖曳跳到一天中的任一時段（統計時段寬度不變）"
+          />
+          <span className="camera-timeline__lapse-clock">{formatClock(occupancyToSec)}</span>
         </div>
       )}
     </div>

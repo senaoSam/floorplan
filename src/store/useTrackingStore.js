@@ -83,7 +83,18 @@ export const useTrackingStore = create((set) => ({
   setSpeedX: (speedX) => set({ speedX }),
   toggleShowUndetected: () => set((s) => ({ showUndetected: !s.showUndetected })),
 
-  setOccupancyMode: (occupancyMode) => set({ occupancyMode }),
+  // Turning the heatmap on from 'off' while the window still spans the whole day
+  // narrows it to the first 2h, so the scrubber/timelapse is immediately usable
+  // (a full-day window leaves the scrubber with zero travel). Switching between
+  // heatmap modes, or a window the user already narrowed, is left untouched.
+  setOccupancyMode: (occupancyMode) => set((s) => {
+    const turningOn = s.occupancyMode === 'off' && occupancyMode !== 'off'
+    const fullDay = s.occupancyFromSec <= DAY_START_SEC && s.occupancyToSec >= DAY_END_SEC
+    if (turningOn && fullDay) {
+      return { occupancyMode, occupancyFromSec: DAY_START_SEC, occupancyToSec: DAY_START_SEC + 2 * 3600 }
+    }
+    return { occupancyMode }
+  }),
   setOccupancyRange: (occupancyFromSec, occupancyToSec) => set((s) => {
     const from = Math.max(DAY_START_SEC, Math.min(DAY_END_SEC, occupancyFromSec ?? s.occupancyFromSec))
     const to = Math.max(DAY_START_SEC, Math.min(DAY_END_SEC, occupancyToSec ?? s.occupancyToSec))
@@ -101,6 +112,19 @@ export const useTrackingStore = create((set) => ({
     const width = s.occupancyToSec - s.occupancyFromSec
     let from = s.occupancyFromSec + dtSec
     if (from + width >= DAY_END_SEC) from = DAY_START_SEC   // loop the day
+    return { occupancyFromSec: from, occupancyToSec: from + width }
+  }),
+  // Jump the window back to the start of the day, keeping its width (⏮). Mirrors
+  // the wrap in advanceOccupancyLapse but on demand; doesn't touch playing state.
+  resetOccupancyLapse: () => set((s) => {
+    const width = s.occupancyToSec - s.occupancyFromSec
+    return { occupancyFromSec: DAY_START_SEC, occupancyToSec: DAY_START_SEC + width }
+  }),
+  // Scrubber: move the window's start to `fromSec`, keeping its width, clamped
+  // so the trailing edge never passes DAY_END_SEC.
+  setOccupancyWindowStart: (fromSec) => set((s) => {
+    const width = s.occupancyToSec - s.occupancyFromSec
+    const from = Math.max(DAY_START_SEC, Math.min(DAY_END_SEC - width, fromSec))
     return { occupancyFromSec: from, occupancyToSec: from + width }
   }),
 }))
