@@ -6,7 +6,14 @@ $accent: #e94560
 $accent-hover: #c73652
 
 $text-primary: #eaeaea
-$text-secondary: #a0a0b0
+// Secondary body text. Brightened from #a0a0b0 → #b8bcc8 for readability on
+// the dark panels (the old value sat near the AA floor on the lighter
+// $bg-panel and half-transparent overlays).
+$text-secondary: #b8bcc8
+// Tertiary text — dimmer than secondary but still above the AA contrast floor.
+// Consolidates hard-coded slate/gray values (#94a3b8, #64748b, #888) that
+// previously bypassed the token system and rendered too faint on dark bg.
+$text-tertiary: #9aa3b5
 
 $border-color: rgba(255, 255, 255, 0.1)
 
