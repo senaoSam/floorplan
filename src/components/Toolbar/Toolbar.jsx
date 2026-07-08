@@ -18,10 +18,11 @@ import './Toolbar.sass'
 //     isn't dropped by a stray tool click. (The floor-switch path has its own
 //     guard in SidebarLeft; this covers the toolbar tool-switch path.)
 
-// 'surveillance' sits first (user ask) — camera mode is its own world apart
-// from the RF-planning tools; Toolbar renders a divider right after it.
-// `direct: true` → the group button IS the tool (one click switches mode,
-// no dropdown for a single choice).
+// 'surveillance' (camera) + 'statistics' (stats) sit first — both are their own
+// read-only "mode" worlds apart from the RF-planning tools, so they're grouped
+// as direct top-level buttons and Toolbar renders a divider right after the
+// pair (after 'statistics'). `direct: true` → the group button IS the tool
+// (one click switches mode, no dropdown for a single choice).
 const GROUPS = [
   {
     id: 'surveillance',
@@ -30,6 +31,15 @@ const GROUPS = [
     direct: true,
     items: [
       { mode: EDITOR_MODE.CAMERA,          icon: 'camera', label: 'Camera 模式（監視器規劃）' },
+    ],
+  },
+  {
+    id: 'statistics',
+    label: '統計（即時網路儀表板）',
+    representativeIcon: 'stats',
+    direct: true,
+    items: [
+      { mode: EDITOR_MODE.STATS,           icon: 'stats', label: '統計（即時網路儀表板）' },
     ],
   },
   {
@@ -224,7 +234,7 @@ function Toolbar() {
                   </button>
                 </Tooltip>
               </div>
-              {group.id === 'surveillance' && (
+              {group.id === 'statistics' && (
                 <span className="toolbar-floating__divider" aria-hidden="true" />
               )}
             </React.Fragment>

@@ -29,6 +29,7 @@ import { attachHeatmapLayer } from '@/render/heatmapAdapter'
 import { bindHeatmapHover } from '@/render/heatmapHoverBinder'
 import { bindClientView } from '@/features/clientView/clientViewBinder'
 import { attachClientViewLayer } from '@/features/clientView/clientViewLayer'
+import { attachStatsOverlayLayer } from '@/features/stats/statsOverlayLayer'
 import { attachDraftOverlay } from '@/features/draft/draftOverlayLayer'
 import { attachHandlesLayer } from '@/features/handles/handlesLayer'
 import { attachRefOverlayLayer } from '@/features/refOverlay/refOverlayLayer'
@@ -121,6 +122,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachHeatmapHover = null
     let detachClientView = null
     let detachClientViewLayer = null
+    let detachStatsOverlay = null
     let detachDraftOverlay = null
     let detachHandles = null
     let detachRefOverlay = null
@@ -448,6 +450,15 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useAPStore,
         useEditorStore,
       })
+      detachStatsOverlay = attachStatsOverlayLayer({
+        scene: s,
+        useFloorStore,
+        useAPStore,
+        useWallStore,
+        useScopeStore,
+        useCableStore,
+        useEditorStore,
+      })
       detachDraftOverlay = attachDraftOverlay({
         scene: s,
         useDraftStore,
@@ -761,6 +772,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (detachHandles) detachHandles()
       if (detachDraftOverlay) detachDraftOverlay()
       if (detachClientViewLayer) detachClientViewLayer()
+      if (detachStatsOverlay) detachStatsOverlay()
       if (detachClientView) detachClientView()
       if (detachHeatmapHover) detachHeatmapHover()
       if (detachFloorHoles) detachFloorHoles()

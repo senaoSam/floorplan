@@ -205,6 +205,17 @@ const CAMERA_CAP = {
   keepLayers: ['floorImage', 'walls'],
 }
 
+// STATS — live network statistics dashboard (Phase 43, B-domain). Read-only
+// like CLIENT_VIEW: no editing affordances. The floor image + APs + switches +
+// walls stay visible so the on-canvas aggregate shading (AP load glow) and the
+// dashboard's "click a row → locate on plan" have context; everything else dims.
+const STATS_CAP = {
+  ...emptyCap(),
+  cursor: 'default',
+  dimOthers: ['struct', 'cable'],
+  keepLayers: ['floorImage', 'devicesAP', 'devicesSW', 'walls'],
+}
+
 const CROP_IMAGE_CAP = {
   ...emptyCap(),
   cursor: 'crosshair',
@@ -237,6 +248,7 @@ const CAP_BY_MODE = {
   [EDITOR_MODE.ALIGN_FLOOR]:      ALIGN_FLOOR_CAP,
   [EDITOR_MODE.CLIENT_VIEW]:      CLIENT_VIEW_CAP,
   [EDITOR_MODE.CAMERA]:           CAMERA_CAP,
+  [EDITOR_MODE.STATS]:            STATS_CAP,
 }
 
 export function getModeCapability(mode) {

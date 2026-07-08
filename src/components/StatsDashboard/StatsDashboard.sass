@@ -1,0 +1,387 @@
+@use '@/styles/variables' as *
+
+// Live network statistics dashboard (Phase 43). Right-docked read-only panel;
+// dark-glass family (matches ClientPanel / CoveragePanel). STATS is a read-only
+// mode so PanelRight never opens over it, but we still honour --right-dock for
+// consistency with the avoidance convention.
+.stats-dash
+  position: absolute
+  top: 12px
+  right: calc(12px + var(--right-dock, 0px))
+  z-index: $z-canvas-overlay
+  transition: right 0.2s ease
+  width: 300px
+  max-height: calc(100vh - 24px)
+  overflow-y: auto
+  display: flex
+  flex-direction: column
+  gap: 10px
+  padding: 13px
+  background: rgba(15, 23, 42, 0.92)
+  border: 1px solid rgba(255, 255, 255, 0.15)
+  border-left: 3px solid #4fc3f7
+  border-radius: 10px
+  backdrop-filter: blur(6px)
+  color: $text-primary
+  font-size: 12px
+  pointer-events: auto
+  font-variant-numeric: tabular-nums
+
+  &__titlebar
+    display: flex
+    align-items: center
+    justify-content: space-between
+    gap: 8px
+
+  &__title
+    font-size: 13px
+    font-weight: 700
+    color: #4fc3f7
+
+  &__live
+    font-size: 11px
+    font-weight: 600
+    color: $text-secondary
+    font-variant-numeric: tabular-nums
+    &--on
+      color: #10b981
+
+  // ── timeline: trend chart + scrubber ──
+  &__timeline
+    padding-top: 8px
+
+  &__live-btn
+    background: rgba(79, 195, 247, 0.12)
+    border: 1px solid rgba(79, 195, 247, 0.4)
+    border-radius: 5px
+    color: #7dd3fc
+    font-size: 10px
+    padding: 2px 7px
+    cursor: pointer
+    &:hover
+      background: rgba(79, 195, 247, 0.22)
+
+  &__trend
+    display: flex
+    align-items: flex-end
+    gap: 2px
+    height: 46px
+
+  &__trend-col
+    flex: 1
+    height: 100%
+    display: flex
+    align-items: flex-end
+    cursor: pointer
+    &:hover .stats-dash__trend-bar
+      filter: brightness(1.3)
+    &--now .stats-dash__trend-bar
+      background: #fff
+
+  &__trend-track
+    width: 100%
+    height: 100%
+    display: flex
+    align-items: flex-end
+
+  &__trend-bar
+    width: 100%
+    min-height: 1px
+    background: #4fc3f7
+    border-radius: 2px 2px 0 0
+    transition: height 0.2s ease
+
+  &__scrubber
+    display: flex
+    align-items: center
+    gap: 7px
+
+  &__play
+    flex: none
+    width: 24px
+    height: 24px
+    display: flex
+    align-items: center
+    justify-content: center
+    background: rgba(255, 255, 255, 0.08)
+    border: 1px solid rgba(255, 255, 255, 0.15)
+    border-radius: 6px
+    color: $text-primary
+    font-size: 11px
+    cursor: pointer
+    &:hover
+      background: rgba(255, 255, 255, 0.16)
+
+  &__range
+    flex: 1
+    accent-color: #4fc3f7
+    cursor: pointer
+
+  &__speeds
+    display: flex
+    gap: 3px
+
+  &__speed
+    background: rgba(255, 255, 255, 0.06)
+    border: 1px solid rgba(255, 255, 255, 0.12)
+    border-radius: 5px
+    color: $text-secondary
+    font-size: 10px
+    padding: 2px 5px
+    cursor: pointer
+    &--active
+      background: #4fc3f7
+      border-color: #4fc3f7
+      color: #0b1220
+      font-weight: 700
+
+  &__empty
+    color: $text-secondary
+    opacity: 0.75
+
+  &__empty-row
+    color: $text-secondary
+    opacity: 0.7
+    font-size: 11px
+    padding: 3px 0
+
+  // ── KPI tiles ──
+  &__kpis
+    display: grid
+    grid-template-columns: 1fr 1fr
+    gap: 6px
+
+  &__kpi
+    display: flex
+    flex-direction: column
+    gap: 1px
+    padding: 7px 9px
+    background: rgba(255, 255, 255, 0.05)
+    border: 1px solid rgba(255, 255, 255, 0.1)
+    border-radius: 8px
+    &--ok
+      border-color: rgba(16, 185, 129, 0.4)
+    &--warn
+      border-color: rgba(245, 158, 11, 0.5)
+    &--crit
+      border-color: rgba(239, 68, 68, 0.55)
+
+  &__kpi-value
+    font-size: 20px
+    font-weight: 800
+    line-height: 1.1
+
+  &__kpi-label
+    font-size: 10px
+    color: $text-secondary
+
+  &__kpi-sub
+    font-size: 10px
+    color: $text-secondary
+    opacity: 0.7
+
+  // ── sections ──
+  &__section
+    display: flex
+    flex-direction: column
+    gap: 6px
+    padding-top: 8px
+    border-top: 1px solid rgba(255, 255, 255, 0.08)
+
+  &__section-title
+    font-size: 10px
+    font-weight: 600
+    color: $text-secondary
+    text-transform: uppercase
+    letter-spacing: 0.4px
+    margin: 0
+
+  // ── alerts ──
+  &__alerts
+    list-style: none
+    margin: 0
+    padding: 0
+    display: flex
+    flex-direction: column
+    gap: 3px
+
+  &__alert
+    display: flex
+    align-items: center
+    gap: 6px
+    padding: 5px 8px
+    border-radius: 6px
+    cursor: pointer
+    font-size: 11px
+    border: 1px solid transparent
+    &--critical
+      background: rgba(239, 68, 68, 0.14)
+      border-color: rgba(239, 68, 68, 0.4)
+      color: #fca5a5
+    &--warning
+      background: rgba(245, 158, 11, 0.12)
+      border-color: rgba(245, 158, 11, 0.38)
+      color: #fcd34d
+    &--info
+      background: rgba(79, 195, 247, 0.1)
+      color: #7dd3fc
+    &:hover
+      filter: brightness(1.15)
+
+  &__alert-icon
+    flex: none
+
+  &__alert-msg
+    flex: 1
+
+  // ── ranking rows ──
+  &__rank
+    list-style: none
+    margin: 0
+    padding: 0
+    display: flex
+    flex-direction: column
+    gap: 5px
+
+  &__rank-row
+    display: flex
+    align-items: center
+    gap: 7px
+    cursor: pointer
+    padding: 2px 0
+    &:hover
+      color: #fff
+
+  &__rank-name
+    flex: none
+    width: 58px
+    white-space: nowrap
+    overflow: hidden
+    text-overflow: ellipsis
+
+  &__rank-bar-track
+    flex: 1
+    height: 7px
+    border-radius: 4px
+    background: rgba(255, 255, 255, 0.08)
+    overflow: hidden
+
+  &__rank-bar
+    display: block
+    height: 100%
+    border-radius: 4px
+    transition: width 0.2s ease
+    &--crit
+      background: #ef4444 !important
+
+  &__rank-val
+    flex: none
+    min-width: 26px
+    text-align: right
+    font-weight: 700
+
+  &__val--crit
+    color: #f87171
+
+  // ── switch rows ──
+  &__sw-row
+    display: flex
+    flex-direction: column
+    gap: 3px
+    cursor: pointer
+    padding: 3px 0
+    &:hover
+      color: #fff
+
+  &__sw-head
+    display: flex
+    align-items: center
+    justify-content: space-between
+    gap: 8px
+
+  &__sw-meta
+    font-size: 10px
+    color: $text-secondary
+
+  &__sw-neighbors
+    opacity: 0.85
+
+  // ── band distribution stacked bar ──
+  &__stack
+    display: flex
+    height: 12px
+    border-radius: 4px
+    overflow: hidden
+    background: rgba(255, 255, 255, 0.06)
+    gap: 2px
+
+  &__stack-seg
+    height: 100%
+
+  &__legend
+    display: flex
+    flex-wrap: wrap
+    gap: 10px
+    font-size: 11px
+    color: $text-secondary
+
+  &__legend-item
+    display: inline-flex
+    align-items: center
+    gap: 4px
+
+  &__legend-dot
+    width: 9px
+    height: 9px
+    border-radius: 50%
+    flex: none
+
+  // ── client drill-down ──
+  &__search
+    width: 100%
+    padding: 5px 8px
+    background: rgba(255, 255, 255, 0.06)
+    border: 1px solid rgba(255, 255, 255, 0.12)
+    border-radius: 6px
+    color: $text-primary
+    font-size: 12px
+    &:focus
+      outline: none
+      border-color: #4fc3f7
+
+  &__clients
+    list-style: none
+    margin: 0
+    padding: 0
+    display: flex
+    flex-direction: column
+    gap: 3px
+
+  &__client-row
+    display: flex
+    flex-direction: column
+    gap: 1px
+    padding: 4px 6px
+    border-radius: 6px
+    cursor: pointer
+    background: rgba(255, 255, 255, 0.04)
+    &:hover
+      background: rgba(255, 255, 255, 0.09)
+
+  &__client-mac
+    font-weight: 600
+    font-size: 11px
+
+  &__client-meta
+    display: inline-flex
+    align-items: center
+    gap: 5px
+    font-size: 10px
+    color: $text-secondary
+
+  &__note
+    color: $text-secondary
+    font-size: 10px
+    opacity: 0.6
+    line-height: 1.3
+    margin: 0

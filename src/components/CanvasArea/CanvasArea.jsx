@@ -11,6 +11,7 @@ import RegulatorySelector from '@/components/RegulatorySelector/RegulatorySelect
 import DevicePlanningPanel from '@/components/DevicePlanningPanel/DevicePlanningPanel'
 import ClientPanelMount from '@/components/ClientPanel/ClientPanel'
 import ClientViewMenuMount from '@/components/ClientPanel/ClientViewMenu'
+import StatsDashboardMount from '@/components/StatsDashboard/StatsDashboard'
 import ScaleBarMount from '@/components/ScaleBar/ScaleBarMount'
 import CameraTimelineBar from '@/components/CameraTimeline/CameraTimelineBar'
 import TrendPanel from '@/components/CameraTimeline/TrendPanel'
@@ -58,6 +59,7 @@ function CanvasArea() {
       </div>
       <ClientPanelMount />
       <ClientViewMenuMount />
+      <StatsDashboardMount />
       <CameraTimelineBar />
       <LiveViewModal />
       <CalibrationModal />

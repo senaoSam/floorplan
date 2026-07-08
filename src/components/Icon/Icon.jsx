@@ -203,6 +203,17 @@ const ICONS = {
     </>
   ),
 
+  // Stats — a three-bar bar chart on a baseline, reading as "live network
+  // statistics / dashboard".
+  stats: (
+    <>
+      <line x1="4" y1="20" x2="20" y2="20" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <rect x="5.5" y="12" width="3.5" height="7" rx="0.6" fill="currentColor" />
+      <rect x="10.5" y="7" width="3.5" height="12" rx="0.6" fill="currentColor" />
+      <rect x="15.5" y="14" width="3.5" height="5" rx="0.6" fill="currentColor" />
+    </>
+  ),
+
   // Camera — video camera body with a lens cone pointing right
   camera: (
     <>

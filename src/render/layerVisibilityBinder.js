@@ -32,14 +32,16 @@ export function bindLayerVisibility({ scene, useEditorStore }) {
   const apply = () => {
     const s = useEditorStore.getState()
     const inCamera = s.editorMode === EDITOR_MODE.CAMERA
+    const inStats = s.editorMode === EDITOR_MODE.STATS
     for (const [key, layerKey] of MAP) {
       const layer = scene.layers[layerKey]
       if (layer) layer.visible = !!s[key] && !(inCamera && CAMERA_HIDDEN.has(layerKey))
     }
     // heatmap has no LayerToggle entry (heatmapAdapter manages its sprite via
-    // the heatmap store) — but CAMERA mode must blank it too, so gate the
-    // whole container here.
-    if (scene.layers.heatmap) scene.layers.heatmap.visible = !inCamera
+    // the heatmap store) — but CAMERA and STATS modes must blank it: CAMERA is
+    // walls-only, and STATS draws its own AP-load glow that reads clearer
+    // without the RSSI field underneath. Gate the whole container here.
+    if (scene.layers.heatmap) scene.layers.heatmap.visible = !inCamera && !inStats
   }
   const unsubscribe = useEditorStore.subscribe(apply)
   apply()

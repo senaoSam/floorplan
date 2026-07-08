@@ -19,6 +19,7 @@ export const EDITOR_MODE = {
   PLACE_RISER: 'place_riser',
   CLIENT_VIEW: 'client_view',
   CAMERA: 'camera',
+  STATS: 'stats',
 }
 
 export const VIEW_MODE = {

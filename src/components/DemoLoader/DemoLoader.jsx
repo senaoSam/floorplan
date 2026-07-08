@@ -38,6 +38,8 @@ const DEMO_TRAY_PTS_NORM = [
 ]
 const DEMO_TRAY_MAGNET_PX = 150
 const DEMO_SWITCH_NORM = { x: 300 / 685, y: 320 / 511 }
+// Second switch (idf) so the stats topology view has more than one uplink.
+const DEMO_IDF_NORM = { x: 560 / 685, y: 320 / 511 }
 
 // Camera seed (Phase 34): four cameras, one per floor corner, each aimed at
 // the floor centre (azimuth computed from its own corner). Inset keeps the
@@ -89,6 +91,9 @@ function buildDemoAPs(canvasWidth, canvasHeight, regulatoryDomain) {
     mountType: 'ceiling',
     modelId: DEFAULT_AP_MODEL_ID,
     color: '#4fc3f7',
+    // Demo: pin AP-03 offline so the stats view always shows an offline unit
+    // (grey 離線 badge + ring + an alert). Real cloud status overrides this.
+    ...(i === 2 ? { mockStatus: 'offline' } : {}),
   }))
   const assignments = greedyChannelAssign(aps, regulatoryDomain)
   return aps.map((ap) => {
@@ -150,19 +155,36 @@ function DemoLoader() {
         magnetDistance: DEMO_TRAY_MAGNET_PX,
         ...DEFAULT_TRAY,
       })
-      setSwitches(floor.id, [{
-        id: generateId('sw'),
-        name: nextSwitchName('switch'),
-        x: DEMO_SWITCH_NORM.x * W,
-        y: DEMO_SWITCH_NORM.y * H,
-        kind: 'switch',
-        mountHeight: 0.5,
-        model: 'POE-24-port',
-        portCount: 24,
-        poeBudget: 370,
-        uplinkTo: null,
-        cableType: 'auto',
-      }])
+      const accessSwId = generateId('sw')
+      const idfSwId = generateId('sw')
+      setSwitches(floor.id, [
+        {
+          id: accessSwId,
+          name: nextSwitchName('switch'),
+          x: DEMO_SWITCH_NORM.x * W,
+          y: DEMO_SWITCH_NORM.y * H,
+          kind: 'switch',
+          mountHeight: 0.5,
+          model: 'POE-24-port',
+          portCount: 24,
+          poeBudget: 370,
+          uplinkTo: idfSwId,
+          cableType: 'auto',
+        },
+        {
+          id: idfSwId,
+          name: nextSwitchName('idf'),
+          x: DEMO_IDF_NORM.x * W,
+          y: DEMO_IDF_NORM.y * H,
+          kind: 'idf',
+          mountHeight: 0.5,
+          model: 'Catalyst 9300-48S',
+          portCount: 48,
+          poeBudget: 740,
+          uplinkTo: null,
+          cableType: 'fiber',
+        },
+      ])
 
       // Camera-mode seed — one camera per corner, aimed at the centre.
       // addCamera (not setCameras) so the global CAM-XX counter advances and
