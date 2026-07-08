@@ -12,8 +12,10 @@
   // Above the mode badge so an open tool dropdown covers it (hint is
   // always-rendered now); badge itself sits at $z-canvas-overlay.
   z-index: $z-badge
+  // Two stacked rows: primary-mode switcher on top, active-mode tools below.
   display: flex
-  align-items: center
+  flex-direction: column
+  align-items: stretch
   gap: 4px
   padding: 4px 6px
   background: rgba(15, 23, 42, 0.92)
@@ -22,6 +24,25 @@
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4)
   user-select: none
   white-space: nowrap
+
+  // Each row lays its buttons out horizontally (the old single-row layout).
+  &__row
+    display: flex
+    align-items: center
+    gap: 4px
+
+  // Primary-mode switcher (AP / Camera / Stats) on the left, Undo/Redo pinned
+  // to the right via a flex spacer. Sits above a hairline separator from the
+  // tools row so the two tiers read as distinct.
+  &__row--primary
+    padding-bottom: 4px
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1)
+
+    // When the tools row below is empty (Camera / Stats), drop the separator
+    // so the toolbar doesn't show a dangling underline over blank space.
+    &.toolbar-floating__row--no-tools
+      padding-bottom: 0
+      border-bottom: none
 
   &__group
     position: relative
@@ -33,14 +54,37 @@
     flex: 1 1 auto
     min-width: 12px
 
-  // Thin vertical rule between the surveillance group (leftmost) and the
-  // RF-planning tools — camera mode is a different world, keep it visually
-  // apart.
+  // Thin vertical rule inside the primary row, setting Stats (an entry usable
+  // from either working world) apart from the AP / Camera working modes.
   &__divider
     width: 1px
     align-self: stretch
     margin: 3px 4px
     background: rgba(255, 255, 255, 0.15)
+
+  // Primary-mode buttons read as pills — larger hit area, active one filled
+  // in the accent colour so the current world is unmistakable.
+  &__primary-btn
+    display: inline-flex
+    align-items: center
+    justify-content: center
+    width: 34px
+    height: 30px
+    padding: 0
+    border: none
+    border-radius: 6px
+    background: rgba(255, 255, 255, 0.05)
+    color: $text-primary
+    cursor: pointer
+    transition: background 0.12s, color 0.12s
+
+    &:hover:not(&--active)
+      background: rgba(255, 255, 255, 0.12)
+      color: $text-primary
+
+    &--active
+      background: rgba($accent, 0.9)
+      color: #fff
 
   &__btn
     display: inline-flex

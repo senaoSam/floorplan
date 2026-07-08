@@ -27,6 +27,39 @@ export const VIEW_MODE = {
   THREE_D: '3d',
 }
 
+// Top-level "worlds" the toolbar switches between. Every editorMode belongs to
+// exactly one PRIMARY_MODE. AP planning owns the full RF-planning tool family
+// (plus the hidden-entry modes CROP_IMAGE / ALIGN_FLOOR reached from panels);
+// CAMERA and STATS are read-only worlds of their own. The toolbar renders a
+// persistent primary-mode switcher (AP / Camera / Stats) and, below it, only
+// the tools that belong to the active primary mode.
+export const PRIMARY_MODE = {
+  AP: 'ap',
+  CAMERA: 'camera',
+  STATS: 'stats',
+}
+
+// The editorMode each primary mode lands on when you switch INTO it. AP falls
+// back to SELECT unless a remembered AP-family mode is restored (see
+// setPrimaryMode). Camera / Stats are single-mode worlds.
+const PRIMARY_DEFAULT_MODE = {
+  [PRIMARY_MODE.AP]: EDITOR_MODE.SELECT,
+  [PRIMARY_MODE.CAMERA]: EDITOR_MODE.CAMERA,
+  [PRIMARY_MODE.STATS]: EDITOR_MODE.STATS,
+}
+
+// editorMode → owning primary mode. Anything not listed (SELECT, PAN, all the
+// draw / place modes, plus CROP_IMAGE / ALIGN_FLOOR / CLIENT_VIEW) belongs to
+// AP planning by default via getPrimaryMode's fallback.
+const PRIMARY_BY_MODE = {
+  [EDITOR_MODE.CAMERA]: PRIMARY_MODE.CAMERA,
+  [EDITOR_MODE.STATS]: PRIMARY_MODE.STATS,
+}
+
+export function getPrimaryMode(editorMode) {
+  return PRIMARY_BY_MODE[editorMode] ?? PRIMARY_MODE.AP
+}
+
 export const useEditorStore = create((set, get) => ({
   editorMode: EDITOR_MODE.SELECT,
   viewMode: VIEW_MODE.TWO_D,
@@ -81,12 +114,27 @@ export const useEditorStore = create((set, get) => ({
   alignRefFloors: null,
   alignRefOpacity: 0.3,
 
+  // Remembers the last AP-planning editorMode so switching Camera/Stats → AP
+  // restores the tool the user was on, rather than always snapping to SELECT.
+  lastApMode: EDITOR_MODE.SELECT,
+
   setEditorMode: (mode) => set({
     editorMode: mode,
+    // Stash AP-family modes so we can return to them from Camera/Stats.
+    lastApMode: getPrimaryMode(mode) === PRIMARY_MODE.AP ? mode : get().lastApMode,
     selectedId: null,
     selectedType: null,
     selectedItems: [],
   }),
+
+  // Toolbar primary-mode switcher. Switching to AP restores the remembered
+  // AP-family mode; Camera / Stats land on their single canonical mode.
+  setPrimaryMode: (primary) => {
+    const target = primary === PRIMARY_MODE.AP
+      ? get().lastApMode
+      : PRIMARY_DEFAULT_MODE[primary]
+    get().setEditorMode(target)
+  },
   setViewMode: (mode) => set({ viewMode: mode }),
   setSelected: (id, type) => {
     if (typeof window !== 'undefined' && window.__debugWallSelect) {

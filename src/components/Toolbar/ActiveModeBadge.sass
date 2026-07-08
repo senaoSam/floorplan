@@ -2,7 +2,9 @@
 
 .active-mode-badge
   position: absolute
-  top: 60px
+  // Sits just below the now two-tier floating toolbar (primary switcher +
+  // tools row); the old 60px assumed the single-row toolbar height.
+  top: 96px
   left: 50%
   transform: translateX(-50%)
   z-index: $z-canvas-overlay

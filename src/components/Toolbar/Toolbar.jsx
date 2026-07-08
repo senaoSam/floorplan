@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE, PRIMARY_MODE, getPrimaryMode } from '@/store/useEditorStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import Icon from '@/components/Icon/Icon'
@@ -18,32 +18,24 @@ import './Toolbar.sass'
 //     isn't dropped by a stray tool click. (The floor-switch path has its own
 //     guard in SidebarLeft; this covers the toolbar tool-switch path.)
 
-// 'surveillance' (camera) + 'statistics' (stats) sit first — both are their own
-// read-only "mode" worlds apart from the RF-planning tools, so they're grouped
-// as direct top-level buttons and Toolbar renders a divider right after the
-// pair (after 'statistics'). `direct: true` → the group button IS the tool
-// (one click switches mode, no dropdown for a single choice).
+// Top row: the persistent primary-mode switcher. AP planning / Camera / Stats
+// are three mutually-exclusive "worlds"; clicking one switches into it (Stats
+// and Camera are single canonical modes, AP restores the last AP-family tool).
+// Stats sits after a divider — it's an entry usable from either working world.
+const PRIMARY_BUTTONS = [
+  { primary: PRIMARY_MODE.AP,     icon: 'ap',     label: 'AP 規劃（無線 / 布線 / 結構）' },
+  { primary: PRIMARY_MODE.CAMERA, icon: 'camera', label: 'Camera 模式（監視器規劃）' },
+  { primary: PRIMARY_MODE.STATS,  icon: 'stats',  label: '統計（即時網路儀表板）', dividerBefore: true },
+]
+
+// Bottom row: per-primary tool groups. Only the groups whose `primary` matches
+// the active primary mode are rendered — so entering Camera / Stats hides the
+// entire AP-planning tool family (walls / AP / cabling / measure), which is
+// exactly the point: those tools do nothing in those read-only worlds.
 const GROUPS = [
   {
-    id: 'surveillance',
-    label: 'Camera 模式（監視器規劃）',
-    representativeIcon: 'camera',
-    direct: true,
-    items: [
-      { mode: EDITOR_MODE.CAMERA,          icon: 'camera', label: 'Camera 模式（監視器規劃）' },
-    ],
-  },
-  {
-    id: 'statistics',
-    label: '統計（即時網路儀表板）',
-    representativeIcon: 'stats',
-    direct: true,
-    items: [
-      { mode: EDITOR_MODE.STATS,           icon: 'stats', label: '統計（即時網路儀表板）' },
-    ],
-  },
-  {
     id: 'pointer',
+    primary: PRIMARY_MODE.AP,
     label: '指標',
     representativeIcon: 'select',
     items: [
@@ -54,6 +46,7 @@ const GROUPS = [
   },
   {
     id: 'structure',
+    primary: PRIMARY_MODE.AP,
     label: '牆 / 結構',
     representativeIcon: 'wall',
     items: [
@@ -66,6 +59,7 @@ const GROUPS = [
   },
   {
     id: 'wireless',
+    primary: PRIMARY_MODE.AP,
     label: '無線 AP',
     representativeIcon: 'ap',
     items: [
@@ -77,6 +71,7 @@ const GROUPS = [
   },
   {
     id: 'experience',
+    primary: PRIMARY_MODE.AP,
     label: '體驗',
     representativeIcon: 'client',
     items: [
@@ -85,6 +80,7 @@ const GROUPS = [
   },
   {
     id: 'cable',
+    primary: PRIMARY_MODE.AP,
     label: '網路布線',
     representativeIcon: 'switch',
     items: [
@@ -98,6 +94,7 @@ const GROUPS = [
   },
   {
     id: 'measure',
+    primary: PRIMARY_MODE.AP,
     label: '量測',
     representativeIcon: 'scale',
     items: [
@@ -128,6 +125,7 @@ function Toolbar() {
   const placeSwitchKind = useEditorStore((s) => s.placeSwitchKind)
   const setPlaceApBand = useEditorStore((s) => s.setPlaceApBand)
   const setPlaceSwitchKind = useEditorStore((s) => s.setPlaceSwitchKind)
+  const setPrimaryMode = useEditorStore((s) => s.setPrimaryMode)
   const setToolbarMenuOpen = useEditorStore((s) => s.setToolbarMenuOpen)
   const undoLen = useHistoryStore((s) => s.undoStack.length)
   const redoLen = useHistoryStore((s) => s.redoStack.length)
@@ -144,6 +142,8 @@ function Toolbar() {
   const closeTimerRef = useRef(null)
 
   const isAlignMode = editorMode === EDITOR_MODE.ALIGN_FLOOR
+  const activePrimary = getPrimaryMode(editorMode)
+  const visibleGroups = GROUPS.filter((g) => g.primary === activePrimary)
 
   const cancelClose = () => {
     if (closeTimerRef.current) {
@@ -200,6 +200,24 @@ function Toolbar() {
     closeImmediate()
   }
 
+  // Primary-mode switch (top row). Reuses the ALIGN_FLOOR confirm guard: while
+  // aligning a floor, jumping to another world would silently drop align mode,
+  // so stash the intended editorMode and prompt first. We resolve the primary
+  // to its landing editorMode here so the confirm's setEditorMode(m) lands the
+  // user in the right world.
+  const handlePrimaryClick = (primary) => {
+    if (primary === activePrimary) return
+    closeImmediate()
+    if (isAlignMode) {
+      const target = primary === PRIMARY_MODE.AP
+        ? useEditorStore.getState().lastApMode
+        : primary === PRIMARY_MODE.CAMERA ? EDITOR_MODE.CAMERA : EDITOR_MODE.STATS
+      setPendingMode(target)
+      return
+    }
+    setPrimaryMode(primary)
+  }
+
   const triggerIcon = (group) => {
     const active = group.items.find((it) =>
       isItemActive(it, editorMode, placeApBand, placeSwitchKind),
@@ -210,114 +228,132 @@ function Toolbar() {
   const groupHasActive = (group) =>
     group.items.some((it) => isItemActive(it, editorMode, placeApBand, placeSwitchKind))
 
+  // Camera / Stats are read-only worlds: their tools row has no RF-planning
+  // groups (those are AP-only). We still surface the shared Undo/Redo keys in
+  // every mode so the row isn't blank and history stays reachable.
   return (
     <div className="toolbar-floating" role="toolbar" aria-label="編輯工具">
-      {GROUPS.map((group) => {
-        const isOpen = openGroupId === group.id
-        const active = groupHasActive(group)
-        // direct groups: one click = switch tool, no dropdown
-        if (group.direct) {
+      {/* Top row — persistent primary-mode switcher (AP / Camera / Stats) */}
+      <div
+        className={
+          'toolbar-floating__row toolbar-floating__row--primary' +
+          (visibleGroups.length === 0 ? ' toolbar-floating__row--no-tools' : '')
+        }
+        role="tablist"
+        aria-label="模式"
+      >
+        {PRIMARY_BUTTONS.map((pb) => {
+          const active = activePrimary === pb.primary
           return (
-            <React.Fragment key={group.id}>
-              <div className="toolbar-floating__group">
-                <Tooltip label={group.label}>
-                  <button
-                    type="button"
-                    className={
-                      'toolbar-floating__btn' +
-                      (active ? ' toolbar-floating__btn--active' : '')
-                    }
-                    aria-label={group.label}
-                    onClick={() => handleItemClick(group.items[0])}
-                  >
-                    <Icon name={group.representativeIcon} size={18} />
-                  </button>
-                </Tooltip>
-              </div>
-              {group.id === 'statistics' && (
+            <React.Fragment key={pb.primary}>
+              {pb.dividerBefore && (
                 <span className="toolbar-floating__divider" aria-hidden="true" />
               )}
+              <Tooltip label={pb.label}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  className={
+                    'toolbar-floating__primary-btn' +
+                    (active ? ' toolbar-floating__primary-btn--active' : '')
+                  }
+                  aria-label={pb.label}
+                  onClick={() => handlePrimaryClick(pb.primary)}
+                >
+                  <Icon name={pb.icon} size={18} />
+                </button>
+              </Tooltip>
             </React.Fragment>
           )
-        }
-        return (
-          <React.Fragment key={group.id}>
-          <div
-            className="toolbar-floating__group"
-            onMouseEnter={() => openGroup(group.id)}
-            onMouseLeave={scheduleClose}
-          >
-            <Tooltip label={group.label}>
-              <button
-                type="button"
-                className={
-                  'toolbar-floating__btn' +
-                  (active ? ' toolbar-floating__btn--active' : '')
-                }
-                aria-label={group.label}
-                aria-haspopup="menu"
-                aria-expanded={isOpen}
-                onClick={() => openGroup(group.id)}
-              >
-                <Icon name={triggerIcon(group)} size={18} />
-              </button>
-            </Tooltip>
+        })}
 
-            {isOpen && (
-              <div className="toolbar-floating__menu" role="menu">
-                {group.items.map((it, idx) => {
-                  const key = `${it.mode ?? it.action}-${it.band ?? it.switchKind ?? idx}`
-                  const itemActive = isItemActive(it, editorMode, placeApBand, placeSwitchKind)
-                  const { enabled } = it.action
-                    ? resolveAction(it.action)
-                    : { enabled: true }
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      role="menuitem"
-                      className={
-                        'toolbar-floating__menu-item' +
-                        (itemActive ? ' toolbar-floating__menu-item--active' : '')
-                      }
-                      disabled={!enabled}
-                      onClick={() => handleItemClick(it)}
-                    >
-                      <Icon name={it.icon} size={16} />
-                      <span className="toolbar-floating__menu-label">{it.label}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-          {group.id === 'surveillance' && (
-            <span className="toolbar-floating__divider" aria-hidden="true" />
-          )}
-          </React.Fragment>
-        )
-      })}
+        {/* Undo / Redo — pinned to the far right of the primary row so they
+            stay put in every mode instead of drifting with the tools below. */}
+        <span className="toolbar-floating__spacer" aria-hidden="true" />
+        <div className="toolbar-floating__group toolbar-floating__group--edit">
+          {EDIT_ACTIONS.map((it) => {
+            const { enabled, onClick } = resolveAction(it.action)
+            return (
+              <Tooltip key={it.action} label={it.label}>
+                <button
+                  type="button"
+                  className="toolbar-floating__btn"
+                  onClick={onClick}
+                  disabled={!enabled}
+                  aria-label={it.label}
+                >
+                  <Icon name={it.icon} size={18} />
+                </button>
+              </Tooltip>
+            )
+          })}
+        </div>
+      </div>
 
-      <span className="toolbar-floating__spacer" aria-hidden="true" />
-
-      <div className="toolbar-floating__group toolbar-floating__group--edit">
-        {EDIT_ACTIONS.map((it) => {
-          const { enabled, onClick } = resolveAction(it.action)
+      {/* Bottom row — tools for the active primary mode only. Camera / Stats
+          have no planning tools, so the row (and its separator) is omitted. */}
+      {visibleGroups.length > 0 && (
+      <div className="toolbar-floating__row toolbar-floating__row--tools">
+        {visibleGroups.map((group) => {
+          const isOpen = openGroupId === group.id
+          const active = groupHasActive(group)
           return (
-            <Tooltip key={it.action} label={it.label}>
-              <button
-                type="button"
-                className="toolbar-floating__btn"
-                onClick={onClick}
-                disabled={!enabled}
-                aria-label={it.label}
-              >
-                <Icon name={it.icon} size={18} />
-              </button>
-            </Tooltip>
+            <div
+              key={group.id}
+              className="toolbar-floating__group"
+              onMouseEnter={() => openGroup(group.id)}
+              onMouseLeave={scheduleClose}
+            >
+              <Tooltip label={group.label}>
+                <button
+                  type="button"
+                  className={
+                    'toolbar-floating__btn' +
+                    (active ? ' toolbar-floating__btn--active' : '')
+                  }
+                  aria-label={group.label}
+                  aria-haspopup="menu"
+                  aria-expanded={isOpen}
+                  onClick={() => openGroup(group.id)}
+                >
+                  <Icon name={triggerIcon(group)} size={18} />
+                </button>
+              </Tooltip>
+
+              {isOpen && (
+                <div className="toolbar-floating__menu" role="menu">
+                  {group.items.map((it, idx) => {
+                    const key = `${it.mode ?? it.action}-${it.band ?? it.switchKind ?? idx}`
+                    const itemActive = isItemActive(it, editorMode, placeApBand, placeSwitchKind)
+                    const { enabled } = it.action
+                      ? resolveAction(it.action)
+                      : { enabled: true }
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        role="menuitem"
+                        className={
+                          'toolbar-floating__menu-item' +
+                          (itemActive ? ' toolbar-floating__menu-item--active' : '')
+                        }
+                        disabled={!enabled}
+                        onClick={() => handleItemClick(it)}
+                      >
+                        <Icon name={it.icon} size={16} />
+                        <span className="toolbar-floating__menu-label">{it.label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           )
         })}
       </div>
+      )}
+
       <AIWallsModal open={aiOpen} onClose={() => setAiOpen(false)} />
 
       {pendingMode && (
