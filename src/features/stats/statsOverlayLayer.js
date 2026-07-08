@@ -98,7 +98,9 @@ export function attachStatsOverlayLayer({
         snapById.set(a.apId, { count: a.clientCount, band: a.band, online: a.status === 'online' })
       }
     }
-    cache = { snapById, floorId: fid }
+    // Keep the client list too — the plan-vs-measured gap overlay needs each
+    // client's position + theoretical/measured RSSI.
+    cache = { snapById, clients: snap?.client?.list ?? [], floorId: fid }
   }
 
   const apPosById = (id) => {
@@ -161,6 +163,27 @@ export function attachStatsOverlayLayer({
     // Hide pool entries for APs not drawn this frame (offline / removed).
     for (const [apId, t] of textPool) if (!seen.has(apId)) t.visible = false
 
+    // Plan-vs-measured gap overlay: mark clients the plan says are covered
+    // (theoretical ≥ threshold) but that actually measure below it — the
+    // "promised signal, real dead spot" cases. Red diamond at each such point.
+    const timeSt = useStatsTimeStore.getState()
+    if (timeSt.showGapOverlay) {
+      const thr = timeSt.gapThresholdDbm ?? -67
+      for (const c of cache.clients) {
+        if (c.theoreticalRssiDbm == null) continue
+        if (c.theoreticalRssiDbm >= thr && c.rssiDbm < thr) {
+          // Red diamond marking a plan-vs-measured gap. Gap points often sit
+          // near AP markers/badges, so draw a bold white-outlined diamond big
+          // enough to stand out over them (white outer diamond → red fill).
+          const r = 11 * s
+          const diamond = (rr) => [c.x, c.y - rr, c.x + rr, c.y, c.x, c.y + rr, c.x - rr, c.y]
+          g.poly(diamond(r + 2.5 * s)).fill({ color: 0xffffff, alpha: 0.95 })  // white halo
+          g.poly(diamond(r)).fill({ color: 0xef4444, alpha: 1 })               // red core
+          g.poly(diamond(r)).stroke({ width: 1 * s, color: 0x7f1d1d, alpha: 0.9 })
+        }
+      }
+    }
+
     // Hover pulse ring on the AP whose dashboard row is hovered — a ring reads
     // as "this one", distinct from the pill.
     if (hover.type === 'ap' && hover.id) {
@@ -170,6 +193,12 @@ export function attachStatsOverlayLayer({
         g.circle(ap.x, ap.y, 22 * s).stroke({ width: 1.5 * s, color: 0x4fc3f7, alpha: 1 })
       }
     }
+
+    // This PIXI app renders on-demand (ticker stopped) — updating Graphics
+    // geometry isn't enough, we must request a frame. Without this, a pure-UI
+    // change like toggling the gap overlay updated `g` but nothing repainted
+    // until an unrelated pointer/viewport event happened to trigger a render.
+    if (typeof scene.requestRender === 'function') scene.requestRender()
   }
 
   // Recompute the snapshot cache then redraw. Used for plan-input + playhead
@@ -191,8 +220,19 @@ export function attachStatsOverlayLayer({
   const unsubFloor = useFloorStore.subscribe(recomputeAndRedraw)
   const unsubAP = useAPStore.subscribe(recomputeAndRedraw)
   const unsubSwitch = useCableStore.subscribe(recomputeAndRedraw)
-  // Timeline (scrubber / playback) moves the displayed moment → recompute.
-  const unsubTime = useStatsTimeStore.subscribe(recomputeAndRedraw)
+  // Timeline store: ONLY a playhead move (a different displayed moment) changes
+  // the underlying data → recompute. Toggling the gap overlay / play / speed is
+  // pure UI and must NOT trigger a snapshot rebuild (that was making the gap
+  // toggle wait ~44ms+ for a full RF sweep before the diamonds appeared).
+  let lastPlayhead = useStatsTimeStore.getState().playheadTs
+  const unsubTime = useStatsTimeStore.subscribe((st) => {
+    if (st.playheadTs !== lastPlayhead) {
+      lastPlayhead = st.playheadTs
+      recomputeAndRedraw()
+    } else {
+      redraw()
+    }
+  })
   // Viewport + hover only redraw (no recompute) — cheap.
   const unsubViewport = useViewportStore.subscribe(redraw)
   const unsubHover = useHoverStore.subscribe(redraw)

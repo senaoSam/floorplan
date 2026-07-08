@@ -81,6 +81,9 @@ function StatsDashboard() {
   const togglePlaying = useStatsTimeStore((s) => s.togglePlaying)
   const setSpeed   = useStatsTimeStore((s) => s.setSpeed)
   const goLive     = useStatsTimeStore((s) => s.goLive)
+  const showGapOverlay  = useStatsTimeStore((s) => s.showGapOverlay)
+  const gapThresholdDbm = useStatsTimeStore((s) => s.gapThresholdDbm)
+  const toggleGapOverlay = useStatsTimeStore((s) => s.toggleGapOverlay)
 
   // Seed the window once on mount (captures "now" as the live edge).
   useEffect(() => { useStatsTimeStore.getState().initAnchor(Date.now()) }, [])
@@ -145,6 +148,13 @@ function StatsDashboard() {
 
   const { ap, switchStat, client, alerts } = snap
 
+  // Plan-vs-measured gap: clients the plan says are covered (theoretical ≥
+  // threshold) but that actually measure below it — promised signal, real
+  // dead spot. The overlay marks these on the plan.
+  const gapClients = client.list.filter(
+    (c) => c.theoreticalRssiDbm != null && c.theoreticalRssiDbm >= gapThresholdDbm && c.rssiDbm < gapThresholdDbm,
+  )
+
   // AP load ranking (by client count, desc).
   const apRanking = [...ap.perAp]
     .filter((a) => a.status === 'online')
@@ -203,10 +213,14 @@ function StatsDashboard() {
             )}
           </div>
           <div className="stats-dash__trend">
-            {trendPts.map((p) => {
+            {trendPts.map((p, i) => {
               const pct = Math.round(((p.value ?? 0) / trendMax) * 100)
               const isNow = playheadHour != null && new Date(p.ts).getHours() === playheadHour
                 && new Date(p.ts).getDate() === new Date(playheadTs).getDate()
+              // Hour tick every 6 bars so the user can read that the dip in the
+              // middle is overnight (the 24h window wraps past midnight).
+              const hr = new Date(p.ts).getHours()
+              const showTick = i % 6 === 0
               return (
                 <div
                   key={p.ts}
@@ -217,6 +231,7 @@ function StatsDashboard() {
                   <div className="stats-dash__trend-track">
                     <div className="stats-dash__trend-bar" style={{ height: `${pct}%` }} />
                   </div>
+                  <span className="stats-dash__trend-tick">{showTick ? `${String(hr).padStart(2, '0')}` : ''}</span>
                 </div>
               )
             })}
@@ -257,6 +272,32 @@ function StatsDashboard() {
           sub={`/ ${switchStat.perSwitch.reduce((s, x) => s + (x.poeBudget || 0), 0)}W`} />
         <Kpi label="告警" value={alerts.length} tone={alerts.some((a) => a.severity === 'critical') ? 'crit' : alerts.length ? 'warn' : 'ok'} />
       </div>
+
+      {/* Plan-vs-measured gap */}
+      <section className="stats-dash__section">
+        <div className="stats-dash__section-head">
+          <p className="stats-dash__section-title">規劃 vs 實測</p>
+          <button
+            type="button"
+            className={`stats-dash__toggle${showGapOverlay ? ' stats-dash__toggle--on' : ''}`}
+            onClick={toggleGapOverlay}
+            title="在圖上標出「規劃說有訊號、實測卻低於門檻」的落差點"
+          >
+            {showGapOverlay ? '● 落差已顯示' : '顯示落差'}
+          </button>
+        </div>
+        <div className="stats-dash__gap-summary">
+          <span className={`stats-dash__gap-num${gapClients.length > 0 ? ' stats-dash__gap-num--bad' : ''}`}>
+            {gapClients.length}
+          </span>
+          <span className="stats-dash__gap-label">
+            個落差點（規劃 ≥{gapThresholdDbm}dBm 但實測不足）
+          </span>
+        </div>
+        {showGapOverlay && gapClients.length === 0 && (
+          <p className="stats-dash__gap-hint">此時段無落差點（連線裝置少時較少見；試拖時間軸到白天尖峰）</p>
+        )}
+      </section>
 
       {/* Alerts */}
       {alerts.length > 0 && (

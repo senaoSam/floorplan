@@ -64,6 +64,29 @@ const randMac = (rng) => {
   return `${h()}:${h()}:${h()}:${h()}:${h()}:${h()}`.toUpperCase()
 }
 
+// Measured-vs-theoretical degradation (dB, ≥0 = measured is WORSE than the
+// propagation model predicts). Real deployments lose signal the planner can't
+// see: furniture, bodies, unmodelled walls, interference. We make it SPATIAL
+// (quantise to a ~3m grid and seed off that cell) so nearby clients share the
+// same environmental penalty — a coherent "dead zone", not per-client noise.
+// Most cells lose a little (1–4 dB); a minority of "problem" cells lose a lot
+// (10–18 dB) so the plan-vs-measured overlay has real gaps to surface. Pure
+// function of (floorId, cellX, cellY) → reproducible.
+function measuredDegradationDb(floorId, xM, yM) {
+  const cx = Math.floor(xM / 3)
+  const cy = Math.floor(yM / 3)
+  const r = mulberry32(hashStringToSeed(`${floorId}:deg:${cx}:${cy}`))
+  const roll = r()
+  const base = 1 + r() * 3                     // 1–4 dB everywhere
+  // ~38% "problem" cells model real dead spots (metal cabinet, lift shaft,
+  // dense partition) with a HEAVY loss (22–40 dB) — big enough that even a
+  // mid-range client there drops below the coverage threshold. The generous
+  // proportion keeps the plan-vs-measured overlay reliably populated at busy
+  // hours regardless of how the client-scatter rng stream lands.
+  if (roll > 0.62) return base + 22 + r() * 18
+  return base
+}
+
 // ── Single source of truth ─────────────────────────────────────────────────
 // Build the AP↔switch↔port↔client topology for a floor at time `ts`, from a
 // seed. `building` carries the same slice refs the stores hold (so getCachedRoutes
@@ -85,13 +108,14 @@ export function deriveTopology(building, floorId, ts, seed = DEFAULT_SEED) {
   // AP → switch routing (reuse the shared cache; route.switchId is the link).
   const { routes } = getCachedRoutes(building)
 
-  // Per-AP online status. An AP may pin its status via `mockStatus`
-  // ('online' | 'offline') — the demo uses this so an offline unit is always
-  // visible for the stats view; when real cloud data arrives it supplies the
-  // real status here instead. APs without a pin get the seeded ~90% online.
+  // Per-AP online status. An AP pins its status via `mockStatus`
+  // ('online' | 'offline'); everything else is online. Keeping this
+  // deterministic (no random flapping) means the demo always shows exactly the
+  // pinned offline unit — stable for testing. When real cloud data arrives it
+  // supplies the real status here instead.
   const apStatus = new Map()
   for (const ap of aps) {
-    apStatus.set(ap.id, ap.mockStatus ?? (rng() < 0.9 ? 'online' : 'offline'))
+    apStatus.set(ap.id, ap.mockStatus === 'offline' ? 'offline' : 'online')
   }
 
   // Client count target for the floor, scaled by time of day.
@@ -116,12 +140,18 @@ export function deriveTopology(building, floorId, ts, seed = DEFAULT_SEED) {
       // Serving AP must be ONLINE — skip candidates on offline APs.
       const serving = candidates.find((c) => onlineApIds.has(c.ap.id))
       if (!serving) continue
-      const linkMbps = Math.max(6, Math.round((serving.rssiDbm + 90) * 12))
+      // Theoretical = what the propagation model predicts here; measured =
+      // theoretical minus a spatial environmental penalty (the real-world loss
+      // the plan can't see). The plan-vs-measured overlay compares these two.
+      const theoretical = serving.rssiDbm
+      const measured = theoretical - measuredDegradationDb(floorId, rxM.x, rxM.y)
+      const linkMbps = Math.max(6, Math.round((measured + 90) * 12))
       clients.push({
         mac: randMac(rng),
         apId: serving.ap.id,
         x: pt.x, y: pt.y,
-        rssiDbm: Math.round(serving.rssiDbm),
+        rssiDbm: Math.round(measured),
+        theoreticalRssiDbm: Math.round(theoretical),
         band: serving.ap.frequency,
         linkMbps,
         assocSince: ts - Math.floor(rng() * 3 * 3600 * 1000),

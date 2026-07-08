@@ -65,22 +65,32 @@
     display: flex
     align-items: flex-end
     gap: 2px
-    height: 46px
+    height: 56px
 
   &__trend-col
     flex: 1
     height: 100%
     display: flex
-    align-items: flex-end
+    flex-direction: column
+    justify-content: flex-end
     cursor: pointer
     &:hover .stats-dash__trend-bar
       filter: brightness(1.3)
     &--now .stats-dash__trend-bar
       background: #fff
 
+  &__trend-tick
+    height: 10px
+    font-size: 8px
+    line-height: 10px
+    text-align: center
+    color: $text-secondary
+    opacity: 0.6
+    white-space: nowrap
+
   &__trend-track
     width: 100%
-    height: 100%
+    flex: 1
     display: flex
     align-items: flex-end
 
@@ -378,6 +388,47 @@
     gap: 5px
     font-size: 10px
     color: $text-secondary
+
+  // ── plan-vs-measured gap ──
+  &__toggle
+    background: rgba(255, 255, 255, 0.06)
+    border: 1px solid rgba(255, 255, 255, 0.15)
+    border-radius: 5px
+    color: $text-secondary
+    font-size: 10px
+    padding: 3px 8px
+    cursor: pointer
+    &:hover
+      background: rgba(255, 255, 255, 0.12)
+    &--on
+      background: #ef4444
+      border-color: #ef4444
+      color: #fff
+      font-weight: 700
+
+  &__gap-summary
+    display: flex
+    align-items: baseline
+    gap: 7px
+
+  &__gap-num
+    font-size: 22px
+    font-weight: 800
+    color: #10b981
+    font-variant-numeric: tabular-nums
+    &--bad
+      color: #ef4444
+
+  &__gap-label
+    font-size: 10px
+    color: $text-secondary
+
+  &__gap-hint
+    font-size: 10px
+    color: $text-secondary
+    opacity: 0.7
+    line-height: 1.3
+    margin: 0
 
   &__note
     color: $text-secondary

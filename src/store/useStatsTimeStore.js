@@ -21,6 +21,10 @@ export const useStatsTimeStore = create((set, get) => ({
   rangeHours: 24,
   playing: false,
   speed: 60,
+  // Plan-vs-measured gap overlay: highlight spots the plan says are covered
+  // (theoretical ≥ threshold) but clients actually measure below it.
+  showGapOverlay: false,
+  gapThresholdDbm: -67,
 
   // Seed the window once (dashboard mount). Only sets when unseeded so
   // re-mounts / HMR don't jump the playhead.
@@ -41,6 +45,8 @@ export const useStatsTimeStore = create((set, get) => ({
   }),
 
   setPlaying: (v) => set({ playing: v }),
+  toggleGapOverlay: () => set((s) => ({ showGapOverlay: !s.showGapOverlay })),
+  setGapThreshold: (v) => set({ gapThresholdDbm: v }),
   togglePlaying: () => set((s) => {
     if (s.playing) return { playing: false }
     // Starting playback: if the playhead is at (or past) the live edge, rewind
