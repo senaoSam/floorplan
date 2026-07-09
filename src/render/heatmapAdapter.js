@@ -200,7 +200,55 @@ export function attachHeatmapLayer({
     layer.addChild(maskG)
     layer.addChild(sprite)
     sprite.mask = maskG
+    rebuildMask() // initial geometry so the first paint isn't fully clipped
     return sprite
+  }
+
+  // Sprite clip geometry = plan rect ∩ in-scopes − out-scopes.
+  //
+  // Two jobs in one mask:
+  //   1. Plan-rect clip — the padded sample grid spills past the floor image;
+  //      without this the padding bleeds into the dark canvas background
+  //      (original behaviour: a plain (0,0)→(imgW,imgH) rect).
+  //   2. Scope clip — scopes are a PURELY VISUAL region filter. Doing it as a
+  //      vector clip here (instead of NaN-ing grid cells in sampleField/GL)
+  //      keeps the heatmap engine untouched AND gives an exact, anti-aliased
+  //      edge that coincides with the drawn scope stroke — no bicubic/blur
+  //      erosion, no grid-step jaggies.
+  //
+  // Rebuilt ONLY on scope / floor-size change (see subscriptions), never per
+  // heatmap frame, so ripple animation and dragging pay nothing here.
+  const rebuildMask = () => {
+    if (!maskG) return
+    const floorState = useFloorStore.getState()
+    const floor = floorState.floors.find((f) => f.id === floorState.activeFloorId)
+    if (!floor) return
+    const imgW = floor.imageWidth
+    const imgH = floor.imageHeight
+    const scopes = useScopeStore
+      ? (useScopeStore.getState().scopesByFloor?.[floorState.activeFloorId] ?? EMPTY_SCOPES)
+      : EMPTY_SCOPES
+    const inScopes  = scopes.filter((s) => s.type === 'in'  && (s.points?.length ?? 0) >= 6)
+    const outScopes = scopes.filter((s) => s.type === 'out' && (s.points?.length ?? 0) >= 6)
+
+    maskG.clear()
+    // Base visible region. Fill each in-scope SEPARATELY (one poly + one fill
+    // per scope) so the union is built by overlapping fills — never one fill
+    // with several subpaths, which PIXI's checkForHoles would mis-read as
+    // "inner subpath = hole" if two in-scopes nest.
+    if (inScopes.length > 0) {
+      for (const s of inScopes) maskG.poly(s.points).fill({ color: 0xffffff, alpha: 1 })
+    } else {
+      maskG.rect(0, 0, imgW, imgH).fill({ color: 0xffffff, alpha: 1 })
+    }
+    // Subtract each out-scope. cut() attaches the just-drawn subpath as a hole
+    // on the most-recent fill instruction (PIXI GraphicsContext.cut). Base-rect
+    // case: single fill, all holes land on it. With multiple in-scope fills the
+    // hole lands on the nearest one — an out-scope straddling two disjoint
+    // in-scopes is an unsupported edge case (matches the old sampleField mask).
+    for (const s of outScopes) maskG.poly(s.points).cut()
+
+    if (typeof scene.requestRender === 'function') scene.requestRender()
   }
 
   // ---- Phase 41 state ----
@@ -258,11 +306,10 @@ export function attachHeatmapLayer({
     // Idle paints replace whatever the solo snapshot was covering; during an
     // active solo drag the caller re-dims it right after.
     if (snapSprite && !soloActive) snapSprite.visible = false
-    if (maskG) {
-      maskG.clear()
-      maskG.rect(0, 0, ctx.imgW, ctx.imgH)
-        .fill({ color: 0xffffff, alpha: 1 })
-    }
+    // NOTE: the sprite mask (plan rect ∩ scopes) is NOT rebuilt here. Its
+    // geometry depends only on scope data + plan size, never on the per-frame
+    // heatmap values, so rebuilding it every ripple/drag frame stutters. It is
+    // maintained independently by rebuildMask() on scope/floor store changes.
     if (typeof scene.requestRender === 'function') scene.requestRender()
   }
 
@@ -678,7 +725,10 @@ export function attachHeatmapLayer({
       // wallsByFloor (not just the active floor's list): other floors' walls
       // feed the cross-floor penetration term, so their edits must recompute.
       wallsAll: useWallStore.getState().wallsByFloor,
-      apsAll: apsByFloorAll, scopes,
+      apsAll: apsByFloorAll,
+      // scopes intentionally omitted — they no longer feed the field (visual
+      // clip only), so a scope change must NOT invalidate this fingerprint and
+      // trigger a needless recompute + ripple.
       holes: useFloorHoleStore ? useFloorHoleStore.getState().floorHolesByFloor : null,
       floors,
       mode: hm.mode, engine: hm.engine, gridStepM: hm.gridStepM,
@@ -807,7 +857,12 @@ export function attachHeatmapLayer({
   const unsubFloor = useFloorStore.subscribe(scheduleComputeDebounced)
   const unsubWall = useWallStore.subscribe(scheduleComputeDebounced)
   const unsubAP = useAPStore.subscribe(scheduleComputeDebounced)
-  const unsubScope = useScopeStore ? useScopeStore.subscribe(scheduleComputeDebounced) : () => {}
+  // NOTE: scopes do NOT trigger a heatmap recompute. They are a purely visual
+  // vector clip (rebuildMask / unsubMaskScope below), so the field value never
+  // changes when a scope is drawn/dragged/flipped. Subscribing recompute here
+  // fired a redundant compute → presentField → a visible ripple TRANSITION on
+  // every scope edit, even though the field was identical. The mask
+  // subscription alone keeps the visuals correct.
   const unsubHole  = useFloorHoleStore ? useFloorHoleStore.subscribe(scheduleComputeDebounced) : () => {}
   // Drag overlay drives the live / solo drag render (AP follow, freeze,
   // single-AP overlay). Without this the dragMode control is inert.
@@ -817,6 +872,15 @@ export function attachHeatmapLayer({
   // field. Without this subscription the heatmap would stay frozen until some
   // other store changed.
   const unsubEditor = useEditorStore ? useEditorStore.subscribe(scheduleCompute) : () => {}
+
+  // Independent mask maintenance: the vector sprite clip (plan rect ∩ scopes)
+  // is rebuilt ONLY when scopes or the active floor change — NOT on heatmap
+  // frames. Cheap (a handful of polygons) and off the animation/drag path, so
+  // it can never stutter the field. rebuildMask early-returns until the sprite
+  // (and maskG) exist; ensureSprite does the first build.
+  const unsubMaskScope = useScopeStore ? useScopeStore.subscribe(rebuildMask) : () => {}
+  const unsubMaskFloor = useFloorStore.subscribe(rebuildMask)
+
   runCompute()
 
   return () => {
@@ -826,10 +890,11 @@ export function attachHeatmapLayer({
     unsubFloor()
     unsubWall()
     unsubAP()
-    unsubScope()
     unsubHole()
     unsubDrag()
     unsubEditor()
+    unsubMaskScope()
+    unsubMaskFloor()
     if (pendingComputeId !== 0) { clearTimeout(pendingComputeId); pendingComputeId = 0 }
     if (debounceId !== 0) { clearTimeout(debounceId); debounceId = 0 }
     if (snapSprite) {

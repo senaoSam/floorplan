@@ -50,16 +50,9 @@ export function sampleField(scenario, gridStepM = 0.5, opts = {}) {
       const x = originX + i * gridStepM
       const y = originY + j * gridStepM
       const idx = j * nx + i
-      // Scope mask only constrains samples inside the original plan rect;
-      // padded samples are always evaluated so contours have room to bend.
-      const insidePlan = (x >= 0 && x <= w && y >= 0 && y <= h)
-      if (insidePlan && !mask(x, y)) {
-        rssi[idx] = NaN
-        sinr[idx] = NaN
-        snr[idx]  = NaN
-        cci[idx]  = NaN
-        continue
-      }
+      // Scopes are a vector clip on the PIXI sprite (heatmapAdapter.rebuildMask),
+      // NOT applied here — sample the whole plan rect so bicubic/blur has no NaN
+      // holes to erode. (mask/insidePlan intentionally left unused.)
       const rx = { x, y, zM: rxZM }
       const perAp = []
       for (const ap of scenario.aps) {
