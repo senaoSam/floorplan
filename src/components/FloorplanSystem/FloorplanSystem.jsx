@@ -627,16 +627,60 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           useCameraStore.getState().setDrawTool(null)
           return
         }
+        // DRAW_DOOR / DRAW_WINDOW aren't in DRAW_MODES (no multi-point draft),
+        // but they DO have a two-click "in progress" state: doorWindowDraft is
+        // set after the first click on a wall. Give them the same two-stage Esc
+        // as the polyline draw tools for consistency:
+        //   1) a door/window placement is half-done → cancel just it, STAY in
+        //      the mode (wallsLayer's own Esc handler clears dw.wallId +
+        //      doorWindowDraft; we only need to NOT leave the mode here).
+        //   2) nothing half-placed → leave the tool back to SELECT.
+        const isDoorWindow = s.editorMode === EDITOR_MODE.DRAW_DOOR
+                          || s.editorMode === EDITOR_MODE.DRAW_WINDOW
+        if (isDoorWindow) {
+          if (draft.doorWindowDraft) {
+            useDraftStore.getState().setDoorWindowDraft(null)
+          } else {
+            s.setEditorMode(EDITOR_MODE.SELECT)
+          }
+          return
+        }
+        // CROP_IMAGE is in DRAW_MODES but its draft is a single drag-box anchor,
+        // not a multi-click shape worth preserving — so it opts OUT of the
+        // two-stage cancel: one Esc clears the box AND leaves to SELECT.
+        if (s.editorMode === EDITOR_MODE.CROP_IMAGE) {
+          draftCtrl.handleKey('Escape')  // clear the anchor if any
+          s.setEditorMode(EDITOR_MODE.SELECT)
+          return
+        }
+        // Real multi-point draw modes (DRAW_WALL / SCOPE / FLOOR_HOLE /
+        // CABLE_TRAY / SCALE) — Esc is a two-stage cancel that mirrors the
+        // drawing gesture rather than a single "abort everything":
+        //   1) a draft is in flight (≥1 point committed) → cancel just that
+        //      in-progress shape, but STAY in the mode so the user can start
+        //      the next one immediately. (User: "繪製時 esc 個別功能".)
+        //   2) no draft yet → nothing to cancel, so Esc leaves to SELECT.
+        if (draftCtrl.isDrawMode()) {
+          if (draft && draft.mode != null && draft.points.length > 0) {
+            draftCtrl.handleKey('Escape')  // clearDraft only; keep the mode
+          } else {
+            // Leaving DRAW_SCALE: if the ScaleDialog is open (draft already
+            // cleared, waiting on the meters input) but the input lost focus,
+            // Esc reaches here. Tear the dialog + preview down too, else the
+            // mode flips to SELECT while an orphan dialog / preview line lingers.
+            setScaleDialog(null)
+            useDraftStore.getState().clearScalePreview()
+            s.setEditorMode(EDITOR_MODE.SELECT)
+          }
+          return
+        }
+        // Non-draw, non-default modes (PLACE_AP / PLACE_SWITCH / PLACE_RISER /
+        // CLIENT_VIEW …) have no multi-click draft to preserve — Esc leaves the
+        // tool back to SELECT. Also clear any stray draft.
         const inNonSelectMode = s.editorMode !== EDITOR_MODE.SELECT
                               && s.editorMode !== EDITOR_MODE.PAN
-        // Drawing / placing / cropping / aligning modes — Esc fully aborts.
-        // Clear any draft in flight AND drop back to SELECT so the next
-        // canvas click doesn't start a fresh draft of the abandoned mode.
-        // (oldSrc only cleared the draft and kept the mode; the user
-        // perceived that as "Esc did nothing" because clicks kept opening
-        // new walls / scopes / trays.)
         if (inNonSelectMode || (draft && draft.mode != null)) {
-          draftCtrl.handleKey('Escape')   // clearDraft via the controller
+          draftCtrl.handleKey('Escape')
           if (inNonSelectMode) s.setEditorMode(EDITOR_MODE.SELECT)
           return
         }

@@ -205,6 +205,24 @@ function ContextMenuMount() {
     })
   }
 
+  // Append "back to select mode" to EVERY object context menu when the user is
+  // in a non-default mode (place / draw / etc.). Purely additive — every
+  // existing per-type item above is untouched; this just gives a right-click
+  // escape hatch out of the current tool, alongside the object's own actions.
+  if (editorMode !== EDITOR_MODE.SELECT) {
+    // Only add our own divider if the built items don't already end in one
+    // (some per-type builders leave a trailing divider) — avoids a double rule.
+    if (items.length > 0 && items[items.length - 1].kind !== 'divider') {
+      items.push({ id: 'div-leave-mode', kind: 'divider' })
+    }
+    items.push({
+      id: 'leave-mode',
+      label: '回到選取模式',
+      shortcut: 'Esc',
+      onClick: () => useEditorStore.getState().setEditorMode(EDITOR_MODE.SELECT),
+    })
+  }
+
   // `key` includes targetType + targetId + screen xy so that EVERY new
   // openContextMenu (different object OR same object at a different click
   // position) forces ObjectContextMenu to unmount + remount. Without the
