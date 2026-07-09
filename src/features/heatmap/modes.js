@@ -42,11 +42,11 @@ const SNR_ANCHORS = [
 // "good" (quiet) end maps to low dBm = green, loud high dBm = red.
 // sign='low' flips legend ordering for the user.
 const CCI_ANCHORS = [
-  [ -45, 102, 217,  64, 0.90],
-  [ -55, 255, 217,  26, 0.88],
+  [ -45, 235,  26,  26, 0.90],
+  [ -55, 255, 128,  13, 0.88],
   [ -70, 255, 128,  13, 0.86],
-  [ -85, 255, 128,  13, 0.84],
-  [-100, 235,  26,  26, 0.80],
+  [ -85, 255, 217,  26, 0.84],
+  [-100, 102, 217,  64, 0.80],
 ]
 
 export const HEATMAP_MODE_CONFIG = {
