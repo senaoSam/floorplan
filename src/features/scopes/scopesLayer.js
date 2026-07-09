@@ -4,6 +4,7 @@ import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useDraftStore } from '@/store/useDraftStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
+import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { getModeCapability } from '@/render/modeCapabilities'
 
 // Scope adapter — per-scope interactive Container with click-select,
@@ -149,10 +150,20 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
     }
 
     graphics.clear()
-    const fillColor = isInvert
-      ? (isOut ? COLOR_OUT_FILL_HOVER : COLOR_IN_FILL_HOVER)
-      : (isOut ? COLOR_OUT_FILL       : COLOR_IN_FILL)
-    graphics.poly(flat).fill({ color: fillColor, alpha: 1 })
+    // When the heatmap is on, an in-scope's translucent green fill sits ON TOP
+    // of the heatmap (scopes layer is above heatmap) and tints/darkens the
+    // field inside it. Skip the fill for a resting in-scope so the heatmap
+    // shows in its true colours — keep the fill only while hovered (the user
+    // needs that highlight feedback) and always for out-scopes (the red fill
+    // carries the "excluded" semantic). Heatmap off → fill as before.
+    const heatmapOn = useHeatmapStore.getState().enabled
+    const skipFill = heatmapOn && !isOut && !isInvert
+    if (!skipFill) {
+      const fillColor = isInvert
+        ? (isOut ? COLOR_OUT_FILL_HOVER : COLOR_IN_FILL_HOVER)
+        : (isOut ? COLOR_OUT_FILL       : COLOR_IN_FILL)
+      graphics.poly(flat).fill({ color: fillColor, alpha: 1 })
+    }
 
     const baseStroke = isOut ? COLOR_OUT_STROKE : COLOR_IN_STROKE
     let stroke = baseStroke
@@ -361,6 +372,17 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
   const unsubEditor = useEditorStore.subscribe(onEditorChange)
   const unsubHover = useHoverStore.subscribe(onHoverChange)
   const unsubDrag = useDragOverlayStore.subscribe(applyDragOverlay)
+  // The heatmap on/off decides whether in-scopes draw their fill (drawScope),
+  // so redraw every scope when it toggles. Track `enabled` only to avoid
+  // redrawing on unrelated heatmap-store churn (blur/mode/dragMode/etc.).
+  let lastHeatmapOn = useHeatmapStore.getState().enabled
+  const onHeatmapChange = () => {
+    const on = useHeatmapStore.getState().enabled
+    if (on === lastHeatmapOn) return
+    lastHeatmapOn = on
+    for (const e of containers.values()) drawScope(e)
+  }
+  const unsubHeatmap = useHeatmapStore.subscribe(onHeatmapChange)
   reconcile()
 
   return () => {
@@ -369,6 +391,7 @@ export function attachScopesLayer({ scene, useFloorStore, useScopeStore }) {
     unsubDrag()
     unsubEditor()
     unsubHover()
+    unsubHeatmap()
     for (const id of Array.from(containers.keys())) removeContainer(id)
   }
 }

@@ -108,24 +108,12 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
       gridSize: { nx, ny },
     })
 
-    // Apply scope mask host-side (cheaper than encoding it into the shader,
-    // and the dominant cost is the per-fragment AP loop anyway). Mask only
-    // applies inside the original plan rect; padded samples bypass it so
-    // contours bending into the margin survive the crop.
+    // Scopes are a vector clip on the PIXI sprite (heatmapAdapter.rebuildMask),
+    // NOT applied here — the whole plan rect is sampled cleanly so bicubic/blur
+    // has no NaN holes to erode/smear. Only clamp the empty-AP CCI sentinel.
     const { rssi, sinr, snr, cci } = out
-    for (let j = 0; j < ny; j++) {
-      for (let i = 0; i < nx; i++) {
-        const idx = j * nx + i
-        const x = originX + i * gridStepM
-        const y = originY + j * gridStepM
-        const insidePlan = (x >= 0 && x <= w && y >= 0 && y <= h)
-        if (insidePlan && !mask(x, y)) {
-          rssi[idx] = NaN; sinr[idx] = NaN; snr[idx] = NaN; cci[idx] = NaN
-          continue
-        }
-        // Empty-AP sentinel: shader writes -120/-50/-50/-120; preserve floors.
-        if (cci[idx] < CCI_MIN_DBM) cci[idx] = CCI_MIN_DBM
-      }
+    for (let idx = 0; idx < cci.length; idx++) {
+      if (cci[idx] < CCI_MIN_DBM) cci[idx] = CCI_MIN_DBM
     }
     return { rssi, sinr, snr, cci, nx, ny, gridStepM, originX, originY }
   }
@@ -276,17 +264,11 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
   const snr  = new Float32Array(nx * ny)
   const cci  = new Float32Array(nx * ny)
 
+  // Scopes clip on the PIXI sprite, not here (see the aggregated path above).
   const perApScratch = new Array(scenario.aps.length)
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
       const idx = j * nx + i
-      const x = originX + i * gridStepM
-      const y = originY + j * gridStepM
-      const insidePlan = (x >= 0 && x <= w && y >= 0 && y <= h)
-      if (insidePlan && !mask(x, y)) {
-        rssi[idx] = NaN; sinr[idx] = NaN; snr[idx] = NaN; cci[idx] = NaN
-        continue
-      }
       if (scenario.aps.length === 0) {
         rssi[idx] = -120; sinr[idx] = -50; snr[idx] = -50; cci[idx] = CCI_MIN_DBM
         continue
@@ -382,19 +364,10 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
     })
     if (out === null || isStale()) return null
 
+    // Scopes clip on the PIXI sprite, not here (see the sync path above).
     const { rssi, sinr, snr, cci } = out
-    for (let j = 0; j < ny; j++) {
-      for (let i = 0; i < nx; i++) {
-        const idx = j * nx + i
-        const x = originX + i * gridStepM
-        const y = originY + j * gridStepM
-        const insidePlan = (x >= 0 && x <= w && y >= 0 && y <= h)
-        if (insidePlan && !mask(x, y)) {
-          rssi[idx] = NaN; sinr[idx] = NaN; snr[idx] = NaN; cci[idx] = NaN
-          continue
-        }
-        if (cci[idx] < CCI_MIN_DBM) cci[idx] = CCI_MIN_DBM
-      }
+    for (let idx = 0; idx < cci.length; idx++) {
+      if (cci[idx] < CCI_MIN_DBM) cci[idx] = CCI_MIN_DBM
     }
     return { rssi, sinr, snr, cci, nx, ny, gridStepM, originX, originY }
   }
@@ -556,18 +529,12 @@ async function aggregateChunked(perApGrids, scenario, nx, ny, originX, originY, 
   const sinr = new Float32Array(nx * ny)
   const snr  = new Float32Array(nx * ny)
   const cci  = new Float32Array(nx * ny)
+  // Scopes clip on the PIXI sprite, not here (see sampleFieldGL sync path).
   const perApScratch = new Array(scenario.aps.length)
   let sliceStart = performance.now()
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
       const idx = j * nx + i
-      const x = originX + i * gridStepM
-      const y = originY + j * gridStepM
-      const insidePlan = (x >= 0 && x <= w && y >= 0 && y <= h)
-      if (insidePlan && !mask(x, y)) {
-        rssi[idx] = NaN; sinr[idx] = NaN; snr[idx] = NaN; cci[idx] = NaN
-        continue
-      }
       if (scenario.aps.length === 0) {
         rssi[idx] = -120; sinr[idx] = -50; snr[idx] = -50; cci[idx] = CCI_MIN_DBM
         continue

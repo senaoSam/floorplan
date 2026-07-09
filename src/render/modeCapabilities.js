@@ -115,7 +115,7 @@ const DRAW_SCOPE_CAP = {
   ...COMMAND_OVERLAY,
   cursor: 'crosshair',
   dimOthers: ['wireless', 'cable', 'meta'],
-  keepLayers: ['floorImage', 'scopes'],
+  keepLayers: ['floorImage', 'scopes', 'heatmap'],
 }
 
 const DRAW_FLOOR_HOLE_CAP = {
