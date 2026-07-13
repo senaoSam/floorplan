@@ -686,6 +686,18 @@ function DeviceHoverReadout({ hovered, pointer, container }) {
 // file that owns scene-graph concerns.
 const FREQ_COLOR_3D = { 2.4: '#f39c12', 5: '#4fc3f7', 6: '#a855f7' }
 
+// r3f's setFrameloop('always') only flips the store flag — the rAF loop stays
+// parked until the next invalidate(), and with the previous mode 'never' every
+// queued invalidate was dropped. Kick one on the hidden→visible edge so the
+// first 3D frame paints immediately after the switch.
+function WakeOnVisible({ isVisible }) {
+  const invalidate = useThree((s) => s.invalidate)
+  useEffect(() => {
+    if (isVisible) invalidate()
+  }, [isVisible, invalidate])
+  return null
+}
+
 function Viewer3D() {
   const floors = useFloorStore((s) => s.floors)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
@@ -695,9 +707,13 @@ function Viewer3D() {
   const toggleLayer     = useEditorStore((s) => s.toggleLayer)
   const clearSelected   = useEditorStore((s) => s.clearSelected)
   // CanvasArea now keeps Viewer3D mounted but hidden when viewMode === 2D, so
-  // we'd otherwise burn GPU rendering an invisible scene. Drop the r3f loop
-  // to demand-only when hidden; OrbitControls re-invalidates on user input,
-  // so this is safe.
+  // we'd otherwise burn GPU rendering an invisible scene. Freeze the r3f loop
+  // entirely ('never' — even invalidate() is a no-op) when hidden: 'demand'
+  // still repainted the whole scene on every store-driven React commit, which
+  // on a software renderer was the largest share of 300-AP drag jank (2D drag
+  // → hidden 3D re-rendered every frame). WakeOnVisible kicks one invalidate
+  // on the 2D→3D switch because r3f's setFrameloop doesn't restart the loop
+  // by itself.
   const viewMode        = useEditorStore((s) => s.viewMode)
   const isVisible       = viewMode === VIEW_MODE.THREE_D
   const inCameraMode    = useEditorStore((s) => s.editorMode === EDITOR_MODE.CAMERA)
@@ -1092,9 +1108,10 @@ function Viewer3D() {
         shadows
         camera={{ position: camPos, fov: 50, near: 0.1, far: 2000 }}
         style={{ width: '100%', height: '100%', background: '#0f172a' }}
-        frameloop={isVisible ? 'always' : 'demand'}
+        frameloop={isVisible ? 'always' : 'never'}
         onPointerMissed={() => clearSelected()}
       >
+      <WakeOnVisible isVisible={isVisible} />
       {/* Weak ambient so back faces aren't pure black, plus a single
           shadow-casting directional KEY light (KeyLight) that dominates the
           scene so the oblique shadows read clearly. A slight hemisphere fill

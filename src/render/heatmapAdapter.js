@@ -1,4 +1,5 @@
 import { Sprite, Texture, Graphics } from 'pixi.js'
+import { publishHeatmapFrame } from './heatmapFrameBus'
 import { createHeatmapGL } from '@/features/heatmap/heatmapGL'
 import { buildScenario } from '@/features/heatmap/buildScenario'
 import { sampleFieldGL, sampleFieldGLAsync } from '@/features/heatmap/sampleFieldGL'
@@ -281,6 +282,7 @@ export function attachHeatmapLayer({
     lastIdleInputs = null
     if (sprite) sprite.visible = false
     if (snapSprite) snapSprite.visible = false
+    publishHeatmapFrame(null)   // 3D plane follows the 2D sprite off
   }
 
   // Render one scalar grid through heatmapGL and present it: PIXI texture
@@ -311,6 +313,20 @@ export function attachHeatmapLayer({
     // heatmap values, so rebuilding it every ripple/drag frame stutters. It is
     // maintained independently by rebuildMask() on scope/floor store changes.
     if (typeof scene.requestRender === 'function') scene.requestRender()
+    // Broadcast the freshly painted canvas so HeatmapPlane3D can re-upload it
+    // as its texture — the 3D plane runs no compute of its own. Solo-drag
+    // frames publish too (canvas = dragged AP only); 3D is hidden during 2D
+    // drags and the post-release idle repaint replaces the frame.
+    publishHeatmapFrame({
+      canvas: gl.canvas,
+      padLpx: ctx.padLpx,
+      padTpx: ctx.padTpx,
+      fullW: ctx.fullW,
+      fullH: ctx.fullH,
+      imgW: ctx.imgW,
+      imgH: ctx.imgH,
+      floorId: ctx.floorId,
+    })
   }
 
   // Phase 41-2: Hamina-style ripple transition. The landed field paints
@@ -886,6 +902,7 @@ export function attachHeatmapLayer({
   return () => {
     generation++ // orphan any in-flight idle stages
     cancelAnim(false)
+    publishHeatmapFrame(null)   // adapter (and its canvas) are going away
     unsubHM()
     unsubFloor()
     unsubWall()

@@ -1,208 +1,83 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { useFloorStore } from '@/store/useFloorStore'
-import { useWallStore } from '@/store/useWallStore'
-import { useAPStore } from '@/store/useAPStore'
-import { useScopeStore } from '@/store/useScopeStore'
-import { useFloorHoleStore } from '@/store/useFloorHoleStore'
-import { useHeatmapStore } from '@/store/useHeatmapStore'
-import { buildScenario } from '@/features/heatmap/buildScenario'
-import { sampleField } from '@/features/heatmap/sampleField'
-import { sampleFieldGLAsync } from '@/features/heatmap/sampleFieldGL'
-import { getModeConfig } from '@/features/heatmap/modes'
-import { computeFloorElevations } from '@/utils/floorStacking'
-import { createHeatmapGL } from '@/features/heatmap/heatmapGL.js'
+import { useEditorStore, VIEW_MODE } from '@/store/useEditorStore'
+import { subscribeHeatmapFrame, getHeatmapFrame } from '@/render/heatmapFrameBus'
 
-const EMPTY = Object.freeze([])
-
-// 3D heatmap plane for one floor. Mirrors the 2D HeatmapLayer compute path —
-// same scenario builder, same sampleFieldGL, same heatmapGL colormap — and
-// pastes the resulting WebGL canvas onto a Three.js plane sitting just above
-// the floor's image. Cross-floor physics (HM-F2x) carries over because we
-// reuse buildScenario with the same crossFloor argument shape.
+// 3D heatmap plane for one floor — a THIN consumer of the 2D heatmap
+// adapter's painted canvas (render/heatmapFrameBus). The plane runs NO
+// propagation compute of its own: the 2D adapter already drives the same
+// engine with better ergonomics (coarse-first two-stage, large-scene
+// downgrade, fingerprint skip, drag paths), so 3D simply re-uploads the
+// composited canvas as a texture whenever the 2D sprite repaints. This
+// guarantees 2D/3D pixel parity by construction and makes the 3D heatmap
+// free even on heavy scenes.
 //
-// MVP scope (10-5e):
-//   - active floor only; non-active stacked floors don't render heatmap
-//     planes. Computing every floor's heatmap on every scene update would
-//     redo expensive WebGL passes whose pixels users mostly don't look at;
-//     the active floor is the one being edited and naturally the focus.
-//   - shares heatmap on/off + mode + opts with the 2D layer (same store).
-//   - no drag-time path — 3D viewer is rarely in front during drag, and the
-//     2D layer already handles the live-drag overlays.
+// (History: the plane used to own a heatmapGL context and call
+// sampleFieldGLAsync itself. That doubled every field compute, needed its
+// own freeze/warm-up logic while Viewer3D was hidden, and — lacking the 2D
+// adapter's large-scene downgrade — took tens of seconds to appear on
+// 300-AP scenes.)
+//
+// The shared canvas covers the PADDED sample region (heatmapAdapter pads
+// unframed floor edges by PAD_M) while the plane spans only the floor rect,
+// so the texture is UV-cropped via offset/repeat. CanvasTexture flips Y, so
+// canvas rows padTpx..padTpx+imgH map to v ∈ [padBpx, padBpx+imgH] / fullH
+// with padBpx measured from the canvas bottom.
+//
+// Scope clipping: the 2D sprite is vector-masked by scopes in PIXI — that
+// mask is not part of the canvas, so the plane shows the unclipped field.
+// Same as the previous self-computed plane (the scope clip moved out of the
+// sampled field into the 2D vector mask in fix/scope-vector-clip).
+
 export default function HeatmapPlane3D({ floorId, elevation }) {
   const floors = useFloorStore((s) => s.floors)
   const floor  = floors.find((f) => f.id === floorId) ?? null
-  const walls  = useWallStore((s) => s.wallsByFloor[floorId] ?? EMPTY)
-  const aps    = useAPStore((s) => s.apsByFloor[floorId] ?? EMPTY)
-  const scopes = useScopeStore((s) => s.scopesByFloor[floorId] ?? EMPTY)
-  const apsByFloor   = useAPStore((s) => s.apsByFloor)
-  const wallsByFloor = useWallStore((s) => s.wallsByFloor)
-  const holesByFloor = useFloorHoleStore((s) => s.floorHolesByFloor)
+  const isVisible = useEditorStore((s) => s.viewMode === VIEW_MODE.THREE_D)
 
-  const enabled     = useHeatmapStore((s) => s.enabled)
-  const mode        = useHeatmapStore((s) => s.mode)
-  const engine      = useHeatmapStore((s) => s.engine)
-  const reflections = useHeatmapStore((s) => s.reflections)
-  const diffraction = useHeatmapStore((s) => s.diffraction)
-  const gridStepM   = useHeatmapStore((s) => s.gridStepM)
-  const blur        = useHeatmapStore((s) => s.blur)
-  const showContours= useHeatmapStore((s) => s.showContours)
-
-  // Per-instance heatmapGL renderer. Each floor's plane owns its own GL
-  // context + canvas so the active-floor swap doesn't trash other floors
-  // (currently MVP renders only one, but the per-instance ownership keeps
-  // the door open to all-floors mode without refactoring).
-  const glRef = useRef(null)
-  const [textureRev, setTextureRev] = useState(0)
-
-  const getGL = () => {
-    if (!glRef.current) {
-      try { glRef.current = createHeatmapGL() }
-      catch (e) { console.warn('[Heatmap3D] WebGL2 init failed:', e.message); return null }
-    }
-    return glRef.current
-  }
-
-  useEffect(() => () => {
-    if (glRef.current) { glRef.current.dispose(); glRef.current = null }
-  }, [])
-
-  // Scenario assembly — mirrors HeatmapLayer's logic minus drag overlays and
-  // padding (3D plane doesn't show iso-contours bleeding into a margin).
-  const scenario = useMemo(() => {
-    if (!enabled) return null
-    if (!floor?.scale) return null
-    const anyAp = Object.values(apsByFloor).some((arr) => arr && arr.length > 0)
-    if (!anyAp) return null
-
-    const elevations = computeFloorElevations(floors)
-    const floorIndexById = new Map(floors.map((f, i) => [f.id, i]))
-    const floorStack = floors.map((f) => ({
-      id: f.id,
-      elevationM: elevations[f.id] ?? 0,
-      slabDb: f.floorSlabAttenuationDb ?? 0,
-      scale: f.scale,
-      holes: (holesByFloor[f.id] ?? []).map((h) => ({
-        points: h.points,
-        fromIdx: floorIndexById.get(h.bottomFloorId ?? f.id) ?? floorIndexById.get(f.id),
-        toIdx:   floorIndexById.get(h.topFloorId    ?? f.id) ?? floorIndexById.get(f.id),
-      })),
-    }))
-
-    const apsAcrossFloors = []
-    for (const f of floors) {
-      const floorAPs = apsByFloor[f.id] ?? []
-      const floorElev = elevations[f.id] ?? 0
-      for (const ap of floorAPs) {
-        apsAcrossFloors.push({
-          ...ap,
-          posPx: { x: ap.x, y: ap.y },
-          elevationM: floorElev,
-          floorScale: f.scale,
-        })
-      }
-    }
-
-    const otherFloorWalls = []
-    for (const f of floors) {
-      if (f.id === floorId) continue
-      const fws = wallsByFloor[f.id] ?? []
-      if (fws.length === 0) continue
-      otherFloorWalls.push({
-        elevationM: elevations[f.id] ?? 0,
-        scale: f.scale,
-        walls: fws,
-      })
-    }
-
-    const crossFloor = {
-      activeElevationM: elevations[floorId] ?? 0,
-      rxHeightM: 1.0,
-      floorStack,
-      apsByFloor: apsAcrossFloors,
-      otherFloorWalls,
-    }
-
-    return buildScenario(floor, walls, aps, scopes, crossFloor)
-  }, [enabled, floor, floorId, floors, walls, aps, scopes, apsByFloor, wallsByFloor, holesByFloor])
-
-  // Sample + colormap the heatmap into glRef.current.canvas. Bumping
-  // textureRev tells the JSX below to recreate the CanvasTexture (Three.js
-  // doesn't notice canvas pixel changes without an explicit needsUpdate +
-  // signal, and the cleanest signal is a fresh texture).
-  // 400 ms trailing debounce (matches heatmapAdapter): each scenario change
-  // re-runs this effect, whose cleanup clears the pending timer — so a burst
-  // of rapid AP edits (holding ↑ on azimuth, dragging the pattern preview)
-  // costs ONE recompute at rest instead of one per keystroke. This matters
-  // double here because Viewer3D stays mounted (hidden) in 2D mode, so this
-  // plane recomputes even when the 3D view isn't visible.
-  const COMPUTE_DEBOUNCE_MS = 400
+  // Subscribe to repaint broadcasts ONLY while the 3D view is visible — the
+  // adapter publishes per paint (60 fps during ripple transitions and solo
+  // drags), and a hidden plane re-rendering per publish would put React work
+  // right back on the 2D drag path. On the hidden→visible edge the effect
+  // catches up with the latest frame, so entry is always current.
+  const [frame, setFrame] = useState(getHeatmapFrame)
   useEffect(() => {
-    if (!enabled || !scenario || !floor?.scale) return
-    let cancelled = false
-    const id = setTimeout(async () => {
-      const gl = getGL()
-      if (!gl) return
-      const wM = scenario.size.w
-      const hM = scenario.size.h
-      const outW = Math.max(1, Math.round(wM * floor.scale))
-      const outH = Math.max(1, Math.round(hM * floor.scale))
+    if (!isVisible) return undefined
+    setFrame(getHeatmapFrame())
+    return subscribeHeatmapFrame(setFrame)
+  }, [isVisible])
 
-      let field
-      const opts = {
-        maxReflOrder: reflections ? 1 : 0,
-        enableDiffraction: diffraction,
-      }
-      if (engine === 'shader') {
-        try {
-          // Phase 41-5: async readback (PBO + fence) — the 3D plane's
-          // recompute no longer stalls the main thread either.
-          field = await sampleFieldGLAsync(scenario, gridStepM, {
-            ...opts,
-            isStale: () => cancelled,
-          })
-        } catch (e) {
-          console.warn('[Heatmap3D] shader engine failed, falling back to JS:', e.message)
-          field = sampleField(scenario, gridStepM, opts)
-        }
-      } else {
-        field = sampleField(scenario, gridStepM, opts)
-      }
-      if (cancelled || field === null) return
-
-      const modeCfg = getModeConfig(mode)
-      const activeField = field[modeCfg.field] ?? field.rssi
-      const renderField = { rssi: activeField, nx: field.nx, ny: field.ny }
-      gl.render(renderField, outW, outH, 1 / floor.scale, blur, showContours, {
-        anchors: modeCfg.anchors,
-      })
-      setTextureRev((v) => v + 1)
-    }, COMPUTE_DEBOUNCE_MS)
-    return () => { cancelled = true; clearTimeout(id) }
-  }, [enabled, mode, engine, scenario, reflections, diffraction,
-      gridStepM, blur, showContours, floor?.scale])
-
-  // CanvasTexture wraps gl.canvas; remake when textureRev bumps. Disposed in
-  // cleanup to free the GPU upload (cheap but proper hygiene). The plane
-  // mesh itself sticks around between updates so r3f doesn't tear/rebuild
-  // geometry every frame.
+  // Recreate the CanvasTexture only when the canvas identity changes (adapter
+  // teardown/rebuild). Repaints of the same canvas are handled below with a
+  // needsUpdate re-upload — no texture churn.
+  const canvas = frame?.canvas ?? null
   const texture = useMemo(() => {
-    const gl = glRef.current
-    if (!gl?.canvas) return null
-    const tex = new THREE.CanvasTexture(gl.canvas)
+    if (!canvas) return null
+    const tex = new THREE.CanvasTexture(canvas)
     if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace
     else tex.encoding = THREE.sRGBEncoding
-    tex.needsUpdate = true
     return tex
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [textureRev])
-
+  }, [canvas])
   useEffect(() => () => { texture?.dispose() }, [texture])
 
-  if (!enabled || !scenario || !floor?.scale || !texture) return null
+  // Per publish: refresh the padding crop (padding changes when walls near a
+  // floor edge appear/disappear) and flag the pixels for re-upload.
+  useEffect(() => {
+    if (!texture || !frame) return
+    const padBpx = frame.fullH - frame.padTpx - frame.imgH
+    texture.offset.set(frame.padLpx / frame.fullW, padBpx / frame.fullH)
+    texture.repeat.set(frame.imgW / frame.fullW, frame.imgH / frame.fullH)
+    texture.needsUpdate = true
+  }, [texture, frame])
 
-  const wM = scenario.size.w
-  const hM = scenario.size.h
+  if (!frame || !texture || !floor?.scale) return null
+  // Frames are computed for the ACTIVE floor; don't paste another floor's
+  // field onto this one (brief mismatch window right after a floor switch,
+  // before the adapter's recompute lands).
+  if (frame.floorId !== floorId) return null
+
+  const wM = floor.imageWidth  / floor.scale
+  const hM = floor.imageHeight / floor.scale
 
   // Sit a hair above the floor image (which lives at the parent group's
   // y=elevation) so we don't z-fight with the floor texture. 0.02 m = 2 cm

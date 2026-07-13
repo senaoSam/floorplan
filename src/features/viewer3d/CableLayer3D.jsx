@@ -1,8 +1,9 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { useAPStore } from '@/store/useAPStore'
 import { useCableStore, resolveTrayMountHeight } from '@/store/useCableStore'
 import { useFloorStore } from '@/store/useFloorStore'
+import { useEditorStore, VIEW_MODE } from '@/store/useEditorStore'
 import { computeRoutes } from '@/features/cable/computeRoutes'
 
 // 3D rendering of Stage-3 route results: each AP→switch route and each
@@ -155,10 +156,28 @@ export default function CableLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
   const switchesByFloor = useCableStore((s) => s.switchesByFloor)
   const traysByFloor    = useCableStore((s) => s.traysByFloor)
   const risers          = useCableStore((s) => s.risers)
+  const isVisible       = useEditorStore((s) => s.viewMode === VIEW_MODE.THREE_D)
 
-  const { routes, switchLinks } = useMemo(() => (
-    computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
-  ), [floors, apsByFloor, switchesByFloor, traysByFloor, risers])
+  // Freeze-while-hidden (Viewer3D stays mounted in 2D): computeRoutes runs
+  // Dijkstra per AP, which showed up as ~200 ms of 2D drag jank on a software
+  // renderer — for a layer nobody could see. A plain useMemo can't express
+  // "skip while hidden but DON'T recompute on re-entry when nothing changed",
+  // so the cache is manual: recompute only when visible AND an input ref
+  // changed; while hidden, keep returning the last computed value (stale is
+  // fine — the frozen frameloop isn't painting anyway). Unchanged inputs make
+  // the 2D→3D switch reuse everything; changed inputs re-route once on entry.
+  const routesCacheRef = useRef({ deps: null, value: { routes: new Map(), switchLinks: new Map() } })
+  if (isVisible) {
+    const deps = [floors, apsByFloor, switchesByFloor, traysByFloor, risers]
+    const prev = routesCacheRef.current.deps
+    if (!prev || deps.some((d, i) => d !== prev[i])) {
+      routesCacheRef.current = {
+        deps,
+        value: computeRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers }),
+      }
+    }
+  }
+  const { routes, switchLinks } = routesCacheRef.current.value
 
   const ctx = useMemo(() => {
     const traysOnFloor = traysByFloor[floorId] ?? []
@@ -170,8 +189,20 @@ export default function CableLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
     return { pxToM, plenumY, apById, swById }
   }, [pxToM, floor, traysByFloor, apsByFloor, switchesByFloor, floorId])
 
-  if (!pxToM) return null
-  if (routes.size === 0 && switchLinks.size === 0) return null
+  // While hidden, hand back the exact element tree from the last visible
+  // render: identical element references make React bail out of reconciling
+  // the ~2 segments-per-route subtree, so 2D store churn costs this component
+  // almost nothing. Rebuilt fresh on the first visible render. Every visible
+  // code path below MUST write jsxCacheRef (including the null returns) —
+  // caching only the non-empty tree would let a hidden render resurrect a
+  // tree older than the last visible one.
+  const jsxCacheRef = useRef(null)
+  if (!isVisible) return jsxCacheRef.current
+
+  if (!pxToM || (routes.size === 0 && switchLinks.size === 0)) {
+    jsxCacheRef.current = null
+    return null
+  }
 
   // Convert each route to a chain of 3D lines on this floor. Per-segment
   // dashing matches 2D CableLayer:
@@ -214,7 +245,7 @@ export default function CableLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
     )
   }
 
-  return (
+  const jsx = (
     <>
       {Array.from(routes.values()).map((r) => renderRoute(r, `r-${r.apId}`, CABLE_COLOR))}
       {Array.from(switchLinks.values()).map((link) => {
@@ -224,4 +255,6 @@ export default function CableLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
       })}
     </>
   )
+  jsxCacheRef.current = jsx
+  return jsx
 }

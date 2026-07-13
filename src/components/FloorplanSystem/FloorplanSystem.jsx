@@ -923,8 +923,9 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       {/* Viewer3D — also ALWAYS mounted (per the .sass note). Keeping the
           Three.js <Canvas> alive means its WebGL context + floor textures are
           already warm, so switching to 3D is instant. We toggle visibility via
-          a class instead of conditional mount; Viewer3D itself drops its
-          frameloop to 'demand' when hidden so it costs no GPU in 2D. */}
+          a class instead of conditional mount; Viewer3D freezes itself while
+          hidden (frameloop 'never' + skipped scene updates) so it costs no
+          GPU or CPU in 2D. */}
       <div
         className={`floorplan-system__viewer3d${is3D ? ' floorplan-system__viewer3d--active' : ''}`}
       >
