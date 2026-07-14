@@ -23,19 +23,22 @@
 **Phase 43 統計階段 2+3：STATS 獨立模式（B 域聚合 dashboard + C 域趨勢/timelapse）完成（2026-07-08 使用者驗收 ok，見下表）。**
 **Phase 44 規劃 vs 實測空間疊合（PM 護城河 backlog）完成（2026-07-08 使用者驗收 ok，見下表）。**
 **Phase 45 隱藏 3D 凍結 + 2D/3D 熱圖共用 canvas 完成（2026-07-13 使用者驗收 ok，見下表）。**
-**下一個 phase：無。剩餘 backlog：效能第二輪（見下方 Phase 45 後續）、A/B plan diff、漫遊重疊區，待與使用者確立要不要做。**
+**Phase 46 效能第二/三輪（引擎 async 化 + Pixi texture 修正 + marker 免重畫）完成（2026-07-14 使用者驗收 ok，見下表）。SW 機 300 AP 拖曳 long task 累計 3.0s→0.93s（-69%）、最大單筆 777→205ms，效能戰役到此收工。**
+**下一個 phase：無。剩餘 backlog：A/B plan diff、漫遊重疊區，待與使用者確立要不要做。**
 
 ---
 
 ## 還沒做的事
 
-### Phase 45 後續：效能第二輪（候選，未拍板）
+### 效能殘餘（Phase 46 收工後暫緩，防重做）
 
-> Phase 45 後 300 AP 拖曳（軟體渲染機）剩餘 long task ~1.5s，trace 歸因（`Trace-20260709T175548_without3D.json` 分析）：
-> ① 熱圖 GL 同步點 ~0.6s——solo drag 同步 `readPixels`（propagationGL renderAp）可改用既有 PBO async 管線（1 幀延遲換零 stall）；coarse(1.0m)↔fine(0.5m) grid 不同導致每次 idle 重算 LOS/out FBO 全部 realloc + `checkFramebufferStatus`（強制 GPU 同步），粗細各留一套 texture 或 losCache key 加 gridStep 可消。
-> ② Pixi 纜線層 `buildLine` 幾何重建 ~0.35s——拖曳中 throttle 或 ghost 直線、放開才真重繪。
-> ③ `heatmapAdapter` SW/HW 降級門檻（1500/20000）仍是 PLACEHOLDER，需在軟體渲染機實測校準。
-> 註：「300 AP 3D 熱圖幾十秒才出圖」問題已因 Phase 45 共用 canvas 直接消失，不在此列。
+> 2026-07-14 拍板收工。SW 機 300 AP 拖曳剩餘 ~0.93s long task 的組成與「還能做但 CP 值低」的候選：
+> ① 拖曳中被拖 AP 的**纜線 gDynamic 每幀重畫**（虛線 drop leg 逐段細分三角化，buildLine 家族 ~350ms）——候選：拖曳中改實線 ghost、放開才畫虛線。
+> ② 放開後全量重算的 CPU fold 單筆 ~165ms RunMicrotasks——候選：再切片。
+> ③ 首次拖曳的 per-size FBO/LOS 一次性配置 ~156ms `checkFramebufferStatus`（同場次後續拖曳不付）——候選：idle 時預熱 drag 尺寸。
+> ④ SwiftShader 全場光柵化固有成本（最大單筆 205ms 的主體）——要再降是靜態層快照（texture cache）等級工程，歸 Phase 25 效能家族扳機。
+> ⑤ `heatmapAdapter` SW/HW 降級門檻（1500/20000）仍是 PLACEHOLDER 未校準。
+> **重啟扳機**：使用者再回報拖曳卡頓，或單層 >500 AP 真實需求。
 
 ### Phase 25 效能家族（全部暫緩，防重做）
 
@@ -73,6 +76,8 @@
 | 44    | **規劃 vs 實測空間疊合（PM 護城河）**（2026-07-08 使用者驗收 ok）：STATS 內標出「規劃說 ≥門檻（該有訊號）但實測 client RSSI <門檻（實際差）」的落差點——平面圖工具獨有、dashboard 給不了的空間洞察。① `statsSource.js`：client 同時帶 `theoreticalRssiDbm`（傳播模型算）+ `rssiDbm`（實測=理論−環境劣化）；`measuredDegradationDb`（依 3m 網格 seeded、~38% 問題格重劣化 22–40dB 模擬死角，其餘 1–4dB）——比例調高確保白天穩定有落差（實測 9/24 小時有、尖峰數個）② `useStatsTimeStore`：`showGapOverlay` toggle + `gapThresholdDbm` ③ `statsOverlayLayer.js`：落差 client 位置畫**紅鑽石（白框加大 11px，落在 AP 密集處也跳出）** ④ `StatsDashboard`「規劃 VS 實測」section：落差點數 + 顯示 toggle（無落差時灰字提示拖白天）。**過程修的 4 個問題**（都使用者回報）：❶ 負載光暈圈誤讀成涵蓋範圍→改數字 badge（已在 Phase 43）❷ **定位落差點按鈕移除**（會硬移畫面、第一個點任意、價值低）❸ apStatus 改「只 mockStatus 釘死、其餘一律 online」（移除隨機 flapping，離線固定 AP-03 方便測試；連帶 rng 流偏移→落差場景變，靠提高問題格比例補回）❹ **overlay redraw 漏 `scene.requestRender()`**——本 app 按需 render（`app.ticker.stop()`），toggle 落差只改 Graphics 幾何卻沒請求重繪，導致「要 hover floorplan 才顯示」；加 requestRender 後 toggle 立即生效（此 bug 亦是先前 MCP 截不到紅鑽石的同源）；另 statsTime 訂閱只在 playheadTs 變才 recompute（toggle 不重算 44ms snapshot）。**MCP 驗證**：seek 白天 toggle 不 hover 紅鑽石立即出現（10 落差一堆紅鑽石）、AP-03 跨時段固定離線、0 console errors。**未做**：A/B plan diff、漫遊重疊區 |
 
 | 45    | **隱藏 3D 凍結 + 2D/3D 熱圖共用 canvas**（2026-07-13 使用者驗收 ok）：使用者回報軟體渲染機（硬體加速關閉→SwiftShader）300 AP 拖曳很卡。**Profiler 歸因**（trace 解析腳本抽 long task + CPU profile）：3.4s long task 中 57% 來自**隱藏中的 Viewer3D**——2D 模式下 Viewer3D 常駐 mounted 只用 CSS 藏，`frameloop='demand'` 仍隨每次 store 變動重繪整個 3D 場景（含陰影），HeatmapPlane3D 隱藏中重算、CableLayer3D 每次 AP 位移重跑 dijkstra；unmount A/B 驗證版實測 long task 3432ms→1468ms、最大單筆 777ms→232ms。**正式修法（凍結而非 unmount）**：① Viewer3D 隱藏時 `frameloop='never'`（invalidate 全 no-op；r3f 7.0.29 `setFrameloop` 不會自動重啟 loop，新增 `WakeOnVisible` 在 hidden→visible 邊緣補一次 invalidate）② CableLayer3D：computeRoutes 手動輸入 ref 快取（隱藏凍結、重入輸入沒變直接沿用=秒切保留、有變才 re-route 一次）+ 隱藏時回傳快取 element tree 讓 reconciliation bailout（**null 路徑也必須寫快取**，否則會復活更舊的樹）③ **2D/3D 熱圖共用 canvas**（回答「兩邊要分開算嗎」→ 不必）：新增 `render/heatmapFrameBus.js` 小 pub-sub，heatmapAdapter `paintCanvas` 每次上畫廣播 canvas+padding 對位、`hide()`/銷毀廣播 null；HeatmapPlane3D **全檔重寫成純消費者**（刪自有 GL context+sampleFieldGLAsync 整條計算路徑+凍結/暖身邏輯），CanvasTexture 包 2D canvas、UV offset/repeat 裁 padding（flipY 下 v 從 canvas 底算）、只在 3D 可見時訂閱（隱藏零成本）、重入拿 `getHeatmapFrame()` 最新一張。**效果**：3D 熱圖零計算成本（繼承 2D 粗場秒出+大場景降級）、2D/3D 像素級一致、300 AP 切 3D 熱圖從幾十秒（3D 舊路徑無大場景降級，MCP 實測 60s 才落地）變 +400ms 即現。**中途撤回**：HeatmapPlane3D「輕場景隱藏暖身」patch（修首次進 3D 空窗）——共用 canvas 後不需要，已刪。MCP 驗證：5 AP 切 3D 即時、2D 移 AP 重入正確跟上、熱圖開關 plane 同步、300 AP +400ms 完整呈現，全程 0 console errors |
+
+| 46    | **效能第二/三輪：熱圖引擎 async 化 + Pixi 修正 + marker 免重畫**（2026-07-14 使用者驗收 ok；三份 trace 逐輪歸因驅動，SW 機 300 AP 拖曳 long task 3.0s→1.25s→0.93s、最大單筆 777→205ms）：① **per-size render target 快取**（propagationGL）：out/outField/mask 從單一可變尺寸改為每尺寸一份（`makeSizedTargets`，LRU cap 6）+ losCache key 加 grid size（`@@${nx}x${ny}`）+ 年齡汰換（LOS_STALE_BAKES 32；**汰換必須用 AP-part 比對**，整 key 比對會讓粗細場互相驅逐）——消除 coarse(1.0m)↔fine(0.5m) 交替時整批 texture realloc + `checkFramebufferStatus`（強制 GPU 同步）；殘餘的 cfs 只剩首次拖曳 per-size 一次性配置 ② **solo/live 拖曳改 async 管線**（heatmapAdapter）：drag 幀不再同步 `sampleFieldGL`+`readPixels` stall，改 latest-wins 單格佇列 + `runDragLoop`（PBO+fence async，1 幀延遲換主執行緒零等待）；**教訓：latest-wins 只作用於佇列**——第一版把「有新請求」放進 isStale 會殺進行中計算，拖曳事件比計算快時每個計算死在半路、疊層凍在第一幀（starvation）；isStale 只留 `!dragSessionOn`（放開後 idle 接管，遲到的 drag paint 直接丟）③ **拖曳輸出解析度減半**（DRAG_OUT_SCALE 0.5）：採樣 grid 之外連 colormap 輸出 canvas 也減半（光柵化+Pixi 上傳都 1/4），sprite scale 自動補償、blur 半徑同步縮放，放開回滿解析度 ④ **Pixi v8 CanvasSource resize bug 修正**（使用者回報「拖曳中熱圖放大好幾倍/全紅」）：③ 讓共用 canvas 首次在執行期改尺寸，`source.resize()` 後 JS 側 source/frame/uvs 全一致但**場景渲染取樣到舊尺寸 GL 配置**（extract/讀 canvas 都會重新上傳所以看起來對，只有螢幕合成錯→初期誤判為測試假影，使用者實測逼出）；修法：尺寸變化時整顆 texture 重建（顯式 `new CanvasSource` 繞過 `Texture.from` 的 resource 快取），只在拖曳開始/結束發生 ⑤ **apsLayer 拖曳移動免重畫**：`drawAP` 幾何本畫在 local(0,0)+`container.position` 定位，`applyDragOverlay` 卻每移動幀全量重畫（circle/fan 筆劃重新三角化+Text 重設，SW 機 ~500ms buildLine+126ms flush 純白做）；改為首幀全畫、移動幀只 `position.set`（拖曳中 hover 被抑制、視覺狀態不會中途變）。**MCP 驗證**：solo/live 兩模式拖曳中疊層正確（牆影/blob 跟手）、放開回滿解析度、5AP 拖曳 0 long task、300AP 拖曳單筆 154ms、0 console errors。**trace 解析腳本**（long task 抽取+CPU profile 歸因+bucket 分類）在 scratchpad，重建成本低、未入 repo |
 
 > **引擎架構決策（2026-06-02，不可違反）**：JS 傳播引擎（propagation.js）**不可移除**——Client View 後 JS 是「單點查詢主力」（probeAt/coverage/hover），shader 只負責 heatmap 整圖。基礎物理常數兩邊須一致。詳見 memory `project_clientview_js_engine_role`。
 >

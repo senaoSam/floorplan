@@ -544,10 +544,22 @@ export function attachAPsLayer({
       const prev = containers.get(lastDragId)
       if (prev) drawAP(prev)
     }
+    const isNewDrag = !!drag && drag.id !== lastDragId
     lastDragId = drag?.id ?? null
     if (drag) {
       const entry = containers.get(drag.id)
-      if (entry) drawAP(entry, drag.x, drag.y)
+      if (!entry) return
+      // drawAP draws the marker at LOCAL (0,0) and places it via
+      // container.position, so a move needs only the transform update.
+      // Rebuilding the Graphics every drag frame (clear + circle/fan strokes
+      // + text sets) re-tessellated identical geometry — on a software
+      // renderer that profiled as the single largest drag cost (~500 ms of
+      // buildLine/triangulate per drag) once the heatmap left the hot path.
+      // Full drawAP runs once on drag START (visual state may change with
+      // selection) — after that the marker's look can't change mid-drag
+      // (hover is suppressed while dragging).
+      if (isNewDrag) drawAP(entry, drag.x, drag.y)
+      else entry.container.position.set(drag.x, drag.y)
     }
   }
 

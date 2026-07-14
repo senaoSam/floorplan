@@ -1,8 +1,8 @@
-import { Sprite, Texture, Graphics } from 'pixi.js'
+import { Sprite, Texture, Graphics, CanvasSource } from 'pixi.js'
 import { publishHeatmapFrame } from './heatmapFrameBus'
 import { createHeatmapGL } from '@/features/heatmap/heatmapGL'
 import { buildScenario } from '@/features/heatmap/buildScenario'
-import { sampleFieldGL, sampleFieldGLAsync } from '@/features/heatmap/sampleFieldGL'
+import { sampleFieldGLAsync } from '@/features/heatmap/sampleFieldGL'
 import { sampleField } from '@/features/heatmap/sampleField'
 import { getModeConfig } from '@/features/heatmap/modes'
 import { computeFloorElevations } from '@/utils/floorStacking'
@@ -172,6 +172,16 @@ export function attachHeatmapLayer({
   // Tracks whether we are mid-solo-drag so we snapshot exactly once per drag
   // (on the transition idle→solo) and restore on the transition back.
   let soloActive = false
+  // ---- async drag pipeline ----
+  // Drag frames used to render with the SYNC engine (sampleFieldGL), whose
+  // readPixels stalls the main thread until the GL backlog drains — profiled
+  // as ~250 ms of long-task time across a 300-AP drag on a software renderer.
+  // Now each drag store event just coalesces its request into dragPending
+  // (latest wins) and a single async loop computes → paints. Costs one frame
+  // of visual latency on the overlay; buys a stall-free main thread.
+  let dragPending = null      // latest coalesced drag render request
+  let dragLoopRunning = false
+  let dragSessionOn = false   // false = released; in-flight results are dropped
   // The padded sample grid extends past the floor image extent. Without
   // a clip the padded region bleeds into the canvas background outside
   // the floor plan, which looked wrong to the user. mask is a Graphics
@@ -280,6 +290,10 @@ export function attachHeatmapLayer({
   const hide = () => {
     cancelAnim(false)
     lastIdleInputs = null
+    // Kill the drag pipeline too — a late drag paint would flip the sprite
+    // back visible after this hide (heatmap toggled off mid-drag).
+    dragSessionOn = false
+    dragPending = null
     if (sprite) sprite.visible = false
     if (snapSprite) snapSprite.visible = false
     publishHeatmapFrame(null)   // 3D plane follows the 2D sprite off
@@ -292,11 +306,22 @@ export function attachHeatmapLayer({
     gl.render({ rssi: grid, nx, ny }, ctx.outW, ctx.outH, 1 / ctx.scale, ctx.blur, ctx.contours, {
       anchors: ctx.anchors,
     })
-    // PIXI v8 CanvasSource caches its dimensions at create-time; resize so
-    // the GPU texture upload reuploads at the new resolution after heatmapGL
-    // mutates canvas.width/height in-place.
+    // PIXI v8 CanvasSource caches its dimensions at create-time. When
+    // heatmapGL mutates canvas.width/height in-place (full-res idle ↔
+    // half-res drag), REBUILD the texture instead of source.resize():
+    // resize keeps all the JS-side sizes consistent (source/frame/uvs) but
+    // the scene render path kept sampling a stale-sized GL allocation — the
+    // on-screen sprite showed a flat/zoomed field while extract() (which
+    // re-uploads) looked correct. A fresh Texture sidesteps that PIXI
+    // internal entirely; it only happens on drag start/end, not per frame.
     if (texture.source.width !== gl.canvas.width || texture.source.height !== gl.canvas.height) {
-      texture.source.resize(gl.canvas.width, gl.canvas.height)
+      const old = texture
+      // Explicit CanvasSource (not Texture.from): from() caches by resource,
+      // so after destroying the old texture it could hand the dead instance
+      // back for the same canvas.
+      texture = new Texture({ source: new CanvasSource({ resource: gl.canvas }) })
+      sprite.texture = texture
+      old.destroy(true)   // release the stale-sized GL allocation
     }
     texture.source.update()
     // Anchor sprite top-left at (-padLpx, -padTpx) so the unpadded floor-plan
@@ -423,6 +448,58 @@ export function attachHeatmapLayer({
     snapSprite.y = sprite.y
     snapSprite.scale.set(sprite.scale.x, sprite.scale.y)
     snapTexture.source.update()
+  }
+
+  // Async drag pipeline: one loop drains dragPending (latest-wins). Each
+  // iteration computes via the async engine (PBO + fence — no readPixels
+  // stall) and paints. Latest-wins applies to the QUEUE only — an in-flight
+  // compute is allowed to finish and paint (it's one drag frame of work).
+  // Aborting it whenever a newer request arrived (an earlier version of this
+  // isStale) starved the pipeline: drag events land faster than a compute
+  // completes, so every compute died mid-flight and the overlay froze on the
+  // first painted frame until the pointer stopped. isStale only fires on
+  // session end — the idle path owns the canvas from release, and a late
+  // drag paint over its coarse field would flash stale content.
+  const runDragLoop = async () => {
+    try {
+      while (dragPending) {
+        const req = dragPending
+        dragPending = null
+        let field = null
+        try {
+          field = await sampleFieldGLAsync(req.renderScenario, req.stepM, {
+            ...req.opts,
+            isStale: () => !dragSessionOn,
+          })
+        } catch (e) {
+          console.warn('[heatmap] async drag engine failed, falling back to JS:', e.message)
+          try { field = sampleField(req.renderScenario, req.stepM, req.opts) } catch (_) { field = null }
+        }
+        if (!field) continue
+        if (!dragSessionOn) return
+        const activeField = field[req.modeCfg.field] ?? field.rssi
+        paintCanvas(activeField, field.nx, field.ny, req.paintCtx)
+        // Solo-AP: dim the frozen snapshot underneath to 0.3 so the single
+        // moving AP reads clearly on top (oldSrc displayMode 'solo-ap').
+        if (snapSprite) {
+          if (req.isSoloAP && snapCanvas) {
+            snapSprite.visible = true
+            snapSprite.alpha = 0.3
+          } else {
+            snapSprite.visible = false
+          }
+        }
+      }
+    } finally {
+      dragLoopRunning = false
+      // compute() only starts the loop when dragLoopRunning is false, so a
+      // request that lands between our last while-check and this finally
+      // (i.e. during an await's microtask turn) would otherwise be stranded.
+      if (dragPending && dragSessionOn) {
+        dragLoopRunning = true
+        runDragLoop()
+      }
+    }
   }
 
   const compute = () => {
@@ -601,6 +678,10 @@ export function attachHeatmapLayer({
     // Don't recompute — show the frozen snapshot, hide the live sprite. The
     // next non-freeze compute() (drag end, store change) restores full quality.
     if (isSoloFreeze && snapSprite && snapCanvas) {
+      // Also drop any in-flight AP-drag compute — its late paint would flip
+      // the live sprite back on over the frozen snapshot.
+      dragSessionOn = false
+      dragPending = null
       snapSprite.visible = true
       snapSprite.alpha = 1
       s.visible = false
@@ -653,7 +734,6 @@ export function attachHeatmapLayer({
 
     const isDragRender = isSoloAP || lodActive
     if (isDragRender) {
-      // Drag frames stay fully synchronous — they ARE the realtime path.
       cancelAnim(false)
       lastIdleInputs = null
 
@@ -697,40 +777,62 @@ export function attachHeatmapLayer({
       const DRAG_GRID_STEP_M = 1.0
       const stepM = Math.max(hm.gridStepM, DRAG_GRID_STEP_M)
 
-      let field
-      if (hm.engine === 'shader') {
-        try {
-          field = sampleFieldGL(renderScenario, stepM, opts)
-        } catch (e) {
-          console.warn('[heatmap] shader engine failed, falling back to JS:', e.message)
-          field = sampleField(renderScenario, stepM, opts)
-        }
-      } else {
-        field = sampleField(renderScenario, stepM, opts)
-      }
-
       // Solo-AP always renders in RSSI (a single AP has no SINR / CCI). Live
       // LOD drops blur + contours; solo-AP keeps the user settings.
+      //
+      // Drag paints also HALVE the output resolution (not just the sample
+      // grid): the colormap passes rasterise outW×outH pixels on the heatmap
+      // GL context and PIXI re-uploads that canvas per paint — both scale
+      // with output area, both run per drag frame, and both are CPU work on
+      // a software renderer. The sprite scales the canvas back up (bilinear)
+      // and the blur upsample already softens the overlay, so half-res is
+      // visually indistinguishable mid-drag. Blur radius is in OUTPUT pixels,
+      // so it scales down with the canvas to keep the same visual size. Drag
+      // end repaints at full resolution via the idle path.
+      const DRAG_OUT_SCALE = 0.5
       const modeCfg = isSoloAP ? getModeConfig('rssi') : getModeConfig(hm.mode)
-      const activeField = field[modeCfg.field] ?? field.rssi
-      paintCanvas(activeField, field.nx, field.ny, {
+      const paintCtx = {
         ...ctxBase,
-        blur:     isSoloAP ? hm.blur         : 0,
+        outW: Math.max(1, Math.round(ctxBase.outW * DRAG_OUT_SCALE)),
+        outH: Math.max(1, Math.round(ctxBase.outH * DRAG_OUT_SCALE)),
+        blur:     isSoloAP ? Math.round(hm.blur * DRAG_OUT_SCALE) : 0,
         contours: isSoloAP ? hm.showContours : false,
         anchors:  modeCfg.anchors,
-      })
-      // Solo-AP: dim the frozen snapshot underneath to 0.3 so the single
-      // moving AP reads clearly on top (oldSrc displayMode 'solo-ap').
-      if (snapSprite) {
-        if (isSoloAP && snapCanvas) {
-          snapSprite.visible = true
-          snapSprite.alpha = 0.3
-        } else {
-          snapSprite.visible = false
+      }
+
+      // JS engine: keep the old synchronous render — the compute runs on the
+      // main thread either way, so the async pipeline buys nothing.
+      if (hm.engine !== 'shader') {
+        const field = sampleField(renderScenario, stepM, opts)
+        const activeField = field[modeCfg.field] ?? field.rssi
+        paintCanvas(activeField, field.nx, field.ny, paintCtx)
+        if (snapSprite) {
+          if (isSoloAP && snapCanvas) {
+            snapSprite.visible = true
+            snapSprite.alpha = 0.3
+          } else {
+            snapSprite.visible = false
+          }
         }
+        return
+      }
+
+      // Shader engine: coalesce into the async drag pipeline (latest wins) —
+      // no sync readPixels stall on the drag path. See runDragLoop.
+      dragSessionOn = true
+      dragPending = { renderScenario, stepM, opts, modeCfg, paintCtx, isSoloAP }
+      if (!dragLoopRunning) {
+        dragLoopRunning = true
+        runDragLoop()
       }
       return
     }
+
+    // Not a drag frame: close the drag session so any in-flight drag compute
+    // drops its result instead of painting a stale overlay over the idle
+    // repaint that follows.
+    dragSessionOn = false
+    dragPending = null
 
     // ---- idle: Phase 41-1 two-stage async compute ----
     // Skip entirely when nothing that feeds the field changed — unrelated
@@ -901,6 +1003,8 @@ export function attachHeatmapLayer({
 
   return () => {
     generation++ // orphan any in-flight idle stages
+    dragSessionOn = false
+    dragPending = null
     cancelAnim(false)
     publishHeatmapFrame(null)   // adapter (and its canvas) are going away
     unsubHM()

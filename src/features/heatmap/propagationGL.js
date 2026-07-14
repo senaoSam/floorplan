@@ -1935,81 +1935,83 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0)
   gl.bindVertexArray(null)
 
-  // Output FBO + R32F target sized to the grid (one render per AP).
-  const outTex = gl.createTexture()
-  gl.bindTexture(gl.TEXTURE_2D, outTex)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-  let outNx = 0, outNy = 0
-  const outFbo = gl.createFramebuffer()
-
-  function ensureOutSize(nx, ny) {
-    if (nx === outNx && ny === outNy) return
-    gl.bindTexture(gl.TEXTURE_2D, outTex)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, nx, ny, 0, gl.RED, gl.FLOAT, null)
-    gl.bindFramebuffer(gl.FRAMEBUFFER, outFbo)
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, outTex, 0)
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error('output FBO incomplete')
+  // Per-size render-target caches. The drag path (≥1.0 m), the idle coarse
+  // stage (1.0 m) and the idle fine stage (user step, default 0.5 m) all
+  // render at different grid sizes. With one mutable target per output, every
+  // stage switch re-allocated the texture and re-ran checkFramebufferStatus —
+  // a forced GPU-pipeline sync that profiled as ~0.5 s of long-task time
+  // across a 300-AP drag on a software renderer. One target PER SIZE makes
+  // stage switches free: allocation + completeness check run once per size,
+  // then every later ensure() is a Map hit. Sizes in practice are 2-3 per
+  // floor; the LRU cap only guards floor-resize churn.
+  const SIZED_TARGET_CAP = 6
+  function makeSizedTargets(label, internalFormat, format, type) {
+    const bySize = new Map()   // 'nx,ny' -> { tex, fbo, lastUse }
+    let useCounter = 0
+    const ensure = (nx, ny) => {
+      const key = nx + ',' + ny
+      let e = bySize.get(key)
+      if (!e) {
+        const tex = gl.createTexture()
+        gl.bindTexture(gl.TEXTURE_2D, tex)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+        gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, nx, ny, 0, format, type, null)
+        const fbo = gl.createFramebuffer()
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0)
+        if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+          throw new Error(`${label} FBO incomplete`)
+        }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+        e = { tex, fbo, lastUse: 0 }
+        bySize.set(key, e)
+        if (bySize.size > SIZED_TARGET_CAP) {
+          let oldestKey = null, oldestUse = Infinity
+          for (const [k, v] of bySize) {
+            if (v.lastUse < oldestUse) { oldestUse = v.lastUse; oldestKey = k }
+          }
+          const old = bySize.get(oldestKey)
+          gl.deleteTexture(old.tex)
+          gl.deleteFramebuffer(old.fbo)
+          bySize.delete(oldestKey)
+        }
+      }
+      e.lastUse = ++useCounter
+      return e
     }
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
-    outNx = nx; outNy = ny
+    const dispose = () => {
+      for (const e of bySize.values()) {
+        gl.deleteTexture(e.tex)
+        gl.deleteFramebuffer(e.fbo)
+      }
+      bySize.clear()
+    }
+    return { ensure, dispose }
   }
 
-  // HM-F5g: aggregated 4-channel output target (rssi, sinr, snr, cci) — sized
-  // to the grid, sampled once at end of renderField.
-  const outFieldTex = gl.createTexture()
-  gl.bindTexture(gl.TEXTURE_2D, outFieldTex)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-  const outFieldFbo = gl.createFramebuffer()
-  let outFieldNx = 0, outFieldNy = 0
-
-  function ensureOutFieldSize(nx, ny) {
-    if (nx === outFieldNx && ny === outFieldNy) return
-    gl.bindTexture(gl.TEXTURE_2D, outFieldTex)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, nx, ny, 0, gl.RGBA, gl.FLOAT, null)
-    gl.bindFramebuffer(gl.FRAMEBUFFER, outFieldFbo)
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, outFieldTex, 0)
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error('field output FBO incomplete')
-    }
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
-    outFieldNx = nx; outFieldNy = ny
-  }
-
+  // R32F per-AP output target (one render per AP).
+  const outTargets = makeSizedTargets('output', gl.R32F, gl.RED, gl.FLOAT)
+  // HM-F5g: aggregated 4-channel output target (rssi, sinr, snr, cci) —
+  // sampled once at end of renderField.
+  const outFieldTargets = makeSizedTargets('field output', gl.RGBA32F, gl.RGBA, gl.FLOAT)
   // HM-F5h cascade mask: R8 alive/dead at coarse resolution. R8 (not R32F) so
   // the upload doesn't need EXT_color_buffer_float for *this* attachment —
   // R8 is universally renderable in WebGL2.
-  const maskTex = gl.createTexture()
-  gl.bindTexture(gl.TEXTURE_2D, maskTex)
+  const maskTargets = makeSizedTargets('mask', gl.R8, gl.RED, gl.UNSIGNED_BYTE)
+  // Placeholder bound as the uMask sampler when cascade is off, so the unit
+  // stays texture-complete. Shader gates on uCascadeFactor before fetching,
+  // so this 1×1 zero is never read for output, only there to satisfy WebGL2
+  // sampler validation.
+  const maskPlaceholderTex = gl.createTexture()
+  gl.bindTexture(gl.TEXTURE_2D, maskPlaceholderTex)
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-  const maskFbo = gl.createFramebuffer()
-  // Placeholder so the sampler is texture-complete even when cascade is off.
-  // Shader gates on uCascadeFactor before fetching, so this 1×1 zero is
-  // never read for output, only there to satisfy WebGL2 sampler validation.
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 1, 1, 0, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array([0]))
-  let maskNx = 1, maskNy = 1
-
-  function ensureMaskSize(nx, ny) {
-    if (nx === maskNx && ny === maskNy) return
-    gl.bindTexture(gl.TEXTURE_2D, maskTex)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, nx, ny, 0, gl.RED, gl.UNSIGNED_BYTE, null)
-    gl.bindFramebuffer(gl.FRAMEBUFFER, maskFbo)
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, maskTex, 0)
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error('mask FBO incomplete')
-    }
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
-    maskNx = nx; maskNy = ny
-  }
 
   // Walls texture is reused across all AP renders within a frame. We pack
   // walls into a 4096-wide RGBA32F image and reupload only when the wall list
@@ -2500,7 +2502,13 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     // toggles. Bake is geometry-only so antenna gain / channel changes are
     // legitimately ignored (LOS depends on rays, not radio).
     const hash = `${apX},${apY},${apZ},${gridStepM},${originM.x},${originM.y},${nx},${ny},${rxZM},${wallsVersion}`
-    const cached = losCache.get(apKey)
+    // Grid size is part of the CACHE KEY, not just the hash: the idle coarse
+    // stage (1.0 m) and fine stage (0.5 m) alternate every recompute, and a
+    // per-AP-only key made them evict each other's texture — 2×N texture
+    // reallocs (each with a checkFramebufferStatus GPU sync) per recompute.
+    // Per-(AP, size) entries persist across the alternation.
+    const cacheKey = `${apKey}@@${nx}x${ny}`
+    const cached = losCache.get(cacheKey)
     if (cached && cached.hash === hash) return cached
 
     // Allocate or resize this AP's texture + FBO. Keeping per-AP FBOs alive
@@ -2514,8 +2522,8 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
       const fbo = gl.createFramebuffer()
-      entry = { tex, fbo, hash: '', nx: 0, ny: 0 }
-      losCache.set(apKey, entry)
+      entry = { tex, fbo, hash: '', nx: 0, ny: 0, lastBake: 0 }
+      losCache.set(cacheKey, entry)
     }
     if (entry.nx !== nx || entry.ny !== ny) {
       gl.bindTexture(gl.TEXTURE_2D, entry.tex)
@@ -2572,19 +2580,33 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // wallCount is plumbed in as a snapshot from sampleFieldGL because the
   // shader uniform must match what was uploaded.
   let wallsCountForLos = 0
+  // Age horizon for per-(AP, size) entries: a size that hasn't been baked for
+  // this many bakeLos calls is dead (e.g. the user changed gridStepM, or a
+  // floor resize shifted nx/ny) and its textures are reclaimed. Coarse/fine
+  // alternate every idle recompute, so live sizes refresh every 1-2 calls —
+  // 32 is comfortably past any legitimate gap.
+  const LOS_STALE_BAKES = 32
+  let losBakeCounter = 0
   function bakeLos(apEntries, gridStepM, originM, rxZM, nx, ny, wallCount) {
     wallsCountForLos = wallCount
+    losBakeCounter++
     const seen = new Set()
     const out = new Map()
     for (const { ap, key } of apEntries) {
       seen.add(key)
-      out.set(key, bakeLosOne(ap, key, gridStepM, originM, rxZM, nx, ny))
+      const entry = bakeLosOne(ap, key, gridStepM, originM, rxZM, nx, ny)
+      entry.lastBake = losBakeCounter
+      out.set(key, entry)
     }
-    // Evict entries for APs that disappeared this frame. Cheap: typical N is
-    // dozens, the loop is amortised across the bake we just did.
+    // Evict entries whose AP disappeared, or whose grid size hasn't been used
+    // for a while (cache keys are per-(AP, size); the size part must NOT take
+    // part in the disappeared-AP test or coarse and fine would evict each
+    // other every alternation). Cheap: typical N is dozens/hundreds, the loop
+    // is amortised across the bake we just did.
     for (const k of [...losCache.keys()]) {
-      if (!seen.has(k)) {
-        const e = losCache.get(k)
+      const e = losCache.get(k)
+      const apPart = k.slice(0, k.lastIndexOf('@@'))
+      if (!seen.has(apPart) || losBakeCounter - e.lastBake > LOS_STALE_BAKES) {
         gl.deleteTexture(e.tex)
         gl.deleteFramebuffer(e.fbo)
         losCache.delete(k)
@@ -2799,14 +2821,14 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     for (const h of handles) pboRelease(h.pbo)
   }
 
-  // Uniform setup + draw for one AP, leaving outFbo bound so the caller
+  // Uniform setup + draw for one AP, leaving the sized output FBO bound so the caller
   // picks its readback flavour (sync readPixels vs PBO enqueue).
   function renderApDraw(ap, scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
     const nx = opts.gridSize?.nx ?? (Math.ceil(scenario.size.w / gridStepM) + 1)
     const ny = opts.gridSize?.ny ?? (Math.ceil(scenario.size.h / gridStepM) + 1)
-    ensureOutSize(nx, ny)
+    const outTarget = outTargets.ensure(nx, ny)
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, outFbo)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, outTarget.fbo)
     gl.viewport(0, 0, nx, ny)
     gl.useProgram(prog)
 
@@ -2949,7 +2971,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   function renderFieldPrep(scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
     const nx = opts.gridSize?.nx ?? (Math.ceil(scenario.size.w / gridStepM) + 1)
     const ny = opts.gridSize?.ny ?? (Math.ceil(scenario.size.h / gridStepM) + 1)
-    ensureOutFieldSize(nx, ny)
+    const outFieldTarget = outFieldTargets.ensure(nx, ny)
 
     // HM-F5h cascade gate. We trigger the coarse pre-pass when AP count is
     // high enough that the per-fragment AP loop dominates frame time; below
@@ -2961,12 +2983,13 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     const cullFloor = opts.cullFloorDbm ?? -120
     const cascadeFactor = (apCount >= 20) ? 4 : 0
     let mNx = 0, mNy = 0
+    let maskTarget = null
     if (cascadeFactor > 0) {
       mNx = Math.max(1, Math.ceil(nx / cascadeFactor))
       mNy = Math.max(1, Math.ceil(ny / cascadeFactor))
-      ensureMaskSize(mNx, mNy)
+      maskTarget = maskTargets.ensure(mNx, mNy)
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, maskFbo)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, maskTarget.fbo)
       gl.viewport(0, 0, mNx, mNy)
       gl.useProgram(progFieldCoarse)
 
@@ -2989,7 +3012,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       gl.drawArrays(gl.TRIANGLES, 0, 6)
     }
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, outFieldFbo)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, outFieldTarget.fbo)
     gl.viewport(0, 0, nx, ny)
     gl.useProgram(progField)
 
@@ -3034,9 +3057,10 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.uniform1i(gl.getUniformLocation(progField, 'uApCount'), apCount)
 
     // HM-F5h: bind the coarse mask + tell the shader whether cascade is on.
-    // When cascadeFactor = 0, the shader skips the mask check entirely.
+    // When cascadeFactor = 0, the shader skips the mask check entirely (the
+    // placeholder only keeps the sampler unit texture-complete).
     gl.activeTexture(gl.TEXTURE6)
-    gl.bindTexture(gl.TEXTURE_2D, maskTex)
+    gl.bindTexture(gl.TEXTURE_2D, maskTarget ? maskTarget.tex : maskPlaceholderTex)
     gl.uniform1i(gl.getUniformLocation(progField, 'uMask'), 6)
     gl.uniform2i(gl.getUniformLocation(progField, 'uMaskSize'), mNx, mNy)
     gl.uniform1i(gl.getUniformLocation(progField, 'uCascadeFactor'), cascadeFactor)
@@ -3133,7 +3157,10 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.deleteProgram(progLos)
     gl.deleteBuffer(vbo)
     gl.deleteVertexArray(vao)
-    for (const t of [outTex, outFieldTex, wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex, apsTex, maskTex, losPlaceholderTex, apGeoPlaceholderTex]) gl.deleteTexture(t)
+    for (const t of [wallsTex, slabsTex, holePolyTex, gridIdxTex, gridListTex, cornersTex, apsTex, maskPlaceholderTex, losPlaceholderTex, apGeoPlaceholderTex]) gl.deleteTexture(t)
+    outTargets.dispose()
+    outFieldTargets.dispose()
+    maskTargets.dispose()
     for (const e of losCache.values()) {
       gl.deleteTexture(e.tex)
       gl.deleteFramebuffer(e.fbo)
@@ -3147,9 +3174,6 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     outGridCache.clear()
     for (const p of pboPool) gl.deleteBuffer(p.buf)
     pboPool.length = 0
-    gl.deleteFramebuffer(outFbo)
-    gl.deleteFramebuffer(outFieldFbo)
-    gl.deleteFramebuffer(maskFbo)
   }
 
   return {
