@@ -24,8 +24,9 @@ export function clearActiveScene(scene) {
   if (!scene || activeScene === scene) activeScene = null
 }
 
-// Returns { app, world } for the export helpers, or null when no scene is
-// mounted yet. capturePlanPng / buildPlanningPdf accept exactly this shape.
+// Returns { app, world } for scene consumers (PNG export, viewer measurements,
+// etc.), or null when no scene is mounted yet. capturePlanPng accepts exactly
+// this shape.
 export function getSceneRefs() {
   if (!activeScene || !activeScene.app || !activeScene.world) return null
   return { app: activeScene.app, world: activeScene.world }
