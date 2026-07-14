@@ -81,6 +81,28 @@
       border-top: 1px dashed rgba(255, 255, 255, 0.08)
       padding-top: 8px
 
+  // Collapsible section header (label + fold arrow). Full-width button so the
+  // whole row is a click target; the label keeps its existing styling.
+  &__section-toggle
+    display: flex
+    align-items: center
+    gap: 5px
+    width: 100%
+    background: none
+    border: none
+    padding: 0
+    cursor: pointer
+    text-align: left
+    &:hover .cable-summary__label
+      color: $text-primary
+
+  &__section-arrow
+    display: inline-flex
+    color: $text-secondary
+    transition: transform 0.2s
+    &--collapsed
+      transform: rotate(-90deg)
+
   &__label
     font-size: 10px
     font-weight: 600
@@ -199,57 +221,3 @@
         background: rgba(255, 255, 255, 0.05)
         color: $text-primary
 
-  // 22-1 + 22-2 Export CTA — sits in the last section, full-width pill
-  // button that opens a small menu for CSV / PDF.
-  &__export-wrap
-    position: relative
-
-  &__export-btn
-    display: flex
-    align-items: center
-    justify-content: center
-    gap: 6px
-    width: 100%
-    padding: 7px 12px
-    border: 1px solid $accent
-    border-radius: 6px
-    background: rgba(0, 229, 255, 0.1)
-    color: $accent
-    font-size: 12px
-    font-weight: 600
-    cursor: pointer
-    transition: background 0.12s
-
-    &:hover:not(:disabled)
-      background: rgba(0, 229, 255, 0.18)
-
-    &:disabled
-      opacity: 0.6
-      cursor: not-allowed
-
-  &__export-menu
-    position: absolute
-    left: 0
-    right: 0
-    bottom: 100%
-    margin-bottom: 4px
-    background: rgba(15, 23, 42, 0.96)
-    border: 1px solid rgba(255, 255, 255, 0.12)
-    border-radius: 6px
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45)
-    display: flex
-    flex-direction: column
-    overflow: hidden
-    z-index: 60
-
-  &__export-item
-    padding: 7px 12px
-    background: transparent
-    border: none
-    color: $text-primary
-    font-size: 12px
-    text-align: left
-    cursor: pointer
-
-    &:hover
-      background: rgba(255, 255, 255, 0.08)

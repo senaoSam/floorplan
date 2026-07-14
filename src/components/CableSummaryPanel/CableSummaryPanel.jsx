@@ -6,12 +6,30 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { getCachedRoutes } from '@/features/cable/routesCache'
 import { computeTrayBOM } from '@/features/cable/computeTrayBOM'
 import { computeTrayCableLoads, computeTrayFill } from '@/features/cable/computeTrayFill'
-import { buildPlanningBOMCsv, triggerCSVDownload } from '@/features/cable/exportPlanningBOM'
-import { buildPlanningPdf, triggerPdfDownload } from '@/features/cable/exportPlanningPdf'
-import { getSceneRefs } from '@/render/sceneRegistry'
-// Phase 25 — PIXI scene replaces Konva stage
 import Icon from '@/components/Icon/Icon'
 import './CableSummaryPanel.sass'
+
+// Collapsible section: clicking the label row folds its body away. `warn`
+// tints the label; `count` appends a badge count. Mirrors StatsDashboard's
+// Section so both summary panels fold the same way.
+function Section({ label, warn, open, onToggle, children }) {
+  return (
+    <section className="cable-summary__section">
+      <button
+        type="button"
+        className={`cable-summary__section-toggle${warn ? ' cable-summary__section-toggle--warn' : ''}`}
+        onClick={onToggle}
+        aria-expanded={open}
+      >
+        <span className={`cable-summary__section-arrow${open ? '' : ' cable-summary__section-arrow--collapsed'}`}>
+          <Icon name="chevronDown" size={9} />
+        </span>
+        <span className={`cable-summary__label${warn ? ' cable-summary__label--warn' : ''}`}>{label}</span>
+      </button>
+      {open && children}
+    </section>
+  )
+}
 
 // Building-wide cable BOM + per-route-status counts + unroutable list.
 // Mirrors HeatmapControl's bottom-left placement; auto-hides until the user
@@ -25,8 +43,6 @@ function CableSummaryPanel() {
   const traysByFloor    = useCableStore((s) => s.traysByFloor)
   const risers          = useCableStore((s) => s.risers)
   const setSelected     = useEditorStore((s) => s.setSelected)
-  const regulatoryDomain = useEditorStore((s) => s.regulatoryDomain)
-  const activeFloorId   = useFloorStore((s) => s.activeFloorId)
   const capacityProfile    = useCableStore((s) => s.capacityProfile)
   const customCapacity     = useCableStore((s) => s.customCapacity)
   const setCapacityProfile = useCableStore((s) => s.setCapacityProfile)
@@ -42,9 +58,20 @@ function CableSummaryPanel() {
   )
 
   const [collapsed, setCollapsed] = useState(true)
-  // 22-2 PDF / CSV export menu state
-  const [exportMenuOpen, setExportMenuOpen] = useState(false)
-  const [exportStatus, setExportStatus] = useState(null)  // null | string while generating
+  // Per-section collapse (same pattern as StatsDashboard). Defaults fold the
+  // advanced / repeat-slicing sections (per-floor, tier split, length brackets)
+  // so the core rows (route status, BOM, tray planning, bottlenecks) read
+  // first. Route status is always visible; it is not a collapsible section.
+  const [collapsedSections, setCollapsedSections] = useState(
+    () => new Set(['perFloor', 'tier', 'length', 'unroutList']),
+  )
+  const isOpen = (key) => !collapsedSections.has(key)
+  const toggleSection = (key) => setCollapsedSections((prev) => {
+    const next = new Set(prev)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    return next
+  })
 
   const stats = useMemo(() => {
     const { routes, switchLinks, warnings } = getCachedRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
@@ -160,87 +187,6 @@ function CableSummaryPanel() {
     setSelected(trayId, 'cable_tray')
   }
 
-  // 22-1 / 22-2 Shared planning snapshot — both CSV and PDF need the same
-  // upstream computes (routes / switchLinks / per-tray fill). Computing on
-  // click rather than caching in the live `stats` memo keeps the panel
-  // cheap to re-render.
-  const buildPlanningSnapshot = () => {
-    const { routes, switchLinks, warnings } = getCachedRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
-    const trayLoads = computeTrayCableLoads({ routes, switchLinks, traysByFloor })
-    const profile = getCapacityProfile(capacityProfile, customCapacity)
-    const trayFillByKey = new Map()
-    for (const f of floors) {
-      for (const tray of traysByFloor[f.id] ?? []) {
-        const key = `${f.id}|${tray.id}`
-        const load = trayLoads.get(key) ?? { count: 0, copperCount: 0, fiberCount: 0 }
-        trayFillByKey.set(key, computeTrayFill({ tray, load, profile }))
-      }
-    }
-    return { routes, switchLinks, warnings, trayFillByKey }
-  }
-
-  const handleExportCsv = () => {
-    setExportMenuOpen(false)
-    const { routes, switchLinks, trayFillByKey } = buildPlanningSnapshot()
-    const csv = buildPlanningBOMCsv({
-      floors,
-      apsByFloor,
-      switchesByFloor,
-      routes,
-      switchLinks,
-      trayBOM,
-      trayFillByKey,
-      traysByFloor,
-      wasteFactor,
-    })
-    const stamp = new Date().toISOString().slice(0, 10)
-    triggerCSVDownload(csv, `floorplan-bom-${stamp}.csv`)
-  }
-
-  // 22-2 PDF export — multi-page (cover + per-floor + tables + warnings).
-  // Async because each floor capture waits ~180 ms for React commit, and
-  // jsPDF can take a few hundred ms on its own. We surface progress strings
-  // into exportStatus so the button shows what stage we're on.
-  const handleExportPdf = async () => {
-    setExportMenuOpen(false)
-    if (exportStatus) return  // Already running
-    setExportStatus('準備中...')
-    try {
-      const snap = buildPlanningSnapshot()
-      // Live scene from the production-safe registry (the old window.__pixiApp
-      // / __scene read was DEV-only → PDF silently no-op'd in production).
-      // capturePlanPng inside buildPlanningPdf accepts this { app, world }.
-      const stage = getSceneRefs()
-      if (!stage) { setExportStatus(null); return }
-      const blob = await buildPlanningPdf({
-        stage,
-        floors,
-        apsByFloor,
-        switchesByFloor,
-        traysByFloor,
-        risers,
-        routes: snap.routes,
-        switchLinks: snap.switchLinks,
-        warnings: snap.warnings,
-        trayBOM,
-        trayFillByKey: snap.trayFillByKey,
-        wasteFactor,
-        regulatoryDomain,
-        setActiveFloor,
-        getActiveFloorId: () => activeFloorId,
-        onProgress: (msg) => setExportStatus(msg),
-      })
-      const stamp = new Date().toISOString().slice(0, 10)
-      triggerPdfDownload(blob, `floorplan-report-${stamp}.pdf`)
-    } catch (err) {
-      console.error('PDF export failed:', err)
-      setExportStatus('失敗 — 請看 console')
-      setTimeout(() => setExportStatus(null), 2500)
-      return
-    }
-    setExportStatus(null)
-  }
-
   // Order per-floor rows highest-floor-first, matching the SidebarLeft list and
   // the 3D floor selector. floors[0] sits on the ground (see floorStacking), so
   // a higher array index = a higher floor → sort by index descending. (The old
@@ -262,6 +208,9 @@ function CableSummaryPanel() {
       </div>
       {!collapsed && (
         <div className="cable-summary__body">
+          {/* Route status — always visible. The unroutable row expands to the
+              AP list inline (merged from the old standalone "無法接線" section
+              so the count and its detail live in one place). */}
           <section className="cable-summary__section">
             <p className="cable-summary__label">路由狀態（{stats.totalAP} AP）</p>
             <div className="cable-summary__row">
@@ -273,16 +222,39 @@ function CableSummaryPanel() {
               <span>{stats.byStatus['fallback-manhattan']}</span>
             </div>
             {stats.byStatus.unroutable > 0 && (
-              <div className="cable-summary__row cable-summary__row--warn">
-                <span>Unroutable</span>
-                <span>{stats.byStatus.unroutable}</span>
-              </div>
+              <>
+                <div
+                  className="cable-summary__row cable-summary__row--warn cable-summary__row--clickable"
+                  onClick={() => toggleSection('unroutList')}
+                  title="展開 / 收合無法接線的 AP"
+                >
+                  <span>
+                    <span className={`cable-summary__section-arrow${isOpen('unroutList') ? '' : ' cable-summary__section-arrow--collapsed'}`}>
+                      <Icon name="chevronDown" size={9} />
+                    </span>
+                    ⚠ Unroutable
+                  </span>
+                  <span>{stats.byStatus.unroutable}</span>
+                </div>
+                {isOpen('unroutList') && stats.unroutable.map((u) => (
+                  <div
+                    key={u.apId}
+                    className="cable-summary__row cable-summary__row--clickable cable-summary__row--sub"
+                    onClick={() => handleNavigateAP(u.apId, u.floorId)}
+                    title="點擊跳到該 AP"
+                  >
+                    <span>　{u.apName}</span>
+                    <span className="cable-summary__sub">
+                      {floors.find((f) => f.id === u.floorId)?.name ?? u.floorId}
+                    </span>
+                  </div>
+                ))}
+              </>
             )}
           </section>
 
           {sortedFloorEntries.length > 0 && (
-            <section className="cable-summary__section">
-              <p className="cable-summary__label">每樓層</p>
+            <Section label="每樓纜線" open={isOpen('perFloor')} onToggle={() => toggleSection('perFloor')}>
               {sortedFloorEntries.map(([fid, info]) => {
                 const f = floors.find((fl) => fl.id === fid)
                 return (
@@ -295,34 +267,13 @@ function CableSummaryPanel() {
                   </div>
                 )
               })}
-            </section>
+            </Section>
           )}
 
-          {stats.unroutable.length > 0 && (
-            <section className="cable-summary__section">
-              <p className="cable-summary__label cable-summary__label--warn">
-                ⚠ 無法接線（{stats.unroutable.length}）
-              </p>
-              {stats.unroutable.map((u) => (
-                <div
-                  key={u.apId}
-                  className="cable-summary__row cable-summary__row--clickable"
-                  onClick={() => handleNavigateAP(u.apId, u.floorId)}
-                  title="點擊跳到該 AP"
-                >
-                  <span>{u.apName}</span>
-                  <span className="cable-summary__sub">
-                    {floors.find((f) => f.id === u.floorId)?.name ?? u.floorId}
-                  </span>
-                </div>
-              ))}
-            </section>
-          )}
-
-          {/* 14-3 BOM breakdown — only show when there's something to summarise. */}
+          {/* 14-3 BOM breakdown — only show when there's something to summarise.
+              Core section, default open. */}
           {(stats.totalApM > 0 || stats.totalS2sM > 0) && (
-            <section className="cable-summary__section">
-              <p className="cable-summary__label">BOM 分類</p>
+            <Section label="BOM 分類" open={isOpen('bom')} onToggle={() => toggleSection('bom')}>
               <div className="cable-summary__row">
                 <span>AP → Switch</span>
                 <span>{stats.totalApM.toFixed(1)} m<span className="cable-summary__sub">（{stats.totalAP}）</span></span>
@@ -345,16 +296,15 @@ function CableSummaryPanel() {
                   )}
                 </>
               )}
-            </section>
+            </Section>
           )}
 
           {/* 29-5 BOM by tier — backbone / distribution / access (per spec §5).
               Only shown when there's at least one S2S link (i.e. an IDF /
               MDF / Router is in the topology), otherwise it adds noise to
-              the AP-only case. */}
+              the AP-only case. Default collapsed (advanced, overlaps BOM S2S). */}
           {stats.totalS2s > 0 && (
-            <section className="cable-summary__section">
-              <p className="cable-summary__label">階層細分 (Backbone / Distribution / Access)</p>
+            <Section label="階層細分 (Backbone / Distribution / Access)" open={isOpen('tier')} onToggle={() => toggleSection('tier')}>
               {[
                 { tier: 'backbone',     label: 'Backbone',     desc: 'MDF↔Router / IDF↔MDF' },
                 { tier: 'distribution', label: 'Distribution', desc: 'Access↔IDF' },
@@ -387,12 +337,11 @@ function CableSummaryPanel() {
                   </React.Fragment>
                 )
               })}
-            </section>
+            </Section>
           )}
 
           {(stats.bom.counts.short + stats.bom.counts.mid + stats.bom.counts.long) > 0 && (
-            <section className="cable-summary__section">
-              <p className="cable-summary__label">長度級距</p>
+            <Section label="長度級距" open={isOpen('length')} onToggle={() => toggleSection('length')}>
               <div className="cable-summary__row">
                 <span>&lt; 30 m</span>
                 <span>{stats.bom.byLength.short.toFixed(1)} m<span className="cable-summary__sub">（{stats.bom.counts.short}）</span></span>
@@ -405,14 +354,13 @@ function CableSummaryPanel() {
                 <span>&ge; 90 m<span className="cable-summary__sub">（需 fiber）</span></span>
                 <span>{stats.bom.byLength.long.toFixed(1)} m<span className="cable-summary__sub">（{stats.bom.counts.long}）</span></span>
               </div>
-            </section>
+            </Section>
           )}
 
           {/* 20-1 Tray Planning BOM — physical tray order estimate (length
               + fittings count). Explicitly framed as planning, not final BOM. */}
           {trayBOM.totalLengthM > 0 && (
-            <section className="cable-summary__section">
-              <p className="cable-summary__label">Tray Planning BOM</p>
+            <Section label="Tray Planning BOM" open={isOpen('trayBOM')} onToggle={() => toggleSection('trayBOM')}>
               <div className="cable-summary__row">
                 <span>總長</span>
                 <span>{trayBOM.totalLengthM.toFixed(1)} m</span>
@@ -442,7 +390,7 @@ function CableSummaryPanel() {
               </div>
               {trayBOM.perFloor.length > 1 && (
                 <details className="cable-summary__details">
-                  <summary>每樓層細項</summary>
+                  <summary>每樓線槽</summary>
                   {trayBOM.perFloor.map((pf) => (
                     <div key={pf.floorId} className="cable-summary__row cable-summary__row--sub">
                       <span>{pf.name}</span>
@@ -459,17 +407,14 @@ function CableSummaryPanel() {
               <p className="cable-summary__hint">
                 Planning estimate — 不含吊桿、餘料裁切細節，僅供下單參考
               </p>
-            </section>
+            </Section>
           )}
 
           {/* 20-2 容量瓶頸 — building-wide ranked list of trays in warn / full /
               exceed state. Click a row to jump to that tray. Hidden when no
               tray exceeds the OK threshold (most projects start clean). */}
           {stats.bottlenecks.length > 0 && (
-            <section className="cable-summary__section">
-              <p className="cable-summary__label cable-summary__label--warn">
-                容量瓶頸（{stats.bottlenecks.length}）
-              </p>
+            <Section label={`容量瓶頸（${stats.bottlenecks.length}）`} warn open={isOpen('bottlenecks')} onToggle={() => toggleSection('bottlenecks')}>
               {stats.bottlenecks.map((b) => (
                 <div
                   key={`${b.floorId}|${b.trayId}`}
@@ -494,7 +439,7 @@ function CableSummaryPanel() {
                   </span>
                 </div>
               ))}
-            </section>
+            </Section>
           )}
 
           {/* 19-4 capacity profile picker — drives per-tray fill ratio warnings. */}
@@ -551,54 +496,14 @@ function CableSummaryPanel() {
           </section>
 
           {stats.warnings.length > 0 && (
-            <section className="cable-summary__section">
-              <p className="cable-summary__label cable-summary__label--warn">
-                ⚠ Graph 警告（{stats.warnings.length}）
-              </p>
+            <Section label={`⚠ Graph 警告（${stats.warnings.length}）`} warn open={isOpen('warnings')} onToggle={() => toggleSection('warnings')}>
               {stats.warnings.map((w, i) => (
                 <div key={i} className="cable-summary__warning" title={w}>
                   {w}
                 </div>
               ))}
-            </section>
+            </Section>
           )}
-
-          {/* 22-1 + 22-2 Export — wraps everything above into either CSV
-              (for spreadsheet workflows) or a multi-page PDF report. Sits
-              at the bottom so the user has scrolled past the live summary
-              first (they shouldn't blindly export numbers they haven't
-              seen). */}
-          <section className="cable-summary__section">
-            <div className="cable-summary__export-wrap">
-              <button
-                type="button"
-                className="cable-summary__export-btn"
-                onClick={() => setExportMenuOpen((v) => !v)}
-                disabled={!!exportStatus}
-              >
-                ⬇ {exportStatus ?? '匯出 ▾'}
-              </button>
-              {exportMenuOpen && !exportStatus && (
-                <div className="cable-summary__export-menu">
-                  <button
-                    className="cable-summary__export-item"
-                    onClick={handleExportCsv}
-                  >
-                    CSV（Excel / Sheets）
-                  </button>
-                  <button
-                    className="cable-summary__export-item"
-                    onClick={handleExportPdf}
-                  >
-                    PDF（含平面圖）
-                  </button>
-                </div>
-              )}
-            </div>
-            <p className="cable-summary__hint">
-              CSV：BOM 4 區塊；PDF：封面 + 每樓層平面圖 + 詳表 + 警告
-            </p>
-          </section>
         </div>
       )}
     </div>
