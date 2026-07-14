@@ -101,8 +101,17 @@ export function buildFloorGraph({ floor, aps, switches, trays, risers = [] }) {
   })
 
   // ── Step 4: tray-tray intersection → shared cross node ──────────────────
-  // Only proper geometric crossings (not coincident endpoints, not collinear
-  // overlap). Touching cases get a warning so the user can clean up.
+  // Proper crossings (§11 "真實幾何相交") get a shared cross node. `touching`
+  // splits into two sub-cases:
+  //   - endpoint-on-mid-segment (exact T-junction): the snap UI's
+  //     snapToTraySegment produces a foot that lands EXACTLY on the other
+  //     tray's body, so this is a real geometric intersection per §11 — merge
+  //     it like a cross (split the through-tray, zero-length bridge on the
+  //     stub tray via Step 7).
+  //   - endpoint-on-endpoint: two stubs meeting at a point. If coords were
+  //     exactly equal Step 3 already folded them; reaching here means they're
+  //     merely near (§10 "距離很近但未相交") — warn, don't merge.
+  const EDGE_EPS = 1e-9  // matches segmentIntersection's eps
   for (let i = 0; i < trayMeta.length; i++) {
     const A = trayMeta[i]
     for (let j = i + 1; j < trayMeta.length; j++) {
@@ -115,10 +124,26 @@ export function buildFloorGraph({ floor, aps, switches, trays, risers = [] }) {
           )
           if (!hit) continue
           if (hit.touching) {
-            warnings.push(
-              `Trays ${A.tray.name ?? A.tray.id} and ${B.tray.name ?? B.tray.id} touch at endpoint near (${hit.x.toFixed(1)}, ${hit.y.toFixed(1)}); not auto-merged.`,
-            )
-            continue
+            const tEdge = hit.t < EDGE_EPS || hit.t > 1 - EDGE_EPS
+            const uEdge = hit.u < EDGE_EPS || hit.u > 1 - EDGE_EPS
+            // Both ends at a vertex → endpoint-on-endpoint.
+            if (tEdge && uEdge) {
+              // The two touching endpoints (the segment ends that sit on the hit).
+              const va = hit.t < EDGE_EPS ? A.tray.points[a] : A.tray.points[a + 1]
+              const vb = hit.u < EDGE_EPS ? B.tray.points[b] : B.tray.points[b + 1]
+              // Coords exactly equal → Step 3 already folded them into one
+              // shared vertex, so the trays ARE connected. Suppress the
+              // misleading "not auto-merged" warning. Only warn when the
+              // endpoints are merely near (§10 "距離很近但未相交").
+              if (va.x !== vb.x || va.y !== vb.y) {
+                warnings.push(
+                  `Trays ${A.tray.name ?? A.tray.id} and ${B.tray.name ?? B.tray.id} touch at endpoint near (${hit.x.toFixed(1)}, ${hit.y.toFixed(1)}); not auto-merged.`,
+                )
+              }
+              continue
+            }
+            // else: exactly one end is an endpoint sitting on the other's
+            // mid-segment → exact T-junction, fall through to merge.
           }
           const crossId = addNode({ kind: 'tray-cross', xy: { x: hit.x, y: hit.y } })
           // chainage on A = cum[a] + t × segLen
