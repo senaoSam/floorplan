@@ -28,7 +28,7 @@ import {
   pointSegDistance, mirrorPoint, segmentNormal,
 } from './geometry.js'
 import { apsShareSpectrum } from './frequency'
-import { getPatternById, sampleGain } from '@/constants/antennaPatterns'
+import { getPatternById, sampleGain, sectorTaperDb } from '@/constants/antennaPatterns'
 
 const C = 299792458
 const dbToLin = (db) => Math.pow(10, db / 10)
@@ -203,15 +203,8 @@ function makeReflectedPath(txPowerDbm, apGainDbi, pathLossDb, distanceM, gammaPe
 // Vertical offset (Phase 40) = ray elevation (atan2 of Z difference over
 // horizontal distance, positive = up) − tiltDeg (boresight elevation,
 // positive = up, default 0). targetZM is the target's absolute Z in metres.
-const DIRECTIONAL_BACK_DB = 20
-const DIRECTIONAL_EDGE_DEG = 15
-// Relative sector taper (≤ 0 dB): flat inside half-beamwidth, linear fall to
-// the -20 dB back lobe across the edge-taper zone.
-function sectorTaperDb(absOffDeg, halfBwDeg) {
-  if (absOffDeg <= halfBwDeg) return 0
-  if (absOffDeg >= halfBwDeg + DIRECTIONAL_EDGE_DEG) return -DIRECTIONAL_BACK_DB
-  return -DIRECTIONAL_BACK_DB * (absOffDeg - halfBwDeg) / DIRECTIONAL_EDGE_DEG
-}
+// sectorTaperDb + its constants live in @/constants/antennaPatterns (imported
+// above) — the directional-mode source of truth, shared with APPanel's preview.
 function apGainDbi(ap, targetPoint, targetZM = 0) {
   const mode = ap.antennaMode ?? 'omni'
   if (mode === 'omni') return AP_ANT_GAIN_DBI

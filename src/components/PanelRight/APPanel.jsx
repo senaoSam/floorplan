@@ -5,7 +5,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { getCachedRoutes } from '@/features/cable/routesCache'
 import { AP_MODEL_LIST, DEFAULT_AP_MODEL_ID, getAPModelById } from '@/constants/apModels'
-import { ANTENNA_PATTERN_LIST, DEFAULT_PATTERN_ID, getPatternById } from '@/constants/antennaPatterns'
+import { ANTENNA_PATTERN_LIST, DEFAULT_PATTERN_ID, getPatternById, buildDirectionalPattern } from '@/constants/antennaPatterns'
 import { channelEntries, isChannelAllowed, allowedChannels } from '@/constants/regulatoryDomains'
 import { CHANNEL_WIDTHS, DEFAULT_CHANNEL_WIDTH, allowedWidthsForBand } from '@/constants/channelWidths'
 import PatternPreview3D from './PatternPreview3D'
@@ -336,19 +336,33 @@ function APPanel({ floorId, apId }) {
                 const rawBw = ap.beamwidth ?? DEFAULT_BEAMWIDTH
                 const effBw = clampBeamwidth(rawBw)
                 const bwChanged = effBw !== rawBw
+                const pattern = buildDirectionalPattern(effBw)
                 return (
-                  <PanelField
-                    label="波瓣寬度"
-                    hint={bwChanged ? `實際 ${effBw}°` : `HPBW，${MIN_BEAMWIDTH}~${MAX_BEAMWIDTH}`}
-                  >
-                    <NumberInput
-                      value={rawBw}
-                      step={5}
-                      unit="度"
-                      width={70}
-                      onChange={(v) => { if (!isNaN(v)) updateAP(floorId, apId, { beamwidth: v }) }}
-                    />
-                  </PanelField>
+                  <>
+                    <PanelField
+                      label="波瓣寬度"
+                      hint={bwChanged ? `實際 ${effBw}°` : `HPBW，${MIN_BEAMWIDTH}~${MAX_BEAMWIDTH}`}
+                    >
+                      <NumberInput
+                        value={rawBw}
+                        step={5}
+                        unit="度"
+                        width={70}
+                        onChange={(v) => { if (!isNaN(v)) updateAP(floorId, apId, { beamwidth: v }) }}
+                      />
+                    </PanelField>
+                    <div className="ap-panel__pattern-preview">
+                      <PatternPreview3D
+                        pattern={pattern}
+                        color={freqColor}
+                        azimuth={effAz}
+                        tilt={effTilt}
+                        onAzimuthChange={(deg) => updateAP(floorId, apId, { azimuth: deg })}
+                        onTiltChange={(deg) => updateAP(floorId, apId, { tilt: clampTilt(deg) })}
+                      />
+                    </div>
+                    <div className="ap-panel__hint">左右拖曳＝方位角、上下拖曳＝俯仰角（放開才套用）；Shift+上下＝觀察視角</div>
+                  </>
                 )
               })()}
 

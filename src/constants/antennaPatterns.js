@@ -42,6 +42,40 @@ function sectorHalf(sectorDeg, backDb) {
   })
 }
 
+// ── Built-in "directional" sector taper ────────────────────────────────────
+// Relative sector gain (≤ 0 dB): flat inside half-beamwidth, linear fall to the
+// back lobe across the edge-taper zone. This is the source of truth for the
+// directional antenna mode — the JS engine (propagation.js) imports it, and the
+// APPanel preview builds a synthetic pattern from it so what the user sees in
+// the 3D lobe equals what the engine computes.
+// NOTE: the WebGL engine (propagationGL.js) hand-copies these constants and the
+// sectorTaperDb body into its shader strings (GLSL can't import JS) — keep those
+// two copies in sync if you change the numbers here.
+export const DIRECTIONAL_BACK_DB = 20
+export const DIRECTIONAL_EDGE_DEG = 15
+export function sectorTaperDb(absOffDeg, halfBwDeg) {
+  if (absOffDeg <= halfBwDeg) return 0
+  if (absOffDeg >= halfBwDeg + DIRECTIONAL_EDGE_DEG) return -DIRECTIONAL_BACK_DB
+  return -DIRECTIONAL_BACK_DB * (absOffDeg - halfBwDeg) / DIRECTIONAL_EDGE_DEG
+}
+
+// Build a directional pattern object (36 dB samples) from a beamwidth, so the
+// PatternPreview3D lobe can render the built-in sector the same way it renders a
+// catalog pattern. Each sample k is the relative sector gain at offset k*STEP_DEG
+// from bore-sight — identical to the per-ray taper the engine applies. The 3D
+// preview sums Gh(az)+Gv(el), matching the engine's sectorTaperDb(absOff)+
+// sectorTaperDb(vertOff), so the surface is what apGainDbi computes.
+export function buildDirectionalPattern(beamwidthDeg) {
+  const half = beamwidthDeg / 2
+  const samples = new Array(PATTERN_SAMPLES)
+  for (let k = 0; k < PATTERN_SAMPLES; k++) {
+    let deg = k * STEP_DEG
+    if (deg > 180) deg = 360 - deg   // fold to [0, 180] offset from bore-sight
+    samples[k] = sectorTaperDb(deg, half)
+  }
+  return { id: 'directional', label: 'Directional', samples }
+}
+
 export const ANTENNA_PATTERNS = {
   PATCH: {
     id: 'patch',
