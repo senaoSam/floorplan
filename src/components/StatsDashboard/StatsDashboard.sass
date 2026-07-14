@@ -33,10 +33,28 @@
     justify-content: space-between
     gap: 8px
 
+    &--clickable
+      cursor: pointer
+      border-radius: 6px
+      padding: 2px 4px
+      margin: -2px -4px
+      &:hover
+        background: rgba(255, 255, 255, 0.05)
+
+  // Whole-panel collapse chevron (title bar)
+  &__arrow
+    display: inline-flex
+    color: $text-secondary
+    transition: transform 0.2s
+    margin-right: 2px
+    &--collapsed
+      transform: rotate(-90deg)
+
   &__title
     font-size: 13px
     font-weight: 700
     color: #4fc3f7
+    margin-right: auto
 
   &__live
     font-size: 11px
@@ -193,6 +211,35 @@
     gap: 6px
     padding-top: 8px
     border-top: 1px solid rgba(255, 255, 255, 0.08)
+
+  // Section header row: collapse toggle (title + arrow) on the left, an
+  // optional control (e.g. gap-overlay / live button) on the right.
+  &__section-head
+    display: flex
+    align-items: center
+    justify-content: space-between
+    gap: 8px
+
+  &__section-toggle
+    display: flex
+    align-items: center
+    gap: 5px
+    flex: 1
+    min-width: 0
+    background: none
+    border: none
+    padding: 0
+    cursor: pointer
+    text-align: left
+    &:hover .stats-dash__section-title
+      color: $text-primary
+
+  &__section-arrow
+    display: inline-flex
+    color: $text-secondary
+    transition: transform 0.2s
+    &--collapsed
+      transform: rotate(-90deg)
 
   &__section-title
     font-size: 10px

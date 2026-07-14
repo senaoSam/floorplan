@@ -8,6 +8,7 @@ import { useCableStore } from '@/store/useCableStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useStatsTimeStore, STATS_SPEEDS } from '@/store/useStatsTimeStore'
 import { getSnapshot, getTimeSeries } from '@/features/stats/statsSource'
+import Icon from '@/components/Icon/Icon'
 import './StatsDashboard.sass'
 
 // Live network statistics dashboard (Phase 43, B-domain). Aggregates the whole
@@ -53,6 +54,32 @@ function Kpi({ label, value, sub, tone }) {
   )
 }
 
+// Per-section collapse wrapper. Clicking the title row folds the body away.
+// `right` renders an extra control on the title row (e.g. the gap-overlay
+// toggle) that keeps working without toggling the collapse. `open` is the
+// current expanded state; `onToggle` flips it in the parent's collapse set.
+function Section({ title, open, onToggle, right, children }) {
+  return (
+    <section className="stats-dash__section">
+      <div className="stats-dash__section-head">
+        <button
+          type="button"
+          className="stats-dash__section-toggle"
+          onClick={onToggle}
+          aria-expanded={open}
+        >
+          <span className={`stats-dash__section-arrow${open ? '' : ' stats-dash__section-arrow--collapsed'}`}>
+            <Icon name="chevronDown" size={10} />
+          </span>
+          <span className="stats-dash__section-title">{title}</span>
+        </button>
+        {right}
+      </div>
+      {open && children}
+    </section>
+  )
+}
+
 function StatsDashboard() {
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
   const floors        = useFloorStore((s) => s.floors)
@@ -69,6 +96,23 @@ function StatsDashboard() {
   const risers           = useCableStore((s) => s.risers)
 
   const [clientQuery, setClientQuery] = useState('')
+
+  // Whole-panel collapse (title bar chevron) — matches CableSummaryPanel /
+  // DevicePlanningPanel. Per-section collapse: a set of section keys the user
+  // has folded away. Defaults fold the space-hungry / advanced sections
+  // (trend, band split, switches, client search) so the maintenance entry
+  // (alerts, AP ranking, plan-vs-measured) reads first.
+  const [dashCollapsed, setDashCollapsed] = useState(false)
+  const [collapsedSections, setCollapsedSections] = useState(
+    () => new Set(['timeline', 'bands', 'switches', 'clients']),
+  )
+  const isOpen = (key) => !collapsedSections.has(key)
+  const toggleSection = (key) => setCollapsedSections((prev) => {
+    const next = new Set(prev)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    return next
+  })
 
   // Shared timeline (scrubber + overlay read the same store). anchorTs is the
   // live edge; playheadTs is the displayed moment.
@@ -194,24 +238,115 @@ function StatsDashboard() {
 
   return (
     <div className="stats-dash">
-      <div className="stats-dash__titlebar">
+      <div
+        className="stats-dash__titlebar stats-dash__titlebar--clickable"
+        onClick={() => setDashCollapsed((v) => !v)}
+      >
+        <span className={`stats-dash__arrow${dashCollapsed ? ' stats-dash__arrow--collapsed' : ''}`}>
+          <Icon name="chevronDown" size={11} />
+        </span>
         <div className="stats-dash__title">網路統計</div>
         <div className={`stats-dash__live${atLive ? ' stats-dash__live--on' : ''}`}>
           {atLive ? '● 即時' : fmtClock(playheadTs)}
         </div>
       </div>
 
-      {/* Trend + timeline scrubber */}
+      {!dashCollapsed && (
+      <>
+      {/* KPI tiles — always visible when the panel is open (top-level summary) */}
+      <div className="stats-dash__kpis">
+        <Kpi label="AP 線上" value={`${ap.online}/${ap.total}`} tone={ap.offline > 0 ? 'warn' : 'ok'} />
+        <Kpi label="連線裝置" value={client.total} />
+        <Kpi label="Switch PoE"
+          value={`${switchStat.perSwitch.reduce((s, x) => s + x.poeWatts, 0)}W`}
+          sub={`/ ${switchStat.perSwitch.reduce((s, x) => s + (x.poeBudget || 0), 0)}W`} />
+        <Kpi label="告警" value={alerts.length} tone={alerts.some((a) => a.severity === 'critical') ? 'crit' : alerts.length ? 'warn' : 'ok'} />
+      </div>
+
+      {/* Plan-vs-measured gap (default open) */}
+      <Section
+        title="規劃 vs 實測"
+        open={isOpen('gap')}
+        onToggle={() => toggleSection('gap')}
+        right={
+          <button
+            type="button"
+            className={`stats-dash__toggle${showGapOverlay ? ' stats-dash__toggle--on' : ''}`}
+            onClick={toggleGapOverlay}
+            title="在圖上標出「規劃說有訊號、實測卻低於門檻」的落差點"
+          >
+            {showGapOverlay ? '● 落差已顯示' : '顯示落差'}
+          </button>
+        }
+      >
+        <div className="stats-dash__gap-summary">
+          <span className={`stats-dash__gap-num${gapClients.length > 0 ? ' stats-dash__gap-num--bad' : ''}`}>
+            {gapClients.length}
+          </span>
+          <span className="stats-dash__gap-label">
+            個落差點（規劃 ≥{gapThresholdDbm}dBm 但實測不足）
+          </span>
+        </div>
+        {showGapOverlay && gapClients.length === 0 && (
+          <p className="stats-dash__gap-hint">此時段無落差點（連線裝置少時較少見；試拖時間軸到白天尖峰）</p>
+        )}
+      </Section>
+
+      {/* Alerts (default open) — only shown when there are alerts */}
+      {alerts.length > 0 && (
+        <Section title={`告警 (${alerts.length})`} open={isOpen('alerts')} onToggle={() => toggleSection('alerts')}>
+          <ul className="stats-dash__alerts">
+            {alerts.slice(0, 6).map((a) => (
+              <li key={a.id}
+                className={`stats-dash__alert stats-dash__alert--${a.severity}`}
+                onClick={() => (a.kind === 'poe_overload' ? gotoSwitch(a.targetId) : gotoAp(a.targetId))}
+                onMouseEnter={() => setHover(a.targetId, a.kind === 'poe_overload' ? 'switch' : 'ap')}
+                onMouseLeave={() => clearHoverIf(a.targetId)}
+                title="點擊定位到該裝置"
+              >
+                <span className="stats-dash__alert-icon">{SEV_ICON[a.severity] ?? 'ℹ'}</span>
+                <span className="stats-dash__alert-msg">{a.msg}</span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      {/* AP load ranking (default open) */}
+      <Section title="AP 負載排行" open={isOpen('apRank')} onToggle={() => toggleSection('apRank')}>
+        <ul className="stats-dash__rank">
+          {apRanking.map((a) => (
+            <li key={a.apId}
+              className="stats-dash__rank-row"
+              onClick={() => gotoAp(a.apId)}
+              onMouseEnter={() => setHover(a.apId, 'ap')}
+              onMouseLeave={() => clearHoverIf(a.apId)}
+              title="點擊定位到該 AP"
+            >
+              <span className="stats-dash__rank-name">{a.name}</span>
+              <span className="stats-dash__rank-bar-track">
+                <span className="stats-dash__rank-bar"
+                  style={{ width: `${(a.clientCount / maxApClients) * 100}%`, background: BAND_COLOR[String(a.band)] ?? '#4fc3f7' }} />
+              </span>
+              <b className="stats-dash__rank-val">{a.clientCount}</b>
+            </li>
+          ))}
+          {apRanking.length === 0 && <li className="stats-dash__empty-row">無線上 AP</li>}
+        </ul>
+      </Section>
+
+      {/* Trend + timeline scrubber (default collapsed — space-hungry) */}
       {anchorTs != null && (
-        <section className="stats-dash__section stats-dash__timeline">
-          <div className="stats-dash__section-head">
-            <p className="stats-dash__section-title">連線裝置趨勢（{rangeHours}h）</p>
-            {!atLive && (
-              <button type="button" className="stats-dash__live-btn" onClick={goLive} title="回到即時">
-                ⏭ 即時
-              </button>
-            )}
-          </div>
+        <Section
+          title={`連線裝置趨勢（${rangeHours}h）`}
+          open={isOpen('timeline')}
+          onToggle={() => toggleSection('timeline')}
+          right={!atLive && (
+            <button type="button" className="stats-dash__live-btn" onClick={goLive} title="回到即時">
+              ⏭ 即時
+            </button>
+          )}
+        >
           <div className="stats-dash__trend">
             {trendPts.map((p, i) => {
               const pct = Math.round(((p.value ?? 0) / trendMax) * 100)
@@ -260,93 +395,11 @@ function StatsDashboard() {
               ))}
             </div>
           </div>
-        </section>
+        </Section>
       )}
 
-      {/* KPI tiles */}
-      <div className="stats-dash__kpis">
-        <Kpi label="AP 線上" value={`${ap.online}/${ap.total}`} tone={ap.offline > 0 ? 'warn' : 'ok'} />
-        <Kpi label="連線裝置" value={client.total} />
-        <Kpi label="Switch PoE"
-          value={`${switchStat.perSwitch.reduce((s, x) => s + x.poeWatts, 0)}W`}
-          sub={`/ ${switchStat.perSwitch.reduce((s, x) => s + (x.poeBudget || 0), 0)}W`} />
-        <Kpi label="告警" value={alerts.length} tone={alerts.some((a) => a.severity === 'critical') ? 'crit' : alerts.length ? 'warn' : 'ok'} />
-      </div>
-
-      {/* Plan-vs-measured gap */}
-      <section className="stats-dash__section">
-        <div className="stats-dash__section-head">
-          <p className="stats-dash__section-title">規劃 vs 實測</p>
-          <button
-            type="button"
-            className={`stats-dash__toggle${showGapOverlay ? ' stats-dash__toggle--on' : ''}`}
-            onClick={toggleGapOverlay}
-            title="在圖上標出「規劃說有訊號、實測卻低於門檻」的落差點"
-          >
-            {showGapOverlay ? '● 落差已顯示' : '顯示落差'}
-          </button>
-        </div>
-        <div className="stats-dash__gap-summary">
-          <span className={`stats-dash__gap-num${gapClients.length > 0 ? ' stats-dash__gap-num--bad' : ''}`}>
-            {gapClients.length}
-          </span>
-          <span className="stats-dash__gap-label">
-            個落差點（規劃 ≥{gapThresholdDbm}dBm 但實測不足）
-          </span>
-        </div>
-        {showGapOverlay && gapClients.length === 0 && (
-          <p className="stats-dash__gap-hint">此時段無落差點（連線裝置少時較少見；試拖時間軸到白天尖峰）</p>
-        )}
-      </section>
-
-      {/* Alerts */}
-      {alerts.length > 0 && (
-        <section className="stats-dash__section">
-          <p className="stats-dash__section-title">告警</p>
-          <ul className="stats-dash__alerts">
-            {alerts.slice(0, 6).map((a) => (
-              <li key={a.id}
-                className={`stats-dash__alert stats-dash__alert--${a.severity}`}
-                onClick={() => (a.kind === 'poe_overload' ? gotoSwitch(a.targetId) : gotoAp(a.targetId))}
-                onMouseEnter={() => setHover(a.targetId, a.kind === 'poe_overload' ? 'switch' : 'ap')}
-                onMouseLeave={() => clearHoverIf(a.targetId)}
-                title="點擊定位到該裝置"
-              >
-                <span className="stats-dash__alert-icon">{SEV_ICON[a.severity] ?? 'ℹ'}</span>
-                <span className="stats-dash__alert-msg">{a.msg}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {/* AP load ranking */}
-      <section className="stats-dash__section">
-        <p className="stats-dash__section-title">AP 負載排行</p>
-        <ul className="stats-dash__rank">
-          {apRanking.map((a) => (
-            <li key={a.apId}
-              className="stats-dash__rank-row"
-              onClick={() => gotoAp(a.apId)}
-              onMouseEnter={() => setHover(a.apId, 'ap')}
-              onMouseLeave={() => clearHoverIf(a.apId)}
-              title="點擊定位到該 AP"
-            >
-              <span className="stats-dash__rank-name">{a.name}</span>
-              <span className="stats-dash__rank-bar-track">
-                <span className="stats-dash__rank-bar"
-                  style={{ width: `${(a.clientCount / maxApClients) * 100}%`, background: BAND_COLOR[String(a.band)] ?? '#4fc3f7' }} />
-              </span>
-              <b className="stats-dash__rank-val">{a.clientCount}</b>
-            </li>
-          ))}
-          {apRanking.length === 0 && <li className="stats-dash__empty-row">無線上 AP</li>}
-        </ul>
-      </section>
-
-      {/* Client band distribution */}
-      <section className="stats-dash__section">
-        <p className="stats-dash__section-title">裝置頻段分布</p>
+      {/* Client band distribution (default collapsed) */}
+      <Section title="裝置頻段分布" open={isOpen('bands')} onToggle={() => toggleSection('bands')}>
         <div className="stats-dash__stack" title={`共 ${client.total} 台`}>
           {bands.map((b) => {
             const n = client.byBand[b] ?? 0
@@ -366,11 +419,10 @@ function StatsDashboard() {
             </span>
           ))}
         </div>
-      </section>
+      </Section>
 
-      {/* Switch PoE + topology mini-view */}
-      <section className="stats-dash__section">
-        <p className="stats-dash__section-title">Switch / 供電</p>
+      {/* Switch PoE + topology mini-view (default collapsed) */}
+      <Section title="Switch / 供電" open={isOpen('switches')} onToggle={() => toggleSection('switches')}>
         <ul className="stats-dash__rank">
           {swRanking.map((s) => {
             const over = s.poeBudget > 0 && s.poeWatts > s.poeBudget
@@ -405,11 +457,10 @@ function StatsDashboard() {
           })}
           {swRanking.length === 0 && <li className="stats-dash__empty-row">本樓層無 Switch</li>}
         </ul>
-      </section>
+      </Section>
 
-      {/* Client MAC drill-down */}
-      <section className="stats-dash__section">
-        <p className="stats-dash__section-title">裝置查詢</p>
+      {/* Client MAC drill-down (default collapsed) */}
+      <Section title="裝置查詢" open={isOpen('clients')} onToggle={() => toggleSection('clients')}>
         <input
           className="stats-dash__search"
           type="text"
@@ -437,9 +488,11 @@ function StatsDashboard() {
             {clientMatches.length === 0 && <li className="stats-dash__empty-row">查無裝置</li>}
           </ul>
         )}
-      </section>
+      </Section>
 
       <p className="stats-dash__note">即時聚合 — mock 資料（未來接 cloud 真實資料）</p>
+      </>
+      )}
     </div>
   )
 }
