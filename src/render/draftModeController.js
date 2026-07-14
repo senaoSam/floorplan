@@ -227,7 +227,7 @@ export function createDraftModeController({
     const hasDraft = useDraftStore.getState().points.length > 0
     if (mode === EDITOR_MODE.DRAW_CABLE_TRAY) {
       let visibleKind = null
-      if (s.kind === 'trayVertex' || s.kind === 'wallEndpoint' || s.kind === 'wallSegment') {
+      if (s.kind === 'trayVertex' || s.kind === 'wallEndpoint' || s.kind === 'wallSegment' || s.kind === 'traySegment') {
         visibleKind = s
       } else if (hasDraft && s.kind === 'parallelWall') {
         visibleKind = s

@@ -3,10 +3,14 @@
 //   1. shift + anchor → angle lock to 0/45/90° from anchor
 //   2. tray vertex   → exact merge to existing tray vertex (24 screen-px)
 //   3. wall point    → endpoint (14) OR perpendicular foot on segment (10)
-//   4. parallel-wall → direction lock parallel/perp to nearby wall (anchor required)
+//   4. tray segment  → perpendicular foot on another tray's body (14 screen-px)
+//   5. parallel-wall → direction lock parallel/perp to nearby wall (anchor required)
+//
+// Endpoint/vertex snaps (2, 3-endpoint) win over segment-foot snaps (3-seg, 4),
+// matching the tray-vertex-drag priority in handlesLayer.
 //
 // Returns { pos, kind, ref?, lockedAngle? } where kind ∈
-//   'angleLock' | 'trayVertex' | 'wallEndpoint' | 'wallSegment' | 'parallelWall' | null
+//   'angleLock' | 'trayVertex' | 'wallEndpoint' | 'wallSegment' | 'traySegment' | 'parallelWall' | null
 // `null` kind means no snap fired — caller uses rawPos as-is. Visual
 // rendering branches on kind in draftOverlayLayer.
 
@@ -38,6 +42,35 @@ export function snapToTrayVertex(pos, trays, draftPoints, scale) {
     const v = draftPoints[i]
     const d = Math.hypot(pos.x - v.x, pos.y - v.y)
     if (d < bestD) { bestD = d; best = { x: v.x, y: v.y } }
+  }
+  return best
+}
+
+// Perpendicular-foot snap onto an existing tray's segment (mid-segment, not
+// a vertex). Mirrors the tray-vertex-drag Pass 2 in handlesLayer
+// (14 screen-px, only fires when no vertex/endpoint snap won) so drawing a
+// tray onto another tray's body behaves identically to dragging a vertex
+// onto it. Only snaps to store trays (not draftPoints) — the draft's own
+// segments would cause self-snapping.
+export function snapToTraySegment(pos, trays, scale) {
+  const segDist = 14 / (scale || 1)
+  let best = null
+  let bestD = segDist
+  for (const t of trays) {
+    for (let i = 0; i < t.points.length - 1; i++) {
+      const a = t.points[i], b = t.points[i + 1]
+      const dx = b.x - a.x, dy = b.y - a.y
+      const lenSq = dx * dx + dy * dy
+      if (lenSq < 1e-6) continue
+      const tt = ((pos.x - a.x) * dx + (pos.y - a.y) * dy) / lenSq
+      if (tt < 0 || tt > 1) continue
+      const fx = a.x + tt * dx, fy = a.y + tt * dy
+      const d = Math.hypot(pos.x - fx, pos.y - fy)
+      if (d < bestD) {
+        bestD = d
+        best = { pos: { x: fx, y: fy }, kind: 'traySegment' }
+      }
+    }
   }
   return best
 }
@@ -137,6 +170,8 @@ export function snapTrayPoint(rawPos, ctx) {
   }
   const wallHit = snapToWallForTray(rawPos, walls, scale)
   if (wallHit) return { pos: wallHit.pos, kind: wallHit.kind, ref: wallHit.wall }
+  const traySegHit = snapToTraySegment(rawPos, trays, scale)
+  if (traySegHit) return { pos: traySegHit.pos, kind: traySegHit.kind }
   if (anchor) {
     const par = parallelWallLock(rawPos, anchor, walls, scale)
     if (par) return { pos: par.pos, kind: 'parallelWall', ref: par.refWall, lockedAngle: par.lockedAngle }
