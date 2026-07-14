@@ -221,7 +221,7 @@ function SidebarLeft() {
           <Icon name="chevronRight" size={12} />
         </button>
         <ul className="sidebar-left__floor-list sidebar-left__floor-list--collapsed">
-          {floors.map((floor) => {
+          {floors.slice().reverse().map((floor) => {
             const isActive = activeFloorId === floor.id
             return (
               <li
@@ -277,7 +277,11 @@ function SidebarLeft() {
           {floors.length === 0 && (
             <li className="sidebar-left__empty">尚未匯入平面圖</li>
           )}
-          {floors.map((floor, idx) => {
+          {/* Display top-down = highest floor first (matches building-plan
+              convention + the 3D stack where floors[0] sits on the ground).
+              We reverse only the render order and keep each floor's REAL array
+              index so drag/reorder/drop-highlight keep operating on `floors`. */}
+          {floors.map((floor, idx) => ({ floor, idx })).reverse().map(({ floor, idx }) => {
             const isActive = activeFloorId === floor.id
             const isEditing = editingId === floor.id
             const isMenuOpen = menuOpenId === floor.id

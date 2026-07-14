@@ -545,7 +545,10 @@ function FloorSelector({ floors, activeFloorId, onSelect }) {
       </button>
       {open && (
         <ul className="viewer3d__floor-list" role="listbox" aria-label="樓層選擇">
-          {floors.map((floor) => {
+          {/* Top-down = highest floor first, matching the SidebarLeft list and
+              the 3D stack (floors[0] on the ground). Reverse render only;
+              onSelect uses floor.id so no index bookkeeping is needed. */}
+          {floors.slice().reverse().map((floor) => {
             const isActive = floor.id === activeFloorId
             return (
               <li
