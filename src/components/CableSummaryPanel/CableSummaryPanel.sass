@@ -13,8 +13,19 @@
   max-width: 320px
   user-select: none
   color: $text-primary
+  // Cap the WHOLE panel (header + body) so it never overflows the bottom-left
+  // overlay. That overlay is `justify-content: flex-end` (grows upward from the
+  // bottom) and stacks siblings BELOW us (HeatmapControl ≈ 94px, and TrendPanel
+  // when present) plus 8px gaps. If this panel is taller than the space left
+  // above those siblings, its top (header + 路由狀態…) gets clipped past the
+  // overlay's top edge. Reserve ~260px for the 12px inset, the siblings, gaps,
+  // and a small safety margin. The header stays pinned; only the body scrolls.
+  display: flex
+  flex-direction: column
+  max-height: calc(100vh - 260px)
 
   &__header
+    flex: none
     display: flex
     align-items: center
     gap: 8px
@@ -55,6 +66,11 @@
     display: flex
     flex-direction: column
     gap: 8px
+    // Only the body scrolls; it takes the remaining height under the pinned
+    // header (min-height:0 lets a flex child actually shrink + scroll).
+    flex: 1
+    min-height: 0
+    overflow-y: auto
 
   &__section
     display: flex

@@ -241,10 +241,15 @@ function CableSummaryPanel() {
     setExportStatus(null)
   }
 
+  // Order per-floor rows highest-floor-first, matching the SidebarLeft list and
+  // the 3D floor selector. floors[0] sits on the ground (see floorStacking), so
+  // a higher array index = a higher floor → sort by index descending. (The old
+  // code sorted by a non-existent `f.elevation`, which was always undefined and
+  // effectively left rows in floors[] order = lowest-first, i.e. reversed.)
   const sortedFloorEntries = [...stats.byFloor.entries()].sort((a, b) => {
-    const ea = floors.find((f) => f.id === a[0])?.elevation ?? 0
-    const eb = floors.find((f) => f.id === b[0])?.elevation ?? 0
-    return ea - eb
+    const ia = floors.findIndex((f) => f.id === a[0])
+    const ib = floors.findIndex((f) => f.id === b[0])
+    return ib - ia
   })
 
   return (
