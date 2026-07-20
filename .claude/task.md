@@ -25,7 +25,8 @@
 **Phase 45 隱藏 3D 凍結 + 2D/3D 熱圖共用 canvas 完成（2026-07-13 使用者驗收 ok，見下表）。**
 **Phase 46 效能第二/三輪（引擎 async 化 + Pixi texture 修正 + marker 免重畫）完成（2026-07-14 使用者驗收 ok，見下表）。SW 機 300 AP 拖曳 long task 累計 3.0s→0.93s（-69%）、最大單筆 777→205ms，效能戰役到此收工。**
 **Phase 47 B1 快速正確性修正完成（47-1/3/4/5/7 + 47-24 頻段色 typo，2026-07-20 commit 2c5295d，MCP 驗證通過）。**
-**下一批：B2 數字可信度（47-2 → 47-6 → 47-8a → 47-9）。**
+**Phase 47 B2 數字可信度完成（47-2/6/8a/9，2026-07-20，MCP 驗證通過；autoChannelPlan 半徑拍板不動）。**
+**下一批：B3 操作型邏輯 bug（47-14 → 47-15 → 47-18 → 47-16 → 47-17 → 47-19 → 47-20 → 47-21）。**
 
 ---
 
@@ -66,7 +67,7 @@
 
 - [x] **47-1【高】〔B1〕Knife-edge 繞射符號反轉**（✅ commit 2c5295d，MCP 驗：符號表 v>0 回正損耗、diff>40 cull 復活、實場繞射 on/off 截圖確認補陰影不灌爆）：`knifeEdgeLossDb` 回傳的是負值繞射增益 Gd，呼叫端當正損耗「加」進 path loss → 繞射越深訊號越強（陰影區被灌爆）。旁證：`if (diff > 40) continue` 恆不觸發（死碼）。預設 `diffraction:true` 即走此路。**JS + shader 同步**取負。
   - `src/features/heatmap/propagation.js:87-93`（回傳取負）、`:411`（驗算）；`src/features/heatmap/propagationGL.js:749-758`、`:1112`。
-- [ ] **47-2【中】〔B2〕planQuality scope 過濾失效**：面板靠 NaN 濾 out-of-scope，但 `sampleField` 已改全矩形取樣不寫 NaN（註解明說），排除區被算進涵蓋率分母與盲區面積。修：迴圈內自呼 `scenario.scopeMaskFn(x,y)`。附帶：`nx=ceil(w/step)+1` 多一排界外格，面積略高估。
+- [x] **47-2【中】〔B2〕planQuality scope 過濾失效**（✅ commit 6c6afe8，MCP 驗：加 out-scope 蓋右半後 coverage 89.2%→81.5%、盲區面積 77→68m² 分母縮小；迴圈內自呼 scopeMaskFn + 界外 row/col 剪除）：面板靠 NaN 濾 out-of-scope，但 `sampleField` 已改全矩形取樣不寫 NaN（註解明說），排除區被算進涵蓋率分母與盲區面積。修：迴圈內自呼 `scenario.scopeMaskFn(x,y)`。附帶：`nx=ceil(w/step)+1` 多一排界外格，面積略高估。
   - `src/features/heatmap/planQuality.js:86`、`src/features/heatmap/sampleField.js:53-55`。
 - [x] **47-3【中】〔B1〕Client View 資料速率頻寬倍率錯**（✅ commit 2c5295d，MCP 驗：80MHz=1202、160MHz=2403；widthRateMultiplier 已刪）：用 11n/ac 的 2.08/4.34/8.68，11ax 正確為 2.0/4.19/8.38。80MHz MCS11 2SS 顯示 1245 應為 1201；160MHz 顯示 2489 應為 2402（人盡皆知值）。另 `channelWidths.js` 有第三套沒人用的 `widthRateMultiplier`（2.1/4.5/9.0），一併收斂。
   - `src/features/clientView/dataRate.js:84-89`；`src/constants/channelWidths.js:64-69`。
@@ -77,16 +78,16 @@
 
 #### P1 — RF 領域語意缺口（工具核心價值，讓真實設計翻車）
 
-- [ ] **47-6【高】〔B2〕頻道衝突改用公尺 + 頻寬相交**：現為固定 300 canvas-px（與比例尺脫鉤、無視牆/功率）+ 只比對頻道號全等（ch36@80 與 ch44@20 頻譜全疊卻不報）。改：距離乘 `floor.scale` 換公尺；改用既有 `apsShareSpectrum()`（頻寬區間相交，SINR 引擎已在用）。**兩處同步**。
-  - `src/features/heatmap/planQuality.js:18,32-38`、`src/utils/autoChannelPlan.js:35`。
+- [x] **47-6【高】〔B2〕頻道衝突改用公尺 + 頻寬相交**（✅ commit 6c6afe8，MCP 驗：ch36@80 vs ch44@20 近距報 1 對、ch36 vs ch149 不報、ch36 相距 20m 不報；detectChannelConflicts 收 floor.scale 用 12m 門檻 + apsShareSpectrum）。**決策（2026-07-20 拍板）**：只改 detectChannelConflicts（報表數字）；`autoChannelPlan.js` 的 greedyChannelAssign `interferenceRadius=300px` **不動**——它是頻道指派演算法的鄰居啟發式（非物理干擾距離），改它要動 3 個呼叫端且改變已驗證的 auto-plan/DemoLoader 行為，CP 值不對。**防重做**：不要再把 autoChannelPlan 半徑改公尺。
+  - `src/features/heatmap/planQuality.js`（已改）；`src/utils/autoChannelPlan.js:35`（保留 300px）。
 - [x] **47-7【高】〔B1〕雜訊底隨頻寬抬升**（✅ commit 2c5295d，MCP 驗：serving AP 20→160MHz SNR 降 9.03dB、20→80 降 6.02dB、RSSI 不變；三處同步 clientView SNR/SINR + JS aggregate + shader RSSI-only/full）：`widthNoiseDelta()`（`+10log10(W/20)`）是死碼無呼叫者，160MHz SNR 高估 ~9dB → MCS/速率虛胖。接進熱圖引擎與 clientView 逐頻段雜訊底。
   - `src/constants/channelWidths.js:73-75`（無呼叫者）、`src/features/heatmap/rfConstants.js:4`、`src/store/useClientViewStore.js:52`。
-- [ ] **47-8a【高】〔B2〕顯示層分頻段篩選**（2026-07-20 拍板：先做這個）：2.4/5/6GHz 混在同一「最強 AP」場，穿牆遠的 2.4G 蓋掉 6GHz 覆蓋洞。加熱圖 band filter（全部/2.4/5/6），`sampleField` 聚合前按 `ap.frequency` 篩。**不動 AP 資料結構、不碰 shader 物理**，只是渲染前 filter + store 狀態 + HeatmapControl 下拉。解決「看 6GHz 單獨的場」核心需求。
-  - `src/features/heatmap/buildScenario.js:195`、`sampleField` 無 band filter；新增 heatmap store band 狀態 + `HeatmapControl`。
+- [x] **47-8a【高】〔B2〕顯示層分頻段篩選**（✅ commit 6c6afe8，MCP 驗：3 頻段 demo 切 6GHz 後熱圖只剩該台 AP 場、其餘紅色，0 errors）：在 heatmapAdapter buildScenario 前按 `String(ap.frequency)===bandFilter` 篩 active + cross-floor aps + totalApCount；store 加 `bandFilter`（預設 all）+ `setBandFilter`；HeatmapControl 主控列加下拉（全部/2.4/5/6GHz）。**MCP 逼出的 bug + 已修**：idleInputs fingerprint 漏 bandFilter → 切 band 被 idleInputsEqual 判定無變化而跳過重算（熱圖不變）；補 `bandFilter: hm.bandFilter` 進 fingerprint 後生效。**不動 AP 資料結構、不碰 shader 物理**，純 render 前 filter。
+  - `src/render/heatmapAdapter.js`（filter + fingerprint）、`useHeatmapStore.js`、`HeatmapControl.jsx`。
 - [ ] **47-8b【backlog，不現在做】單射頻→多射頻 AP 模型**：現況一台 AP = 一個 radio（單 `frequency`/`channel`），model 已有 `supportedBands`/per-band 欄位但引擎只用單頻。要讓一台同發三頻需把 AP 展開成 N 個 radio 訊號源，**牽動全鏈**（buildScenario 展開、shader AP texture 打包、channel 面板 per-band、SINR/CCI 同頻干擾、Client View 關聯、統計負載）+ 風險破壞已驗證 parity。**CP 值不對**：47-8a 做完後痛點大幅緩解，雙頻可用「放兩顆」workaround。**重啟扳機**：使用者明確需要單台三頻建模，或 47-8a 的 workaround 造成實際規劃困擾。
   - `src/constants/apModels.js`（supportedBands 現成）、`buildScenario.js:187-204`。
-- [ ] **47-9【中】〔B2〕secondary coverage 視圖**：語音/漫遊需「任一點 2 台 AP ≥ 門檻」，現只算最強 AP 聯集。per-AP RSSI 現成，缺視圖。
-  - `src/features/heatmap/planQuality.js:88`。
+- [x] **47-9【中】〔B2〕secondary coverage 視圖**（✅ commit 6c6afe8，MCP 驗：coverage 89.2% / secondary 43.6%，secondary ≤ coverage 不變式成立）：`sampleField` 加 opt-in `redundancyThresholdDbm` → 每格達門檻 AP 數（Uint8，reuse 現成 perAp 零額外 probe，預設不算不影響熱圖效能）；planQuality 算 `secondaryCoveragePct`（≥2 台達門檻的 in-scope 面積比）；DevicePlanningPanel 加「雙重涵蓋（≥2 台）」列（語音/漫遊備援白話 title）。
+  - `src/features/heatmap/sampleField.js`、`planQuality.js`、`DevicePlanningPanel.jsx`。
 - [ ] **47-10【中】〔B5〕AP 型號逐頻段天線增益是死資料**：引擎固定 3dBi（`AP_ANT_GAIN_DBI`），`apModels.js` 的 `antennaGain` 無人讀，高增益 AP 被低估 2-3dB。接進 gain 計算。
   - `src/features/heatmap/rfConstants.js:2` vs `src/constants/apModels.js`。
 - [ ] **47-11【中】〔B5〕材質庫**：金屬 20dB 全頻段偏低（真實電梯井/機房 >26-40dB，`lossB:0`）；缺 Low-E 玻璃（25-40dB）；牆不可逐面自訂 dB。（自訂材質 = spec.md §3.2 承諾，兩家競品都有。）
