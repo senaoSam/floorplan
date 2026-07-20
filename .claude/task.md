@@ -40,6 +40,102 @@
 > ⑤ `heatmapAdapter` SW/HW 降級門檻（1500/20000）仍是 PLACEHOLDER 未校準。
 > **重啟扳機**：使用者再回報拖曳卡頓，或單層 >500 AP 真實需求。
 
+### Phase 47 六角色審查缺陷修復（2026-07-20 立項）
+
+> 來源：設計師 / PM / RF 工程師 / 新手 / 演算法 / 邏輯 六個角色 subagent 全專案掃描。
+> 已由使用者剔除（未來串 API 解決，**不修**）：零持久化、`buildingData/onSave` 整合契約、AI 牆偵測外部服務依賴、Stats/相機 mock 資料與 40px/m fallback、dev widget（DemoLoader/StressLoader/ProgressPanel，正式版整塊移除）。
+> 下列為「即使 demo 版也算錯數字 / 踩得到的真 bug」，與串不串 API 無關，須修。
+
+#### 建議動工順序（2026-07-20 拍板，按 CP 值＝影響÷風險排批次，跨越 P 分層）
+
+> **P0–P3 是嚴重度/類別分層，不是動工順序。** 實際動工照下面批次 B1→B5。每條 task 標題末尾標 〔B?〕。
+> 原則：先撿「低風險高影響、改動小驗證快」的，再進大改動；操作型 bug 優先於觀感。
+
+| 批次 | 內容 | 為何這個順序 |
+|------|------|--------------|
+| **B1 快速正確性修正** | 47-24(僅頻段色 typo 那條) → 47-1 → 47-3 → 47-7 → 47-4 → 47-5 | 改動極小（多為改常數/一行取負）、影響大、驗證快；先讓引擎不再算錯數字。47-1 JS+shader 各一行；47-3/47-7 改常數。 |
+| **B2 數字可信度（算法/語意）** | 47-2 → 47-6 → 47-8a → 47-9 | 影響報表/規劃數字正確性，需動邏輯但不動全鏈。 |
+| **B3 操作型邏輯 bug** | 47-14 → 47-15 → 47-18 → 47-16 → 47-17 → 47-19 → 47-20 → 47-21 | 「操作就踩到」，優先於觀感；47-14/15/18 使用者最易觸發。 |
+| **B4 UX/一致性** | 47-22 → 47-23 → 47-24(其餘 token) → 47-25 → 47-26 → 47-27 | 47-22 比例尺指引影響大但需設計 UI 流程，成本高於改常數故排 B4；其餘為收斂性清理。 |
+| **B5 大工程（非急迫）** | 47-10 → 47-11 → 47-12 → 47-13 | 牽動較廣、非急迫；材質庫/天線增益/PoE class 可獨立慢慢做。 |
+
+> 註：47-24 拆兩處出現——頻段色 typo（一字元、撞警告橘）併入 B1 隨手修；其餘色彩 token 收斂留 B4。
+
+#### P0 — 物理/演算法正確性（會直接算錯數字，最優先）
+
+- [ ] **47-1【高】〔B1〕Knife-edge 繞射符號反轉**：`knifeEdgeLossDb` 回傳的是負值繞射增益 Gd，呼叫端當正損耗「加」進 path loss → 繞射越深訊號越強（陰影區被灌爆）。旁證：`if (diff > 40) continue` 恆不觸發（死碼）。預設 `diffraction:true` 即走此路。**JS + shader 同步**取負。
+  - `src/features/heatmap/propagation.js:87-93`（回傳取負）、`:411`（驗算）；`src/features/heatmap/propagationGL.js:749-758`、`:1112`。
+- [ ] **47-2【中】〔B2〕planQuality scope 過濾失效**：面板靠 NaN 濾 out-of-scope，但 `sampleField` 已改全矩形取樣不寫 NaN（註解明說），排除區被算進涵蓋率分母與盲區面積。修：迴圈內自呼 `scenario.scopeMaskFn(x,y)`。附帶：`nx=ceil(w/step)+1` 多一排界外格，面積略高估。
+  - `src/features/heatmap/planQuality.js:86`、`src/features/heatmap/sampleField.js:53-55`。
+- [ ] **47-3【中】〔B1〕Client View 資料速率頻寬倍率錯**：用 11n/ac 的 2.08/4.34/8.68，11ax 正確為 2.0/4.19/8.38。80MHz MCS11 2SS 顯示 1245 應為 1201；160MHz 顯示 2489 應為 2402（人盡皆知值）。另 `channelWidths.js` 有第三套沒人用的 `widthRateMultiplier`（2.1/4.5/9.0），一併收斂。
+  - `src/features/clientView/dataRate.js:84-89`；`src/constants/channelWidths.js:64-69`。
+- [ ] **47-4【低】〔B1〕聚合 shader 缺 0.25m 水平距離 clamp**：`FS_FIELD`/CCI 迴圈無 clamp，AP 正下方一格與 JS/per-AP 路徑差 ~0.1-0.6dB，違反雙引擎一致性不變量。
+  - `src/features/heatmap/propagationGL.js:1542-1544`、`:1600-1602`。
+- [ ] **47-5【低】〔B1〕probeAt zM 優先序潛伏**：`scenario.rxElevationM ?? rx.zM` 讓 scenario 蓋過呼叫端 client 高度，crossFloor 一啟用即靜默忽略使用者高度。改 `rx.zM ?? scenario.rxElevationM ?? 0`。
+  - `src/features/heatmap/hoverProbe.js:8`。
+
+#### P1 — RF 領域語意缺口（工具核心價值，讓真實設計翻車）
+
+- [ ] **47-6【高】〔B2〕頻道衝突改用公尺 + 頻寬相交**：現為固定 300 canvas-px（與比例尺脫鉤、無視牆/功率）+ 只比對頻道號全等（ch36@80 與 ch44@20 頻譜全疊卻不報）。改：距離乘 `floor.scale` 換公尺；改用既有 `apsShareSpectrum()`（頻寬區間相交，SINR 引擎已在用）。**兩處同步**。
+  - `src/features/heatmap/planQuality.js:18,32-38`、`src/utils/autoChannelPlan.js:35`。
+- [ ] **47-7【高】〔B1〕雜訊底隨頻寬抬升**：`widthNoiseDelta()`（`+10log10(W/20)`）是死碼無呼叫者，160MHz SNR 高估 ~9dB → MCS/速率虛胖。接進熱圖引擎與 clientView 逐頻段雜訊底。
+  - `src/constants/channelWidths.js:73-75`（無呼叫者）、`src/features/heatmap/rfConstants.js:4`、`src/store/useClientViewStore.js:52`。
+- [ ] **47-8a【高】〔B2〕顯示層分頻段篩選**（2026-07-20 拍板：先做這個）：2.4/5/6GHz 混在同一「最強 AP」場，穿牆遠的 2.4G 蓋掉 6GHz 覆蓋洞。加熱圖 band filter（全部/2.4/5/6），`sampleField` 聚合前按 `ap.frequency` 篩。**不動 AP 資料結構、不碰 shader 物理**，只是渲染前 filter + store 狀態 + HeatmapControl 下拉。解決「看 6GHz 單獨的場」核心需求。
+  - `src/features/heatmap/buildScenario.js:195`、`sampleField` 無 band filter；新增 heatmap store band 狀態 + `HeatmapControl`。
+- [ ] **47-8b【backlog，不現在做】單射頻→多射頻 AP 模型**：現況一台 AP = 一個 radio（單 `frequency`/`channel`），model 已有 `supportedBands`/per-band 欄位但引擎只用單頻。要讓一台同發三頻需把 AP 展開成 N 個 radio 訊號源，**牽動全鏈**（buildScenario 展開、shader AP texture 打包、channel 面板 per-band、SINR/CCI 同頻干擾、Client View 關聯、統計負載）+ 風險破壞已驗證 parity。**CP 值不對**：47-8a 做完後痛點大幅緩解，雙頻可用「放兩顆」workaround。**重啟扳機**：使用者明確需要單台三頻建模，或 47-8a 的 workaround 造成實際規劃困擾。
+  - `src/constants/apModels.js`（supportedBands 現成）、`buildScenario.js:187-204`。
+- [ ] **47-9【中】〔B2〕secondary coverage 視圖**：語音/漫遊需「任一點 2 台 AP ≥ 門檻」，現只算最強 AP 聯集。per-AP RSSI 現成，缺視圖。
+  - `src/features/heatmap/planQuality.js:88`。
+- [ ] **47-10【中】〔B5〕AP 型號逐頻段天線增益是死資料**：引擎固定 3dBi（`AP_ANT_GAIN_DBI`），`apModels.js` 的 `antennaGain` 無人讀，高增益 AP 被低估 2-3dB。接進 gain 計算。
+  - `src/features/heatmap/rfConstants.js:2` vs `src/constants/apModels.js`。
+- [ ] **47-11【中】〔B5〕材質庫**：金屬 20dB 全頻段偏低（真實電梯井/機房 >26-40dB，`lossB:0`）；缺 Low-E 玻璃（25-40dB）；牆不可逐面自訂 dB。（自訂材質 = spec.md §3.2 承諾，兩家競品都有。）
+  - `src/constants/materials.js:48-55`。
+- [ ] **47-12【中】〔B5〕預設 TX 20dBm 偏熱**：企業實務 2.4G 8-14 / 5G 14-17dBm。評估是否降預設或逐頻段預設。
+  - `src/features/heatmap/buildScenario.js:194`。
+- [ ] **47-13【低】〔B5〕PoE per-port class 協商檢查**：只算總 budget，不檢查「35W AP 接 30W/埠 802.3at switch 會砍 radio」。AP model 標所需 PoE class 對比 switch 埠級。poeWattage 建議用 worst-case 而非典型值。
+  - `src/constants/apModels.js`、`src/components/PanelRight/SwitchPanel.jsx:87`。
+
+#### P2 — 邏輯/狀態 bug（demo 操作就踩得到）
+
+- [ ] **47-14【中】〔B3〕STATS 唯讀模式可 Delete 刪 AP/Switch**：Delete 分支只擋 ALIGN_FLOOR，STATS 點 dashboard 列 setSelected 後 Delete 真刪 + 開可編輯面板，違反 STATS_CAP 唯讀。加唯讀模式 guard。
+  - `src/components/FloorplanSystem/FloorplanSystem.jsx:755-803`。
+- [ ] **47-15【中】〔B3〕刪樓層漏清相機/軌跡**：`useCameraStore.clearFloor`（cameras/tripwires/zones）、`useTrackingStore.clearFloor` 是死碼無人呼叫，確認框說「一併移除」實際殘留幽靈裝置。confirmRemove 補呼叫兩者。
+  - `src/components/SidebarLeft/SidebarLeft.jsx:177-193`。
+- [ ] **47-16【中】〔B3〕「＋放置」相機後 Ctrl+Z 相機徹底消失**：snapshot 不含 `unplacedCameras`，undo 後兩邊都沒有。history 納入 unplacedCameras 或 placeCamera 不入 undo。
+  - `src/store/useHistoryStore.js:31-46`、`src/store/useCameraStore.js:114-125`。
+- [ ] **47-17【中】〔B3〕Switch 刪除/新增的跨樓層 uplinkTo 副作用不被 undo 還原**：removeSwitch 全建築 null dangling uplink、addSwitch 全建築 backfill，但 history 只存 active floor → undo 後其他樓層 uplink 遺失或 dangling。
+  - `src/store/useCableStore.js:293-342,420-433`。
+- [ ] **47-18【中】〔B3〕DRAW_WALL Backspace 誤刪既有牆**：步退取 `walls[length-1]`（樓層最後一面牆）而非本次 draft session commit 的牆。追蹤 session 實際新增的牆。
+  - `src/render/draftModeController.js:316-330`。
+- [ ] **47-19【低】〔B3〕刪樓層後死快照卡住 undo 堆疊**：undo 遇 `prevSnap.floorId !== activeFloorId` 直接 return 不彈出，永遠無反應。刪樓層時清該樓層相關 undo/redo 項。
+  - `src/store/useHistoryStore.js:80-96`。
+- [ ] **47-20【低】〔B3〕複製相機連 calibration 帶走 → 假「已校正」**：副本位移 +24px、homography 已不對位卻顯示綠徽。複製時 strip calibration。
+  - `src/components/ContextMenu/ContextMenuMount.jsx:376-390`、CameraPanel.handleDuplicate。
+- [ ] **47-21【低】〔B3〕雜項**：ContextMenuMount render 期間寫 store（`closeContextMenu` 搬進 effect）；`viewport.js:373-384` Space 鍵無 `isTypingTarget` guard；`camerasLayer.js` 拖曳中切模式 onMove 續寫 store（加 `isCameraMode()` guard）；history `_pendingRaw` 跨樓層混合致 B 樓第一步不可 undo。
+
+#### P3 — UX / 一致性（demo 展示會出糗）
+
+- [ ] **47-22【高】〔B4〕比例尺靜默失敗指路**：未設 scale 時熱圖 `hide()` 全空（按鈕仍顯示「已開啟」）+ 三套行為不一致（熱圖靜默 / 面板警告 / 相機 40px fallback）。熱圖開啟且 scale 缺失時 toast/面板提示「請先設定比例尺」+ 一鍵進 DRAW_SCALE；匯入樓層後 scale=null 給常駐入口。
+  - `src/render/heatmapAdapter.js:539,569`、`buildScenario.js:150`。
+- [ ] **47-23【高】〔B4〕-67 門檻收斂單一來源**：五處獨立（ClientView store / 規劃品質 useState 重設 / STATS gapThreshold 有 setter 無 UI / association.js fallback / 熱圖色階無 -67 anchor）→ 三個「涵蓋」數字可互相矛盾。抽共用常數；STATS 落差門檻補 UI 入口或標明固定；規劃品質門檻/目標改 store-backed（比照相機 coverageTargetPct）。**決策（2026-07-20 拍板）：目標% 統一** — 規劃 90 vs 相機 80 收斂成單一預設（Wi-Fi 覆蓋門檻 -67dBm / 目標覆蓋% 抽成共用常數，相機覆蓋率屬不同物理量另計，但「目標%」的預設值與 UI 呈現統一風格）。
+  - `src/store/useClientViewStore.js:59`、`DevicePlanningPanel.jsx:51`、`useStatsTimeStore.js:27,49`、`association.js:26`、`modes.js:13-19`。
+- [ ] **47-24【中】〔B1+B4〕色彩 token 收斂**：2.4G 頻段色 typo `#f39e0b`→`#f39c12`（撞警告橘，最優先單修）；五種危險紅→`$danger`；兩種暗玻璃底 + 三種 radius→`%dark-glass`/token；三種 chip active 畫法→統一實心；熱圖開關「開啟」用錯誤紅 `#ef4444`→accent。頻段色/domain accent 抽進 `_variables.sass`。
+  - `StatsDashboard.jsx:26`、`_variables.sass`、各面板 sass。
+- [ ] **47-25【中】〔B4〕內部黑話外漏**（違反 ui-spec §2.6-2）：熱圖引擎下拉「F5a」、SidebarLeft「greedy multi-start」、CableSummary「Manhattan fallback」「Unroutable」→ 白話。
+  - `HeatmapControl.jsx:159`、`SidebarLeft.jsx:415`、`CableSummaryPanel.jsx:221,235`。
+- [ ] **47-26【中】〔B4〕版面避讓**：CameraTimelineBar 不吃 `--right-dock` 會被 PanelRight 蓋；3D 檢視時 2D overlay 全數殘留蓋在 3D canvas 上；TL 堆疊無 max-height（768px 高溢出）。
+  - `CameraTimelineBar.sass:7-18`、CanvasArea overlay、`CanvasArea.sass:18-31`。
+- [ ] **47-27【低】〔B4〕hit target / 殘留樣式**：多個小按鈕 <24px（TrendPanel close、CameraListPanel del/live 18px）；SidebarLeft 樓層輸入框 hover 泛紅（疑殘留 bug，`SidebarLeft.sass:299-300`）；三套 toast 中心點不一；StatsDashboard `fmtBps` 死碼、`linkMbps` 單位、rank-name 無 title。
+
+#### 保留為 backlog（缺口非 bug，依產品優先序拍板）
+
+- [ ] **PDF 規劃報告輸出**：Ekahau/Hamina 核心交付物（涵蓋熱圖截圖 + AP 清單 + verdict + Planning BOM）。jspdf 仍在 package.json；數據皆現成，缺組版。（CSV/SVG/DXF 已撤回，尊重。）
+- [ ] **容量/airtime 規劃**：純覆蓋工具，缺高密度場域容量輸入（Ekahau Capacity Planner 對標）。
+- [ ] **A/B plan diff、漫遊重疊區**：原有 backlog，待拍板。
+- [ ] **spec.md 同步**：已嚴重落後實作（Camera/ClientView/Stats/Cable 整域未寫）；自訂材質、CAD 匯入等承諾與現況對不上，建議修 spec 或明列不做。
+
+---
+
 ### Phase 25 效能家族（全部暫緩，防重做）
 
 > 31-5/6/9/10/11 經 2026-06-01 MCP 壓測**全部暫緩**：單層真實 AP 量級（~300）MVP 全達標，瓶頸只在 1000 AP（真實到不了）。
