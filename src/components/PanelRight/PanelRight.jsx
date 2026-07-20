@@ -1,6 +1,7 @@
 import React from 'react'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
+import { getModeCapability } from '@/render/modeCapabilities'
 import APPanel from './APPanel'
 import SwitchPanel from './SwitchPanel'
 import CableTrayPanel from './CableTrayPanel'
@@ -36,7 +37,13 @@ function PanelRight() {
   // is the only UI for the mode (oldSrc parity). Always targets the
   // active floor's transform.
   const isAlignMode  = editorMode === EDITOR_MODE.ALIGN_FLOOR
-  const hasSelection = !!selectedId || isBatch || isAlignMode
+  // 47-14: read-only modes (STATS / CLIENT_VIEW) may hold a selection to
+  // locate an object on the plan, but must not open an editable object panel —
+  // that would let the user mutate values the mode is supposed to freeze. Those
+  // modes have their own dedicated UI (StatsDashboard / ClientPanel) outside
+  // this router, so suppressing the object panel here doesn't hide anything.
+  const isReadOnly   = getModeCapability(editorMode).readOnly
+  const hasSelection = !isReadOnly && (!!selectedId || isBatch || isAlignMode)
   const isOpen       = hasSelection && !panelCollapsed
 
   // Right-dock avoidance (ui-spec §2.1-2): publish the dock's occupied width
@@ -48,7 +55,9 @@ function PanelRight() {
   }, [isOpen])
 
   let body = null
-  if (isAlignMode && activeFloorId) {
+  if (isReadOnly) {
+    body = null
+  } else if (isAlignMode && activeFloorId) {
     body = <AlignFloorPanel floorId={activeFloorId} />
   } else if (isBatch && activeFloorId) {
     body = <BatchPanel />

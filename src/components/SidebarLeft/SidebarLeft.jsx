@@ -11,6 +11,8 @@ import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useCableStore } from '@/store/useCableStore'
+import { useCameraStore } from '@/store/useCameraStore'
+import { useTrackingStore } from '@/store/useTrackingStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorImport } from '@/features/importer/useFloorImport'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
@@ -44,6 +46,8 @@ function SidebarLeft() {
   const clearScopes     = useScopeStore((s) => s.clearFloor)
   const clearHoles      = useFloorHoleStore((s) => s.clearFloor)
   const clearSwitches   = useCableStore((s) => s.clearFloor)
+  const clearCameras    = useCameraStore((s) => s.clearFloor)
+  const clearTracks     = useTrackingStore((s) => s.clearFloor)
   const setEditorMode   = useEditorStore((s) => s.setEditorMode)
   const setSelected     = useEditorStore((s) => s.setSelected)
 
@@ -185,6 +189,11 @@ function SidebarLeft() {
     clearScopes(floor.id)
     clearHoles(floor.id)
     clearSwitches(floor.id)
+    // 47-15: the confirm dialog says cameras/tracks are removed too, so clear
+    // them — otherwise the floor's cameras, tripwires, zones and mock tracks
+    // linger as ghost devices keyed by the now-deleted floor id.
+    clearCameras(floor.id)
+    clearTracks(floor.id)
     removeFloor(floor.id)
     if (isAlignMode && floor.id === activeFloorId) {
       setEditorMode(EDITOR_MODE.SELECT)

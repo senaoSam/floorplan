@@ -74,6 +74,11 @@ export function createDraftModeController({
     return { pos: raw, kind: null }
   }
 
+  // Wall ids committed during the CURRENT draw chain (since the last anchor was
+  // dropped fresh). Backspace step-back removes only these — never a wall that
+  // already existed on the floor before this draw session started (47-18).
+  let sessionWallIds = []
+
   const commitWall = (a, b) => {
     const fid = useFloorStore.getState().activeFloorId
     if (!fid) return
@@ -81,8 +86,9 @@ export function createDraftModeController({
     // Use editor.wallMaterial so Tab / Shift+Tab cycling (FloorplanSystem
     // keydown) takes effect for the next drawn wall.
     const material = useEditorStore.getState().wallMaterial ?? MATERIALS.CONCRETE
+    const id = generateId('wall')
     useWallStore.getState().addWall(fid, {
-      id: generateId('wall'),
+      id,
       name: useWallStore.getState().nextWallName({ floor }),
       startX: a.x, startY: a.y,
       endX:   b.x, endY:   b.y,
@@ -91,6 +97,7 @@ export function createDraftModeController({
       bottomHeight: 0,
       openings: [],
     })
+    sessionWallIds.push(id)
   }
 
   const commitScope = (points, type = 'in') => {
@@ -146,6 +153,9 @@ export function createDraftModeController({
     const snapped = snapDraftPoint(worldPt, mode).pos
 
     if (draft.mode !== mode || draft.points.length === 0) {
+      // Fresh chain: reset the DRAW_WALL step-back session so Backspace can't
+      // reach back into walls drawn before this anchor (47-18).
+      if (mode === EDITOR_MODE.DRAW_WALL) sessionWallIds = []
       useDraftStore.getState().beginDraft(mode, snapped)
       return
     }
@@ -316,14 +326,23 @@ export function createDraftModeController({
     if (mode === EDITOR_MODE.DRAW_WALL && draft.mode === mode && draft.points.length > 0) {
       const fid = useFloorStore.getState().activeFloorId
       const walls = fid ? (useWallStore.getState().wallsByFloor[fid] ?? []) : []
-      const last = walls[walls.length - 1]
+      // Only step back into walls THIS draw chain committed — pop the newest
+      // session id that still exists. Never walls[length-1], which could be a
+      // wall that existed before the session (47-18).
+      let last = null
+      while (sessionWallIds.length > 0) {
+        const id = sessionWallIds.pop()
+        const w = walls.find((x) => x.id === id)
+        if (w) { last = w; break }
+      }
       if (last) {
         useWallStore.getState().removeWall(fid, last.id)
         // Rewind the anchor to the removed segment's start so the next click
         // continues the chain from the previous vertex.
         useDraftStore.getState().beginDraft(EDITOR_MODE.DRAW_WALL, { x: last.startX, y: last.startY })
       } else {
-        // No committed wall yet (only the anchor exists) — drop the anchor.
+        // No session-committed wall left (only the anchor exists) — drop the
+        // anchor. Existing floor walls are untouched.
         useDraftStore.getState().clearDraft()
       }
       return true

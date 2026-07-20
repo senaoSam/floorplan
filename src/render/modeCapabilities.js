@@ -47,6 +47,10 @@ function emptyCap() {
     // strict mode-relevant focus.
     dimOthers:          [],
     keepLayers:         'all',
+    // readOnly: no object mutation from this mode. Selection can still happen
+    // (e.g. a dashboard row calls setSelected to locate an object on the plan),
+    // but keyboard delete must be a no-op. Editing modes leave this false.
+    readOnly:           false,
   }
 }
 
@@ -187,6 +191,7 @@ const CLIENT_VIEW_CAP = {
   cursor: CLIENT_CURSOR,
   dimOthers: ['struct', 'cable'],
   keepLayers: ['floorImage', 'devicesAP', 'heatmap'],
+  readOnly: true,
 }
 
 // CAMERA — surveillance planning (Phase 34). Per design consensus the mode is
@@ -214,6 +219,7 @@ const STATS_CAP = {
   cursor: 'default',
   dimOthers: ['struct', 'cable'],
   keepLayers: ['floorImage', 'devicesAP', 'devicesSW', 'walls'],
+  readOnly: true,
 }
 
 const CROP_IMAGE_CAP = {

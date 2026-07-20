@@ -59,6 +59,7 @@ import { showUiToast } from '@/store/useUiToastStore'
 import { MATERIAL_LIST } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 import { isTypingTarget } from '@/utils/isTypingTarget'
+import { getModeCapability } from '@/render/modeCapabilities'
 import MaterialToast from '@/components/MaterialToast/MaterialToast'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import './FloorplanSystem.sass'
@@ -756,6 +757,10 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         const s = useEditorStore.getState()
         const fid = useFloorStore.getState().activeFloorId
         if (!fid) return
+        // 47-14: read-only modes (STATS / CLIENT_VIEW) can still hold a
+        // selection (a dashboard row calls setSelected to locate an object),
+        // but keyboard delete must not mutate — the mode is a viewer.
+        if (getModeCapability(s.editorMode).readOnly) return
 
         // Batch (marquee multi-select): confirm before deleting >1 objects
         // (ui-spec §2.4 delete policy) — the actual removal happens in the
