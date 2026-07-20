@@ -24,7 +24,8 @@
 **Phase 44 規劃 vs 實測空間疊合（PM 護城河 backlog）完成（2026-07-08 使用者驗收 ok，見下表）。**
 **Phase 45 隱藏 3D 凍結 + 2D/3D 熱圖共用 canvas 完成（2026-07-13 使用者驗收 ok，見下表）。**
 **Phase 46 效能第二/三輪（引擎 async 化 + Pixi texture 修正 + marker 免重畫）完成（2026-07-14 使用者驗收 ok，見下表）。SW 機 300 AP 拖曳 long task 累計 3.0s→0.93s（-69%）、最大單筆 777→205ms，效能戰役到此收工。**
-**下一個 phase：無。剩餘 backlog：A/B plan diff、漫遊重疊區，待與使用者確立要不要做。**
+**Phase 47 B1 快速正確性修正完成（47-1/3/4/5/7 + 47-24 頻段色 typo，2026-07-20 commit 2c5295d，MCP 驗證通過）。**
+**下一批：B2 數字可信度（47-2 → 47-6 → 47-8a → 47-9）。**
 
 ---
 
@@ -63,22 +64,22 @@
 
 #### P0 — 物理/演算法正確性（會直接算錯數字，最優先）
 
-- [ ] **47-1【高】〔B1〕Knife-edge 繞射符號反轉**：`knifeEdgeLossDb` 回傳的是負值繞射增益 Gd，呼叫端當正損耗「加」進 path loss → 繞射越深訊號越強（陰影區被灌爆）。旁證：`if (diff > 40) continue` 恆不觸發（死碼）。預設 `diffraction:true` 即走此路。**JS + shader 同步**取負。
+- [x] **47-1【高】〔B1〕Knife-edge 繞射符號反轉**（✅ commit 2c5295d，MCP 驗：符號表 v>0 回正損耗、diff>40 cull 復活、實場繞射 on/off 截圖確認補陰影不灌爆）：`knifeEdgeLossDb` 回傳的是負值繞射增益 Gd，呼叫端當正損耗「加」進 path loss → 繞射越深訊號越強（陰影區被灌爆）。旁證：`if (diff > 40) continue` 恆不觸發（死碼）。預設 `diffraction:true` 即走此路。**JS + shader 同步**取負。
   - `src/features/heatmap/propagation.js:87-93`（回傳取負）、`:411`（驗算）；`src/features/heatmap/propagationGL.js:749-758`、`:1112`。
 - [ ] **47-2【中】〔B2〕planQuality scope 過濾失效**：面板靠 NaN 濾 out-of-scope，但 `sampleField` 已改全矩形取樣不寫 NaN（註解明說），排除區被算進涵蓋率分母與盲區面積。修：迴圈內自呼 `scenario.scopeMaskFn(x,y)`。附帶：`nx=ceil(w/step)+1` 多一排界外格，面積略高估。
   - `src/features/heatmap/planQuality.js:86`、`src/features/heatmap/sampleField.js:53-55`。
-- [ ] **47-3【中】〔B1〕Client View 資料速率頻寬倍率錯**：用 11n/ac 的 2.08/4.34/8.68，11ax 正確為 2.0/4.19/8.38。80MHz MCS11 2SS 顯示 1245 應為 1201；160MHz 顯示 2489 應為 2402（人盡皆知值）。另 `channelWidths.js` 有第三套沒人用的 `widthRateMultiplier`（2.1/4.5/9.0），一併收斂。
+- [x] **47-3【中】〔B1〕Client View 資料速率頻寬倍率錯**（✅ commit 2c5295d，MCP 驗：80MHz=1202、160MHz=2403；widthRateMultiplier 已刪）：用 11n/ac 的 2.08/4.34/8.68，11ax 正確為 2.0/4.19/8.38。80MHz MCS11 2SS 顯示 1245 應為 1201；160MHz 顯示 2489 應為 2402（人盡皆知值）。另 `channelWidths.js` 有第三套沒人用的 `widthRateMultiplier`（2.1/4.5/9.0），一併收斂。
   - `src/features/clientView/dataRate.js:84-89`；`src/constants/channelWidths.js:64-69`。
-- [ ] **47-4【低】〔B1〕聚合 shader 缺 0.25m 水平距離 clamp**：`FS_FIELD`/CCI 迴圈無 clamp，AP 正下方一格與 JS/per-AP 路徑差 ~0.1-0.6dB，違反雙引擎一致性不變量。
+- [x] **47-4【低】〔B1〕聚合 shader 缺 0.25m 水平距離 clamp**（✅ commit 2c5295d，best-AP+CCI 兩迴圈加 max(length(dxy),0.25) 對齊 JS；shader 編譯 0 error、聚合場正常）：`FS_FIELD`/CCI 迴圈無 clamp，AP 正下方一格與 JS/per-AP 路徑差 ~0.1-0.6dB，違反雙引擎一致性不變量。
   - `src/features/heatmap/propagationGL.js:1542-1544`、`:1600-1602`。
-- [ ] **47-5【低】〔B1〕probeAt zM 優先序潛伏**：`scenario.rxElevationM ?? rx.zM` 讓 scenario 蓋過呼叫端 client 高度，crossFloor 一啟用即靜默忽略使用者高度。改 `rx.zM ?? scenario.rxElevationM ?? 0`。
+- [x] **47-5【低】〔B1〕probeAt zM 優先序潛伏**（✅ commit 2c5295d，MCP 驗：caller zM=1m 優先、hover 無 zM fallback scenario 5m）：`scenario.rxElevationM ?? rx.zM` 讓 scenario 蓋過呼叫端 client 高度，crossFloor 一啟用即靜默忽略使用者高度。改 `rx.zM ?? scenario.rxElevationM ?? 0`。
   - `src/features/heatmap/hoverProbe.js:8`。
 
 #### P1 — RF 領域語意缺口（工具核心價值，讓真實設計翻車）
 
 - [ ] **47-6【高】〔B2〕頻道衝突改用公尺 + 頻寬相交**：現為固定 300 canvas-px（與比例尺脫鉤、無視牆/功率）+ 只比對頻道號全等（ch36@80 與 ch44@20 頻譜全疊卻不報）。改：距離乘 `floor.scale` 換公尺；改用既有 `apsShareSpectrum()`（頻寬區間相交，SINR 引擎已在用）。**兩處同步**。
   - `src/features/heatmap/planQuality.js:18,32-38`、`src/utils/autoChannelPlan.js:35`。
-- [ ] **47-7【高】〔B1〕雜訊底隨頻寬抬升**：`widthNoiseDelta()`（`+10log10(W/20)`）是死碼無呼叫者，160MHz SNR 高估 ~9dB → MCS/速率虛胖。接進熱圖引擎與 clientView 逐頻段雜訊底。
+- [x] **47-7【高】〔B1〕雜訊底隨頻寬抬升**（✅ commit 2c5295d，MCP 驗：serving AP 20→160MHz SNR 降 9.03dB、20→80 降 6.02dB、RSSI 不變；三處同步 clientView SNR/SINR + JS aggregate + shader RSSI-only/full）：`widthNoiseDelta()`（`+10log10(W/20)`）是死碼無呼叫者，160MHz SNR 高估 ~9dB → MCS/速率虛胖。接進熱圖引擎與 clientView 逐頻段雜訊底。
   - `src/constants/channelWidths.js:73-75`（無呼叫者）、`src/features/heatmap/rfConstants.js:4`、`src/store/useClientViewStore.js:52`。
 - [ ] **47-8a【高】〔B2〕顯示層分頻段篩選**（2026-07-20 拍板：先做這個）：2.4/5/6GHz 混在同一「最強 AP」場，穿牆遠的 2.4G 蓋掉 6GHz 覆蓋洞。加熱圖 band filter（全部/2.4/5/6），`sampleField` 聚合前按 `ap.frequency` 篩。**不動 AP 資料結構、不碰 shader 物理**，只是渲染前 filter + store 狀態 + HeatmapControl 下拉。解決「看 6GHz 單獨的場」核心需求。
   - `src/features/heatmap/buildScenario.js:195`、`sampleField` 無 band filter；新增 heatmap store band 狀態 + `HeatmapControl`。
@@ -119,7 +120,7 @@
   - `src/render/heatmapAdapter.js:539,569`、`buildScenario.js:150`。
 - [ ] **47-23【高】〔B4〕-67 門檻收斂單一來源**：五處獨立（ClientView store / 規劃品質 useState 重設 / STATS gapThreshold 有 setter 無 UI / association.js fallback / 熱圖色階無 -67 anchor）→ 三個「涵蓋」數字可互相矛盾。抽共用常數；STATS 落差門檻補 UI 入口或標明固定；規劃品質門檻/目標改 store-backed（比照相機 coverageTargetPct）。**決策（2026-07-20 拍板）：目標% 統一** — 規劃 90 vs 相機 80 收斂成單一預設（Wi-Fi 覆蓋門檻 -67dBm / 目標覆蓋% 抽成共用常數，相機覆蓋率屬不同物理量另計，但「目標%」的預設值與 UI 呈現統一風格）。
   - `src/store/useClientViewStore.js:59`、`DevicePlanningPanel.jsx:51`、`useStatsTimeStore.js:27,49`、`association.js:26`、`modes.js:13-19`。
-- [ ] **47-24【中】〔B1+B4〕色彩 token 收斂**：2.4G 頻段色 typo `#f39e0b`→`#f39c12`（撞警告橘，最優先單修）；五種危險紅→`$danger`；兩種暗玻璃底 + 三種 radius→`%dark-glass`/token；三種 chip active 畫法→統一實心；熱圖開關「開啟」用錯誤紅 `#ef4444`→accent。頻段色/domain accent 抽進 `_variables.sass`。
+- [ ] **47-24【中】〔B1+B4〕色彩 token 收斂**：~~2.4G 頻段色 typo `#f39e0b`→`#f39c12`~~（✅ B1 已修，commit 2c5295d）；其餘 B4：五種危險紅→`$danger`；兩種暗玻璃底 + 三種 radius→`%dark-glass`/token；三種 chip active 畫法→統一實心；熱圖開關「開啟」用錯誤紅 `#ef4444`→accent。頻段色/domain accent 抽進 `_variables.sass`。
   - `StatsDashboard.jsx:26`、`_variables.sass`、各面板 sass。
 - [ ] **47-25【中】〔B4〕內部黑話外漏**（違反 ui-spec §2.6-2）：熱圖引擎下拉「F5a」、SidebarLeft「greedy multi-start」、CableSummary「Manhattan fallback」「Unroutable」→ 白話。
   - `HeatmapControl.jsx:159`、`SidebarLeft.jsx:415`、`CableSummaryPanel.jsx:221,235`。
