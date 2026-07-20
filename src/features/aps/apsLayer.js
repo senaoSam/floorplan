@@ -5,6 +5,7 @@ import { useDraftStore } from '@/store/useDraftStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useClientViewStore } from '@/store/useClientViewStore'
+import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { computeFocusedDevices, FOCUS_HALO_COLOR, FOCUS_HALO_ALPHA, FOCUS_HALO_WIDTH } from '@/features/focus/focusedDevices'
 import { perfOn, probe, probeEvent } from '@/features/cable/perfProbe'
 import { getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
@@ -47,6 +48,18 @@ const BODY_STROKE_NORMAL = '#1e3a8a'
 const BODY_FILL_NORMAL   = '#ffffff'
 const CV_HIGHLIGHT_FILL  = '#ef4444'   // Client View single-AP-range highlight (red body)
 const DRAG_COMMIT_THRESHOLD_PX = 1
+// 47-8a: when the heatmap band filter is active, APs off the selected band are
+// dimmed (not hidden) so they stay locatable but clearly read as "not part of
+// the band you're viewing" — mirrors the field being filtered to that band.
+const BAND_DIM_ALPHA = 0.3
+
+// Alpha for an AP given the heatmap band filter. 1 when the heatmap is off, the
+// filter is 'all', or this AP is on the selected band; dimmed otherwise.
+function bandDimAlpha(ap) {
+  const hm = useHeatmapStore.getState()
+  if (!hm.enabled || !hm.bandFilter || hm.bandFilter === 'all') return 1
+  return String(ap.frequency) === hm.bandFilter ? 1 : BAND_DIM_ALPHA
+}
 
 // The AP whose single-AP coverage range is currently shown in Client View
 // (manual choice, else serving). Only in CLIENT_VIEW mode. That AP's marker
@@ -375,8 +388,10 @@ export function attachAPsLayer({
       infoBg.visible = false
     }
 
-    // Per-band visibility filter.
+    // Per-band visibility filter (layer toggle — hides entirely).
     entry.container.visible = !!(editorState.showAPBand?.[ap.frequency] ?? true)
+    // 47-8a heatmap band filter: dim (don't hide) APs off the viewed band.
+    entry.container.alpha = bandDimAlpha(ap)
   }
 
   const bindInteractions = (entry) => {
@@ -665,6 +680,23 @@ export function attachAPsLayer({
     if (next) liftToTop(next)
   }
 
+  // 47-8a: redraw all markers when the heatmap band filter (or heatmap on/off)
+  // changes, so off-band APs dim / un-dim. Tracked by ref so unrelated heatmap
+  // store changes (blur, contours, hover reading, …) don't pay the full redraw.
+  let lastBandFilter = useHeatmapStore.getState().bandFilter
+  let lastHeatmapEnabled = useHeatmapStore.getState().enabled
+  const onHeatmapChange = () => {
+    const s = useHeatmapStore.getState()
+    if (s.bandFilter === lastBandFilter && s.enabled === lastHeatmapEnabled) return
+    lastBandFilter = s.bandFilter
+    lastHeatmapEnabled = s.enabled
+    for (const entry of containers.values()) {
+      const drag = useDragOverlayStore.getState().ap
+      if (drag && drag.id === entry.ap.id) drawAP(entry, drag.x, drag.y)
+      else drawAP(entry)
+    }
+  }
+
   // Client View single-AP-range highlight: when the highlighted AP changes
   // (manual pick / serving change / entering-leaving CLIENT_VIEW), redraw the
   // previously- and newly-highlighted markers so the red body paints / clears.
@@ -708,6 +740,7 @@ export function attachAPsLayer({
   const unsubHover = useHoverStore.subscribe(timed('hover', onHoverChange))
   const unsubViewport = useViewportStore.subscribe(timed('viewport', applyInverseScale))
   const unsubClientView = useClientViewStore.subscribe(timed('clientView', onClientViewChange))
+  const unsubHeatmap = useHeatmapStore.subscribe(timed('heatmap', onHeatmapChange))
   reconcile()
   recomputeFocus()
   applyInverseScale()
@@ -721,6 +754,7 @@ export function attachAPsLayer({
     unsubHover()
     unsubViewport()
     unsubClientView()
+    unsubHeatmap()
     for (const id of Array.from(containers.keys())) removeContainer(id)
   }
 }

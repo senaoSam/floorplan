@@ -2,7 +2,12 @@ import React, { useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { getPatternById, sampleGain } from '@/constants/antennaPatterns'
+
+// 47-8a: off-band APs are dimmed (not hidden) to match the 2D heatmap band
+// filter — keep the same factor as apsLayer's BAND_DIM_ALPHA.
+const BAND_DIM_ALPHA = 0.3
 
 // Match APLayer (2D) so users see the same freq-based color across views.
 const FREQ_COLOR = {
@@ -375,22 +380,29 @@ const APMarker = React.memo(function APMarker({ ap, pxToM, dimOpacity, isActiveF
 
 export default function APLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true, onAPHover }) {
   const allAPs = useAPStore((s) => s.apsByFloor[floorId] ?? [])
-  // Keep 2D and 3D visibility in sync — same per-band filter.
+  // Keep 2D and 3D visibility in sync — same per-band layer toggle (hides).
   const showAPBand = useEditorStore((s) => s.showAPBand)
+  // 47-8a: heatmap band filter dims (not hides) off-band APs — mirror 2D.
+  const heatmapOn = useHeatmapStore((s) => s.enabled)
+  const bandFilter = useHeatmapStore((s) => s.bandFilter)
   const aps = allAPs.filter((ap) => showAPBand[ap.frequency] !== false)
   if (!aps.length || !pxToM) return null
+  const bandActive = heatmapOn && bandFilter && bandFilter !== 'all'
   return (
     <group>
-      {aps.map((ap) => (
-        <APMarker
-          key={ap.id}
-          ap={ap}
-          pxToM={pxToM}
-          dimOpacity={dimOpacity}
-          isActiveFloor={isActiveFloor}
-          onHover={isActiveFloor ? onAPHover : undefined}
-        />
-      ))}
+      {aps.map((ap) => {
+        const offBand = bandActive && String(ap.frequency) !== bandFilter
+        return (
+          <APMarker
+            key={ap.id}
+            ap={ap}
+            pxToM={pxToM}
+            dimOpacity={offBand ? dimOpacity * BAND_DIM_ALPHA : dimOpacity}
+            isActiveFloor={isActiveFloor}
+            onHover={isActiveFloor ? onAPHover : undefined}
+          />
+        )
+      })}
     </group>
   )
 }
