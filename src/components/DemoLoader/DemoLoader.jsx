@@ -73,28 +73,37 @@ function nextDemoName(floors) {
   return `${DEMO_BASE_NAME}-${n}`
 }
 
+// Per-AP band mix for the demo so a fresh load already exercises the multi-band
+// tooling (heatmap band filter + off-band dimming). Index-aligned with
+// DEMO_AP_POSITIONS_NORM; channel is assigned per band by greedyChannelAssign
+// below, so only the band + width matter here.
+const DEMO_AP_BANDS = [2.4, 6, 5, 5, 6]
+
 function buildDemoAPs(canvasWidth, canvasHeight, regulatoryDomain) {
-  const aps = DEMO_AP_POSITIONS_NORM.map((p, i) => ({
-    id: generateId('ap'),
-    name: `AP-${String(i + 1).padStart(2, '0')}`,
-    x: p.x * canvasWidth,
-    y: p.y * canvasHeight,
-    z: 2.4,
-    txPower: 20,
-    frequency: 5,
-    channel: 36,
-    channelWidth: DEFAULT_CHANNEL_WIDTH[5],
-    antennaMode: 'omni',
-    azimuth: 0,
-    beamwidth: 60,
-    patternId: null,
-    mountType: 'ceiling',
-    modelId: DEFAULT_AP_MODEL_ID,
-    color: '#4fc3f7',
-    // Demo: pin AP-03 offline so the stats view always shows an offline unit
-    // (grey 離線 badge + ring + an alert). Real cloud status overrides this.
-    ...(i === 2 ? { mockStatus: 'offline' } : {}),
-  }))
+  const aps = DEMO_AP_POSITIONS_NORM.map((p, i) => {
+    const band = DEMO_AP_BANDS[i] ?? 5
+    return {
+      id: generateId('ap'),
+      name: `AP-${String(i + 1).padStart(2, '0')}`,
+      x: p.x * canvasWidth,
+      y: p.y * canvasHeight,
+      z: 2.4,
+      txPower: 20,
+      frequency: band,
+      channel: 36,
+      channelWidth: DEFAULT_CHANNEL_WIDTH[band] ?? 20,
+      antennaMode: 'omni',
+      azimuth: 0,
+      beamwidth: 60,
+      patternId: null,
+      mountType: 'ceiling',
+      modelId: DEFAULT_AP_MODEL_ID,
+      color: '#4fc3f7',
+      // Demo: pin AP-03 offline so the stats view always shows an offline unit
+      // (grey 離線 badge + ring + an alert). Real cloud status overrides this.
+      ...(i === 2 ? { mockStatus: 'offline' } : {}),
+    }
+  })
   const assignments = greedyChannelAssign(aps, regulatoryDomain)
   return aps.map((ap) => {
     const picked = assignments.get(ap.id)
