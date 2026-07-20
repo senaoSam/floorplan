@@ -747,14 +747,16 @@ vec3 segSegHit(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
 // reference (knifeEdgeLossDb in propagation.js). v is the Fresnel-Kirchhoff
 // parameter (positive = corner blocks the ray, negative = clear).
 float knifeEdgeLossDb(float v) {
+  // ITU-R P.526 diffraction *gain* Gd(v) is non-positive; callers add this as
+  // a positive path-loss term, so return the loss magnitude = -Gd(v).
   if (v <= -1.0) return 0.0;
-  if (v <= 0.0)  return 20.0 * log(0.5 - 0.62 * v) / log(10.0);
-  if (v <= 1.0)  return 20.0 * log(0.5 * exp(-0.95 * v)) / log(10.0);
+  if (v <= 0.0)  return -(20.0 * log(0.5 - 0.62 * v) / log(10.0));
+  if (v <= 1.0)  return -(20.0 * log(0.5 * exp(-0.95 * v)) / log(10.0));
   if (v <= 2.4) {
     float t = 0.38 - 0.1 * v;
-    return 20.0 * log(0.4 - sqrt(0.1184 - t * t)) / log(10.0);
+    return -(20.0 * log(0.4 - sqrt(0.1184 - t * t)) / log(10.0));
   }
-  return 20.0 * log(0.225 / v) / log(10.0);
+  return -(20.0 * log(0.225 / v) / log(10.0));
 }
 
 // Corner-diffraction Fresnel-Kirchhoff parameter v then dB loss.
@@ -1526,6 +1528,7 @@ void main() {
   float bestFreqLo = 0.0;
   float bestFreqHi = 0.0;
   float bestBand   = 0.0;
+  float bestBw     = 20.0;
 
   for (int k = 0; k < 4096; k++) {
     if (k >= uApCount) break;
@@ -1539,9 +1542,13 @@ void main() {
     float azDeg = t2.x; float bwDeg = t2.y; float tiltDeg = t3.y;
 
     // Cull by free-space-only RSSI: txDbm + max possible gain - PL(d) < floor.
+    // Clamp horizontal distance to 0.25 m before the 3D combine, matching JS
+    // propagation.js (dxyDir = max(dist, 0.25)) so the AP's own cell doesn't
+    // blow up path loss.
     vec2 dxy = rx - apPos.xy;
+    float dxyDir = max(length(dxy), 0.25);
     float dz = apPos.z - rxZ;
-    float dDir = sqrt(dxy.x*dxy.x + dxy.y*dxy.y + dz*dz);
+    float dDir = sqrt(dxyDir*dxyDir + dz*dz);
     float fsBest = txDbm + antGain + uRxGainDbi - pathLossDbField(dDir, centerMHz);
     if (fsBest < uCullFloorDbm) continue;
 
@@ -1558,6 +1565,7 @@ void main() {
       bestFreqLo = t2.z;
       bestFreqHi = t2.w;
       bestBand = t3.x;
+      bestBw = t1.y;
     }
   }
 
@@ -1573,8 +1581,13 @@ void main() {
   // dominant cost in scenes where most APs share a band. CCI/SINR get
   // sentinel values; the host only routes this output to the RSSI/SNR
   // colormap during drag, then re-renders full quality on dragend.
+  // Widen the noise floor for the serving AP's channel bandwidth: a 160 MHz
+  // receiver admits ~9 dB more thermal noise than 20 MHz. 10·log10(W/20).
+  // Mirrors widthNoiseDelta in channelWidths.js / propagation.js.
+  float effNoiseDbm = uNoiseDbm + 10.0 * log(bestBw / 20.0) / log(10.0);
+
   if (uRssiOnly == 1) {
-    float snrDbFast = bestDb - uNoiseDbm;
+    float snrDbFast = bestDb - effNoiseDbm;
     outColor = vec4(bestDb, -50.0, snrDbFast, -120.0);
     return;
   }
@@ -1598,8 +1611,9 @@ void main() {
     float azDeg = t2.x; float bwDeg = t2.y; float tiltDeg = t3.y;
 
     vec2 dxy = rx - apPos.xy;
+    float dxyDir = max(length(dxy), 0.25);
     float dz = apPos.z - rxZ;
-    float dDir = sqrt(dxy.x*dxy.x + dxy.y*dxy.y + dz*dz);
+    float dDir = sqrt(dxyDir*dxyDir + dz*dz);
     float fsBest = txDbm + antGain + uRxGainDbi - pathLossDbField(dDir, centerMHz);
     if (fsBest < uCullFloorDbm) continue;
 
@@ -1613,9 +1627,9 @@ void main() {
     cciLin += dbToLin(rxDb);
   }
 
-  float noiseLin = dbToLin(uNoiseDbm);
+  float noiseLin = dbToLin(effNoiseDbm);
   float sinrDb = bestDb - linToDb(noiseLin + cciLin);
-  float snrDb  = bestDb - uNoiseDbm;
+  float snrDb  = bestDb - effNoiseDbm;
   float cciDbm = cciLin > 0.0 ? linToDb(cciLin) : -120.0;
   outColor = vec4(bestDb, sinrDb, snrDb, cciDbm);
 }`

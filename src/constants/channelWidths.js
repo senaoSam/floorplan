@@ -57,17 +57,6 @@ export function channelsOverlap(bandA, chA, wA, bandB, chB, wB) {
 }
 
 // ── Data rate / SNR adjustments ──────────────────────────────────────────
-// Approximate PHY rate multiplier (Wi-Fi 5/6) relative to 20 MHz:
-//   40  →  ×2.1
-//   80  →  ×4.5
-//   160 →  ×9.0
-export function widthRateMultiplier(width) {
-  if (width >= 160) return 9.0
-  if (width >= 80)  return 4.5
-  if (width >= 40)  return 2.1
-  return 1.0
-}
-
 // Noise floor rises by 10·log10(W/20) dB as bandwidth grows (wider receiver → more noise).
 // 20→0 dB, 40→+3, 80→+6, 160→+9.
 export function widthNoiseDelta(width) {

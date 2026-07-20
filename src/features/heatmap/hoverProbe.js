@@ -5,7 +5,11 @@ import { rssiFromAp, aggregateApContributions } from './propagation'
 export function probeAt(scenario, rx, opts = {}) {
   if (!scenario || !scenario.aps.length) return null
   if (scenario.scopeMaskFn && !scenario.scopeMaskFn(rx.x, rx.y)) return null
-  const rxAbs = { ...rx, zM: scenario.rxElevationM ?? rx.zM ?? 0 }
+  // Caller-supplied rx.zM wins (e.g. Client View's per-device client height);
+  // fall back to the scenario elevation, then floor level. Reversing this let
+  // scenario.rxElevationM silently override the client height once crossFloor
+  // set it.
+  const rxAbs = { ...rx, zM: rx.zM ?? scenario.rxElevationM ?? 0 }
   const perAp = scenario.aps.map((ap) =>
     rssiFromAp(ap, rxAbs, scenario.walls, scenario.corners, {
       maxReflOrder: opts.reflections ? 1 : 0,

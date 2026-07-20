@@ -23,7 +23,7 @@ import './StatsDashboard.sass'
 
 // Frequency-band colors — fixed per entity (spec / project convention), never
 // cycled: 2.4 orange, 5 blue, 6 purple.
-const BAND_COLOR = { '2.4': '#f39e0b', '5': '#4fc3f7', '6': '#a855f7' }
+const BAND_COLOR = { '2.4': '#f39c12', '5': '#4fc3f7', '6': '#a855f7' }
 const BAND_LABEL = { '2.4': '2.4G', '5': '5G', '6': '6G' }
 
 const SEV_ICON = { critical: '⛔', warning: '⚠', info: 'ℹ' }

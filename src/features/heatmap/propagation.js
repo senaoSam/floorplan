@@ -28,6 +28,7 @@ import {
   pointSegDistance, mirrorPoint, segmentNormal,
 } from './geometry.js'
 import { apsShareSpectrum } from './frequency'
+import { widthNoiseDelta } from '@/constants/channelWidths'
 import { getPatternById, sampleGain, sectorTaperDb } from '@/constants/antennaPatterns'
 
 const C = 299792458
@@ -85,11 +86,14 @@ function accumulateWallLoss(a, b, walls, aZM, bZM, fOver24) {
 }
 
 function knifeEdgeLossDb(v) {
+  // ITU-R P.526 gives the diffraction *gain* Gd(v) (a non-positive dB value:
+  // the field is attenuated relative to free space). Callers add this as a
+  // positive path-loss term, so return the loss magnitude = -Gd(v).
   if (v <= -1) return 0
-  if (v <= 0)  return 20 * Math.log10(0.5 - 0.62 * v)
-  if (v <= 1)  return 20 * Math.log10(0.5 * Math.exp(-0.95 * v))
-  if (v <= 2.4) return 20 * Math.log10(0.4 - Math.sqrt(0.1184 - Math.pow(0.38 - 0.1 * v, 2)))
-  return 20 * Math.log10(0.225 / v)
+  if (v <= 0)  return -(20 * Math.log10(0.5 - 0.62 * v))
+  if (v <= 1)  return -(20 * Math.log10(0.5 * Math.exp(-0.95 * v)))
+  if (v <= 2.4) return -(20 * Math.log10(0.4 - Math.sqrt(0.1184 - Math.pow(0.38 - 0.1 * v, 2))))
+  return -(20 * Math.log10(0.225 / v))
 }
 
 function cornerDiffractionDb(tx, rx, corner, wavelengthM) {
@@ -483,9 +487,13 @@ export function aggregateApContributions(perApDbm, apList, noiseDbm = NOISE_FLOO
     if (!apsShareSpectrum(signalAp, apList[i])) continue
     cciLin += dbToLin(perApDbm[i])
   }
-  const noiseLin = dbToLin(noiseDbm)
+  // Widen the noise floor for the serving AP's channel bandwidth — a 160 MHz
+  // receiver admits ~9 dB more thermal noise than 20 MHz. Kept in sync with the
+  // clientView SNR path and the GLSL aggregate shader.
+  const effNoiseDbm = noiseDbm + widthNoiseDelta(signalAp.channelWidth ?? 20)
+  const noiseLin = dbToLin(effNoiseDbm)
   const sinrDb = signalDb - linToDb(noiseLin + cciLin)
-  const snrDb  = signalDb - noiseDbm
+  const snrDb  = signalDb - effNoiseDbm
   const cciDbm = cciLin > 0 ? linToDb(cciLin) : -Infinity
   return { rssiDbm: signalDb, sinrDb, snrDb, cciDbm, bestApIndex: bestIdx }
 }

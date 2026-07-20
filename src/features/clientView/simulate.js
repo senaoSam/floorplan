@@ -20,6 +20,7 @@
 import { probeAt } from '@/features/heatmap/hoverProbe'
 import { effectiveBands } from '@/constants/clientDevices'
 import { apsShareSpectrum } from '@/features/heatmap/frequency'
+import { widthNoiseDelta } from '@/constants/channelWidths'
 import { estimateDataRate } from './dataRate'
 import { ROAM_HYSTERESIS_DB, ROAM_CANDIDATE_WINDOW_DB } from '@/store/useClientViewStore'
 
@@ -128,7 +129,16 @@ export function simulateClient(scenario, rx, opts) {
   const isLocked = lockedApId != null && servingAp.id === lockedApId
   const rssiDbm = serving.rssiDbm           // effective (link-direction-aware)
   const band = servingAp.frequency
-  const noiseDbm = (noiseFloor && noiseFloor[band] != null) ? noiseFloor[band] : -95
+
+  // Effective channel width / streams = min(AP, client). Wi-Fi 7 off → 11ax ladder.
+  const channelWidth = Math.min(servingAp.channelWidth ?? 20, device.maxChannelWidth ?? 160)
+  const spatialStreams = Math.max(1, device.spatialStreams ?? 1)
+
+  // Noise floor = per-band base + bandwidth widening. A wider receiver admits
+  // proportionally more thermal noise (+10·log10(W/20) dB), so 160 MHz sits
+  // ~9 dB above 20 MHz — without this the SNR (and thus MCS/rate) is inflated.
+  const baseNoiseDbm = (noiseFloor && noiseFloor[band] != null) ? noiseFloor[band] : -95
+  const noiseDbm = baseNoiseDbm + widthNoiseDelta(channelWidth)
 
   // SNR uses the band's noise floor.
   const snrDb = rssiDbm - noiseDbm
@@ -146,9 +156,6 @@ export function simulateClient(scenario, rx, opts) {
   }
   const sinrDb = rssiDbm - linToDb(dbToLin(noiseDbm) + cciLin)
 
-  // Effective channel width / streams = min(AP, client). Wi-Fi 7 off → 11ax ladder.
-  const channelWidth = Math.min(servingAp.channelWidth ?? 20, device.maxChannelWidth ?? 160)
-  const spatialStreams = Math.max(1, device.spatialStreams ?? 1)
   const dr = estimateDataRate(snrDb, effectivePhy(device, wifi7On), channelWidth, spatialStreams)
 
   const distanceM = Math.hypot(rx.x - servingAp.pos.x, rx.y - servingAp.pos.y)

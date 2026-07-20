@@ -78,13 +78,13 @@ const MAX_MCS_BY_PHY = {
   '11be': 13,  // Wi-Fi 7  → 4096-QAM
 }
 
-// Linear width factor relative to 20 MHz, from data-subcarrier counts:
-//   20→1, 40→2.08, 80→4.34, 160→8.68 (HE numerology: 234/980/1960 vs 980… )
-// We use the commonly-quoted ratios.
+// Linear width factor relative to 20 MHz, from HE (11ax) data-subcarrier
+// counts: 20→234, 40→468, 80→980, 160→1960. Ratios vs the 234 baseline:
+//   40 → 2.0, 80 → 4.19, 160 → 8.38.
 function widthFactor(width) {
-  if (width >= 160) return 8.68
-  if (width >= 80)  return 4.34
-  if (width >= 40)  return 2.08
+  if (width >= 160) return 8.38
+  if (width >= 80)  return 4.19
+  if (width >= 40)  return 2.0
   return 1.0
 }
 
