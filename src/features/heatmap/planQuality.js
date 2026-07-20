@@ -12,26 +12,31 @@
 
 import { buildScenario } from './buildScenario'
 import { sampleField } from './sampleField'
+import { apsShareSpectrum } from './frequency'
 
 const GRID_STEP_M = 1.0   // coarse enough to run debounced without a GPU
 const GAP_GRID = 8        // 8×8 coarse cells to locate the densest blind area
-const CONFLICT_DIST_PX = 300   // same interference radius as autoChannelPlan
+const CONFLICT_DIST_M = 12   // physical interference radius (metres)
 
-// Detect co-channel conflicts: two APs on the same band + same channel that
-// sit within CONFLICT_DIST_PX of each other. (A,B) pairs are de-duped — each
-// unordered pair is reported once. Mirrors autoChannelPlan's dist/radius idea
-// but reports conflicts rather than assigning channels.
-export function detectChannelConflicts(aps) {
+// Detect co-channel conflicts: two APs whose spectra overlap (same band AND
+// intersecting frequency ranges — so ch36@80 vs ch44@20 counts, not just exact
+// channel matches) and that sit within CONFLICT_DIST_M metres of each other.
+// Distance uses the floor scale (px/m) so the radius tracks the plan's scale
+// instead of a fixed canvas-px number. (A,B) pairs are de-duped — each
+// unordered pair is reported once.
+export function detectChannelConflicts(aps, scale) {
   const list = aps ?? []
   const conflicts = []
-  const r2 = CONFLICT_DIST_PX * CONFLICT_DIST_PX
+  // scale is px per metre; fall back to a pure-px radius when unset so the
+  // check still runs before a scale is calibrated.
+  const distPx = scale ? CONFLICT_DIST_M * scale : 300
+  const r2 = distPx * distPx
   for (let i = 0; i < list.length; i++) {
     for (let j = i + 1; j < list.length; j++) {
       const a = list[i]
       const b = list[j]
-      if (a.frequency !== b.frequency) continue
       if (a.channel == null || b.channel == null) continue
-      if (a.channel !== b.channel) continue
+      if (!apsShareSpectrum(a, b)) continue
       const dx = a.x - b.x
       const dy = a.y - b.y
       if (dx * dx + dy * dy > r2) continue
@@ -49,10 +54,11 @@ export function computePlanQualityStats({ floor, walls, aps, scopes, thresholdDb
   const scenario = buildScenario(floor, walls ?? [], apList, scopes ?? [])
   if (!scenario) return null
 
-  const channelConflicts = detectChannelConflicts(apList)
+  const channelConflicts = detectChannelConflicts(apList, floor.scale)
   if (apList.length === 0) {
     return {
       coveragePct: 0,
+      secondaryCoveragePct: 0,
       blindPct: 100,
       coveredAreaM2: 0,
       blindAreaM2: 0,
@@ -66,12 +72,19 @@ export function computePlanQualityStats({ floor, walls, aps, scopes, thresholdDb
   // Sample RSSI with the coarse JS engine. Reflections/diffraction OFF keeps a
   // debounced full-floor sweep cheap; the panel is a coverage summary, not the
   // final heatmap, so first-order accuracy is plenty for a %.
-  const field = sampleField(scenario, GRID_STEP_M, { maxReflOrder: 0, enableDiffraction: false })
-  const { rssi, nx, ny, gridStepM, originX, originY } = field
+  const field = sampleField(scenario, GRID_STEP_M, {
+    maxReflOrder: 0,
+    enableDiffraction: false,
+    redundancyThresholdDbm: thresholdDbm,   // 47-9: per-cell count of APs ≥ threshold
+  })
+  const { rssi, redundancy, nx, ny, gridStepM, originX, originY } = field
   const pxToM = 1 / floor.scale
+  const { w: planW, h: planH } = scenario.size
+  const maskFn = scenario.scopeMaskFn ?? (() => true)
 
-  let inScope = 0     // non-NaN cells inside the plan → denominator
+  let inScope = 0     // in-plane, in-scope cells → denominator
   let covered = 0
+  let secondary = 0   // 47-9: cells with ≥2 APs ≥ threshold (voice/roaming safe)
   const cellM2 = gridStepM * gridStepM
 
   // Blind density per coarse cell, to locate the biggest gap (image-px).
@@ -79,14 +92,25 @@ export function computePlanQualityStats({ floor, walls, aps, scopes, thresholdDb
   const cellH = Math.ceil(ny / GAP_GRID)
   const blindPerCell = new Int32Array(GAP_GRID * GAP_GRID)
 
+  // sampleField samples the whole padded rectangle and never writes NaN, so we
+  // must clip in-scope ourselves: (1) drop the trailing out-of-plane row/column
+  // the `+1` grid sizing adds, and (2) drop cells outside the scope polygons —
+  // otherwise excluded regions inflate the coverage denominator and blind area.
   for (let j = 0; j < ny; j++) {
     const gy = Math.min(GAP_GRID - 1, Math.floor(j / cellH))
+    const y = originY + j * gridStepM
+    if (y < 0 || y > planH) continue
     for (let i = 0; i < nx; i++) {
-      const v = rssi[j * nx + i]
-      if (Number.isNaN(v)) continue   // out-of-scope / padding
+      const x = originX + i * gridStepM
+      if (x < 0 || x > planW) continue
+      if (!maskFn(x, y)) continue     // out-of-scope
+      const idx = j * nx + i
+      const v = rssi[idx]
+      if (Number.isNaN(v)) continue
       inScope += 1
       if (v >= thresholdDbm) {
         covered += 1
+        if (redundancy && redundancy[idx] >= 2) secondary += 1
       } else {
         const gx = Math.min(GAP_GRID - 1, Math.floor(i / cellW))
         blindPerCell[gy * GAP_GRID + gx] += 1
@@ -96,7 +120,7 @@ export function computePlanQualityStats({ floor, walls, aps, scopes, thresholdDb
 
   if (inScope === 0) {
     return {
-      coveragePct: 0, blindPct: 0, coveredAreaM2: 0, blindAreaM2: 0,
+      coveragePct: 0, secondaryCoveragePct: 0, blindPct: 0, coveredAreaM2: 0, blindAreaM2: 0,
       apCount: apList.length, channelConflicts, biggestGap: null, thresholdDbm,
     }
   }
@@ -122,6 +146,9 @@ export function computePlanQualityStats({ floor, walls, aps, scopes, thresholdDb
   const blind = inScope - covered
   return {
     coveragePct: (covered / inScope) * 100,
+    // 47-9: fraction of in-scope area with ≥2 APs above threshold — the area
+    // where a client can roam / sustain voice without a coverage gap.
+    secondaryCoveragePct: (secondary / inScope) * 100,
     blindPct: (blind / inScope) * 100,
     coveredAreaM2: covered * cellM2,
     blindAreaM2: blind * cellM2,

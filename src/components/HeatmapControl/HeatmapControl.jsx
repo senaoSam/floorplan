@@ -24,6 +24,8 @@ function HeatmapControl() {
   const setEnabled   = useHeatmapStore((s) => s.setEnabled)
   const mode         = useHeatmapStore((s) => s.mode)
   const setMode      = useHeatmapStore((s) => s.setMode)
+  const bandFilter   = useHeatmapStore((s) => s.bandFilter)
+  const setBandFilter = useHeatmapStore((s) => s.setBandFilter)
   const reflections  = useHeatmapStore((s) => s.reflections)
   const setReflections = useHeatmapStore((s) => s.setReflections)
   const diffraction  = useHeatmapStore((s) => s.diffraction)
@@ -133,6 +135,17 @@ function HeatmapControl() {
               {HEATMAP_MODE_LIST.map((m) => (
                 <option key={m.id} value={m.id}>{m.label}</option>
               ))}
+            </select>
+            <select
+              className="heatmap-control__mode"
+              value={bandFilter}
+              onChange={(e) => setBandFilter(e.target.value)}
+              title="只顯示所選頻段的 AP 訊號場（避免遠處他頻段 AP 蓋掉覆蓋洞）"
+            >
+              <option value="all">全部頻段</option>
+              <option value="2.4">2.4 GHz</option>
+              <option value="5">5 GHz</option>
+              <option value="6">6 GHz</option>
             </select>
             <button
               type="button"

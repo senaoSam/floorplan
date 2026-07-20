@@ -559,13 +559,23 @@ export function attachHeatmapLayer({
     const applyApOverlay = (list) =>
       dragAP ? list.map((a) => (a.id === dragAP.id ? { ...a, x: dragAP.x, y: dragAP.y } : a)) : list
 
+    // 47-8a: band display filter. 'all' keeps every AP; otherwise drop APs off
+    // the selected band BEFORE the field is built, so a far off-band AP can't
+    // paint over the selected band's coverage. Physics/data unchanged.
+    const bandFilter = hm.bandFilter || 'all'
+    const applyBandFilter = (list) =>
+      bandFilter === 'all' ? list : list.filter((a) => String(a.frequency) === bandFilter)
+
     const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
-    const aps = applyApOverlay(useAPStore.getState().apsByFloor[activeFloorId] ?? [])
+    const aps = applyBandFilter(applyApOverlay(useAPStore.getState().apsByFloor[activeFloorId] ?? []))
     // Cross-floor: even when the ACTIVE floor has no APs, other floors'
     // APs can still cast attenuated signal through the slab. Check the
     // building-wide AP count, not just the active floor's.
     const apsByFloorAll = useAPStore.getState().apsByFloor ?? {}
-    const totalApCount = Object.values(apsByFloorAll).reduce((n, list) => n + (list?.length ?? 0), 0)
+    // Count band-filtered APs across the building: if the selected band has no
+    // APs anywhere there's nothing to render.
+    const totalApCount = Object.values(apsByFloorAll)
+      .reduce((n, list) => n + applyBandFilter(list ?? []).length, 0)
     if (totalApCount === 0) {
       hide()
       return
@@ -616,7 +626,7 @@ export function attachHeatmapLayer({
       }))
       const apsAcrossFloors = []
       for (const f of allFloors) {
-        const floorAPs = applyApOverlay(apsByFloor[f.id] ?? [])
+        const floorAPs = applyBandFilter(applyApOverlay(apsByFloor[f.id] ?? []))
         const floorElev = elevations[f.id] ?? 0
         for (const ap of floorAPs) {
           apsAcrossFloors.push({
@@ -852,6 +862,9 @@ export function attachHeatmapLayer({
       mode: hm.mode, engine: hm.engine, gridStepM: hm.gridStepM,
       blur: hm.blur, contours: hm.showContours,
       reflections: hm.reflections, diffraction: hm.diffraction,
+      // 47-8a: the band filter changes which APs feed the field, so a filter
+      // switch must invalidate the fingerprint and force a recompute.
+      bandFilter: hm.bandFilter,
       forceAggregated,
     }
     if (lastIdleInputs && idleInputsEqual(idleInputs, lastIdleInputs)) return

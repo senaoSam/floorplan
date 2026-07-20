@@ -26,6 +26,12 @@ export const HEATMAP_ENGINES = ['js', 'shader']
 //   scenes where live mode still can't hit 60 FPS.
 export const HEATMAP_DRAG_MODES = ['live', 'solo']
 
+// Band the heatmap renders. 'all' aggregates every AP (current behaviour);
+// '2.4'/'5'/'6' filter to a single band's APs *before* the field is built, so
+// e.g. a far 2.4 GHz AP can't mask a 6 GHz coverage hole. Purely a display
+// filter — AP data and shader physics are untouched.
+export const HEATMAP_BANDS = ['all', '2.4', '5', '6']
+
 // Heatmap UI / compute options.
 export const useHeatmapStore = create((set) => ({
   enabled: false,
@@ -42,6 +48,8 @@ export const useHeatmapStore = create((set) => ({
   gridStepM: 0.5,
   blur: 8,
   showContours: true,
+  // 47-8a: which band's APs feed the field. 'all' = every AP (default).
+  bandFilter: 'all',
 
   // Hover readout driven by Editor2D's mousemove when enabled. Shape:
   //   { at:{x,y}, rssiDbm, sinrDb, snrDb, cciDbm, perAp:number[], apList:AP[] }
@@ -74,6 +82,7 @@ export const useHeatmapStore = create((set) => ({
   setGridStepM:   (v) => set({ gridStepM: v }),
   setBlur:        (v) => set({ blur: v }),
   setShowContours:(v) => set({ showContours: v }),
+  setBandFilter:  (v) => set({ bandFilter: v }),
   setHoverReading:(v) => set({ hoverReading: v }),
   // 任務 4 (b): adapter calls this each compute; guarded to a no-op when the
   // value is unchanged so it never triggers an extra subscriber recompute loop.

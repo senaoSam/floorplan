@@ -35,6 +35,12 @@ export function sampleField(scenario, gridStepM = 0.5, opts = {}) {
   const sinr = new Float32Array(nx * ny)
   const snr  = new Float32Array(nx * ny)
   const cci  = new Float32Array(nx * ny)
+  // 47-9 (opt-in): when a redundancy threshold is given, also record how many
+  // APs reach that RSSI per cell (capped at 255). Lets the caller compute
+  // secondary/redundant coverage (≥2 APs) for voice/roaming. No extra probes —
+  // reuses the perAp values already computed below.
+  const redundancyThresholdDbm = opts.redundancyThresholdDbm ?? null
+  const redundancy = redundancyThresholdDbm != null ? new Uint8Array(nx * ny) : null
 
   const mask = scenario.scopeMaskFn ?? (() => true)
 
@@ -71,7 +77,12 @@ export function sampleField(scenario, gridStepM = 0.5, opts = {}) {
       sinr[idx] = agg.sinrDb
       snr[idx]  = agg.snrDb
       cci[idx]  = isFinite(agg.cciDbm) ? Math.max(agg.cciDbm, CCI_MIN_DBM) : CCI_MIN_DBM
+      if (redundancy) {
+        let n = 0
+        for (let k = 0; k < perAp.length; k++) if (perAp[k] >= redundancyThresholdDbm) n++
+        redundancy[idx] = n > 255 ? 255 : n
+      }
     }
   }
-  return { rssi, sinr, snr, cci, nx, ny, gridStepM, originX, originY }
+  return { rssi, sinr, snr, cci, redundancy, nx, ny, gridStepM, originX, originY }
 }

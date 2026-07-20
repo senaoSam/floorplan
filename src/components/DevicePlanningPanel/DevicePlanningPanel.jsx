@@ -188,7 +188,11 @@ function DevicePlanningPanel() {
                     <span>盲區</span>
                     <b>{fmtPct(quality.blindPct)} · {fmtArea(quality.blindAreaM2)}</b>
                   </div>
-                  <div className="device-planning__row" title="同頻段、同頻道、且距離過近的 AP 對數">
+                  <div className="device-planning__row" title="有兩台以上 AP 同時高於門檻的區域比例——語音通話與漫遊需要這種重疊備援，避免換手時斷訊">
+                    <span>雙重涵蓋（≥2 台）</span>
+                    <b>{fmtPct(quality.secondaryCoveragePct ?? 0)}</b>
+                  </div>
+                  <div className="device-planning__row" title="同頻段、頻譜重疊、且距離過近的 AP 對數">
                     <span>頻道衝突</span>
                     <b className={conflictCount > 0 ? 'device-planning__val--warn' : ''}>{conflictCount} 對</b>
                   </div>
