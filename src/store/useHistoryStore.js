@@ -36,18 +36,26 @@ function takeSnapshot(floorId) {
     aps: structuredClone(useAPStore.getState().apsByFloor[floorId] ?? []),
     scopes: structuredClone(useScopeStore.getState().scopesByFloor[floorId] ?? []),
     floorHoles: structuredClone(useFloorHoleStore.getState().floorHolesByFloor[floorId] ?? []),
-    switches: structuredClone(useCableStore.getState().switchesByFloor[floorId] ?? []),
+    // 47-17: add/removeSwitch rewrite uplinkTo on switches BUILDING-WIDE (dangling
+    // null on remove, backfill on add), so the snapshot must carry every floor's
+    // switches — not just the active floor's — or undo leaves other floors'
+    // uplinks broken. Restored wholesale below.
+    switchesAll: structuredClone(useCableStore.getState().switchesByFloor ?? {}),
     trays:    structuredClone(useCableStore.getState().traysByFloor[floorId] ?? []),
     risers:   structuredClone(useCableStore.getState().risers ?? []),
     cameras:  structuredClone(useCameraStore.getState().camerasByFloor[floorId] ?? []),
     tripwires: structuredClone(useCameraStore.getState().tripwiresByFloor[floorId] ?? []),
     camZones:  structuredClone(useCameraStore.getState().zonesByFloor[floorId] ?? []),
+    // 47-16: placeCamera moves a camera out of the org-level unplaced pool into a
+    // floor. Without capturing the pool, undo restores camerasByFloor (camera
+    // gone from the floor) but not the pool (not back either) → camera vanishes.
+    unplacedCameras: structuredClone(useCameraStore.getState().unplacedCameras ?? []),
   }
 }
 
 function restoreSnapshot(snapshot) {
   if (!snapshot) return
-  const { floorId, walls, aps, scopes, floorHoles, switches, trays, risers, cameras, tripwires, camZones } = snapshot
+  const { floorId, walls, aps, scopes, floorHoles, switchesAll, trays, risers, cameras, tripwires, camZones, unplacedCameras } = snapshot
   _restoring = true
   useWallStore.getState().setWalls(floorId, walls)
   useAPStore.getState().setAPs(floorId, aps)
@@ -57,12 +65,16 @@ function restoreSnapshot(snapshot) {
   useFloorHoleStore.setState((s) => ({
     floorHolesByFloor: { ...s.floorHolesByFloor, [floorId]: floorHoles },
   }))
-  useCableStore.getState().setSwitches(floorId, switches ?? [])
+  // 47-17: restore switches for the whole building so cross-floor uplinkTo
+  // rewrites are undone everywhere, not just on the active floor.
+  useCableStore.setState({ switchesByFloor: switchesAll ?? {} })
   useCableStore.getState().setTrays(floorId, trays ?? [])
   useCableStore.getState().setRisers(risers ?? [])
   useCameraStore.getState().setCameras(floorId, cameras ?? [])
   useCameraStore.getState().setTripwires(floorId, tripwires ?? [])
   useCameraStore.getState().setZones(floorId, camZones ?? [])
+  // 47-16: restore the org-level unplaced camera pool.
+  useCameraStore.setState({ unplacedCameras: unplacedCameras ?? [] })
   _restoring = false
 }
 
@@ -114,6 +126,22 @@ export const useHistoryStore = create((set, get) => ({
   canRedo: () => get().redoStack.length > 0,
 
   clearHistory: () => set({ undoStack: [], redoStack: [] }),
+
+  // 47-19: when a floor is deleted its snapshots become dead weight — undo hits
+  // `prevSnap.floorId !== activeFloorId` and returns without popping, so the
+  // stack jams and Ctrl+Z stops responding. Drop every snapshot keyed to the
+  // removed floor (and any pending raw for it) so the stacks stay live.
+  dropFloor: (floorId) => {
+    if (_pendingRaw && _pendingRaw.floorId === floorId) {
+      if (_debounceTimer) { clearTimeout(_debounceTimer); _debounceTimer = null }
+      if (_idleHandle !== null) { cancelIdle(_idleHandle); _idleHandle = null }
+      _pendingRaw = null
+    }
+    set((s) => ({
+      undoStack: s.undoStack.filter((snap) => snap.floorId !== floorId),
+      redoStack: s.redoStack.filter((snap) => snap.floorId !== floorId),
+    }))
+  },
 }))
 
 // ── Debounce + idle 機制：拖曳等連續操作合併為一次 undo 步驟 ──────────
@@ -144,12 +172,13 @@ function commitPending() {
     aps: structuredClone(raw.aps),
     scopes: structuredClone(raw.scopes),
     floorHoles: structuredClone(raw.floorHoles),
-    switches: structuredClone(raw.switches),
+    switchesAll: structuredClone(raw.switchesAll ?? {}),
     trays:    structuredClone(raw.trays),
     risers:   structuredClone(raw.risers ?? []),
     cameras:  structuredClone(raw.cameras ?? []),
     tripwires: structuredClone(raw.tripwires ?? []),
     camZones:  structuredClone(raw.camZones ?? []),
+    unplacedCameras: structuredClone(raw.unplacedCameras ?? []),
   })
 }
 
@@ -188,12 +217,14 @@ let _prevRisers   = useCableStore.getState().risers
 let _prevCameras  = useCameraStore.getState().camerasByFloor
 let _prevTripwires = useCameraStore.getState().tripwiresByFloor
 let _prevCamZones  = useCameraStore.getState().zonesByFloor
+let _prevUnplaced  = useCameraStore.getState().unplacedCameras
 
 function onStoreChange(storeName, prevRef, currentRef) {
   if (_restoring) return
   const floorId = useFloorStore.getState().activeFloorId
   if (!floorId) return
-  if (storeName === 'risers') {
+  if (storeName === 'risers' || storeName === 'unplaced') {
+    // Building-/org-level arrays (not keyed by floor): compare the ref directly.
     if (prevRef === currentRef) return
   } else if (prevRef[floorId] === currentRef[floorId]) {
     return
@@ -208,12 +239,19 @@ function onStoreChange(storeName, prevRef, currentRef) {
     aps:        storeName === 'aps'      ? (prevRef[floorId] ?? []) : (useAPStore.getState().apsByFloor[floorId] ?? []),
     scopes:     storeName === 'scopes'   ? (prevRef[floorId] ?? []) : (useScopeStore.getState().scopesByFloor[floorId] ?? []),
     floorHoles: storeName === 'holes'    ? (prevRef[floorId] ?? []) : (useFloorHoleStore.getState().floorHolesByFloor[floorId] ?? []),
-    switches:   storeName === 'switches' ? (prevRef[floorId] ?? []) : (useCableStore.getState().switchesByFloor[floorId] ?? []),
+    // 47-17: 'switches' change → the "before" is the whole prev map (prevRef);
+    // other changes capture the current whole map. Restored building-wide.
+    switchesAll: storeName === 'switches' ? (prevRef ?? {}) : (useCableStore.getState().switchesByFloor ?? {}),
     trays:      storeName === 'trays'    ? (prevRef[floorId] ?? []) : (useCableStore.getState().traysByFloor[floorId] ?? []),
     risers:     storeName === 'risers'   ? (prevRef ?? [])           : (useCableStore.getState().risers ?? []),
     cameras:    storeName === 'cameras'  ? (prevRef[floorId] ?? []) : (useCameraStore.getState().camerasByFloor[floorId] ?? []),
     tripwires:  storeName === 'tripwires' ? (prevRef[floorId] ?? []) : (useCameraStore.getState().tripwiresByFloor[floorId] ?? []),
     camZones:   storeName === 'camZones'  ? (prevRef[floorId] ?? []) : (useCameraStore.getState().zonesByFloor[floorId] ?? []),
+    // 47-16: always capture the PREVIOUS unplaced pool. placeCamera mutates
+    // camerasByFloor + unplacedCameras in one set(), so by the time the
+    // 'cameras' change fires here getState().unplacedCameras is already the
+    // AFTER pool — _prevUnplaced is the before-value we must snapshot to undo.
+    unplacedCameras: _prevUnplaced ?? [],
   }
   schedulePushRaw(raw)
 }
@@ -236,11 +274,18 @@ useFloorHoleStore.subscribe((state) => {
 })
 useCameraStore.subscribe((state) => {
   const cur = state.camerasByFloor
+  // Order matters: process camerasByFloor BEFORE updating _prevUnplaced, so the
+  // 'cameras' snapshot (built from _prevUnplaced) captures the pre-place pool.
+  // placeCamera mutates both in one set(); the cameras raw already carries the
+  // before-pool, and the 'unplaced' branch below then coalesces into it via
+  // _pendingRaw rather than recording a second snapshot (47-16).
   if (cur !== _prevCameras) { onStoreChange('cameras', _prevCameras, cur); _prevCameras = cur }
   const curT = state.tripwiresByFloor
   if (curT !== _prevTripwires) { onStoreChange('tripwires', _prevTripwires, curT); _prevTripwires = curT }
   const curZ = state.zonesByFloor
   if (curZ !== _prevCamZones) { onStoreChange('camZones', _prevCamZones, curZ); _prevCamZones = curZ }
+  const curU = state.unplacedCameras
+  if (curU !== _prevUnplaced) { onStoreChange('unplaced', _prevUnplaced, curU); _prevUnplaced = curU }
 })
 useCableStore.subscribe((state) => {
   const curS = state.switchesByFloor

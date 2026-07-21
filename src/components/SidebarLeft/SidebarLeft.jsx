@@ -13,6 +13,7 @@ import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useCableStore } from '@/store/useCableStore'
 import { useCameraStore } from '@/store/useCameraStore'
 import { useTrackingStore } from '@/store/useTrackingStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorImport } from '@/features/importer/useFloorImport'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
@@ -194,6 +195,9 @@ function SidebarLeft() {
     // linger as ghost devices keyed by the now-deleted floor id.
     clearCameras(floor.id)
     clearTracks(floor.id)
+    // 47-19: drop this floor's undo/redo snapshots so a dead snapshot can't jam
+    // the stack (undo returns early on floorId mismatch and never pops).
+    useHistoryStore.getState().dropFloor(floor.id)
     removeFloor(floor.id)
     if (isAlignMode && floor.id === activeFloorId) {
       setEditorMode(EDITOR_MODE.SELECT)
