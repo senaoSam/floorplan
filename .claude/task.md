@@ -27,7 +27,8 @@
 **Phase 47 B1 快速正確性修正完成（47-1/3/4/5/7 + 47-24 頻段色 typo，2026-07-20 commit 2c5295d，MCP 驗證通過）。**
 **Phase 47 B2 數字可信度完成（47-2/6/8a/9，2026-07-20，MCP 驗證通過；autoChannelPlan 半徑拍板不動）。**
 **Phase 47 B3 操作型邏輯 bug 完成（47-14~21，commit eb59e10 + 91c36a7 + 09a5ddf，使用者驗收 ok）。**
-**下一批：B4 UX/一致性（47-22 → 47-23 → 47-24 其餘 token → 47-25 → 47-26 → 47-27）。**
+**Phase 47 B4 UX/一致性完成（47-22~27，commit 1a4bf16，使用者驗收 ok；含 off-band dim/多頻段 demo/3D toolbar 精簡等使用者追加）。**
+**下一批：B5 大工程（47-10 天線增益 → 47-11 材質庫 → 47-12 TX 預設 → 47-13 PoE class；非急迫、可獨立慢慢做）。**
 
 ---
 
@@ -118,17 +119,17 @@
 
 #### P3 — UX / 一致性（demo 展示會出糗）
 
-- [ ] **47-22【高】〔B4〕比例尺靜默失敗指路**：未設 scale 時熱圖 `hide()` 全空（按鈕仍顯示「已開啟」）+ 三套行為不一致（熱圖靜默 / 面板警告 / 相機 40px fallback）。熱圖開啟且 scale 缺失時 toast/面板提示「請先設定比例尺」+ 一鍵進 DRAW_SCALE；匯入樓層後 scale=null 給常駐入口。
-  - `src/render/heatmapAdapter.js:539,569`、`buildScenario.js:150`。
-- [ ] **47-23【高】〔B4〕-67 門檻收斂單一來源**：五處獨立（ClientView store / 規劃品質 useState 重設 / STATS gapThreshold 有 setter 無 UI / association.js fallback / 熱圖色階無 -67 anchor）→ 三個「涵蓋」數字可互相矛盾。抽共用常數；STATS 落差門檻補 UI 入口或標明固定；規劃品質門檻/目標改 store-backed（比照相機 coverageTargetPct）。**決策（2026-07-20 拍板）：目標% 統一** — 規劃 90 vs 相機 80 收斂成單一預設（Wi-Fi 覆蓋門檻 -67dBm / 目標覆蓋% 抽成共用常數，相機覆蓋率屬不同物理量另計，但「目標%」的預設值與 UI 呈現統一風格）。
-  - `src/store/useClientViewStore.js:59`、`DevicePlanningPanel.jsx:51`、`useStatsTimeStore.js:27,49`、`association.js:26`、`modes.js:13-19`。
-- [ ] **47-24【中】〔B1+B4〕色彩 token 收斂**：~~2.4G 頻段色 typo `#f39e0b`→`#f39c12`~~（✅ B1 已修，commit 2c5295d）；其餘 B4：五種危險紅→`$danger`；兩種暗玻璃底 + 三種 radius→`%dark-glass`/token；三種 chip active 畫法→統一實心；熱圖開關「開啟」用錯誤紅 `#ef4444`→accent。頻段色/domain accent 抽進 `_variables.sass`。
-  - `StatsDashboard.jsx:26`、`_variables.sass`、各面板 sass。
-- [ ] **47-25【中】〔B4〕內部黑話外漏**（違反 ui-spec §2.6-2）：熱圖引擎下拉「F5a」、SidebarLeft「greedy multi-start」、CableSummary「Manhattan fallback」「Unroutable」→ 白話。
-  - `HeatmapControl.jsx:159`、`SidebarLeft.jsx:415`、`CableSummaryPanel.jsx:221,235`。
-- [ ] **47-26【中】〔B4〕版面避讓**：CameraTimelineBar 不吃 `--right-dock` 會被 PanelRight 蓋；3D 檢視時 2D overlay 全數殘留蓋在 3D canvas 上；TL 堆疊無 max-height（768px 高溢出）。
-  - `CameraTimelineBar.sass:7-18`、CanvasArea overlay、`CanvasArea.sass:18-31`。
-- [ ] **47-27【低】〔B4〕hit target / 殘留樣式**：多個小按鈕 <24px（TrendPanel close、CameraListPanel del/live 18px）；SidebarLeft 樓層輸入框 hover 泛紅（疑殘留 bug，`SidebarLeft.sass:299-300`）；三套 toast 中心點不一；StatsDashboard `fmtBps` 死碼、`linkMbps` 單位、rank-name 無 title。
+- [x] **47-22【高】〔B4〕比例尺靜默失敗指路**（✅ commit 1a4bf16，使用者驗收 ok）：heatmap store 加 `scaleMissing` flag（heatmapAdapter 在 enabled+無 scale 時 set true）；HeatmapControl 顯示「⚠️ 尚未設定比例尺」notice + 「設定比例尺」鈕（進 DRAW_SCALE）。MCP 驗 flag true/false 正確切換。**未做**：「匯入樓層後 scale=null 常駐入口」（DRAW_SCALE 已可從 toolbar 進，未加常駐入口，範圍收斂）。
+  - `src/store/useHeatmapStore.js`、`heatmapAdapter.js`、`HeatmapControl.jsx`。
+- [x] **47-23【高】〔B4〕-67 門檻收斂單一來源**（✅ commit 1a4bf16，使用者驗收 ok）：新增 `src/constants/coverage.js`（`COVERAGE_THRESHOLD_DBM=-67` + `COVERAGE_TARGET_PCT=90`），四處引用（ClientView store / DevicePlanningPanel / association fallback / useStatsTimeStore gapThreshold）。**決策（2026-07-21 拍板）：相機 coverageTargetPct 80% 不動**（FOV 覆蓋屬不同物理量，非 RSSI）——**防重做：不要把相機 80 改成 90**。熱圖色階 anchor 不塞 -67（視覺 ramp，非涵蓋計算，不動）。STATS gapThreshold 用共用常數即標明固定（未加獨立 UI 入口）。
+  - `src/constants/coverage.js`（新）、`useClientViewStore.js`、`DevicePlanningPanel.jsx`、`association.js`、`useStatsTimeStore.js`。
+- [x] **47-24【中】〔B1+B4〕色彩 token 收斂**（✅ B1 typo commit 2c5295d；B4 危險紅+開關色 commit 1a4bf16，使用者驗收 ok）：`_variables.sass` 加 `$danger`/`$danger-hover`/`$danger-soft`；各面板 #ef4444/#f87171/#e74c3c(危險語意) 收成 token（10 檔）；熱圖開關「開啟」#ef4444→`$accent`。**決策（2026-07-21 拍板）：只收危險紅+開關色**——「暗玻璃底 %dark-glass / 三種 radius / chip active 畫法統一」深度視覺重構**未做**（風險/CP 值不對，留 backlog）；頻段色留 JS（apsLayer FREQ_COLOR 已統一，sass 用不到）。
+  - `_variables.sass`、各面板 sass、`HeatmapControl.sass`。
+- [x] **47-25【中】〔B4〕內部黑話外漏**（✅ commit 1a4bf16，使用者驗收 ok）：引擎下拉 F5a→「精確（完整物理）/快速（GPU 加速）」；SidebarLeft/DevicePlanningPanel/BatchPanel/AutoPowerModal 的 greedy→白話；CableSummary/APPanel「Manhattan fallback/Unroutable/Z drop/slack」→「直角走線（未沿線槽）/無法接線/垂直落線/預留餘量」。
+  - `HeatmapControl.jsx`、`SidebarLeft.jsx`、`CableSummaryPanel.jsx`、`APPanel.jsx`、`BatchPanel.jsx`、`DevicePlanningPanel.jsx`、`AutoPowerModal.jsx`。
+- [x] **47-26【中】〔B4〕版面避讓**（✅ commit 1a4bf16，使用者驗收 ok）：① CameraTimelineBar center 改吃 `--right-dock`（`left: calc((100% - dock)/2)`）不被 PanelRight 蓋 ② **3D 隱藏 2D overlay**：CanvasArea `is3D` gate 左上/左下 stack + 時間軸 + 比例尺；ActiveModeBadge 3D 回 null ③ **3D Toolbar 精簡（2026-07-21 使用者拍板方案）：只留 AP/Camera/Stats 世界切換鈕**，藏第二行工具列 + Undo/Redo + 操作提示——世界切換在 3D 仍可用（實測點 Camera 切世界維持 3D）④ `--tl` stack 加 `max-height + overflow-y auto`（矮視窗可捲）。MCP 驗切 3D→2D overlay 消失/恢復、世界切換可用、0 errors。
+  - `CameraTimelineBar.sass`、`CanvasArea.jsx/.sass`、`Toolbar.jsx`、`ActiveModeBadge.jsx`。
+- [x] **47-27【低】〔B4〕hit target / 殘留樣式**（✅ commit 1a4bf16，使用者驗收 ok）：SidebarLeft 樓層輸入框 hover 泛紅殘留 bug→中性藍邊；CameraListPanel del/live + TrendPanel close 18px→24px hit target；StatsDashboard `fmtBps` 死碼移除、`linkMbps` 單位「M」→「Mbps」、rank-name 加 `title`。**未做**：三套 toast 中心點統一（觀感細節，CP 值低，留 backlog）。
 
 #### 保留為 backlog（缺口非 bug，依產品優先序拍板）
 
