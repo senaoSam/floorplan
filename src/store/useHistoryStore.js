@@ -230,8 +230,17 @@ function onStoreChange(storeName, prevRef, currentRef) {
     return
   }
   if (_pendingRaw) {
-    schedulePushRaw(_pendingRaw)
-    return
+    // 47-21: a pending raw for a DIFFERENT floor must be committed before we
+    // start recording this floor's change — otherwise the cross-floor edit is
+    // folded into the previous floor's snapshot and this floor's first step
+    // can't be undone. Same-floor changes coalesce as before.
+    if (_pendingRaw.floorId !== floorId) {
+      flushPending()
+      // fall through to build a fresh raw for the current floor
+    } else {
+      schedulePushRaw(_pendingRaw)
+      return
+    }
   }
   const raw = {
     floorId,

@@ -413,6 +413,10 @@ export function attachCamerasLayer({
       }
     }
     const onMove = (e) => {
+      // 47-21: if the mode changed mid-drag (e.g. a hotkey switched away from
+      // CAMERA), stop writing camera position — the drag no longer belongs to
+      // an active camera interaction.
+      if (!isCameraMode()) return
       const wp = scene.world.toLocal(e.global)
       pending = { x: startX + (wp.x - startWorld.x), y: startY + (wp.y - startWorld.y) }
       if (rafId === 0) rafId = requestAnimationFrame(flush)
@@ -443,6 +447,8 @@ export function attachCamerasLayer({
       }
     }
     const onMove = (e) => {
+      // 47-21: stop writing azimuth if the mode changed mid-rotate.
+      if (!isCameraMode()) return
       const wp = scene.world.toLocal(e.global)
       const cam = entry.camera
       const dx = wp.x - cam.x

@@ -77,7 +77,10 @@ function CameraPanel({ floorId, cameraId }) {
   const handleDuplicate = () => {
     if (!camera) return
     const id = generateId('cam')
-    const { id: _omit, name: _omitName, ...rest } = camera
+    // 47-20: drop calibration — the copy is offset +24px so the source's
+    // frame→floor homography no longer aligns; keeping it would falsely mark
+    // the copy 已校正.
+    const { id: _omit, name: _omitName, calibration: _omitCal, ...rest } = camera
     addCamera(floorId, {
       ...rest,
       id,

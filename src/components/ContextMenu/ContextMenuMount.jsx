@@ -38,6 +38,28 @@ function ContextMenuMount() {
   const camerasByFloor = useCameraStore((s) => s.camerasByFloor)
   const floorHolesByFloor = useFloorHoleStore((s) => s.floorHolesByFloor)
 
+  // 47-21: resolve whether the menu's target object still exists. Used to close
+  // the menu from an effect (below) instead of during render — calling
+  // closeContextMenu() mid-render updates the editor store while React is
+  // rendering this component, which is the "cannot update while rendering"
+  // anti-pattern. Render stays pure; the close happens after commit.
+  const targetLists = {
+    ap: apsByFloor, switch: switchesByFloor, cable_tray: traysByFloor,
+    wall: wallsByFloor, scope: scopesByFloor, camera: camerasByFloor,
+    floor_hole: floorHolesByFloor,
+  }
+  const targetExists = (() => {
+    if (!ctx || !activeFloorId) return true   // nothing to close yet
+    const list = targetLists[ctx.targetType]?.[activeFloorId]
+    // Types without a per-floor list here (tripwire / camera_zone / floor_image
+    // / riser) are resolved in the render body; don't force-close them.
+    if (!list) return true
+    return list.some((o) => o.id === ctx.targetId)
+  })()
+  React.useEffect(() => {
+    if (ctx && !targetExists) closeContextMenu()
+  }, [ctx, targetExists, closeContextMenu])
+
   if (typeof window !== 'undefined' && window.__debugRMB === true) {
     console.log('[RMB ContextMenuMount] render ctx=', ctx, 'activeFloorId=', activeFloorId)
   }
@@ -157,11 +179,11 @@ function ContextMenuMount() {
   }
 
   if (!target) {
-    // Target was removed underneath; close menu silently.
+    // Target was removed underneath; render nothing. The effect above closes
+    // the menu after commit (47-21 — no store write during render).
     if (typeof window !== 'undefined' && window.__debugRMB === true) {
       console.log('[RMB ContextMenuMount] target NOT FOUND, closing menu. targetType=', targetType, 'targetId=', targetId, 'wallsByFloor[fid]=', wallsByFloor[activeFloorId], 'scopesByFloor[fid]=', scopesByFloor[activeFloorId])
     }
-    closeContextMenu()
     return null
   }
 
@@ -377,7 +399,10 @@ function buildCameraItems(items, camera, floorId, setSelected, isSelected, onDel
     onClick: () => {
       const store = useCameraStore.getState()
       const id = generateId('cam')
-      const { id: _omit, name: _omitName, ...rest } = camera
+      // 47-20: drop calibration — the copy sits at a different position, so the
+      // source's frame→floor homography no longer aligns. Keeping it would show
+      // a false "已校正" badge for a camera that isn't actually calibrated.
+      const { id: _omit, name: _omitName, calibration: _omitCal, ...rest } = camera
       store.addCamera(floorId, {
         ...rest,
         id,

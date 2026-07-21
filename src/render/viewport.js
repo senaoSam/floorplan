@@ -1,5 +1,6 @@
 import { Graphics } from 'pixi.js'
 import { useFloorStore } from '@/store/useFloorStore'
+import { isTypingTarget } from '@/utils/isTypingTarget'
 
 // Wires pointer + wheel events on the PIXI scene to a viewport store, and
 // imperatively applies store updates back to the world Container transform.
@@ -371,6 +372,10 @@ export function bindViewport({
   canvas.addEventListener('wheel', onWheel, { passive: false })
 
   const onKeyDown = (e) => {
+    // 47-21: don't hijack Space for pan when the user is typing (e.g. a space
+    // in a camera / floor rename field) — that would flip the canvas cursor to
+    // grab and swallow the keystroke's intent.
+    if (isTypingTarget(e.target)) return
     if (e.code === 'Space' && !e.repeat) {
       spaceDown = true
       stage.cursor = panActive ? 'grabbing' : 'grab'
