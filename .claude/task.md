@@ -26,7 +26,7 @@
 **Phase 46 效能第二/三輪（引擎 async 化 + Pixi texture 修正 + marker 免重畫）完成（2026-07-14 使用者驗收 ok，見下表）。SW 機 300 AP 拖曳 long task 累計 3.0s→0.93s（-69%）、最大單筆 777→205ms，效能戰役到此收工。**
 **Phase 47 B1 快速正確性修正完成（47-1/3/4/5/7 + 47-24 頻段色 typo，2026-07-20 commit 2c5295d，MCP 驗證通過）。**
 **Phase 47 B2 數字可信度完成（47-2/6/8a/9，2026-07-20，MCP 驗證通過；autoChannelPlan 半徑拍板不動）。**
-**下一批：B3 操作型邏輯 bug（47-14 → 47-15 → 47-18 → 47-16 → 47-17 → 47-19 → 47-20 → 47-21）。**
+**Phase 47 B3 進行中：47-14/15/18（commit eb59e10）+ 47-16/17/19 undo 群組（commit 91c36a7）完成、使用者驗收 ok。剩 47-20（複製相機 strip calibration）+ 47-21（雜項）。**
 
 ---
 
@@ -99,18 +99,18 @@
 
 #### P2 — 邏輯/狀態 bug（demo 操作就踩得到）
 
-- [ ] **47-14【中】〔B3〕STATS 唯讀模式可 Delete 刪 AP/Switch**：Delete 分支只擋 ALIGN_FLOOR，STATS 點 dashboard 列 setSelected 後 Delete 真刪 + 開可編輯面板，違反 STATS_CAP 唯讀。加唯讀模式 guard。
-  - `src/components/FloorplanSystem/FloorplanSystem.jsx:755-803`。
-- [ ] **47-15【中】〔B3〕刪樓層漏清相機/軌跡**：`useCameraStore.clearFloor`（cameras/tripwires/zones）、`useTrackingStore.clearFloor` 是死碼無人呼叫，確認框說「一併移除」實際殘留幽靈裝置。confirmRemove 補呼叫兩者。
-  - `src/components/SidebarLeft/SidebarLeft.jsx:177-193`。
-- [ ] **47-16【中】〔B3〕「＋放置」相機後 Ctrl+Z 相機徹底消失**：snapshot 不含 `unplacedCameras`，undo 後兩邊都沒有。history 納入 unplacedCameras 或 placeCamera 不入 undo。
-  - `src/store/useHistoryStore.js:31-46`、`src/store/useCameraStore.js:114-125`。
-- [ ] **47-17【中】〔B3〕Switch 刪除/新增的跨樓層 uplinkTo 副作用不被 undo 還原**：removeSwitch 全建築 null dangling uplink、addSwitch 全建築 backfill，但 history 只存 active floor → undo 後其他樓層 uplink 遺失或 dangling。
-  - `src/store/useCableStore.js:293-342,420-433`。
-- [ ] **47-18【中】〔B3〕DRAW_WALL Backspace 誤刪既有牆**：步退取 `walls[length-1]`（樓層最後一面牆）而非本次 draft session commit 的牆。追蹤 session 實際新增的牆。
-  - `src/render/draftModeController.js:316-330`。
-- [ ] **47-19【低】〔B3〕刪樓層後死快照卡住 undo 堆疊**：undo 遇 `prevSnap.floorId !== activeFloorId` 直接 return 不彈出，永遠無反應。刪樓層時清該樓層相關 undo/redo 項。
-  - `src/store/useHistoryStore.js:80-96`。
+- [x] **47-14【中】〔B3〕STATS 唯讀模式可 Delete 刪 AP/Switch**（✅ commit eb59e10，使用者驗收 ok）：加 `readOnly` capability（STATS + CLIENT_VIEW）；Delete handler + PanelRight 在 readOnly 模式 no-op / 不開物件編輯面板（含面板顯示，2026-07-20 拍板一起擋）。MCP 驗 STATS 選 AP Delete 存活、SELECT 正常刪。
+  - `src/render/modeCapabilities.js`（readOnly flag）、`FloorplanSystem.jsx`（Delete guard）、`PanelRight.jsx`（面板 gate）。
+- [x] **47-15【中】〔B3〕刪樓層漏清相機/軌跡**（✅ commit eb59e10，使用者驗收 ok）：confirmRemove 補呼叫 `useCameraStore.clearFloor` + `useTrackingStore.clearFloor`。MCP 驗 camera clearFloor 5→0。
+  - `src/components/SidebarLeft/SidebarLeft.jsx`。
+- [x] **47-16【中】〔B3〕「＋放置」相機後 Ctrl+Z 相機徹底消失**（✅ commit 91c36a7，使用者驗收 ok）：history snapshot 納入 org-level `unplacedCameras`（一律存 before-pool，因 placeCamera 同一 set() 改 pool+camerasByFloor）。MCP 驗 undo 後相機回 unplaced pool（pool 3→2→3）。
+  - `src/store/useHistoryStore.js`。
+- [x] **47-17【中】〔B3〕Switch 刪除/新增的跨樓層 uplinkTo 副作用不被 undo 還原**（✅ commit 91c36a7，使用者驗收 ok）：snapshot 的 switches 從單樓層 array 改成全建築 `switchesByFloor` map，restoreSnapshot 整份還原。MCP 驗跨樓層 uplink 刪→undo 還原、同樓層 switch undo 無回歸。
+  - `src/store/useHistoryStore.js`（takeSnapshot/restoreSnapshot/commitPending/onStoreChange 全改 switchesAll）。
+- [x] **47-18【中】〔B3〕DRAW_WALL Backspace 誤刪既有牆**（✅ commit eb59e10，使用者驗收 ok）：draftModeController 追蹤 `sessionWallIds`（commitWall push、新 anchor reset），Backspace 只 pop 本 chain 仍存在的牆，非 walls[length-1]。MCP 驗 45 牆未畫即 Backspace 全保留。
+  - `src/render/draftModeController.js`。
+- [x] **47-19【低】〔B3〕刪樓層後死快照卡住 undo 堆疊**（✅ commit 91c36a7，使用者驗收 ok）：`useHistoryStore.dropFloor(floorId)` 清該樓層 undo/redo 快照 + pending raw；SidebarLeft.confirmRemove 呼叫。MCP 驗 dropFloor 移除死快照、保留 active 樓層項。
+  - `src/store/useHistoryStore.js`、`src/components/SidebarLeft/SidebarLeft.jsx`。
 - [ ] **47-20【低】〔B3〕複製相機連 calibration 帶走 → 假「已校正」**：副本位移 +24px、homography 已不對位卻顯示綠徽。複製時 strip calibration。
   - `src/components/ContextMenu/ContextMenuMount.jsx:376-390`、CameraPanel.handleDuplicate。
 - [ ] **47-21【低】〔B3〕雜項**：ContextMenuMount render 期間寫 store（`closeContextMenu` 搬進 effect）；`viewport.js:373-384` Space 鍵無 `isTypingTarget` guard；`camerasLayer.js` 拖曳中切模式 onMove 續寫 store（加 `isCameraMode()` guard）；history `_pendingRaw` 跨樓層混合致 B 樓第一步不可 undo。
