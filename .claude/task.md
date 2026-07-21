@@ -26,7 +26,8 @@
 **Phase 46 效能第二/三輪（引擎 async 化 + Pixi texture 修正 + marker 免重畫）完成（2026-07-14 使用者驗收 ok，見下表）。SW 機 300 AP 拖曳 long task 累計 3.0s→0.93s（-69%）、最大單筆 777→205ms，效能戰役到此收工。**
 **Phase 47 B1 快速正確性修正完成（47-1/3/4/5/7 + 47-24 頻段色 typo，2026-07-20 commit 2c5295d，MCP 驗證通過）。**
 **Phase 47 B2 數字可信度完成（47-2/6/8a/9，2026-07-20，MCP 驗證通過；autoChannelPlan 半徑拍板不動）。**
-**Phase 47 B3 進行中：47-14/15/18（commit eb59e10）+ 47-16/17/19 undo 群組（commit 91c36a7）完成、使用者驗收 ok。剩 47-20（複製相機 strip calibration）+ 47-21（雜項）。**
+**Phase 47 B3 操作型邏輯 bug 完成（47-14~21，commit eb59e10 + 91c36a7 + 09a5ddf，使用者驗收 ok）。**
+**下一批：B4 UX/一致性（47-22 → 47-23 → 47-24 其餘 token → 47-25 → 47-26 → 47-27）。**
 
 ---
 
@@ -111,9 +112,9 @@
   - `src/render/draftModeController.js`。
 - [x] **47-19【低】〔B3〕刪樓層後死快照卡住 undo 堆疊**（✅ commit 91c36a7，使用者驗收 ok）：`useHistoryStore.dropFloor(floorId)` 清該樓層 undo/redo 快照 + pending raw；SidebarLeft.confirmRemove 呼叫。MCP 驗 dropFloor 移除死快照、保留 active 樓層項。
   - `src/store/useHistoryStore.js`、`src/components/SidebarLeft/SidebarLeft.jsx`。
-- [ ] **47-20【低】〔B3〕複製相機連 calibration 帶走 → 假「已校正」**：副本位移 +24px、homography 已不對位卻顯示綠徽。複製時 strip calibration。
-  - `src/components/ContextMenu/ContextMenuMount.jsx:376-390`、CameraPanel.handleDuplicate。
-- [ ] **47-21【低】〔B3〕雜項**：ContextMenuMount render 期間寫 store（`closeContextMenu` 搬進 effect）；`viewport.js:373-384` Space 鍵無 `isTypingTarget` guard；`camerasLayer.js` 拖曳中切模式 onMove 續寫 store（加 `isCameraMode()` guard）；history `_pendingRaw` 跨樓層混合致 B 樓第一步不可 undo。
+- [x] **47-20【低】〔B3〕複製相機連 calibration 帶走 → 假「已校正」**（✅ commit 09a5ddf，使用者驗收 ok）：ContextMenuMount + CameraPanel.handleDuplicate 解構加 `calibration: _omitCal` strip。MCP 真 UI 驗：原相機有 calibration、複製鈕產生的副本 calibration=false。
+  - `src/components/ContextMenu/ContextMenuMount.jsx`、`CameraPanel.jsx`。
+- [x] **47-21【低】〔B3〕雜項**（✅ commit 09a5ddf，使用者驗收 ok）：① ContextMenuMount menu-target-removed 的 closeContextMenu 從 render 期間搬進 `useEffect`（targetExists 判斷）——MCP 驗刪 target 後 menu 自動關、無 "cannot update while rendering" 警告 ② `viewport.js` Space keydown 加 `isTypingTarget` guard ③ `camerasLayer.js` drag/rotate 兩個 onMove 加 `isCameraMode()` guard ④ history onStoreChange：`_pendingRaw.floorId !== floorId` 時先 flushPending 再建新 raw（跨樓層第一步可 undo）。
 
 #### P3 — UX / 一致性（demo 展示會出糗）
 
