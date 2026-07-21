@@ -13,6 +13,7 @@
 
 import { buildCandidates } from './simulate'
 import { maskToSmoothPolygons, cleanMask } from './contour'
+import { COVERAGE_THRESHOLD_DBM } from '@/constants/coverage'
 
 // Grid step (meters). 0.4 m keeps the wall-shaped boundary faithful enough that
 // Chaikin smoothing reads as a natural curve.
@@ -20,10 +21,9 @@ const GRID_STEP_M = 0.4
 // Hard cap on cells swept; coarsen the step if a floor is huge.
 const MAX_CELLS = 20000
 
-// Fallback coverage threshold (dBm) if opts doesn't supply one. -67 is the
-// common industry "good signal" coverage design target. Blue = good-signal
-// area, NOT can/can't-associate (devices associate down to ~-85, just poorly).
-const DEFAULT_COVERAGE_THRESHOLD_DBM = -67
+// Fallback coverage threshold (dBm) if opts doesn't supply one — shared
+// constant so this can't drift from the Client View store / planning panel.
+const DEFAULT_COVERAGE_THRESHOLD_DBM = COVERAGE_THRESHOLD_DBM
 
 // Compute the association-area (coverage) render data.
 // Args:

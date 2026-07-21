@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { useEditorStore, EDITOR_MODE, PRIMARY_MODE, getPrimaryMode } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE, PRIMARY_MODE, VIEW_MODE, getPrimaryMode } from '@/store/useEditorStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import Icon from '@/components/Icon/Icon'
@@ -143,7 +143,12 @@ function Toolbar() {
 
   const isAlignMode = editorMode === EDITOR_MODE.ALIGN_FLOOR
   const activePrimary = getPrimaryMode(editorMode)
-  const visibleGroups = GROUPS.filter((g) => g.primary === activePrimary)
+  // 47-26: 3D is a read-only view. Keep the primary world switcher (AP / Camera
+  // / Stats — a navigation choice that still applies to what you're viewing in
+  // 3D), but hide the editing tools row and Undo/Redo, which have nothing to
+  // act on there.
+  const is3D = useEditorStore((s) => s.viewMode === VIEW_MODE.THREE_D)
+  const visibleGroups = is3D ? [] : GROUPS.filter((g) => g.primary === activePrimary)
 
   const cancelClose = () => {
     if (closeTimerRef.current) {
@@ -269,26 +274,31 @@ function Toolbar() {
         })}
 
         {/* Undo / Redo — pinned to the far right of the primary row so they
-            stay put in every mode instead of drifting with the tools below. */}
-        <span className="toolbar-floating__spacer" aria-hidden="true" />
-        <div className="toolbar-floating__group toolbar-floating__group--edit">
-          {EDIT_ACTIONS.map((it) => {
-            const { enabled, onClick } = resolveAction(it.action)
-            return (
-              <Tooltip key={it.action} label={it.label}>
-                <button
-                  type="button"
-                  className="toolbar-floating__btn"
-                  onClick={onClick}
-                  disabled={!enabled}
-                  aria-label={it.label}
-                >
-                  <Icon name={it.icon} size={18} />
-                </button>
-              </Tooltip>
-            )
-          })}
-        </div>
+            stay put in every mode instead of drifting with the tools below.
+            47-26: hidden in 3D (read-only view, nothing to undo). */}
+        {!is3D && (
+          <>
+            <span className="toolbar-floating__spacer" aria-hidden="true" />
+            <div className="toolbar-floating__group toolbar-floating__group--edit">
+              {EDIT_ACTIONS.map((it) => {
+                const { enabled, onClick } = resolveAction(it.action)
+                return (
+                  <Tooltip key={it.action} label={it.label}>
+                    <button
+                      type="button"
+                      className="toolbar-floating__btn"
+                      onClick={onClick}
+                      disabled={!enabled}
+                      aria-label={it.label}
+                    >
+                      <Icon name={it.icon} size={18} />
+                    </button>
+                  </Tooltip>
+                )
+              })}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Bottom row — tools for the active primary mode only. Camera / Stats

@@ -425,7 +425,7 @@ function SidebarLeft() {
                   </label>
                   <button
                     className="sidebar-left__floor-action"
-                    title="跑 greedy multi-start 搜索，自動調整 AP txPower 達成目標 RSSI"
+                    title="自動調整本樓層各 AP 的發射功率，達成目標訊號涵蓋"
                     onClick={(e) => { e.stopPropagation(); setAutoPowerOpen(true) }}
                   >
                     ⚡ 自動規劃整層 AP 功率

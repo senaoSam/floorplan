@@ -1,5 +1,5 @@
 import React from 'react'
-import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE, VIEW_MODE } from '@/store/useEditorStore'
 import './ActiveModeBadge.sass'
 
 // Mode-hint banner under the Toolbar. Ports oldSrc Editor2D.modeHintMap so
@@ -34,6 +34,11 @@ function ActiveModeBadge() {
   const editorMode = useEditorStore((s) => s.editorMode)
   const placeApBand = useEditorStore((s) => s.placeApBand)
   const placeSwitchKind = useEditorStore((s) => s.placeSwitchKind)
+  const is3D = useEditorStore((s) => s.viewMode === VIEW_MODE.THREE_D)
+
+  // 47-26: the hint describes 2D canvas gestures (left-click / drag / Esc);
+  // 3D is a read-only view with none of those, so hide it there.
+  if (is3D) return null
 
   // Always visible — even while a toolbar dropdown is open (ui-spec §2.4:
   // the moment the user is picking a tool is exactly when the hint matters).

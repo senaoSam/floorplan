@@ -515,6 +515,8 @@ export function attachHeatmapLayer({
       useHeatmapStore.getState().setSimplifiedLargeScene(false)
       // Also clear the draw-wall freeze notice — heatmap off, nothing frozen.
       useHeatmapStore.getState().setDrawWallFrozen(false)
+      // 47-22: clear the scale-missing notice too.
+      useHeatmapStore.getState().setScaleMissing(false)
       return
     }
 
@@ -537,9 +539,13 @@ export function attachHeatmapLayer({
     const { floors, activeFloorId } = useFloorStore.getState()
     const floor = floors.find((f) => f.id === activeFloorId)
     if (!floor || !floor.scale) {
+      // 47-22: enabled but no scale → can't compute. Don't fail silently; flag
+      // it so HeatmapControl can prompt the user to set the scale.
       hide()
+      useHeatmapStore.getState().setScaleMissing(true)
       return
     }
+    useHeatmapStore.getState().setScaleMissing(false)
 
     // Drag state (heatmap reacts to ap / wall / scope drags only — oldSrc
     // HeatmapLayer 317-320). The canonical AP store doesn't update until

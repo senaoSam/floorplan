@@ -250,9 +250,9 @@ function AutoPowerModal({ open, apIds, onClose }) {
 
             <section className="auto-power-modal__section">
               <p className="auto-power-modal__hint">
-                演算法：3 起點（max / mid / min txPower）greedy ±1 dB 局部搜尋。<br/>
-                cost = 0.5 覆蓋缺 + 0.2 死角 + 0.2 品質缺 + 0.1 過量罰（每項 [0, 1] 正規化）。<br/>
-                規劃品質 = 100 × (1 − cost)。粗 grid 2 m，預估 30 秒~2 分鐘。
+                系統會反覆微調每台 AP 的功率，在「涵蓋足夠」與「不過度重疊」之間取得平衡。<br/>
+                規劃品質分數綜合評估涵蓋率、死角、訊號品質與功率過量。<br/>
+                預估耗時 30 秒~2 分鐘（視樓層大小與 AP 數量）。
               </p>
             </section>
           </>

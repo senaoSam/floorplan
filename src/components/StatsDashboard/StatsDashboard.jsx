@@ -28,13 +28,6 @@ const BAND_LABEL = { '2.4': '2.4G', '5': '5G', '6': '6G' }
 
 const SEV_ICON = { critical: '⛔', warning: '⚠', info: 'ℹ' }
 
-function fmtBps(bps) {
-  if (bps >= 1e9) return `${(bps / 1e9).toFixed(1)} Gbps`
-  if (bps >= 1e6) return `${Math.round(bps / 1e6)} Mbps`
-  if (bps >= 1e3) return `${Math.round(bps / 1e3)} kbps`
-  return `${bps} bps`
-}
-
 // Clock label for a ts, weekday-aware ("週三 15:00").
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
 function fmtClock(ts) {
@@ -323,7 +316,7 @@ function StatsDashboard() {
               onMouseLeave={() => clearHoverIf(a.apId)}
               title="點擊定位到該 AP"
             >
-              <span className="stats-dash__rank-name">{a.name}</span>
+              <span className="stats-dash__rank-name" title={a.name}>{a.name}</span>
               <span className="stats-dash__rank-bar-track">
                 <span className="stats-dash__rank-bar"
                   style={{ width: `${(a.clientCount / maxApClients) * 100}%`, background: BAND_COLOR[String(a.band)] ?? '#4fc3f7' }} />
@@ -436,7 +429,7 @@ function StatsDashboard() {
                 title="點擊定位到該 Switch"
               >
                 <div className="stats-dash__sw-head">
-                  <span className="stats-dash__rank-name">{s.name}</span>
+                  <span className="stats-dash__rank-name" title={s.name}>{s.name}</span>
                   <b className={`stats-dash__rank-val${over ? ' stats-dash__val--crit' : ''}`}>{s.poeWatts}/{s.poeBudget || '—'}W</b>
                 </div>
                 <span className="stats-dash__rank-bar-track">
@@ -481,7 +474,7 @@ function StatsDashboard() {
                 <span className="stats-dash__client-mac">{c.mac}</span>
                 <span className="stats-dash__client-meta">
                   <span className="stats-dash__legend-dot" style={{ background: BAND_COLOR[String(c.band)] }} />
-                  {apNameById(c.apId)} · {c.rssiDbm}dBm · {c.linkMbps}M
+                  {apNameById(c.apId)} · {c.rssiDbm}dBm · {c.linkMbps} Mbps
                 </span>
               </li>
             ))}

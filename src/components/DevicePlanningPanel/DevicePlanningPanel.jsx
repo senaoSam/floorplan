@@ -10,12 +10,13 @@ import { greedyChannelAssign } from '@/utils/autoChannelPlan'
 import { computePlanQualityStats } from '@/features/heatmap/planQuality'
 import { NumberInput } from '@/components/PanelRight/_shared/PanelControls'
 import Icon from '@/components/Icon/Icon'
+import { COVERAGE_THRESHOLD_DBM, COVERAGE_TARGET_PCT } from '@/constants/coverage'
 import './DevicePlanningPanel.sass'
 
 // Recomputing the full-floor RF field is too heavy to run every drag frame, so
 // the quality stats are debounced like CoveragePanel's camera stats.
 const QUALITY_DEBOUNCE_MS = 200
-const DEFAULT_TARGET_PCT = 90
+const DEFAULT_TARGET_PCT = COVERAGE_TARGET_PCT
 
 function fmtPct(v) { return `${v.toFixed(1)}%` }
 function fmtArea(m2) { return m2 >= 100 ? `${Math.round(m2)} m²` : `${m2.toFixed(1)} m²` }
@@ -48,7 +49,7 @@ function DevicePlanningPanel() {
   // Coverage design target + threshold live on the panel (planning aid, not the
   // Client-View coverage semantics), defaulting to the -67 dBm industry target.
   const [targetPct, setTargetPct] = useState(DEFAULT_TARGET_PCT)
-  const [thresholdDbm, setThresholdDbm] = useState(-67)
+  const [thresholdDbm, setThresholdDbm] = useState(COVERAGE_THRESHOLD_DBM)
   const [quality, setQuality] = useState(null)
   const qualityTimerRef = useRef(null)
 
@@ -126,7 +127,7 @@ function DevicePlanningPanel() {
                 className="device-planning__btn"
                 onClick={runAutoChannel}
                 disabled={apsOnFloor === 0}
-                title="對本樓層所有 AP 執行 greedy 最小干擾頻道指派"
+                title="自動為本樓層所有 AP 指派互不干擾的頻道"
               >
                 📻 自動頻道
               </button>

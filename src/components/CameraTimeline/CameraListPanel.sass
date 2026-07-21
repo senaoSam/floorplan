@@ -185,8 +185,9 @@
 
   &__live
     flex: none
-    width: 18px
-    height: 18px
+    // 47-27: ≥24px hit target (ui-spec) — icon stays centred, box just grows.
+    width: 24px
+    height: 24px
     display: flex
     align-items: center
     justify-content: center
@@ -202,8 +203,9 @@
 
   &__del
     flex: none
-    width: 18px
-    height: 18px
+    // 47-27: ≥24px hit target (ui-spec).
+    width: 24px
+    height: 24px
     display: flex
     align-items: center
     justify-content: center
@@ -217,7 +219,7 @@
     opacity: 0          // revealed on row hover
     &:hover
       background: rgba(239, 68, 68, 0.2)
-      color: #ef4444
+      color: $danger
 
   // ── Batch bar (shown when ≥1 row checked) ──
   &__batch
@@ -274,7 +276,7 @@
 
   &__batch-del:hover
     border-color: rgba(239, 68, 68, 0.6) !important
-    color: #ef4444 !important
+    color: $danger !important
 
   // ── Unplaced pool (Verkada "Add Cameras") ──
   &__unplaced

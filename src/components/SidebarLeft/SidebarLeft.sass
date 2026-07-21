@@ -296,8 +296,10 @@
         outline: none
         border-color: rgba(59, 130, 246, 0.6)
 
+      // 47-27: was a stray red tint (reads as an error) on a plain numeric
+      // input — use a neutral border highlight matching the focus accent.
       &:hover
-        background: rgba(255, 107, 107, 0.12)
+        border-color: rgba(59, 130, 246, 0.4)
 
     select
       flex: 1

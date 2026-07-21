@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { COVERAGE_THRESHOLD_DBM } from '@/constants/coverage'
 
 // Shared time source for STATS mode (Phase 43 / stage 3, timelapse). Both the
 // React dashboard and the imperative PIXI overlay layer subscribe to this one
@@ -24,7 +25,7 @@ export const useStatsTimeStore = create((set, get) => ({
   // Plan-vs-measured gap overlay: highlight spots the plan says are covered
   // (theoretical ≥ threshold) but clients actually measure below it.
   showGapOverlay: false,
-  gapThresholdDbm: -67,
+  gapThresholdDbm: COVERAGE_THRESHOLD_DBM,
 
   // Seed the window once (dashboard mount). Only sets when unseeded so
   // re-mounts / HMR don't jump the playhead.

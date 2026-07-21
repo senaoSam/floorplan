@@ -1,6 +1,6 @@
 import React from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
-import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE, VIEW_MODE } from '@/store/useEditorStore'
 import FloorplanSystem from '@/components/FloorplanSystem/FloorplanSystem'
 import HeatmapControl from '@/components/HeatmapControl/HeatmapControl'
 import CableSummaryPanel from '@/components/CableSummaryPanel/CableSummaryPanel'
@@ -30,6 +30,11 @@ function CanvasArea() {
   // + hover readout, cable BOM, AP planning, regulatory domain) are all
   // irrelevant there and would float over a canvas that hides their subject.
   const inCameraMode = useEditorStore((s) => s.editorMode === EDITOR_MODE.CAMERA)
+  // 47-26: in 3D the floating 2D overlays (corner stacks, timeline bar, scale
+  // bar) sit over the 3D canvas and edit a plane the user isn't looking at.
+  // Hide them; keep the toolbar + mode badge so the user can switch mode / go
+  // back to 2D. StatsDashboard / ClientPanel self-gate elsewhere.
+  const is3D = useEditorStore((s) => s.viewMode === VIEW_MODE.THREE_D)
   return (
     <div className="canvas-area">
       <div className="canvas-area__pane">
@@ -40,30 +45,34 @@ function CanvasArea() {
       {/* Top-left stack: layer toggle row → regulatory → coverage report
           (CoveragePanel self-gates to CAMERA mode). Flow-stacked so a taller
           LayerToggle can never overlap the panel below it. */}
-      <div className="canvas-area__overlay canvas-area__overlay--tl">
-        <div className="canvas-area__top-left-row">
-          <LayerToggle />
-          {!inCameraMode && <DevicePlanningPanel />}
+      {!is3D && (
+        <div className="canvas-area__overlay canvas-area__overlay--tl">
+          <div className="canvas-area__top-left-row">
+            <LayerToggle />
+            {!inCameraMode && <DevicePlanningPanel />}
+          </div>
+          {!inCameraMode && <RegulatorySelector />}
+          <CoveragePanel />
         </div>
-        {!inCameraMode && <RegulatorySelector />}
-        <CoveragePanel />
-      </div>
+      )}
       {/* Bottom-left stack (bottom-up): heatmap control lowest, cable summary
           above it. TrendPanel starts here and can be dragged out of the flow.
           Dev widgets (demo/stress/progress) live in SidebarLeft, NOT here —
           they'll be removed for production and must not skew canvas UIUX. */}
-      <div className="canvas-area__overlay canvas-area__overlay--bl">
-        <TrendPanel />
-        {hasFloor && !inCameraMode && <CableSummaryPanel />}
-        {hasFloor && !inCameraMode && <HeatmapControl />}
-      </div>
+      {!is3D && (
+        <div className="canvas-area__overlay canvas-area__overlay--bl">
+          <TrendPanel />
+          {hasFloor && !inCameraMode && <CableSummaryPanel />}
+          {hasFloor && !inCameraMode && <HeatmapControl />}
+        </div>
+      )}
       <ClientPanelMount />
       <ClientViewMenuMount />
       <StatsDashboardMount />
-      <CameraTimelineBar />
+      {!is3D && <CameraTimelineBar />}
       <LiveViewModal />
       <CalibrationModal />
-      <ScaleBarMount />
+      {!is3D && <ScaleBarMount />}
     </div>
   )
 }

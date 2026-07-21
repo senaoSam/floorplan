@@ -416,12 +416,12 @@ function APPanel({ floorId, apId }) {
               </PanelField>
               <PanelField
                 label="線長"
-                hint={route.cableM != null ? `Z drop ${route.zDropM.toFixed(2)} m，含 20% slack` : null}
+                hint={route.cableM != null ? `含垂直落線 ${route.zDropM.toFixed(2)} m 與 20% 預留餘量` : null}
               >
                 {route.cableM != null ? `${route.cableM.toFixed(2)} m` : '需先校正比例尺'}
               </PanelField>
               <PanelField label="狀態">
-                {route.routeStatus === 'tray' ? '沿 Cable Tray' : 'fallback Manhattan'}
+                {route.routeStatus === 'tray' ? '沿線槽' : '直角走線（未沿線槽）'}
               </PanelField>
             </>
           )}

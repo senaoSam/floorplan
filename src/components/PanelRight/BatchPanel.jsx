@@ -434,7 +434,7 @@ function BatchPanel() {
               onClick={() => setAutoPowerOpen(true)}
               style={{ marginTop: 8 }}
             >
-              ⚡ 自動規劃功率（greedy）
+              ⚡ 自動規劃功率
             </button>
           </section>
 

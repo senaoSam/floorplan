@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { DEFAULT_CLIENT_DEVICE_ID } from '@/constants/clientDevices'
+import { COVERAGE_THRESHOLD_DBM } from '@/constants/coverage'
 
 // Client View ("see the network from a client's perspective") UI + simulation
 // state. Kept isolated from the heatmap store so toggling Client View never
@@ -56,7 +57,7 @@ export const useClientViewStore = create((set) => ({
   // (signal strong enough for normal use), NOT "can/can't associate" — devices
   // still associate down to ~-85 (MIN_USABLE_RSSI_DBM in simulate.js), just at
   // poor quality. -67 is the common industry "good" coverage design target.
-  coverageThresholdDbm: -67,
+  coverageThresholdDbm: COVERAGE_THRESHOLD_DBM,
   servingApId: null,
   // Manually-locked serving AP id (null = automatic: strongest + hysteresis).
   // A what-if tool — real device users can't pick an AP, so the UI labels this

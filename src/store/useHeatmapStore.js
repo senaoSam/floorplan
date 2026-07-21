@@ -73,6 +73,12 @@ export const useHeatmapStore = create((set) => ({
   // mistaken for live. Cleared when the user leaves DRAW_WALL.
   drawWallFrozen: false,
 
+  // 47-22: set by heatmapAdapter when the heatmap is enabled but the active
+  // floor has no scale — the field can't be computed (no px→m), so instead of
+  // silently hiding while the toggle still reads "on", HeatmapControl surfaces
+  // a notice + a one-click "set the scale" action (enters DRAW_SCALE).
+  scaleMissing: false,
+
   setEnabled:     (v) => set({ enabled: v }),
   setMode:        (v) => set({ mode: v }),
   setEngine:      (v) => set({ engine: v }),
@@ -91,4 +97,6 @@ export const useHeatmapStore = create((set) => ({
   // heatmap store is one of its own compute triggers, so an unconditional set
   // would loop.
   setDrawWallFrozen: (v) => set((s) => (s.drawWallFrozen === v ? s : { drawWallFrozen: v })),
+  // 47-22: same no-op-when-unchanged guard (adapter calls it every compute).
+  setScaleMissing: (v) => set((s) => (s.scaleMissing === v ? s : { scaleMissing: v })),
 }))

@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
 import { HEATMAP_MODE_LIST, getModeConfig } from '@/features/heatmap/modes'
 import FormulaNote from '@/components/FormulaNote/FormulaNote'
@@ -45,6 +46,9 @@ function HeatmapControl() {
   const simplifiedLargeScene = useHeatmapStore((s) => s.simplifiedLargeScene)
   // Frozen while drawing walls — the field shown is from before the draw.
   const drawWallFrozen = useHeatmapStore((s) => s.drawWallFrozen)
+  // 47-22: enabled but the active floor has no scale → nothing can render.
+  const scaleMissing = useHeatmapStore((s) => s.scaleMissing)
+  const setEditorMode = useEditorStore((s) => s.setEditorMode)
   const hover        = useHoverReadoutStore((s) => s.reading)
 
   const [panelOpen, setPanelOpen] = useState(false)
@@ -64,6 +68,21 @@ function HeatmapControl() {
       {enabled && drawWallFrozen && (
         <div className="heatmap-control__notice">
           ❄️ 畫牆中：熱圖已暫停更新（畫完離開畫牆模式後自動重新計算）
+        </div>
+      )}
+      {/* 47-22: heatmap is on but there's no scale — it can't render. Tell the
+          user why and offer a one-click jump into the scale-drawing mode, so
+          the enabled toggle isn't paired with a mysteriously blank canvas. */}
+      {enabled && scaleMissing && (
+        <div className="heatmap-control__notice heatmap-control__notice--action">
+          <span>⚠️ 尚未設定比例尺，熱圖無法計算</span>
+          <button
+            type="button"
+            className="heatmap-control__notice-btn"
+            onClick={() => setEditorMode(EDITOR_MODE.DRAW_SCALE)}
+          >
+            設定比例尺
+          </button>
         </div>
       )}
       {/* Readout — stacked above the button. Shows all four metrics so the
@@ -167,10 +186,10 @@ function HeatmapControl() {
               className="heatmap-control__select"
               value={engine}
               onChange={(e) => setEngine(e.target.value)}
-              title="JS = 完整物理 (full parity); Shader = WebGL2 加速 (HM-F5a, 暫無反射/繞射/多頻點)"
+              title="精確：完整物理（含反射／繞射，較慢）。快速：GPU 加速，適合大場景即時預覽。"
             >
-              <option value="js">JS (full parity)</option>
-              <option value="shader">Shader (F5a, fast)</option>
+              <option value="js">精確（完整物理）</option>
+              <option value="shader">快速（GPU 加速）</option>
             </select>
           </label>
           <label className="heatmap-control__line">

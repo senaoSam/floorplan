@@ -6,7 +6,9 @@
 .camera-timeline
   position: absolute
   bottom: 18px
-  left: 50%
+  // 47-26: centre within the space LEFT of the right dock (PanelRight) so an
+  // open panel doesn't cover the bar. --right-dock is 0 when the dock is shut.
+  left: calc((100% - var(--right-dock, 0px)) / 2)
   transform: translateX(-50%)
   z-index: $z-canvas-overlay
   display: inline-flex
@@ -15,7 +17,7 @@
   padding: 8px 14px
   // Cap the bar on narrow windows so it never reaches the bottom-right
   // scale bar (ui-spec B15 residual); rows wrap into extra lines instead.
-  max-width: calc(100% - 240px)
+  max-width: calc(100% - 240px - var(--right-dock, 0px))
   background: rgba(15, 23, 42, 0.88)
   border: 1px solid rgba(255, 255, 255, 0.12)
   border-left: 3px solid #10b981

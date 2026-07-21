@@ -65,10 +65,12 @@
       border-color: rgba(255, 255, 255, 0.4)
       background: rgba(20, 65, 120, 0.9)
 
+    // 47-24: "on" uses the brand accent, not a danger red — a red toggle reads
+    // as "error / stop", the opposite of "heatmap is active".
     &--active
-      background: rgba(239, 68, 68, 0.85)
+      background: $accent
       &:hover
-        background: rgba(220, 38, 38, 0.9)
+        background: $accent-hover
 
   &__dot
     width: 8px
@@ -150,6 +152,27 @@
     max-width: 240px
     backdrop-filter: blur(6px)
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4)
+
+  // 47-22: scale-missing notice with an inline call-to-action button.
+  &__notice--action
+    display: flex
+    align-items: center
+    justify-content: space-between
+    gap: 8px
+
+  &__notice-btn
+    flex: none
+    padding: 4px 10px
+    background: rgba(245, 158, 11, 0.9)
+    border: none
+    border-radius: 5px
+    color: #1a1205
+    font-size: 11px
+    font-weight: 600
+    cursor: pointer
+    white-space: nowrap
+    &:hover
+      background: #f59e0b
 
   // Mirrors RegulatorySelector's __select: half-transparent fill, thin border,
   // accent on focus. Used for engine + drag-mode dropdowns inside the panel.

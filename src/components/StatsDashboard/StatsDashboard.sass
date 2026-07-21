@@ -325,7 +325,7 @@
     border-radius: 4px
     transition: width 0.2s ease
     &--crit
-      background: #ef4444 !important
+      background: $danger !important
 
   &__rank-val
     flex: none
@@ -334,7 +334,7 @@
     font-weight: 700
 
   &__val--crit
-    color: #f87171
+    color: $danger-soft
 
   // ── switch rows ──
   &__sw-row
@@ -444,8 +444,8 @@
     &:hover
       background: rgba(255, 255, 255, 0.12)
     &--on
-      background: #ef4444
-      border-color: #ef4444
+      background: $danger
+      border-color: $danger
       color: #fff
       font-weight: 700
 
@@ -460,7 +460,7 @@
     color: #10b981
     font-variant-numeric: tabular-nums
     &--bad
-      color: #ef4444
+      color: $danger
 
   &__gap-label
     font-size: 10px

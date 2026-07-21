@@ -214,11 +214,11 @@ function CableSummaryPanel() {
           <section className="cable-summary__section">
             <p className="cable-summary__label">路由狀態（{stats.totalAP} AP）</p>
             <div className="cable-summary__row">
-              <span>沿 Tray</span>
+              <span>沿線槽</span>
               <span>{stats.byStatus.tray}</span>
             </div>
             <div className="cable-summary__row">
-              <span>Manhattan fallback</span>
+              <span>直角走線（未沿線槽）</span>
               <span>{stats.byStatus['fallback-manhattan']}</span>
             </div>
             {stats.byStatus.unroutable > 0 && (
@@ -226,13 +226,13 @@ function CableSummaryPanel() {
                 <div
                   className="cable-summary__row cable-summary__row--warn cable-summary__row--clickable"
                   onClick={() => toggleSection('unroutList')}
-                  title="展開 / 收合無法接線的 AP"
+                  title="展開／收合無法接線的 AP"
                 >
                   <span>
                     <span className={`cable-summary__section-arrow${isOpen('unroutList') ? '' : ' cable-summary__section-arrow--collapsed'}`}>
                       <Icon name="chevronDown" size={9} />
                     </span>
-                    ⚠ Unroutable
+                    ⚠ 無法接線
                   </span>
                   <span>{stats.byStatus.unroutable}</span>
                 </div>
