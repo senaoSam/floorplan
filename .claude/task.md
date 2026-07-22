@@ -28,7 +28,7 @@
 **Phase 47 B2 數字可信度完成（47-2/6/8a/9，2026-07-20，MCP 驗證通過；autoChannelPlan 半徑拍板不動）。**
 **Phase 47 B3 操作型邏輯 bug 完成（47-14~21，commit eb59e10 + 91c36a7 + 09a5ddf，使用者驗收 ok）。**
 **Phase 47 B4 UX/一致性完成（47-22~27，commit 1a4bf16，使用者驗收 ok；含 off-band dim/多頻段 demo/3D toolbar 精簡等使用者追加）。**
-**下一批：B5 大工程（47-10 天線增益 → 47-11 材質庫 → 47-12 TX 預設 → 47-13 PoE class；非急迫、可獨立慢慢做）。**
+**Phase 47 B5 進行中：47-12 TX 預設（逐頻段）+ 47-13 PoE per-port class 完成（2026-07-22，Opus 4.8，使用者驗收 ok，MCP 通過）。剩 47-10 天線增益 + 47-11 材質庫（用 Fable，見批次表下方分模型決策）。**
 
 ---
 
@@ -65,6 +65,12 @@
 
 > 註：47-24 拆兩處出現——頻段色 typo（一字元、撞警告橘）併入 B1 隨手修；其餘色彩 token 收斂留 B4。
 
+> **B5 分模型 + effort 決策（2026-07-21 拍板）**：B1~B4 全程 Opus 4.8。B5 依「牽動面 × 失敗代價」分模型——
+> - **47-10（天線增益，JS+shader 雙引擎同步）、47-11（材質庫，動 materials.js＋可能牆資料結構＋UI）：用 `claude-fable-5`，effort `high`。** 這兩條牽動最廣、要同時 hold 住多處不變量，用最強模型降低漏改/破壞已驗證 parity 的機率，錢花在刀口上。
+> - **47-12（TX 預設，評估＋查表）、47-13（PoE per-port class，邏輯＋對比 switch 埠級）：用 Opus 4.8，effort `high`。** 有明確 spec/資料、改動面收斂，Opus 綽綽有餘。
+> - Fable 的 API 差異（thinking 永遠開、refusal fallback、需 30 天資料保留）在 Claude Code harness 內對開發是透明的，非負擔。**切模型須使用者手動 `/model`**——Fable 那兩條開工前先切到 Fable。
+> - 護城河仍是 MCP 並排驗證（對 Opus/Fable 一視同仁）＋嚴格照 spec/oldSrc、不准自行設計。
+
 #### P0 — 物理/演算法正確性（會直接算錯數字，最優先）
 
 - [x] **47-1【高】〔B1〕Knife-edge 繞射符號反轉**（✅ commit 2c5295d，MCP 驗：符號表 v>0 回正損耗、diff>40 cull 復活、實場繞射 on/off 截圖確認補陰影不灌爆）：`knifeEdgeLossDb` 回傳的是負值繞射增益 Gd，呼叫端當正損耗「加」進 path loss → 繞射越深訊號越強（陰影區被灌爆）。旁證：`if (diff > 40) continue` 恆不觸發（死碼）。預設 `diffraction:true` 即走此路。**JS + shader 同步**取負。
@@ -94,10 +100,10 @@
   - `src/features/heatmap/rfConstants.js:2` vs `src/constants/apModels.js`。
 - [ ] **47-11【中】〔B5〕材質庫**：金屬 20dB 全頻段偏低（真實電梯井/機房 >26-40dB，`lossB:0`）；缺 Low-E 玻璃（25-40dB）；牆不可逐面自訂 dB。（自訂材質 = spec.md §3.2 承諾，兩家競品都有。）
   - `src/constants/materials.js:48-55`。
-- [ ] **47-12【中】〔B5〕預設 TX 20dBm 偏熱**：企業實務 2.4G 8-14 / 5G 14-17dBm。評估是否降預設或逐頻段預設。
-  - `src/features/heatmap/buildScenario.js:194`。
-- [ ] **47-13【低】〔B5〕PoE per-port class 協商檢查**：只算總 budget，不檢查「35W AP 接 30W/埠 802.3at switch 會砍 radio」。AP model 標所需 PoE class 對比 switch 埠級。poeWattage 建議用 worst-case 而非典型值。
-  - `src/constants/apModels.js`、`src/components/PanelRight/SwitchPanel.jsx:87`。
+- [x] **47-12【中】〔B5〕預設 TX 20dBm 偏熱**（✅ 2026-07-22，Opus 4.8，使用者驗收 ok，MCP 驗：demo AP 2.4G=11/5G=15/6G=15dBm 不再全 20）：**決策（2026-07-22 拍板）＝逐頻段合理預設**。apModels.js 加 `DEFAULT_TX_POWER_DBM = {2.4:11, 5:15, 6:15}` + `getDefaultTxPower(band)`（單一來源，對齊 47-23 常數收斂）；三個 AP 建立點（FloorplanSystem 手動放置 / DemoLoader / StressLoader）+ buildScenario fallback 全改引用。取企業實務範圍（2.4G 8–14 / 5G 14–17）中間偏典型值，6G 對齊 5G。
+  - `src/constants/apModels.js`（新常數+helper）、`FloorplanSystem.jsx`、`DemoLoader.jsx`、`StressLoader.jsx`、`buildScenario.js:194`。
+- [x] **47-13【低】〔B5〕PoE per-port class 協商檢查**（✅ 2026-07-22，Opus 4.8，使用者驗收 ok，MCP 驗：3bt AP 連 3at switch→classShort count=1 + UI 顯示「⚠ 需 802.3bt」，switch 改 3bt→警告消失非恆真，0 errors）：**決策（2026-07-22 拍板）＝完整 per-port class 協商**。apModels.js 加 per-model `poeClass`（3af/3at/3bt）+ `POE_CLASSES` 元資料（rank/perPortWatt 15.4/30/60W）+ `getAPPoeClass`/`getPoeClassMeta`；`poeWattage` 改 worst-case（fallback 15→18W）。useCableStore per-kind default 加 `poePortStd`（access 3at / idf 3bt / core 無）。SwitchPanel connected 迴圈算 `classShort`（AP rank > port rank），PoE 區加「每埠供電」下拉 + 警告 hint，已連 AP 清單標「⚠ 需 802.3bt」。
+  - `src/constants/apModels.js`、`src/store/useCableStore.js`、`src/components/PanelRight/SwitchPanel.jsx`、`SwitchPanel.sass`。
 
 #### P2 — 邏輯/狀態 bug（demo 操作就踩得到）
 

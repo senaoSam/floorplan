@@ -10,7 +10,7 @@ import { useAPStore } from '@/store/useAPStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { getCachedRoutes } from '@/features/cable/routesCache'
-import { getAPPoeWattage } from '@/constants/apModels'
+import { getAPPoeWattage, getAPPoeClass, getPoeClassMeta } from '@/constants/apModels'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { TextInput, NumberInput, Select, Button } from './_shared/PanelControls'
 import './_shared/shared.sass'
@@ -20,6 +20,14 @@ const CABLE_TYPE_OPTIONS = [
   { value: 'auto',   label: 'Auto' },
   { value: 'copper', label: 'Copper' },
   { value: 'fiber',  label: 'Fiber' },
+]
+
+// 47-13 — per-port PoE standard options. Labels carry the perPortWatt cap so
+// the user sees the供電上限 without cross-referencing.
+const POE_PORT_STD_OPTIONS = [
+  { value: '3af', label: '802.3af（15.4 W）' },
+  { value: '3at', label: '802.3at PoE+（30 W）' },
+  { value: '3bt', label: '802.3bt PoE++（60 W）' },
 ]
 
 function SwitchPanel({ floorId, swId }) {
@@ -54,15 +62,24 @@ function SwitchPanel({ floorId, swId }) {
   // S2S links. Used for port-count + PoE warnings — advisory, doesn't gate
   // routing (spec §8).
   const connected = useMemo(() => {
-    if (!sw) return { aps: [], totalPoe: 0, uplinkUsed: 0, downlinkCount: 0 }
+    if (!sw) return { aps: [], totalPoe: 0, uplinkUsed: 0, downlinkCount: 0, classShortCount: 0 }
     const { routes } = getCachedRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
+    // 47-13 — per-port PoE class negotiation. An AP whose required class
+    // out-ranks the switch's per-port standard would get its radios cut (e.g.
+    // a 3bt AP on a 3at port). Flag per-AP; only meaningful on PoE switches.
+    const portMeta = sw.poePortStd ? getPoeClassMeta(sw.poePortStd) : null
     const connAps = []
     let totalPoe = 0
+    let classShortCount = 0
     for (const [fId, list] of Object.entries(apsByFloor)) {
       for (const ap of list ?? []) {
         const r = routes.get(ap.id)
         if (r && r.switchId === swId) {
-          connAps.push({ ...ap, floorId: fId })
+          const apClass = getAPPoeClass(ap)
+          const apMeta = getPoeClassMeta(apClass)
+          const classShort = !!portMeta && apMeta.rank > portMeta.rank
+          if (classShort) classShortCount++
+          connAps.push({ ...ap, floorId: fId, poeClass: apClass, classShort })
           totalPoe += getAPPoeWattage(ap)
         }
       }
@@ -74,7 +91,7 @@ function SwitchPanel({ floorId, swId }) {
         if (other.id !== swId && other.uplinkTo === swId) downlinkCount++
       }
     }
-    return { aps: connAps, totalPoe, uplinkUsed, downlinkCount }
+    return { aps: connAps, totalPoe, uplinkUsed, downlinkCount, classShortCount }
   }, [sw, swId, floors, apsByFloor, switchesByFloor, traysByFloor, risers])
 
   if (!sw) return null
@@ -82,6 +99,7 @@ function SwitchPanel({ floorId, swId }) {
   const color      = getSwitchKindColor(sw.kind)
   const portCount  = sw.portCount ?? 24
   const poeBudget  = sw.poeBudget ?? 0
+  const poePortStd = sw.poePortStd ?? '3at'
   const portsUsed  = connected.aps.length + connected.uplinkUsed + connected.downlinkCount
   const portOver   = portsUsed > portCount
   const poeOver    = poeBudget > 0 && connected.totalPoe > poeBudget
@@ -256,6 +274,22 @@ function SwitchPanel({ floorId, swId }) {
               />
             </PanelField>
             <div className="switch-panel__hint">PoE 預算 = 0 → 該 Switch 無 PoE 供電</div>
+
+            <PanelField
+              label="每埠供電"
+              hint={connected.classShortCount > 0
+                ? `⚠ ${connected.classShortCount} 台 AP 需求超過每埠供電等級`
+                : `每埠上限 ${getPoeClassMeta(poePortStd).perPortWatt} W`}
+            >
+              <Select
+                value={poePortStd}
+                options={POE_PORT_STD_OPTIONS}
+                onChange={(v) => handleField('poePortStd', v)}
+              />
+            </PanelField>
+            <div className="switch-panel__hint">
+              AP 需求等級高於此標準時，該埠會砍 radio（總預算足夠也沒用）。
+            </div>
           </>
         ) : (
           <div className="switch-panel__hint">
@@ -400,6 +434,14 @@ function SwitchPanel({ floorId, swId }) {
                     {isCrossFloor && (
                       <span className="switch-panel__conn-floor">
                         （{apFloor?.name ?? ap.floorId}）
+                      </span>
+                    )}
+                    {ap.classShort && (
+                      <span
+                        className="switch-panel__conn-classwarn"
+                        title={`此 AP 需 ${getPoeClassMeta(ap.poeClass).label}，超過本 Switch 每埠 ${getPoeClassMeta(poePortStd).label} 供電，radio 會被砍`}
+                      >
+                        ⚠ 需 {getPoeClassMeta(ap.poeClass).label}
                       </span>
                     )}
                   </span>

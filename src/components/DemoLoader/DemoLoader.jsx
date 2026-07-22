@@ -9,7 +9,7 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { floorplanFromLines } from '@/utils/floorplanFromLines'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
 import { generateId } from '@/utils/id'
-import { DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
+import { DEFAULT_AP_MODEL_ID, getDefaultTxPower } from '@/constants/apModels'
 import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
 import Icon from '@/components/Icon/Icon'
 import './DemoLoader.sass'
@@ -88,7 +88,7 @@ function buildDemoAPs(canvasWidth, canvasHeight, regulatoryDomain) {
       x: p.x * canvasWidth,
       y: p.y * canvasHeight,
       z: 2.4,
-      txPower: 20,
+      txPower: getDefaultTxPower(band),
       frequency: band,
       channel: 36,
       channelWidth: DEFAULT_CHANNEL_WIDTH[band] ?? 20,

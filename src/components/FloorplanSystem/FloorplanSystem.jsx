@@ -45,6 +45,7 @@ import { useAPStore } from '@/store/useAPStore'
 import { useCableStore } from '@/store/useCableStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useEditorStore, EDITOR_MODE, VIEW_MODE } from '@/store/useEditorStore'
+import { getDefaultTxPower } from '@/constants/apModels'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useScopeStore } from '@/store/useScopeStore'
@@ -239,7 +240,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
               id: newId,
               name: useAPStore.getState().nextAPName(),
               x, y, z: 2.4,
-              txPower: 20,
+              txPower: getDefaultTxPower(band),
               frequency: band,
               channel, channelWidth: width,
               antennaMode: 'omni', azimuth: 0, beamwidth: 60,

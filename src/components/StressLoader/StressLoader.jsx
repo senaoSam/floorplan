@@ -3,6 +3,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { generateId } from '@/utils/id'
+import { getDefaultTxPower } from '@/constants/apModels'
 import './StressLoader.sass'
 
 // Inline defaults — apModels / channelWidths constants ported separately
@@ -45,7 +46,7 @@ function buildGridAPs(floor, count) {
       id: generateId('ap'),
       x, y,
       z: 2.4,
-      txPower: 20,
+      txPower: getDefaultTxPower(5),
       frequency: 5,
       channel: CHANNEL_CYCLE[i % CHANNEL_CYCLE.length],
       channelWidth: DEFAULT_CHANNEL_WIDTH[5],

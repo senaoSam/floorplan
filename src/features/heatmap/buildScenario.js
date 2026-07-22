@@ -5,6 +5,7 @@
 // sub-segments so each sub-segment carries its own dB loss.
 
 import { channelCenterMHz } from './frequency'
+import { getDefaultTxPower } from '@/constants/apModels'
 
 // ITU-R P.2040-3 Table 3 coefficients. Reflection uses full complex Fresnel
 // based on (eps_r, sigma) derived from these per-AP frequency. Fallback ~ concrete.
@@ -191,7 +192,7 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
     // Absolute Z of the AP = its floor's elevation + its install height.
     // 0 when no cross-floor data is in play (single-floor planar mode).
     zM: (elevationM ?? 0) + (ap.z ?? 0),
-    txDbm: ap.txPower ?? 20,
+    txDbm: ap.txPower ?? getDefaultTxPower(ap.frequency ?? 5),
     frequency: ap.frequency ?? 5,
     channel: ap.channel ?? 36,
     channelWidth: ap.channelWidth ?? 20,

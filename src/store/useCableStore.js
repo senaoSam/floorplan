@@ -5,11 +5,14 @@ import { create } from 'zustand'
 // (see .claude/cable-spec.md §2).
 //
 // Switch shape:
-//   { id, name, x, y, mountHeight, kind, model, portCount, poeBudget }
+//   { id, name, x, y, mountHeight, kind, model, portCount, poeBudget, poePortStd }
 //   - x, y: canvas coords (image px), same convention as walls/APs
 //   - kind: 'switch' | 'idf' | 'mdf' | 'router'
 //   - mountHeight: meters above floor (rack height; default 0.5 m)
 //   - poeBudget: watts (0 = no PoE)
+//   - poePortStd: per-port PoE standard ('3af'/'3at'/'3bt'), undefined on
+//     core/router kinds (no PoE). Compared against each connected AP's required
+//     PoE class in SwitchPanel — under-provisioned ports get flagged (47-13).
 export const SWITCH_KINDS = [
   { value: 'switch', label: 'Switch', color: '#10b981' },
   { value: 'idf',    label: 'IDF',    color: '#3b82f6' },
@@ -35,6 +38,7 @@ export const DEFAULT_SWITCH_BY_KIND = {
     model: 'Catalyst 9200-24P',
     portCount: 24,
     poeBudget: 370,
+    poePortStd: '3at',
     uplinkPortType: 'sfp+',
     uplinkCount: 4,
     uplinkTo: null,
@@ -47,6 +51,7 @@ export const DEFAULT_SWITCH_BY_KIND = {
     model: 'Catalyst 9300-48S',
     portCount: 48,
     poeBudget: 740,
+    poePortStd: '3bt',
     uplinkPortType: 'sfp28',
     uplinkCount: 2,
     uplinkTo: null,
