@@ -23,6 +23,13 @@ function WallPanel({ floorId, wallId }) {
     updateWall(floorId, wallId, { material: mat })
   }, [floorId, wallId, updateWall])
 
+  // 47-11 — per-wall custom dB override (2.4 GHz anchor). Clearing the input
+  // (NaN) removes the override; material lossB / reflection / color stay.
+  const handleCustomDb = useCallback((v) => {
+    if (isNaN(v)) { updateWall(floorId, wallId, { customDb: null }); return }
+    if (v >= 0) updateWall(floorId, wallId, { customDb: v })
+  }, [floorId, wallId, updateWall])
+
   const handleHeight = useCallback((field, value) => {
     if (!isNaN(value) && value >= 0) updateWall(floorId, wallId, { [field]: value })
   }, [floorId, wallId, updateWall])
@@ -65,6 +72,22 @@ function WallPanel({ floorId, wallId }) {
             )
           })}
         </div>
+        <PanelField
+          label="自訂衰減"
+          hint={wall.customDb != null
+            ? `覆寫中：${wall.material.label} ${wall.material.dbLoss} dB → ${wall.customDb} dB（@2.4GHz）`
+            : '留空＝用材質值；輸入即覆寫此面牆 @2.4GHz 衰減'}
+        >
+          <NumberInput
+            value={wall.customDb ?? null}
+            min={0}
+            step={1}
+            unit="dB"
+            width={70}
+            placeholder={String(wall.material.dbLoss)}
+            onChange={handleCustomDb}
+          />
+        </PanelField>
       </PanelSection>
 
       <PanelSection title="高度">

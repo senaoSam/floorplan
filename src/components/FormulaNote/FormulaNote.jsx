@@ -23,7 +23,7 @@ function FormulaNote() {
           每道穿越的牆/門窗累加 <code>L_wall · sec(θ_i)</code>，
           <code>θ_i</code> 為射線與牆面法線夾角，<code>sec</code> 上限 3.5（約 79°）避免掠射爆衝。
         </p>
-        <p className="muted">L_wall 來自材質的 dbLoss；門窗則用 opening.material 的 dbLoss 取代該段牆。</p>
+        <p className="muted">L_wall 來自材質的 dbLoss（牆可逐面以「自訂衰減」覆寫 @2.4GHz anchor）；門窗則用 opening.material 的 dbLoss 取代該段牆。</p>
         <p className="muted">
           Z 範圍過濾：在 2D 交點處用 <code>Z(t) = Z_ap + t·(Z_rx − Z_ap)</code> 取得射線高度，
           只有當 <code>Z(t)</code> 落在該牆/門窗的 <code>[bottomHeight, topHeight]</code>（加上樓層 elevation）內才計入衰減。
@@ -127,7 +127,10 @@ function FormulaNote() {
           <code>tilt</code>，仰角由高度差與水平距離算出）取天線增益：
         </p>
         <ul>
-          <li>Omni：固定 <code>G_tx = AP_ANT_GAIN_DBI</code>（3 dBi），垂直不衰減</li>
+          <li>
+            Omni：<code>G_tx</code> = AP 型號該頻段的天線增益（<code>apModels.js
+            antennaGain</code>，未列頻段 fallback 3 dBi），垂直不衰減
+          </li>
           <li>
             Directional：水平與垂直各套同一組扇區錐 —— 半波瓣寬 <code>φ/2</code>
             內為 0 dB，外側 15° 線性跌到 <code>−20 dB</code> 背瓣，兩者相加。

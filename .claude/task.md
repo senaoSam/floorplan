@@ -28,7 +28,7 @@
 **Phase 47 B2 數字可信度完成（47-2/6/8a/9，2026-07-20，MCP 驗證通過；autoChannelPlan 半徑拍板不動）。**
 **Phase 47 B3 操作型邏輯 bug 完成（47-14~21，commit eb59e10 + 91c36a7 + 09a5ddf，使用者驗收 ok）。**
 **Phase 47 B4 UX/一致性完成（47-22~27，commit 1a4bf16，使用者驗收 ok；含 off-band dim/多頻段 demo/3D toolbar 精簡等使用者追加）。**
-**Phase 47 B5 進行中：47-12 TX 預設（逐頻段）+ 47-13 PoE per-port class 完成（2026-07-22，Opus 4.8，使用者驗收 ok，MCP 通過）。剩 47-10 天線增益 + 47-11 材質庫（用 Fable，見批次表下方分模型決策）。**
+**Phase 47 B5 全部完成（2026-07-22，使用者驗收 ok，MCP 通過）：47-12 TX 逐頻段預設 + 47-13 PoE per-port class（Opus 4.8）、47-10 天線增益 + 47-11 材質庫（Fable 5，雙引擎 parity 已驗）。B1~B5 收工，Phase 47 六角色審查缺陷全數清完（47-8b 單台三頻 / 47-6 autoChannelPlan 半徑為 backlog/防重做，非缺陷）。**
 
 ---
 
@@ -96,10 +96,10 @@
   - `src/constants/apModels.js`（supportedBands 現成）、`buildScenario.js:187-204`。
 - [x] **47-9【中】〔B2〕secondary coverage 視圖**（✅ commit 6c6afe8，MCP 驗：coverage 89.2% / secondary 43.6%，secondary ≤ coverage 不變式成立）：`sampleField` 加 opt-in `redundancyThresholdDbm` → 每格達門檻 AP 數（Uint8，reuse 現成 perAp 零額外 probe，預設不算不影響熱圖效能）；planQuality 算 `secondaryCoveragePct`（≥2 台達門檻的 in-scope 面積比）；DevicePlanningPanel 加「雙重涵蓋（≥2 台）」列（語音/漫遊備援白話 title）。
   - `src/features/heatmap/sampleField.js`、`planQuality.js`、`DevicePlanningPanel.jsx`。
-- [ ] **47-10【中】〔B5〕AP 型號逐頻段天線增益是死資料**：引擎固定 3dBi（`AP_ANT_GAIN_DBI`），`apModels.js` 的 `antennaGain` 無人讀，高增益 AP 被低估 2-3dB。接進 gain 計算。
-  - `src/features/heatmap/rfConstants.js:2` vs `src/constants/apModels.js`。
-- [ ] **47-11【中】〔B5〕材質庫**：金屬 20dB 全頻段偏低（真實電梯井/機房 >26-40dB，`lossB:0`）；缺 Low-E 玻璃（25-40dB）；牆不可逐面自訂 dB。（自訂材質 = spec.md §3.2 承諾，兩家競品都有。）
-  - `src/constants/materials.js:48-55`。
+- [x] **47-10【中】〔B5〕AP 型號逐頻段天線增益是死資料**（✅ 2026-07-22，Fable 5，使用者驗收 ok，MCP 驗：只換 model → JS RSSI 差正好 +1/+2/+3dB；GL delta = JS delta = 3.000、GL vs JS 絕對差 0.00；GL cache A→B→A round-trip=0；0 errors）：`apModels.js` 加 `getAPAntennaGain(ap)`（讀 model per-band `antennaGain`，未列頻段回 undefined）；buildScenario AP entry 加 `antGainDbi`；propagation.js `apGainDbi()` peak 從寫死 `AP_ANT_GAIN_DBI` 改 `ap.antGainDbi ?? AP_ANT_GAIN_DBI`（omni/directional/custom 三分支同步）；sampleFieldGL 三處 `_antGainDbi` 打包 + 兩處 cache hash 改用有效增益（否則換 model 吃舊快取）。**雙引擎不變量已驗**。
+  - `src/constants/apModels.js`、`buildScenario.js`、`propagation.js`、`sampleFieldGL.js`、`FormulaNote.jsx`（第 7 節文案）。
+- [x] **47-11【中】〔B5〕材質庫**（✅ 2026-07-22，Fable 5，使用者驗收 ok，MCP 驗：7 材質、金屬 30dB 全頻持平、Low-E 2.4/5/6G=25/32/33dB；customDb 雙引擎 delta 44.43=44.43；WallPanel 自訂衰減欄覆寫/解除正常；0 errors）：**決策（2026-07-22 拍板）**＝金屬 20→**30dB**（電梯井/機房級中間值）；新增 **Low-E 玻璃**（anchor 25dB@2.4 + lossB 0.3 → 5G≈32/6G≈33，落在 25-40 實測範圍；反射用金屬係數＝鍍膜強反射物理）；逐面牆 **customDb 覆寫欄**（WallPanel 材質列下方，留空=用材質值，只覆寫 anchor dB、lossB/反射/色沿用材質）。buildScenario expandWall 讀 `wall.customDb ?? material.dbLoss`；uploadWalls signature 已蓋 lossDb 故 GL 自動失效重算。
+  - `src/constants/materials.js`、`buildScenario.js`（expandWall）、`WallPanel.jsx`、`FormulaNote.jsx`、`CLAUDE.md`（材質數 6→7）。
 - [x] **47-12【中】〔B5〕預設 TX 20dBm 偏熱**（✅ 2026-07-22，Opus 4.8，使用者驗收 ok，MCP 驗：demo AP 2.4G=11/5G=15/6G=15dBm 不再全 20）：**決策（2026-07-22 拍板）＝逐頻段合理預設**。apModels.js 加 `DEFAULT_TX_POWER_DBM = {2.4:11, 5:15, 6:15}` + `getDefaultTxPower(band)`（單一來源，對齊 47-23 常數收斂）；三個 AP 建立點（FloorplanSystem 手動放置 / DemoLoader / StressLoader）+ buildScenario fallback 全改引用。取企業實務範圍（2.4G 8–14 / 5G 14–17）中間偏典型值，6G 對齊 5G。
   - `src/constants/apModels.js`（新常數+helper）、`FloorplanSystem.jsx`、`DemoLoader.jsx`、`StressLoader.jsx`、`buildScenario.js:194`。
 - [x] **47-13【低】〔B5〕PoE per-port class 協商檢查**（✅ 2026-07-22，Opus 4.8，使用者驗收 ok，MCP 驗：3bt AP 連 3at switch→classShort count=1 + UI 顯示「⚠ 需 802.3bt」，switch 改 3bt→警告消失非恆真，0 errors）：**決策（2026-07-22 拍板）＝完整 per-port class 協商**。apModels.js 加 per-model `poeClass`（3af/3at/3bt）+ `POE_CLASSES` 元資料（rank/perPortWatt 15.4/30/60W）+ `getAPPoeClass`/`getPoeClassMeta`；`poeWattage` 改 worst-case（fallback 15→18W）。useCableStore per-kind default 加 `poePortStd`（access 3at / idf 3bt / core 無）。SwitchPanel connected 迴圈算 `classShort`（AP rank > port rank），PoE 區加「每埠供電」下拉 + 警告 hint，已連 AP 清單標「⚠ 需 802.3bt」。

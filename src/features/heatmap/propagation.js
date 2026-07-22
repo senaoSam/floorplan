@@ -194,11 +194,15 @@ function makeReflectedPath(txPowerDbm, apGainDbi, pathLossDb, distanceM, gammaPe
 }
 
 // Per-ray AP antenna gain (dBi) at the departure direction from the AP.
-// - omni:        flat AP_ANT_GAIN_DBI (no vertical pattern — dipole ring was
+// Peak = the AP's per-model per-band gain (47-10, scenario `antGainDbi` from
+// buildScenario / getAPAntennaGain), falling back to AP_ANT_GAIN_DBI when the
+// model doesn't list the band. Kept in sync with the shader, which reads the
+// same value via `_antGainDbi` (sampleFieldGL packing).
+// - omni:        flat peak (no vertical pattern — dipole ring was
 //                explicitly rejected so existing omni results stay unchanged)
-// - directional: peak AP_ANT_GAIN_DBI, sector taper applied to BOTH the
+// - directional: peak, sector taper applied to BOTH the
 //                horizontal and the vertical offset (same beamwidth cone).
-// - custom:      peak AP_ANT_GAIN_DBI + Gh(horizontal offset) + Gv(vertical
+// - custom:      peak + Gh(horizontal offset) + Gv(vertical
 //                offset), both cuts sampled from the same catalog pattern
 //                (matches the 3D lobe / preview surface r = Gh(az) + Gv(el)).
 // Azimuth/angles are taken in the canvas frame (+x = 0°, +y = 90°) to match
@@ -210,12 +214,13 @@ function makeReflectedPath(txPowerDbm, apGainDbi, pathLossDb, distanceM, gammaPe
 // sectorTaperDb + its constants live in @/constants/antennaPatterns (imported
 // above) — the directional-mode source of truth, shared with APPanel's preview.
 function apGainDbi(ap, targetPoint, targetZM = 0) {
+  const peak = ap.antGainDbi ?? AP_ANT_GAIN_DBI
   const mode = ap.antennaMode ?? 'omni'
-  if (mode === 'omni') return AP_ANT_GAIN_DBI
+  if (mode === 'omni') return peak
 
   const dx = targetPoint.x - ap.pos.x
   const dy = targetPoint.y - ap.pos.y
-  if (dx === 0 && dy === 0) return AP_ANT_GAIN_DBI
+  if (dx === 0 && dy === 0) return peak
   const rayDeg = Math.atan2(dy, dx) * 180 / Math.PI
   const az = ap.azimuthDeg ?? 0
   let off = rayDeg - az
@@ -231,12 +236,12 @@ function apGainDbi(ap, targetPoint, targetZM = 0) {
     const pattern = getPatternById(ap.patternId)
     const relDb = sampleGain(pattern, absOff * Math.PI / 180)
       + sampleGain(pattern, vertOff * Math.PI / 180)
-    return AP_ANT_GAIN_DBI + relDb
+    return peak + relDb
   }
 
   // directional (built-in sector approximation, same cone both planes)
   const half = (ap.beamwidthDeg ?? 60) / 2
-  return AP_ANT_GAIN_DBI + sectorTaperDb(absOff, half) + sectorTaperDb(vertOff, half)
+  return peak + sectorTaperDb(absOff, half) + sectorTaperDb(vertOff, half)
 }
 
 // Pick frequency sample count for the channel-wide coherent sum.

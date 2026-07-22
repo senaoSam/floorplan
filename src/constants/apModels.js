@@ -120,3 +120,13 @@ export const getAPPoeClass = (ap) => {
   const m = getAPModelById(ap?.modelId ?? DEFAULT_AP_MODEL_ID)
   return m.poeClass ?? '3at'
 }
+
+// 47-10 — per-band antenna gain (dBi) for the AP's current band. Model resolve
+// follows the getAPPoeWattage convention (null / unknown modelId → Generic, 即
+// APPanel 顯示的那顆). Returns undefined for a band the model doesn't list
+// (e.g. 6 GHz on a dual-band model) — engines coalesce with their own
+// AP_ANT_GAIN_DBI fallback so the resolved peak stays identical in JS + shader.
+export const getAPAntennaGain = (ap) => {
+  const m = getAPModelById(ap?.modelId ?? DEFAULT_AP_MODEL_ID)
+  return m.antennaGain?.[ap?.frequency ?? 5]
+}

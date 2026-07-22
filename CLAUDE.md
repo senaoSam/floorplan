@@ -99,8 +99,8 @@ if (e.key === 'Delete' || e.key === 'Backspace') {
 ```
 
 ### Materials (`src/constants/materials.js`)
-6 materials sorted by dB loss ascending: Glass(2) → Drywall(3) → Wood(4) → Brick(8) → Concrete(12) → Metal(20).
-Default wall material: `MATERIALS.CONCRETE`.
+7 materials sorted by dB loss ascending: Glass(2) → Drywall(3) → Wood(4) → Brick(8) → Concrete(12) → Low-E Glass(25) → Metal(30).
+Default wall material: `MATERIALS.CONCRETE`. Walls may carry a per-wall `customDb` override (2.4 GHz anchor; material lossB/reflection/color stay).
 
 ### AP Frequency Colors
 - 2.4 GHz: `#f39c12`

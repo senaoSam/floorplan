@@ -93,11 +93,12 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
 
   if (canUseAggregated(scenario, opts)) {
     // ---- HM-F5g aggregated path ----
-    // Decorate APs with the constant gains the shader expects, then upload
-    // once for the single dispatch.
+    // Decorate APs with the gains the shader expects, then upload once for
+    // the single dispatch. 47-10: per-AP model gain from buildScenario;
+    // AP_ANT_GAIN_DBI only when the model doesn't list the band.
     const apsForGL = scenario.aps.map((ap) => ({
       ...ap,
-      _antGainDbi: AP_ANT_GAIN_DBI,
+      _antGainDbi: ap.antGainDbi ?? AP_ANT_GAIN_DBI,
     }))
     gl.uploadAps(apsForGL)
     const out = gl.renderField(scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta, {
@@ -187,7 +188,7 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
     const ap = scenario.aps[k]
     const apForGL = {
       ...ap,
-      _antGainDbi: AP_ANT_GAIN_DBI,
+      _antGainDbi: ap.antGainDbi ?? AP_ANT_GAIN_DBI,
       _rxGainDbi: RX_ANT_GAIN_DBI,
     }
     const apKey = ap.id ?? `_idx_${k}`
@@ -204,7 +205,9 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
         ap.txDbm, ap.centerMHz ?? '', ap.channelWidth ?? '',
         ap.antennaMode ?? 'omni', ap.azimuthDeg ?? 0, ap.beamwidthDeg ?? 0,
         ap.tiltDeg ?? 0, ap.patternId ?? '',
-        AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI,
+        // 47-10: effective per-AP gain — must be the resolved value, or a
+        // model change (different gain) would serve a stale cached grid.
+        ap.antGainDbi ?? AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI,
       ].join('|')
       hash = apSig + '#' + geomSig
       const cached = gl.getCachedGrid(apKey, hash)
@@ -351,7 +354,7 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
   if (canUseAggregated(scenario, opts)) {
     const apsForGL = scenario.aps.map((ap) => ({
       ...ap,
-      _antGainDbi: AP_ANT_GAIN_DBI,
+      _antGainDbi: ap.antGainDbi ?? AP_ANT_GAIN_DBI,
     }))
     gl.uploadAps(apsForGL)
     const out = await gl.renderFieldAsync(scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta, {
@@ -444,7 +447,7 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
     const ap = scenario.aps[k]
     const apForGL = {
       ...ap,
-      _antGainDbi: AP_ANT_GAIN_DBI,
+      _antGainDbi: ap.antGainDbi ?? AP_ANT_GAIN_DBI,
       _rxGainDbi: RX_ANT_GAIN_DBI,
     }
     const apKey = ap.id ?? `_idx_${k}`
@@ -457,7 +460,9 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
         ap.txDbm, ap.centerMHz ?? '', ap.channelWidth ?? '',
         ap.antennaMode ?? 'omni', ap.azimuthDeg ?? 0, ap.beamwidthDeg ?? 0,
         ap.tiltDeg ?? 0, ap.patternId ?? '',
-        AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI,
+        // 47-10: effective per-AP gain — must be the resolved value, or a
+        // model change (different gain) would serve a stale cached grid.
+        ap.antGainDbi ?? AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI,
       ].join('|')
       hash = apSig + '#' + geomSig
       const cached = gl.getCachedGrid(apKey, hash)

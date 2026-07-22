@@ -5,7 +5,7 @@
 // sub-segments so each sub-segment carries its own dB loss.
 
 import { channelCenterMHz } from './frequency'
-import { getDefaultTxPower } from '@/constants/apModels'
+import { getDefaultTxPower, getAPAntennaGain } from '@/constants/apModels'
 
 // ITU-R P.2040-3 Table 3 coefficients. Reflection uses full complex Fresnel
 // based on (eps_r, sigma) derived from these per-AP frequency. Fallback ~ concrete.
@@ -29,7 +29,9 @@ function ituFor(material) {
 function expandWall(wall, pxToM, elevationM) {
   const ax = wall.startX, ay = wall.startY
   const bx = wall.endX,   by = wall.endY
-  const wallLoss = wall.material?.dbLoss ?? 8
+  // 47-11 — per-wall custom dB override (2.4 GHz anchor). Wall keeps its
+  // material (color / lossB / itu reflection); only the anchor is replaced.
+  const wallLoss = wall.customDb ?? wall.material?.dbLoss ?? 8
   const wallLossB = wall.material?.lossB ?? 0
   const wallItu = ituFor(wall.material)
   const wallZLo = elevationM + (wall.bottomHeight ?? 0)
@@ -193,6 +195,9 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
     // 0 when no cross-floor data is in play (single-floor planar mode).
     zM: (elevationM ?? 0) + (ap.z ?? 0),
     txDbm: ap.txPower ?? getDefaultTxPower(ap.frequency ?? 5),
+    // 47-10 — per-model per-band antenna gain. undefined when the model
+    // doesn't list this band; both engines then fall back to AP_ANT_GAIN_DBI.
+    antGainDbi: getAPAntennaGain(ap),
     frequency: ap.frequency ?? 5,
     channel: ap.channel ?? 36,
     channelWidth: ap.channelWidth ?? 20,
