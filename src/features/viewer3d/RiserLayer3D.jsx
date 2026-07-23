@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { useFloorStore, DEFAULT_FLOOR_HEIGHT_M } from '@/store/useFloorStore'
 import { useCableStore } from '@/store/useCableStore'
 import { computeFloorElevations } from '@/utils/floorStacking'
+import { makeAlignMatrixM, applyAlignMatrix, isIdentityAlign } from '@/utils/floorAlign'
 
 // Riser column: vertical chase from the lowest to the highest floor the riser
 // passes through. We extend the column slightly above the topmost floor's
@@ -36,8 +37,16 @@ export default function RiserLayer3D({ activeFloorId }) {
       if (fs.length === 0) continue
       const anchor = fs[0]
       const pxToM = 1 / (anchor.scale || 100)
-      const x = r.x * pxToM
-      const z = r.y * pxToM
+      let x = r.x * pxToM
+      let z = r.y * pxToM
+      // Scene-root layer — apply the anchor floor's meter-space align so the
+      // shaft tracks its floor plane (approximation when the spanned floors
+      // are aligned differently; the column stays vertical).
+      if (!isIdentityAlign(anchor)) {
+        const p = applyAlignMatrix(makeAlignMatrixM(anchor, pxToM), x, z)
+        x = p.x
+        z = p.y
+      }
 
       const bottom = fs[0]
       const top    = fs[fs.length - 1]

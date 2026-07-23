@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect } from 'react'
-import { useFloorStore } from '@/store/useFloorStore'
+import { useFloorStore, getAlignAnchorId } from '@/store/useFloorStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { getFloorColor } from '@/utils/floorColor'
 import './AlignFloorPanel.sass'
@@ -10,6 +10,7 @@ import './AlignFloorPanel.sass'
 function AlignFloorPanel({ floorId }) {
   const floor               = useFloorStore((s) => s.floors.find((f) => f.id === floorId))
   const floors              = useFloorStore((s) => s.floors)
+  const anchorFloorId       = useFloorStore(getAlignAnchorId)
   const setAlignTransform   = useFloorStore((s) => s.setAlignTransform)
   const resetAlignTransform = useFloorStore((s) => s.resetAlignTransform)
   const setEditorMode       = useEditorStore((s) => s.setEditorMode)
@@ -45,6 +46,16 @@ function AlignFloorPanel({ floorId }) {
 
   const patch = (p) => setAlignTransform(floorId, p)
 
+  // Alignment is defined in meter space — floors participating without a
+  // calibrated scale fall back to raw-px overlay sizing, which can misstate
+  // relative building size when image resolutions differ.
+  const uncalibrated = [floor, ...otherFloors.filter((f) => refIds.includes(f.id))]
+    .filter((f) => !f.scale)
+
+  // Offset sliders cover the whole image regardless of resolution — a fixed
+  // ±1000 px range only spans a fraction of a large scan.
+  const offsetRange = Math.max(1000, Math.round(Math.max(floor.imageWidth ?? 0, floor.imageHeight ?? 0)))
+
   return (
     <div className="align-floor-panel">
       <div className="align-floor-panel__header">
@@ -54,7 +65,20 @@ function AlignFloorPanel({ floorId }) {
 
       <div className="align-floor-panel__intro">
         調整本樓層相對於其他樓層的位置。勾選參考樓層以半透明疊影顯示輔助對齊。
+        左鍵拖曳畫布移動本樓層；右鍵拖曳（或空白鍵＋左鍵、滑鼠中鍵）平移視角。
       </div>
+
+      {floorId === anchorFloorId && (
+        <div className="align-floor-panel__warn">
+          📌 本樓層是對齊基準：其他樓層都以它為參考，移動它會讓整棟一起偏移。建議按「完成」離開，改對齊其他樓層。
+        </div>
+      )}
+
+      {uncalibrated.length > 0 && (
+        <div className="align-floor-panel__warn">
+          ⚠️ {uncalibrated.map((f) => f.name).join('、')} 尚未校正比例尺：疊影以原始像素大小顯示，可能與實際比例不符。建議先用比例尺工具校正各樓層，不同解析度的圖會自動等大，通常只需位移＋旋轉即可對齊。
+        </div>
+      )}
 
       {/* 參考樓層疊影 */}
       <section className="align-floor-panel__section">
@@ -75,7 +99,12 @@ function AlignFloorPanel({ floorId }) {
                       onChange={() => toggleAlignRefFloor(f.id)}
                     />
                     <span className="align-floor-panel__ref-swatch" style={{ background: color }} />
-                    <span>{f.name}</span>
+                    <span>
+                      {f.name}
+                      {f.id === anchorFloorId && (
+                        <span className="align-floor-panel__ref-anchor" title="對齊基準樓層">📌</span>
+                      )}
+                    </span>
                   </label>
                 )
               })}
@@ -142,7 +171,7 @@ function AlignFloorPanel({ floorId }) {
             type="range"
             className="align-floor-panel__slider"
             value={ox}
-            min={-1000} max={1000} step={1}
+            min={-offsetRange} max={offsetRange} step={1}
             onChange={(e) => patch({ alignOffsetX: parseFloat(e.target.value) })}
           />
         </div>
@@ -159,7 +188,7 @@ function AlignFloorPanel({ floorId }) {
             type="range"
             className="align-floor-panel__slider"
             value={oy}
-            min={-1000} max={1000} step={1}
+            min={-offsetRange} max={offsetRange} step={1}
             onChange={(e) => patch({ alignOffsetY: parseFloat(e.target.value) })}
           />
         </div>
@@ -176,7 +205,7 @@ function AlignFloorPanel({ floorId }) {
             step={0.01}
             min={0.1}
             max={5}
-            onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) patch({ alignScale: v }) }}
+            onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) patch({ alignScale: Math.max(0.1, Math.min(5, v)) }) }}
           />
           <input
             type="range"
@@ -185,6 +214,9 @@ function AlignFloorPanel({ floorId }) {
             min={0.25} max={4} step={0.01}
             onChange={(e) => patch({ alignScale: parseFloat(e.target.value) })}
           />
+        </div>
+        <div className="align-floor-panel__hint">
+          已校正比例尺的樓層通常維持 1（僅用於修正圖紙本身的比例誤差）
         </div>
       </section>
 

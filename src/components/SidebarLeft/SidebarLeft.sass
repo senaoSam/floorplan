@@ -265,6 +265,12 @@
     &--danger
       color: #ff6b6b
 
+  &__anchor-badge
+    margin-left: 5px
+    font-size: 10px
+    opacity: 0.9
+    cursor: help
+
   &__floor-props
     list-style: none
     padding: 2px 12px 6px 34px
@@ -291,6 +297,14 @@
       background: $bg-primary
       color: $text-primary
       font-size: 11px
+      // Hide native number spinners — match the AP panel numeric fields
+      // (PanelRight/_shared shared.sass).
+      -moz-appearance: textfield
+
+      &::-webkit-outer-spin-button,
+      &::-webkit-inner-spin-button
+        -webkit-appearance: none
+        margin: 0
 
       &:focus
         outline: none

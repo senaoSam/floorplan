@@ -513,8 +513,10 @@ export function attachHeatmapLayer({
       // 任務 4: clear the large-scene notice when the heatmap is off so it
       // can't linger stale into the next enable.
       useHeatmapStore.getState().setSimplifiedLargeScene(false)
-      // Also clear the draw-wall freeze notice — heatmap off, nothing frozen.
+      // Also clear the draw-wall / align freeze notices — heatmap off,
+      // nothing frozen.
       useHeatmapStore.getState().setDrawWallFrozen(false)
+      useHeatmapStore.getState().setAlignFrozen(false)
       // 47-22: clear the scale-missing notice too.
       useHeatmapStore.getState().setScaleMissing(false)
       return
@@ -535,6 +537,17 @@ export function attachHeatmapLayer({
       return
     }
     useHeatmapStore.getState().setDrawWallFrozen(false)
+
+    // Freeze during floor alignment for the same reason: align fields live on
+    // the floor record, so drag-aligning writes the floor store every
+    // pointermove — each write would fire a full recompute + ripple
+    // transition. The sprite sits inside contentWrap, so it visually follows
+    // the drag anyway; leaving ALIGN_FLOOR triggers the restoring recompute.
+    if (editorMode === EDITOR_MODE.ALIGN_FLOOR && sprite) {
+      useHeatmapStore.getState().setAlignFrozen(true)
+      return
+    }
+    useHeatmapStore.getState().setAlignFrozen(false)
 
     const { floors, activeFloorId } = useFloorStore.getState()
     const floor = floors.find((f) => f.id === activeFloorId)

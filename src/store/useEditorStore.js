@@ -122,6 +122,11 @@ export const useEditorStore = create((set, get) => ({
     editorMode: mode,
     // Stash AP-family modes so we can return to them from Camera/Stats.
     lastApMode: getPrimaryMode(mode) === PRIMARY_MODE.AP ? mode : get().lastApMode,
+    // Leaving ALIGN_FLOOR resets the ref-overlay list to the uninitialised
+    // sentinel so the next align session re-seeds to "all other floors" —
+    // otherwise floors added after the first session stay unchecked and
+    // their overlays silently never show.
+    alignRefFloors: mode === EDITOR_MODE.ALIGN_FLOOR ? get().alignRefFloors : null,
     selectedId: null,
     selectedType: null,
     selectedItems: [],

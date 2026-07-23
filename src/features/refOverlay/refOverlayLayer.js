@@ -59,7 +59,15 @@ export function attachRefOverlayLayer({
     built.clear()
   }
 
-  const applyAlignTransform = (container, floor) => {
+  // `k` is the px/m density compensation: alignment is defined in meter
+  // space (utils/floorAlign), so a ref floor whose image has a different
+  // px/m calibration must be scaled by scaleActive/scaleRef to appear at
+  // true relative size on the active floor's px canvas. Either scale
+  // missing → k = 1 (raw-px fallback; AlignFloorPanel shows a warning).
+  // The whole meter-space map projected onto the active canvas is exactly
+  // k × (the floor's own px-space align formula), so k folds into the
+  // container's position and scale.
+  const applyAlignTransform = (container, floor, k) => {
     const cx = (floor.imageWidth ?? 0) / 2
     const cy = (floor.imageHeight ?? 0) / 2
     const ox = floor.alignOffsetX ?? 0
@@ -67,19 +75,19 @@ export function attachRefOverlayLayer({
     const sc = floor.alignScale ?? 1
     const rt = ((floor.alignRotation ?? 0) * Math.PI) / 180
     container.pivot.set(cx, cy)
-    container.position.set(cx + ox, cy + oy)
+    container.position.set((cx + ox) * k, (cy + oy) * k)
     container.rotation = rt
-    container.scale.set(sc, sc)
+    container.scale.set(sc * k, sc * k)
   }
 
   // Build the tinted sprite + walls/scopes/holes/APs graphics for one
   // ref floor. Sprite loads async; the entry is registered immediately
   // so vector overlays render even before the texture lands.
-  const buildEntry = (floor, color, opacity) => {
+  const buildEntry = (floor, color, opacity, k) => {
     const container = new Container()
     container.eventMode = 'none'
     container.alpha = opacity
-    applyAlignTransform(container, floor)
+    applyAlignTransform(container, floor, k)
     root.addChild(container)
 
     // Tint filter — ColorMatrixFilter to recolor the greyscale-ish floor
@@ -220,6 +228,7 @@ export function attachRefOverlayLayer({
     }
 
     const { floors, activeFloorId } = useFloorStore.getState()
+    const activeFloor = floors.find((f) => f.id === activeFloorId)
     const refIds = editor.alignRefFloors ?? []
     const opacity = editor.alignRefOpacity ?? 0.3
 
@@ -239,17 +248,21 @@ export function attachRefOverlayLayer({
       const idx = floors.findIndex((f) => f.id === fid)
       const color = getFloorColor(idx)
 
+      const k = (activeFloor?.scale && floor.scale)
+        ? activeFloor.scale / floor.scale
+        : 1
+
       let entry = built.get(fid)
       if (!entry) {
-        entry = buildEntry(floor, color, opacity)
+        entry = buildEntry(floor, color, opacity, k)
         built.set(fid, entry)
       } else {
-        // Floor record (transform / image / colour palette) may have
-        // changed since last build — keep the live container in sync.
+        // Floor record (transform / image / colour palette / scale) may
+        // have changed since last build — keep the live container in sync.
         entry.color = color
         entry.opacity = opacity
         entry.container.alpha = opacity
-        applyAlignTransform(entry.container, floor)
+        applyAlignTransform(entry.container, floor, k)
       }
 
       const wallsList = useWallStore.getState().wallsByFloor?.[fid] ?? []

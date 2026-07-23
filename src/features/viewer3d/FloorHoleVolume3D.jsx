@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { useFloorStore, DEFAULT_FLOOR_HEIGHT_M } from '@/store/useFloorStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { computeFloorElevations } from '@/utils/floorStacking'
+import { makeAlignMatrixM, applyAlignMatrix, isIdentityAlign } from '@/utils/floorAlign'
 
 const HOLE_COLOR   = '#a855f7'
 const STROKE_COLOR = '#7c3aed'
@@ -148,6 +149,18 @@ export default function FloorHoleVolume3D({ activeFloorId }) {
         // that floor's pxToM. (Multi-floor span still uses the home floor's
         // calibration, since the polygon only exists there.)
         const pointsM = pointsToMeters(h.points, pxToM)
+        // This layer lives at scene root (doesn't inherit FloorStack's align
+        // group), so apply the home floor's meter-space align here. A column
+        // spanning differently-aligned floors approximates with the home
+        // floor's transform — a vertical shaft can't bend per level.
+        if (!isIdentityAlign(f)) {
+          const m = makeAlignMatrixM(f, pxToM)
+          for (let i = 0; i < pointsM.length; i += 2) {
+            const p = applyAlignMatrix(m, pointsM[i], pointsM[i + 1])
+            pointsM[i] = p.x
+            pointsM[i + 1] = p.y
+          }
+        }
         const isActiveOwn = f.id === activeFloorId
         acc.push({
           key: `${f.id}::${h.id}`,

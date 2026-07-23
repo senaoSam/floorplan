@@ -6,9 +6,22 @@ import { DEFAULT_FLOOR_SLAB_MATERIAL_ID, DEFAULT_FLOOR_SLAB_DB } from '@/constan
 // a multi-storey 3D stack lines up.
 export const DEFAULT_FLOOR_HEIGHT_M = 3.0
 
+// Effective align-anchor floor: the explicitly pinned one, else the bottom
+// floor (floors[0], the 3D ground level). The anchor is ADVISORY — it gates
+// nothing in the engine; SidebarLeft warns before aligning it so one floor
+// stays fixed and the others align onto it (per-floor align poses are
+// absolute, so moving every floor drifts the whole stack).
+export const getAlignAnchorId = (s) =>
+  s.alignAnchorFloorId ?? s.floors[0]?.id ?? null
+
 export const useFloorStore = create((set, get) => ({
   floors: [],
   activeFloorId: null,
+  // Explicit align-anchor pick (菜單「設為對齊基準」); null = default to the
+  // bottom floor via getAlignAnchorId.
+  alignAnchorFloorId: null,
+
+  setAlignAnchorFloor: (id) => set({ alignAnchorFloorId: id }),
 
   setFloors: (floors) => set({ floors }),
 
@@ -25,7 +38,12 @@ export const useFloorStore = create((set, get) => ({
         else if (idx > 0)             nextActive = nextFloors[idx - 1].id
         else                          nextActive = nextFloors[0].id
       }
-      return { floors: nextFloors, activeFloorId: nextActive }
+      return {
+        floors: nextFloors,
+        activeFloorId: nextActive,
+        // Deleted anchor → fall back to the bottom-floor default.
+        alignAnchorFloorId: state.alignAnchorFloorId === id ? null : state.alignAnchorFloorId,
+      }
     }),
 
   setActiveFloor: (id) => set({ activeFloorId: id }),

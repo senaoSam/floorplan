@@ -73,6 +73,12 @@ export const useHeatmapStore = create((set) => ({
   // mistaken for live. Cleared when the user leaves DRAW_WALL.
   drawWallFrozen: false,
 
+  // Same freeze idea for ALIGN_FLOOR: align fields live on the floor record,
+  // so drag-aligning fires a floor-store change per pointermove — each would
+  // trigger a full recompute + a visible ripple transition. Frozen while in
+  // align mode; leaving the mode triggers the restoring recompute.
+  alignFrozen: false,
+
   // 47-22: set by heatmapAdapter when the heatmap is enabled but the active
   // floor has no scale — the field can't be computed (no px→m), so instead of
   // silently hiding while the toggle still reads "on", HeatmapControl surfaces
@@ -97,6 +103,7 @@ export const useHeatmapStore = create((set) => ({
   // heatmap store is one of its own compute triggers, so an unconditional set
   // would loop.
   setDrawWallFrozen: (v) => set((s) => (s.drawWallFrozen === v ? s : { drawWallFrozen: v })),
+  setAlignFrozen: (v) => set((s) => (s.alignFrozen === v ? s : { alignFrozen: v })),
   // 47-22: same no-op-when-unchanged guard (adapter calls it every compute).
   setScaleMissing: (v) => set((s) => (s.scaleMissing === v ? s : { scaleMissing: v })),
 }))

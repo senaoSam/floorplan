@@ -1,6 +1,7 @@
 import { Sprite, Texture, Graphics } from 'pixi.js'
 import { getModeCapability } from '@/render/modeCapabilities'
 import { useDraftStore } from '@/store/useDraftStore'
+import { EDITOR_MODE } from '@/store/useEditorStore'
 
 // Load an image URL via HTMLImageElement and wrap as PIXI.Texture. We
 // avoid PIXI's Assets.load() because v8's resolver uses URL extension to
@@ -190,6 +191,11 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, 
           // the in-progress draft.
           const draft = useDraftStore.getState()
           if (draft.mode != null && draft.points.length > 0) return
+          // ALIGN_FLOOR: right-drag is the viewport pan there (left-drag
+          // moves the floor), and the floor-image menu (crop/select) is
+          // off-topic mid-align — bail without stopPropagation so the
+          // event bubbles to the stage pan handler.
+          if (editor.editorMode === EDITOR_MODE.ALIGN_FLOOR) return
           e.stopPropagation()
           editor.openContextMenu({
             targetType: 'floor_image',

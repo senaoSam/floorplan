@@ -142,6 +142,8 @@ export function attachRisersLayer({ scene, useFloorStore, useCableStore }) {
       if (e.button === 2) {
         const draft = useDraftStore.getState()
         if (draft.mode != null && draft.points.length > 0) return
+        // ALIGN_FLOOR: right-drag pans the viewport — let it bubble to stage.
+        if (useEditorStore.getState().editorMode === EDITOR_MODE.ALIGN_FLOOR) return
         e.stopPropagation()
         useEditorStore.getState().openContextMenu({
           targetType: 'cable_riser',

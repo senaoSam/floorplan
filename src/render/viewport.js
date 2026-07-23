@@ -127,7 +127,11 @@ export function bindViewport({
     // ActiveModeBadge hint "拖曳畫布移動視角"). Same path as middle-button
     // pan / space+left pan.
     const isLeftPanMode = button === 0 && typeof isPanMode === 'function' && isPanMode()
-    if (isMiddle || isLeftPan || isLeftPanMode) {
+    // ALIGN_FLOOR: left-drag moves the floor itself, so right-drag doubles
+    // as the viewport pan. Safe because RMB has no other role in align mode
+    // (object layers are non-interactive, no RMB menus, no draw commit).
+    const isRightPanAlign = button === 2 && typeof isAlignMode === 'function' && isAlignMode()
+    if (isMiddle || isLeftPan || isLeftPanMode || isRightPanAlign) {
       panActive = true
       panLastX = e.global.x
       panLastY = e.global.y

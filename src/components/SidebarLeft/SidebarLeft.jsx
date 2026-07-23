@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react'
-import { useFloorStore, DEFAULT_FLOOR_HEIGHT_M } from '@/store/useFloorStore'
+import { useFloorStore, DEFAULT_FLOOR_HEIGHT_M, getAlignAnchorId } from '@/store/useFloorStore'
 import {
   MATERIAL_LIST,
   FLOOR_SLAB_DEFAULT_DB,
@@ -42,6 +42,8 @@ function SidebarLeft() {
   const updateFloor     = useFloorStore((s) => s.updateFloor)
   const removeFloor     = useFloorStore((s) => s.removeFloor)
   const reorderFloors   = useFloorStore((s) => s.reorderFloors)
+  const anchorFloorId   = useFloorStore(getAlignAnchorId)
+  const setAlignAnchorFloor = useFloorStore((s) => s.setAlignAnchorFloor)
   const clearWalls      = useWallStore((s) => s.clearFloor)
   const clearAPs        = useAPStore((s) => s.clearFloor)
   const clearScopes     = useScopeStore((s) => s.clearFloor)
@@ -51,6 +53,7 @@ function SidebarLeft() {
   const clearTracks     = useTrackingStore((s) => s.clearFloor)
   const setEditorMode   = useEditorStore((s) => s.setEditorMode)
   const setSelected     = useEditorStore((s) => s.setSelected)
+  const setAlignRefFloors = useEditorStore((s) => s.setAlignRefFloors)
 
   const { processFile, isLoading, loadingMsg } = useFloorImport()
   const fileInputRef = useRef(null)
@@ -63,6 +66,9 @@ function SidebarLeft() {
   const [pendingRemove, setPendingRemove] = useState(null)
   const [autoPowerOpen, setAutoPowerOpen] = useState(false)
   const [pendingSwitch, setPendingSwitch] = useState(null)
+  // Set when the user asks to align the ANCHOR floor — confirmed before
+  // proceeding, since the anchor is the pose everyone else aligns onto.
+  const [pendingAnchorAlign, setPendingAnchorAlign] = useState(null)
 
   const editorMode = useEditorStore((s) => s.editorMode)
   const isAlignMode = editorMode === EDITOR_MODE.ALIGN_FLOOR
@@ -81,6 +87,10 @@ function SidebarLeft() {
     setPendingSwitch(null)
     if (!s) return
     if (s.keepAlign) {
+      // Reseed the ref-overlay list for the NEW aligned floor — the current
+      // list was seeded as "everyone except the previous floor", so the
+      // previous floor (now a reference) would stay invisible.
+      setAlignRefFloors(null)
       setActiveFloor(s.id)
       setEditorMode(EDITOR_MODE.ALIGN_FLOOR)
       setSelected(s.id, 'floor_align')
@@ -103,8 +113,17 @@ function SidebarLeft() {
   useEffect(() => {
     if (!menuOpenId) return
     const onDocClick = () => setMenuOpenId(null)
-    const t = setTimeout(() => document.addEventListener('click', onDocClick), 0)
-    return () => { clearTimeout(t); document.removeEventListener('click', onDocClick) }
+    // contextmenu too: the row's right-click opener stops propagation, so
+    // any right-click that reaches document means "elsewhere" — close.
+    const t = setTimeout(() => {
+      document.addEventListener('click', onDocClick)
+      document.addEventListener('contextmenu', onDocClick)
+    }, 0)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('click', onDocClick)
+      document.removeEventListener('contextmenu', onDocClick)
+    }
   }, [menuOpenId])
 
   const handleAddClick = () => {
@@ -168,8 +187,7 @@ function SidebarLeft() {
     }
   }
 
-  const startAlign = (floor) => {
-    setMenuOpenId(null)
+  const doStartAlign = (floor) => {
     if (isAlignMode && floor.id !== activeFloorId) {
       setPendingSwitch({ id: floor.id, keepAlign: true })
       return
@@ -177,6 +195,23 @@ function SidebarLeft() {
     setActiveFloor(floor.id)
     setEditorMode(EDITOR_MODE.ALIGN_FLOOR)
     setSelected(floor.id, 'floor_align')
+  }
+
+  const startAlign = (floor) => {
+    setMenuOpenId(null)
+    // Anchor gate: aligning the anchor moves the reference everyone else
+    // aligns onto — confirm first (escape hatch kept for genuine re-basing).
+    if (floor.id === anchorFloorId) {
+      setPendingAnchorAlign(floor)
+      return
+    }
+    doStartAlign(floor)
+  }
+
+  const setAnchor = (floor) => {
+    setMenuOpenId(null)
+    setAlignAnchorFloor(floor.id)
+    showUiToast(`已將「${floor.name}」設為對齊基準樓層`)
   }
 
   const confirmRemove = () => {
@@ -309,6 +344,14 @@ function SidebarLeft() {
                   isDragOver ? 'sidebar-left__floor-item--drop-target' : '',
                 ].filter(Boolean).join(' ')}
                 onClick={() => !isEditing && requestSetActive(floor.id)}
+                onContextMenu={(e) => {
+                  // Right-click opens the same options menu as the ⋯ button —
+                  // discoverability parity (the hover-only ⋯ was the sole entry
+                  // into 對齊樓層 / 匯出 / 刪除).
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (!isEditing) setMenuOpenId(floor.id)
+                }}
                 onDragOver={(e) => handleDragOver(e, idx)}
                 onDrop={(e) => handleDrop(e, idx)}
                 onDragEnd={handleDragEnd}
@@ -340,7 +383,17 @@ function SidebarLeft() {
                     onClick={(e) => e.stopPropagation()}
                   />
                 ) : (
-                  <span className="sidebar-left__floor-name">{floor.name}</span>
+                  <span className="sidebar-left__floor-name">
+                    {floor.name}
+                    {floor.id === anchorFloorId && (
+                      <span
+                        className="sidebar-left__anchor-badge"
+                        title="對齊基準樓層：其他樓層以它為基準對齊，建議固定不動"
+                      >
+                        📌
+                      </span>
+                    )}
+                  </span>
                 )}
                 {!isEditing && (
                   <button
@@ -361,6 +414,14 @@ function SidebarLeft() {
                   >
                     <button className="sidebar-left__menu-item" onClick={() => startRename(floor)}>重新命名</button>
                     <button className="sidebar-left__menu-item" onClick={() => startAlign(floor)}>對齊樓層</button>
+                    <button
+                      className="sidebar-left__menu-item"
+                      disabled={floor.id === anchorFloorId}
+                      title="其他樓層以基準樓層為參考對齊；基準樓層本身建議固定不動"
+                      onClick={() => setAnchor(floor)}
+                    >
+                      {floor.id === anchorFloorId ? '✓ 對齊基準' : '設為對齊基準'}
+                    </button>
                     <button
                       className="sidebar-left__menu-item"
                       disabled={!floor.imageUrl}
@@ -456,6 +517,21 @@ function SidebarLeft() {
           danger
           onConfirm={confirmRemove}
           onCancel={() => setPendingRemove(null)}
+        />
+      )}
+
+      {pendingAnchorAlign && (
+        <ConfirmDialog
+          title="對齊基準樓層？"
+          message={`「${pendingAnchorAlign.name}」是對齊基準樓層，其他樓層都以它為參考，移動它會讓整棟的對齊一起偏移。建議改對齊其他樓層。仍要對齊它嗎？`}
+          confirmLabel="仍要對齊"
+          cancelLabel="取消"
+          onConfirm={() => {
+            const f = pendingAnchorAlign
+            setPendingAnchorAlign(null)
+            doStartAlign(f)
+          }}
+          onCancel={() => setPendingAnchorAlign(null)}
         />
       )}
 

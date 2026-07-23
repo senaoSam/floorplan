@@ -46,6 +46,9 @@ function HeatmapControl() {
   const simplifiedLargeScene = useHeatmapStore((s) => s.simplifiedLargeScene)
   // Frozen while drawing walls — the field shown is from before the draw.
   const drawWallFrozen = useHeatmapStore((s) => s.drawWallFrozen)
+  // Frozen while aligning floors — drag-align writes the floor store every
+  // pointermove, which would otherwise recompute + ripple continuously.
+  const alignFrozen = useHeatmapStore((s) => s.alignFrozen)
   // 47-22: enabled but the active floor has no scale → nothing can render.
   const scaleMissing = useHeatmapStore((s) => s.scaleMissing)
   const setEditorMode = useEditorStore((s) => s.setEditorMode)
@@ -68,6 +71,11 @@ function HeatmapControl() {
       {enabled && drawWallFrozen && (
         <div className="heatmap-control__notice">
           ❄️ 畫牆中：熱圖已暫停更新（畫完離開畫牆模式後自動重新計算）
+        </div>
+      )}
+      {enabled && alignFrozen && (
+        <div className="heatmap-control__notice">
+          ❄️ 對齊樓層中：熱圖已暫停更新（完成對齊後自動重新計算）
         </div>
       )}
       {/* 47-22: heatmap is on but there's no scale — it can't render. Tell the
