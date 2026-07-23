@@ -4,6 +4,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
+import { getDefaultTxPower } from '@/constants/apModels'
 import './AutoPowerModal.sass'
 
 // HM-F9: run the greedy plan in a Web Worker so the main thread stays
@@ -35,6 +36,11 @@ const qualityScore = (cost) =>
 
 // Format a [0, 1] loss term as a percentage string.
 const fmtPct = (x) => x == null || !isFinite(x) ? '—' : `${(x * 100).toFixed(1)}%`
+
+// 起點顯示名稱（演算法內部 key 是英文）。
+const START_KIND_LABELS = { max: '高功率', mid: '中功率', min: '低功率' }
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
 function AutoPowerModal({ open, apIds, onClose }) {
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
   const floors = useFloorStore((s) => s.floors)
@@ -68,6 +74,17 @@ function AutoPowerModal({ open, apIds, onClose }) {
     }
   }, [])
 
+  // 每次開啟都從乾淨的設定頁開始。元件關閉時不 unmount（open=false 只是
+  // return null），舊 result 會殘留 — 換樓層/換選取後重開，舊 txMap 對不上
+  // 新 AP id，結果列會渲染出 undefined/NaN。
+  useEffect(() => {
+    if (open) {
+      setResult(null)
+      setProgress(null)
+      setError(null)
+    }
+  }, [open])
+
   const handleRun = useCallback(() => {
     if (!floor || !floor.scale) {
       setError('當前樓層未設定比例尺，無法執行自動規劃')
@@ -77,6 +94,19 @@ function AutoPowerModal({ open, apIds, onClose }) {
       setError('沒有可規劃的 AP')
       return
     }
+    // 輸入驗證：欄位清空時 parseFloat('') = NaN，帶著 NaN 目標跑出來的分數
+    // 全是垃圾。開跑前 parse + clamp 回合法區間，並把正規化後的值寫回 state
+    // （進度/結果標籤讀 state 顯示）。
+    const rssiVal = parseFloat(targetRssi)
+    const sinrVal = parseFloat(targetSinr)
+    if (!isFinite(rssiVal) || !isFinite(sinrVal)) {
+      setError('請輸入有效的目標 RSSI / SINR 數值')
+      return
+    }
+    const rssiClamped = Math.round(clamp(rssiVal, -90, -30))
+    const sinrClamped = Math.round(clamp(sinrVal, 0, 40))
+    setTargetRssi(rssiClamped)
+    setTargetSinr(sinrClamped)
     setRunning(true)
     setError(null)
     setResult(null)
@@ -133,7 +163,7 @@ function AutoPowerModal({ open, apIds, onClose }) {
         aps,
         scopes,
         apIdsToPlan: targetIds,
-        userOpts: { targetRssiDbm: targetRssi, targetSinrDb: targetSinr },
+        userOpts: { targetRssiDbm: rssiClamped, targetSinrDb: sinrClamped },
       },
     })
   }, [floor, walls, aps, scopes, targetIds, targetRssi, targetSinr])
@@ -156,12 +186,17 @@ function AutoPowerModal({ open, apIds, onClose }) {
 
   const handleCancel = useCallback(() => {
     if (running) {
-      // Polite cancel: ask the worker to wind down at the next progress
-      // checkpoint so we get a clean { aborted: true } 'done' message + a
-      // rendered "已取消" state. The worker tears itself down in onmessage.
+      // Hard cancel: terminate the worker outright. In-band 'cancel' messages
+      // don't work — the greedy loop is one synchronous microtask chain, so
+      // the worker's event loop can't deliver any message until the run ends.
+      // Terminate is instant and the worker is per-run disposable anyway.
       if (workerRef.current) {
-        workerRef.current.postMessage({ type: 'cancel' })
+        workerRef.current.terminate()
+        workerRef.current = null
       }
+      setRunning(false)
+      setProgress(null)
+      setError('已取消')
     } else {
       onClose()
     }
@@ -220,7 +255,7 @@ function AutoPowerModal({ open, apIds, onClose }) {
                   min="-90"
                   max="-30"
                   value={targetRssi}
-                  onChange={(e) => setTargetRssi(parseFloat(e.target.value))}
+                  onChange={(e) => setTargetRssi(e.target.value)}
                 />
                 <span className="auto-power-modal__unit">dBm</span>
               </div>
@@ -239,7 +274,7 @@ function AutoPowerModal({ open, apIds, onClose }) {
                   min="0"
                   max="40"
                   value={targetSinr}
-                  onChange={(e) => setTargetSinr(parseFloat(e.target.value))}
+                  onChange={(e) => setTargetSinr(e.target.value)}
                 />
                 <span className="auto-power-modal__unit">dB</span>
               </div>
@@ -252,7 +287,7 @@ function AutoPowerModal({ open, apIds, onClose }) {
               <p className="auto-power-modal__hint">
                 系統會反覆微調每台 AP 的功率，在「涵蓋足夠」與「不過度重疊」之間取得平衡。<br/>
                 規劃品質分數綜合評估涵蓋率、死角、訊號品質與功率過量。<br/>
-                預估耗時 30 秒~2 分鐘（視樓層大小與 AP 數量）。
+                一般樓層數秒內完成；樓層大、AP 數量多時可能需要數分鐘。
               </p>
             </section>
           </>
@@ -266,7 +301,7 @@ function AutoPowerModal({ open, apIds, onClose }) {
               <div className="auto-power-modal__progress">
                 <div className="auto-power-modal__progress-row">
                   <span>起點</span>
-                  <span>{(progress.startIdx ?? 0) + 1} / {progress.totalStarts ?? 3}（{progress.startKind}）</span>
+                  <span>{(progress.startIdx ?? 0) + 1} / {progress.totalStarts ?? 3}（{START_KIND_LABELS[progress.startKind] ?? progress.startKind}）</span>
                 </div>
                 <div className="auto-power-modal__progress-row">
                   <span>迭代</span>
@@ -343,7 +378,13 @@ function AutoPowerModal({ open, apIds, onClose }) {
             <div className="auto-power-modal__changes">
               {targetAPs.map((a) => {
                 const next = result.txMap.get(a.id)
-                const cur = a.txPower
+                // 開啟後第一幀可能還帶著上一輪的 result（reset effect 在
+                // render 後才跑）— txMap 對不上當前 AP 就跳過該列，避免
+                // 渲染出 NaN。
+                if (next == null) return null
+                // txPower 未設時退回 per-band 預設 — 跟引擎建模值同源，
+                // 也避免顯示「undefined dBm」/ delta NaN。
+                const cur = a.txPower ?? getDefaultTxPower(a.frequency ?? 5)
                 const delta = next - cur
                 return (
                   <div key={a.id} className="auto-power-modal__change-row">
