@@ -47,12 +47,16 @@
 > MCP 驗證：scenario 手算 5 case 全對、場峰值位移 198px/期望 200、GL cache round-trip
 > bit-exact、JS vs GL 質心 0.0px、排除警告生效。細節見 git log。
 
-### Phase 48+ 候選（未立項）：3D 多層熱圖
+### Phase 48+ 3D 全樓層熱圖 — 完成（2026-07-23，A 策略；防重做備註）
 
-> 討論已有共識（2026-07-23）：現況 3D 只有 active 層有熱圖平面（10-5e MVP + Phase 45 共用
-> canvas 架構）。若做，採 **A 策略起步**（進 3D 才逐層背景算 + 全域指紋快取；不做 always-on
-> ×N——會吃掉 Phase 46 效能戰果），保留升級成 C（idle 補算）的骨架。
-> 前置：Phase 48 已完成（引擎已接 align），無阻塞。等使用者立項。
+> UI＝3D 右上「🌡️ 全樓層熱圖」開關（預設關，熱圖未開/單樓層模式反灰）。
+> **A 策略拍板落地**：只在「3D 可見＋開關開」時逐層背景算（每層自己的 rx 高度＋完整跨樓層
+> 模型，`buildCrossFloorData` 與 2D adapter 共用）；指紋快取（store refs＋熱圖設定）——
+> 開關/視圖切換無資料變更時**零重算**（MCP 驗：rev 不變）；資料變更 debounce 重算。
+> **防重做**：不要改成 always-on ×N（吃掉 Phase 46 效能戰果）；要更即時再升級 C 策略
+> （idle 補算），骨架已留（heatmapStack.js 的 fingerprint/ensure 分離）。
+> 核心檔：`features/viewer3d/heatmapStack.js`、`HeatmapStackPlane3D.jsx`、
+> `features/heatmap/buildCrossFloor.js`。
 
 ### 效能殘餘（Phase 46 收工後暫緩，防重做）
 

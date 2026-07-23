@@ -15,6 +15,9 @@ import TrackLayer3D from './TrackLayer3D'
 import APLayer3D from './APLayer3D'
 import ScopeLayer3D from './ScopeLayer3D'
 import HeatmapPlane3D from './HeatmapPlane3D'
+import HeatmapStackPlane3D from './HeatmapStackPlane3D'
+import { attachHeatmapStackDriver } from './heatmapStack'
+import { useHeatmapStore } from '@/store/useHeatmapStore'
 import CameraOverlay3D from './CameraOverlay3D'
 import FloorHoleVolume3D from './FloorHoleVolume3D'
 import RiserLayer3D from './RiserLayer3D'
@@ -190,6 +193,10 @@ function FloorStack({ floor, elevation, isActive, onAPHover, onSwitchHover, onCa
           {isActive && (
             <HeatmapPlane3D floorId={floor.id} elevation={elevation} />
           )}
+          {/* Phase 48+ 全樓層熱圖: non-active floors get their own plane fed
+              by the on-demand heatmapStack computes (gates itself on the
+              toggle + heatmap enabled internally). */}
+          {!isActive && <HeatmapStackPlane3D floorId={floor.id} />}
         </>
       )}
       {inCameraMode && (
@@ -707,6 +714,8 @@ function Viewer3D() {
   const setActiveFloor = useFloorStore((s) => s.setActiveFloor)
   const activeFloor = floors.find((f) => f.id === activeFloorId) ?? null
   const show3DAllFloors = useEditorStore((s) => s.show3DAllFloors)
+  const heatmap3DAllFloors = useEditorStore((s) => s.heatmap3DAllFloors)
+  const hmEnabled       = useHeatmapStore((s) => s.enabled)
   const toggleLayer     = useEditorStore((s) => s.toggleLayer)
   const clearSelected   = useEditorStore((s) => s.clearSelected)
   // CanvasArea now keeps Viewer3D mounted but hidden when viewMode === 2D, so
@@ -724,6 +733,14 @@ function Viewer3D() {
   const visibleFloors = show3DAllFloors
     ? floors
     : floors.filter((f) => f.id === activeFloorId)
+
+  // 全樓層熱圖 driver — compute per-floor fields ONLY while 3D is visible
+  // with the toggle on (strategy A). Detach keeps the canvases cached; the
+  // fingerprint inside heatmapStack decides whether re-attach recomputes.
+  useEffect(() => {
+    if (!isVisible || !heatmap3DAllFloors || !hmEnabled || !show3DAllFloors) return undefined
+    return attachHeatmapStackDriver()
+  }, [isVisible, heatmap3DAllFloors, hmEnabled, show3DAllFloors])
 
   // Per-floor stacking elevations computed from floorHeight; shared by the
   // scene graph and the camera target so they move together when the user
@@ -1050,6 +1067,26 @@ function Viewer3D() {
             title={autoRotate ? '停止自動旋轉' : '自動旋轉（轉盤環繞，拖曳即停）'}
           >
             🔄 自動旋轉
+          </button>
+        </div>
+
+        {/* Phase 48+ 全樓層熱圖 — per-floor field planes on every stacked
+            floor. Only computes while this toggle is on and 3D is visible;
+            unchanged data re-uses cached canvases. */}
+        <div className="viewer3d__panel-row">
+          <button
+            type="button"
+            className={`viewer3d__floors-btn${heatmap3DAllFloors ? ' viewer3d__floors-btn--active' : ''}`}
+            onClick={() => toggleLayer('heatmap3DAllFloors')}
+            disabled={!hmEnabled || !show3DAllFloors}
+            title={
+              !hmEnabled ? '先開啟熱圖再使用'
+                : !show3DAllFloors ? '需先切換為顯示全部樓層'
+                : heatmap3DAllFloors ? '關閉其他樓層的熱圖平面'
+                : '為每個樓層各算一張熱圖（進 3D 才計算，資料未變時使用快取）'
+            }
+          >
+            🌡️ 全樓層熱圖
           </button>
         </div>
 

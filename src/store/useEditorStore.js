@@ -99,6 +99,11 @@ export const useEditorStore = create((set, get) => ({
   // 3D viewer — render all floors stacked (true) vs. only the active
   // floor (false). Toggled from the Viewer3D overlay.
   show3DAllFloors: true,
+  // 3D viewer — compute + show a heatmap plane on EVERY stacked floor (not
+  // just the active one). Off by default: N floors = N extra field computes,
+  // so this only runs while the user is in 3D with the toggle on; results
+  // are cached against a store fingerprint (features/viewer3d/heatmapStack).
+  heatmap3DAllFloors: false,
   // Per-kind Switch visibility (gated by showSwitches master toggle).
   showSwitchKind: { switch: true, idf: true, mdf: true, router: true },
 

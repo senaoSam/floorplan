@@ -5,7 +5,7 @@ import { buildScenario } from '@/features/heatmap/buildScenario'
 import { sampleFieldGLAsync } from '@/features/heatmap/sampleFieldGL'
 import { sampleField } from '@/features/heatmap/sampleField'
 import { getModeConfig } from '@/features/heatmap/modes'
-import { computeFloorElevations } from '@/utils/floorStacking'
+import { buildCrossFloorData } from '@/features/heatmap/buildCrossFloor'
 import { EDITOR_MODE } from '@/store/useEditorStore'
 
 // Heatmap adapter — keeps the existing raw WebGL2 heatmap engine intact and
@@ -625,83 +625,23 @@ export function attachHeatmapLayer({
     // from the null/2D path. A `length > 1` guard here made the single-floor
     // demo's contours drift relative to Konva (MCP-confirmed: null crossFloor
     // field checksum 461800843 vs object 914922232, the latter matching oldSrc).
-    let crossFloor = null
-    const allFloors = floors
-    if (allFloors.length > 0) {
-      const elevations = computeFloorElevations(allFloors)
-      const floorIndexById = new Map(allFloors.map((f, i) => [f.id, i]))
-      const holesByFloor = useFloorHoleStore?.getState().floorHolesByFloor ?? {}
-      const apsByFloor   = useAPStore.getState().apsByFloor ?? {}
-      const wallsByFloor = useWallStore.getState().wallsByFloor ?? {}
-      // Phase 48 Bundle 2 (決策②): floors WITHOUT a calibrated scale are
-      // excluded from cross-floor geometry (APs / walls / holes) instead of
-      // being silently mis-positioned with the active floor's px/m. Slab
-      // attenuation still applies (elevation-based, needs no geometry).
-      // `floorRef` hands buildScenario the authoring floor record so it can
-      // map the bucket through the inter-floor align transform.
-      const excludedFloors = []
-      for (const f of allFloors) {
-        if (f.scale || f.id === activeFloorId) continue
-        const hasContent =
-          (apsByFloor[f.id]?.length ?? 0) > 0 ||
-          (wallsByFloor[f.id]?.length ?? 0) > 0 ||
-          (holesByFloor[f.id]?.length ?? 0) > 0
-        if (hasContent) excludedFloors.push(f.name ?? f.id)
-      }
-      const floorStack = allFloors.map((f) => ({
-        id: f.id,
-        elevationM: elevations[f.id] ?? 0,
-        slabDb: f.floorSlabAttenuationDb ?? 0,
-        scale: f.scale,
-        floorRef: f,
-        holes: (f.scale ? (holesByFloor[f.id] ?? []) : []).map((h) => ({
-          points: h.points,
-          fromIdx: floorIndexById.get(h.bottomFloorId ?? f.id) ?? floorIndexById.get(f.id),
-          toIdx:   floorIndexById.get(h.topFloorId    ?? f.id) ?? floorIndexById.get(f.id),
-        })),
-      }))
-      const apsAcrossFloors = []
-      for (const f of allFloors) {
-        if (!f.scale && f.id !== activeFloorId) continue
-        const floorAPs = applyBandFilter(applyApOverlay(apsByFloor[f.id] ?? []))
-        const floorElev = elevations[f.id] ?? 0
-        for (const ap of floorAPs) {
-          apsAcrossFloors.push({
-            ...ap,
-            posPx: { x: ap.x, y: ap.y },
-            elevationM: floorElev,
-            floorScale: f.scale,
-            floorRef: f,
-          })
-        }
-      }
-      const otherFloorWalls = []
-      for (const f of allFloors) {
-        if (f.id === activeFloorId) continue
-        if (!f.scale) continue
-        const fws = wallsByFloor[f.id] ?? []
-        if (fws.length === 0) continue
-        otherFloorWalls.push({
-          elevationM: elevations[f.id] ?? 0,
-          scale: f.scale,
-          floorRef: f,
-          walls: fws,
-        })
-      }
-      useHeatmapStore.getState().setCrossFloorExcluded(excludedFloors)
-      // Exclusion can leave zero contributing APs even though totalApCount
-      // (counted before exclusion) was > 0 — nothing to render then.
-      if (apsAcrossFloors.length === 0) {
-        hide()
-        return
-      }
-      crossFloor = {
-        activeElevationM: elevations[activeFloorId] ?? 0,
-        rxHeightM: 1.0,
-        floorStack,
-        apsByFloor: apsAcrossFloors,
-        otherFloorWalls,
-      }
+    // Assembly (incl. 決策② uncalibrated-floor exclusion + floorRef for the
+    // align transform) extracted to buildCrossFloorData so the 3D all-floors
+    // heatmap stack shares it verbatim.
+    const { crossFloor, excludedFloors } = buildCrossFloorData({
+      floors,
+      activeFloorId,
+      apsByFloor: useAPStore.getState().apsByFloor ?? {},
+      wallsByFloor: useWallStore.getState().wallsByFloor ?? {},
+      holesByFloor: useFloorHoleStore?.getState().floorHolesByFloor ?? {},
+      mapAps: (list) => applyBandFilter(applyApOverlay(list)),
+    })
+    useHeatmapStore.getState().setCrossFloorExcluded(excludedFloors)
+    // Exclusion can leave zero contributing APs even though totalApCount
+    // (counted before exclusion) was > 0 — nothing to render then.
+    if (crossFloor && crossFloor.apsByFloor.length === 0) {
+      hide()
+      return
     }
 
     const scenario = buildScenario(floor, walls, aps, scopes, crossFloor)
