@@ -40,6 +40,30 @@ export function applyAlignMatrix(m, x, y) {
   return { x: m.a * x - m.b * y + m.tx, y: m.b * x + m.a * y + m.ty }
 }
 
+// Inverse of a similarity {a, b, tx, ty}: p = A⁻¹(p' − t). A = s·R maps to
+// the complex number a + i·b, so A⁻¹ = (a − i·b) / (a² + b²).
+export function invertAlignMatrix(m) {
+  const det = m.a * m.a + m.b * m.b
+  const ia = m.a / det
+  const ib = -m.b / det
+  return {
+    a: ia,
+    b: ib,
+    tx: -(ia * m.tx - ib * m.ty),
+    ty: -(ib * m.tx + ia * m.ty),
+  }
+}
+
+// composeAlignMatrix(m2, m1) = m2 ∘ m1 (apply m1 first, then m2).
+export function composeAlignMatrix(m2, m1) {
+  return {
+    a: m2.a * m1.a - m2.b * m1.b,
+    b: m2.b * m1.a + m2.a * m1.b,
+    tx: m2.a * m1.tx - m2.b * m1.ty + m2.tx,
+    ty: m2.b * m1.tx + m2.a * m1.ty + m2.ty,
+  }
+}
+
 // True when every align field is at its default — callers skip the matrix
 // work entirely (the overwhelmingly common case).
 export function isIdentityAlign(floor) {

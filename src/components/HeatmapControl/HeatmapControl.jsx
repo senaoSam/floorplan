@@ -51,6 +51,8 @@ function HeatmapControl() {
   const alignFrozen = useHeatmapStore((s) => s.alignFrozen)
   // 47-22: enabled but the active floor has no scale → nothing can render.
   const scaleMissing = useHeatmapStore((s) => s.scaleMissing)
+  // Phase 48: other floors excluded from cross-floor computation (no scale).
+  const crossFloorExcluded = useHeatmapStore((s) => s.crossFloorExcluded)
   const setEditorMode = useEditorStore((s) => s.setEditorMode)
   const hover        = useHoverReadoutStore((s) => s.reading)
 
@@ -76,6 +78,14 @@ function HeatmapControl() {
       {enabled && alignFrozen && (
         <div className="heatmap-control__notice">
           ❄️ 對齊樓層中：熱圖已暫停更新（完成對齊後自動重新計算）
+        </div>
+      )}
+      {/* Phase 48: floors whose scale is uncalibrated can't be positioned in
+          meters — they're excluded from the cross-floor field, not silently
+          mis-placed. */}
+      {enabled && crossFloorExcluded.length > 0 && (
+        <div className="heatmap-control__notice">
+          ⚠️ {crossFloorExcluded.join('、')} 尚未校正比例尺，未納入跨樓層計算
         </div>
       )}
       {/* 47-22: heatmap is on but there's no scale — it can't render. Tell the

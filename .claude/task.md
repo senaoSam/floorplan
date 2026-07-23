@@ -34,24 +34,25 @@
 
 ## 還沒做的事
 
-### Phase 48 樓層對齊修復 — Bundle 2 引擎接 align（Bundle 1 已完，2026-07-23 commit）
+### Phase 48 樓層對齊修復 — 全部完成（Bundle 1+2，2026-07-23；防重做決策保留如下）
 
-> 背景：樓層對齊調查發現引擎/2D/3D 三套語意不一致。**已拍板決策（防重做）**：
+> **已拍板決策（防重做）**：
 > ① 對齊語意統一為**米空間**（`src/utils/floorAlign.js` 為唯一正典；圖片幾米由各層比例尺回答）；
 > ② 跨樓層計算遇未校正比例尺的樓層 → **排除＋警告**（不要 fallback 硬套 active 比例尺）；
 > ③ `alignScale` 保留（僅圖紙比例誤差修正，正常恆 1）；
-> ④ 基準樓層採**方案 C**（`alignAnchorFloorId`，預設最底層，UI 已完成）。
+> ④ 基準樓層採**方案 C**（`alignAnchorFloorId`，預設最底層）。
 >
-> **Bundle 1 已完成**（2D 疊影 k=scaleA/scaleB 補償、3D hole/riser 接 align、熱圖對齊凍結、
-> 基準樓層 UI、右鍵樓層選單、對齊模式右鍵拖曳=平移視角、各 UX 修正）。
->
-> **Bundle 2 待做**：
-> - [ ] buildScenario 跨樓層幾何過 `T = A_active⁻¹ ∘ A_other`（其他樓層牆端點、AP posPx、
->       中庭 bypass 多邊形；active floor 維持 identity → scenario 座標系不變，顯示/hover/shader 零改動，
->       JS+GL 雙引擎自動同步）。heatmapAdapter crossFloor buckets 傳 align 欄位。
-> - [ ] 未校正比例尺的其他樓層：從跨樓層計算**排除** + HeatmapControl 警告 chip（決策②）。
-> - [ ] 風險驗證：GL cache hash 蓋到 align 變化（47-10 教訓，A→改align→A round-trip）；
->       align identity 場景熱圖 checksum 回歸不變。
+> **Bundle 2 已完成**：buildScenario 跨樓層幾何（AP／牆線段／中庭 bypass）過
+> `T = A_active⁻¹ ∘ A_other`，active 維持 identity → scenario 座標系不變、雙引擎自動同步。
+> MCP 驗證：scenario 手算 5 case 全對、場峰值位移 198px/期望 200、GL cache round-trip
+> bit-exact、JS vs GL 質心 0.0px、排除警告生效。細節見 git log。
+
+### Phase 48+ 候選（未立項）：3D 多層熱圖
+
+> 討論已有共識（2026-07-23）：現況 3D 只有 active 層有熱圖平面（10-5e MVP + Phase 45 共用
+> canvas 架構）。若做，採 **A 策略起步**（進 3D 才逐層背景算 + 全域指紋快取；不做 always-on
+> ×N——會吃掉 Phase 46 效能戰果），保留升級成 C（idle 補算）的骨架。
+> 前置：Phase 48 已完成（引擎已接 align），無阻塞。等使用者立項。
 
 ### 效能殘餘（Phase 46 收工後暫緩，防重做）
 

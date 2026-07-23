@@ -6,6 +6,13 @@
 
 import { channelCenterMHz } from './frequency'
 import { getDefaultTxPower, getAPAntennaGain } from '@/constants/apModels'
+import {
+  makeAlignMatrixM,
+  applyAlignMatrix,
+  invertAlignMatrix,
+  composeAlignMatrix,
+  isIdentityAlign,
+} from '@/utils/floorAlign'
 
 // ITU-R P.2040-3 Table 3 coefficients. Reflection uses full complex Fresnel
 // based on (eps_r, sigma) derived from these per-AP frequency. Fallback ~ concrete.
@@ -141,9 +148,12 @@ function collectCorners(segments) {
 //         antennaMode, azimuth, tilt, beamwidth, patternId }
 //     ],
 //     otherFloorWalls?: [                 non-active floors' walls (HM-F2c);
-//       { elevationM, scale, walls: Wall[] }    each floor keeps its own
-//     ]                                         px→m scale and elevation.
+//       { elevationM, scale, floorRef, walls: Wall[] }   each floor keeps its
+//     ]                                   own px→m scale and elevation.
 //   }
+//   Cross-floor buckets (apsByFloor entries / otherFloorWalls / floorStack)
+//   carry `floorRef` — the authoring floor record — so geometry can be mapped
+//   through the inter-floor align transform (Phase 48; see relAlignM below).
 //
 // Returns: { size:{w,h}, walls, corners, aps, scopeMaskFn, floorStack?, rxElevationM? }
 //          When crossFloor is provided, aps includes all floors' APs with
@@ -155,6 +165,26 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
 
   const w = floor.imageWidth * pxToM
   const h = floor.imageHeight * pxToM
+
+  // Inter-floor alignment (Phase 48 Bundle 2). Other floors' geometry maps
+  // into the active floor's local-meter frame via T = A_active⁻¹ ∘ A_other
+  // (meter-space similarity, utils/floorAlign). The active floor stays
+  // untransformed, so the scenario frame — and everything downstream
+  // (display sprite, hover probe, scope masks, both engines) — is unchanged.
+  // Returns null (= skip, bit-exact legacy path) when no align is in play or
+  // when the bucket IS the active floor. Cross-floor buckets carry the
+  // authoring floor record as `floorRef` (heatmapAdapter).
+  const activeInvM = isIdentityAlign(floor)
+    ? null
+    : invertAlignMatrix(makeAlignMatrixM(floor, pxToM))
+  const relAlignM = (otherFloor, otherPxToM) => {
+    if (!otherFloor || otherFloor.id === floor.id) return null
+    const otherM = isIdentityAlign(otherFloor)
+      ? null
+      : makeAlignMatrixM(otherFloor, otherPxToM)
+    if (!otherM) return activeInvM
+    return activeInvM ? composeAlignMatrix(activeInvM, otherM) : otherM
+  }
 
   // Active-floor walls sit at the active elevation (provided via crossFloor).
   // Single-floor planar mode has no crossFloor — treat as elevation 0.
@@ -174,8 +204,13 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
   if (crossFloor?.otherFloorWalls) {
     for (const bucket of crossFloor.otherFloorWalls) {
       const bucketPxToM = bucket.scale ? 1 / bucket.scale : pxToM
+      const t = relAlignM(bucket.floorRef, bucketPxToM)
       for (const wall of bucket.walls ?? []) {
         for (const seg of expandWall(wall, bucketPxToM, bucket.elevationM ?? 0)) {
+          if (t) {
+            seg.a = applyAlignMatrix(t, seg.a.x, seg.a.y)
+            seg.b = applyAlignMatrix(t, seg.b.x, seg.b.y)
+          }
           wallSegs.push(seg)
         }
       }
@@ -214,11 +249,10 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
     // Cross-floor path: each entry already has {posPx, floorScale, elevationM}.
     apList = crossFloor.apsByFloor.map((ap) => {
       const apPxToM = ap.floorScale ? 1 / ap.floorScale : pxToM
-      return buildApEntry(
-        ap,
-        { x: ap.posPx.x * apPxToM, y: ap.posPx.y * apPxToM },
-        ap.elevationM,
-      )
+      let pos = { x: ap.posPx.x * apPxToM, y: ap.posPx.y * apPxToM }
+      const t = relAlignM(ap.floorRef, apPxToM)
+      if (t) pos = applyAlignMatrix(t, pos.x, pos.y)
+      return buildApEntry(ap, pos, ap.elevationM)
     })
   } else {
     // Planar path: every AP lives on the supplied `floor`.
@@ -289,8 +323,19 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
           if (hole.fromIdx == null || hole.toIdx == null) continue
           if (hole.fromIdx <= i && i <= hole.toIdx - 1) {
             const holePxToM = f.scale ? 1 / f.scale : pxToM
+            const t = relAlignM(f.floorRef, holePxToM)
             const pts = new Array(hole.points.length)
-            for (let p = 0; p < hole.points.length; p++) pts[p] = hole.points[p] * holePxToM
+            for (let p = 0; p + 1 < hole.points.length; p += 2) {
+              let x = hole.points[p] * holePxToM
+              let y = hole.points[p + 1] * holePxToM
+              if (t) {
+                const q = applyAlignMatrix(t, x, y)
+                x = q.x
+                y = q.y
+              }
+              pts[p] = x
+              pts[p + 1] = y
+            }
             bypassHoles.push(pts)
           }
         }

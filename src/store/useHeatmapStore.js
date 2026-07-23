@@ -85,6 +85,12 @@ export const useHeatmapStore = create((set) => ({
   // a notice + a one-click "set the scale" action (enters DRAW_SCALE).
   scaleMissing: false,
 
+  // Phase 48 Bundle 2 (決策②): names of OTHER floors excluded from the
+  // cross-floor computation because their scale is uncalibrated (their
+  // AP/wall/hole positions can't be converted to meters). Drives a
+  // HeatmapControl notice so the exclusion isn't silent.
+  crossFloorExcluded: [],
+
   setEnabled:     (v) => set({ enabled: v }),
   setMode:        (v) => set({ mode: v }),
   setEngine:      (v) => set({ engine: v }),
@@ -106,4 +112,11 @@ export const useHeatmapStore = create((set) => ({
   setAlignFrozen: (v) => set((s) => (s.alignFrozen === v ? s : { alignFrozen: v })),
   // 47-22: same no-op-when-unchanged guard (adapter calls it every compute).
   setScaleMissing: (v) => set((s) => (s.scaleMissing === v ? s : { scaleMissing: v })),
+  // Same guard, array-valued (adapter calls it every compute).
+  setCrossFloorExcluded: (names) => set((s) => (
+    s.crossFloorExcluded.length === names.length &&
+    s.crossFloorExcluded.every((n, i) => n === names[i])
+      ? s
+      : { crossFloorExcluded: names }
+  )),
 }))
