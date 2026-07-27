@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
 import './ConfirmDialog.sass'
 
 // Generic confirm modal. Render conditionally at the call site (open={true}).
@@ -28,6 +29,8 @@ function ConfirmDialog({ title, message, confirmLabel = '確認', cancelLabel = 
     return () => document.removeEventListener('keydown', onKey)
   }, [onConfirm, onCancel])
 
+  const dismiss = useOverlayDismiss(onCancel)
+
   // Portal to <body> so the fixed-position overlay is centred on the VIEWPORT,
   // not on whatever ancestor it's declared in. Toolbar.jsx (a caller) lives
   // inside .toolbar-floating which has transform: translateX(-50%) — a CSS
@@ -35,8 +38,8 @@ function ConfirmDialog({ title, message, confirmLabel = '確認', cancelLabel = 
   // pushed the dialog off-centre and squashed it to the toolbar's narrow width
   // (the reported "位置不對 + 文字破版"). The portal escapes that containing block.
   return createPortal(
-    <div className="confirm-dialog-overlay" onClick={onCancel}>
-      <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
+    <div className="confirm-dialog-overlay" {...dismiss}>
+      <div className="confirm-dialog">
         {title && <p className="confirm-dialog__title">{title}</p>}
         {message && <p className="confirm-dialog__message">{message}</p>}
         <div className="confirm-dialog__actions">

@@ -4,6 +4,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAIPreviewStore } from '@/store/useAIPreviewStore'
 import { floorplanFromLines } from '@/utils/floorplanFromLines'
+import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
 import './AIWallsModal.sass'
 
 // AI Wall flow:
@@ -243,6 +244,8 @@ export default function AIWallsModal({ open, onClose }) {
     }
   }, [floor, apiKey, setWalls, setFloorScale, setGeminiPreview])
 
+  const dismiss = useOverlayDismiss(onClose)
+
   if (!open) return null
 
   const counts = result?.lines?.reduce(
@@ -251,8 +254,8 @@ export default function AIWallsModal({ open, onClose }) {
   )
 
   const modal = (
-    <div className="ai-walls-modal-overlay" onClick={onClose}>
-      <div className="ai-walls-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="ai-walls-modal-overlay" {...dismiss}>
+      <div className="ai-walls-modal">
         <div className="ai-walls-modal__header">
           <span className="ai-walls-modal__title">AI 偵測牆壁</span>
           <span className="ai-walls-modal__sub">

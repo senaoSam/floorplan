@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
 import './ScaleDialog.sass'
 
 // Modal asking for the real-world distance between two clicked points.
@@ -26,9 +27,11 @@ function ScaleDialog({ pixelDist, onConfirm, onCancel }) {
     if (e.key === 'Escape') onCancel()
   }
 
+  const dismiss = useOverlayDismiss(onCancel)
+
   return (
-    <div className="scale-dialog-overlay" onClick={onCancel}>
-      <div className="scale-dialog" onClick={(e) => e.stopPropagation()}>
+    <div className="scale-dialog-overlay" {...dismiss}>
+      <div className="scale-dialog">
         <p className="scale-dialog__title">設定比例尺</p>
         <p className="scale-dialog__px">量測長度：{pixelDist} px</p>
         <div className="scale-dialog__row">

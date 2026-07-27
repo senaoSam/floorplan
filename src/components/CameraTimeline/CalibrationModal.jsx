@@ -4,6 +4,7 @@ import { useCameraStore } from '@/store/useCameraStore'
 import { solveHomography } from '@/utils/homography'
 import { FRAME_W, FRAME_H } from '@/features/cameras/frameConstants'
 import { drawCctvFrame } from '@/features/cameras/mockCctv'
+import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
 import './CalibrationModal.sass'
 
 // Heat-map calibration modal (Verkada parity, see verkada-notes §L, stage 1).
@@ -143,9 +144,11 @@ function CalibrationModal() {
   const planStep = onPlanStage ? `① 在平面圖點第 ${floorPts.length + 1} 點` : null
   const frameStep = onFrameStage ? `② 在相機畫面點對應的第 ${framePts.length + 1} 點` : null
 
+  const dismiss = useOverlayDismiss(closeCalibrate)
+
   return (
-    <div className="calib" onClick={closeCalibrate}>
-      <div className="calib__frame" onClick={(e) => e.stopPropagation()}>
+    <div className="calib" {...dismiss}>
+      <div className="calib__frame">
         <div className="calib__bar">
           <span className="calib__title">🎯 相機校正 · 用於人流熱圖 · {camera.name}</span>
           <button type="button" className="calib__close" onClick={closeCalibrate}>✕</button>

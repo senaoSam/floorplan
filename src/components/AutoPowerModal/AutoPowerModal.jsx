@@ -5,6 +5,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { getDefaultTxPower } from '@/constants/apModels'
+import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
 import './AutoPowerModal.sass'
 
 // HM-F9: run the greedy plan in a Web Worker so the main thread stays
@@ -209,12 +210,14 @@ function AutoPowerModal({ open, apIds, onClose }) {
     setError(null)
   }, [])
 
+  const dismiss = useOverlayDismiss(running ? null : onClose)
+
   if (!open) return null
 
   // Render to body：避開 PanelRight 祖先 transform 對 position:fixed 的影響。
   return createPortal((
-    <div className="auto-power-modal-overlay" onClick={running ? undefined : onClose}>
-      <div className="auto-power-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="auto-power-modal-overlay" {...dismiss}>
+      <div className="auto-power-modal">
         <div className="auto-power-modal__header">
           <span className="auto-power-modal__title">自動功率規劃</span>
           <span className="auto-power-modal__sub">
