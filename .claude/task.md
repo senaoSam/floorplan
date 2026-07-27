@@ -34,6 +34,29 @@
 
 ## 還沒做的事
 
+### Phase 49 自動規劃 AP 放置（auto place）— 已實作，待使用者驗收（2026-07-23 起）
+
+> Spec 與所有拍板決策見 `.claude/auto-place-spec.md`。
+> 三模式（fresh 重新規劃／fixed 固定數量／fill 補洞）+ 頻段選擇 + 完整頻道指派
+> （`greedyChannelAssign` 新增 `fixedChannels` 參數）+ ghost 預覽層（`ghostAPsLayer`）
+> + what-if 熱圖（heatmapAdapter 併入 previewAps，memoized 不破指紋）
+> + 預覽態 docked 小卡不擋畫布。
+> 演算法：候選格 → 覆蓋矩陣 → set cover 貪婪 → relocate。
+> 同期：autoPowerPlan 修復 + ~100x 提速已 commit（9dde23c）。
+>
+> **2026-07-27 使用者驗收回饋 → 四輪修正**（細節與實測數據全在 spec）：
+> 1. **室內偵測**（`utils/indoorMask.js`）— 原本 AP 會被放到牆外空地（demo 10 顆中 6 顆）。
+>    flood fill 自動辨識建築範圍，候選點與評分格都套；牆沒接好時退回全範圍 + UI 明示。
+> 2. **格距校準** — `gridStepM` 2→1 m、`candStepM` 4→2 m。候選格才是關鍵瓶頸：
+>    demo 從「10 顆 / 93.3% / 未達標」變成「7 顆 / 97.2% / 達標」。
+>    加 `stopReason` + `targetMet`，未達標不再假裝成功。
+> 3. **移除預覽** — 紅環「✕」標出將被移除的 AP；併修 heatmapAdapter 只加不減
+>    導致 what-if 熱圖虛胖（實測落差達 13 dB）。
+> 4. **原地保留** — 重跑時位置沒變的 AP 不刪不加（原本會洗掉手動調過的功率/頻道）。
+>
+> 另修 overlay dismiss（`hooks/useOverlayDismiss.js`）：7 個 modal 的
+> 「modal 內按下 → 背景放開」誤關問題。
+
 ### Phase 48 樓層對齊修復 — 全部完成（Bundle 1+2，2026-07-23；防重做決策保留如下）
 
 > **已拍板決策（防重做）**：
