@@ -30,6 +30,7 @@ import { bindHeatmapHover } from '@/render/heatmapHoverBinder'
 import { bindClientView } from '@/features/clientView/clientViewBinder'
 import { attachClientViewLayer } from '@/features/clientView/clientViewLayer'
 import { attachStatsOverlayLayer } from '@/features/stats/statsOverlayLayer'
+import { attachGhostAPsLayer } from '@/features/autoPlace/ghostAPsLayer'
 import { attachDraftOverlay } from '@/features/draft/draftOverlayLayer'
 import { attachHandlesLayer } from '@/features/handles/handlesLayer'
 import { attachRefOverlayLayer } from '@/features/refOverlay/refOverlayLayer'
@@ -55,6 +56,7 @@ import { useClientViewStore } from '@/store/useClientViewStore'
 import { useCameraStore } from '@/store/useCameraStore'
 import { useTrackingStore } from '@/store/useTrackingStore'
 import { useDraftStore } from '@/store/useDraftStore'
+import { useAutoPlaceStore } from '@/store/useAutoPlaceStore'
 import { useMaterialToastStore } from '@/store/useMaterialToastStore'
 import { showUiToast } from '@/store/useUiToastStore'
 import { MATERIAL_LIST } from '@/constants/materials'
@@ -125,6 +127,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachClientView = null
     let detachClientViewLayer = null
     let detachStatsOverlay = null
+    let detachGhostAPs = null
     let detachDraftOverlay = null
     let detachHandles = null
     let detachRefOverlay = null
@@ -393,6 +396,13 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useHeatmapStore,
         useDragOverlayStore,
         useEditorStore,
+        useAutoPlaceStore,
+      })
+      detachGhostAPs = attachGhostAPsLayer({
+        scene: s,
+        useAutoPlaceStore,
+        useFloorStore,
+        useAPStore,
       })
       detachSelection = attachSelectionOverlay({
         scene: s,
@@ -515,6 +525,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           history: useHistoryStore,
           camera: useCameraStore,
           tracking: useTrackingStore,
+          autoPlace: useAutoPlaceStore,
         }
       }
     })
@@ -821,6 +832,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (detachRefOverlay) detachRefOverlay()
       if (detachHandles) detachHandles()
       if (detachDraftOverlay) detachDraftOverlay()
+      if (detachGhostAPs) detachGhostAPs()
       if (detachClientViewLayer) detachClientViewLayer()
       if (detachStatsOverlay) detachStatsOverlay()
       if (detachClientView) detachClientView()

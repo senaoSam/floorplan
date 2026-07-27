@@ -25,6 +25,7 @@ import StressLoader from '@/components/StressLoader/StressLoader'
 import { capturePlanPng, triggerImageDownload } from '@/features/exportPng/exportPlanView'
 import { getSceneRefs } from '@/render/sceneRegistry'
 import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
+import AutoPlaceModal from '@/components/AutoPlaceModal/AutoPlaceModal'
 import './SidebarLeft.sass'
 
 // Ported from oldSrc; trimmed against the PIXI port:
@@ -65,6 +66,7 @@ function SidebarLeft() {
   const [menuOpenId, setMenuOpenId] = useState(null)
   const [pendingRemove, setPendingRemove] = useState(null)
   const [autoPowerOpen, setAutoPowerOpen] = useState(false)
+  const [autoPlaceOpen, setAutoPlaceOpen] = useState(false)
   const [pendingSwitch, setPendingSwitch] = useState(null)
   // Set when the user asks to align the ANCHOR floor — confirmed before
   // proceeding, since the anchor is the pose everyone else aligns onto.
@@ -486,6 +488,13 @@ function SidebarLeft() {
                   </label>
                   <button
                     className="sidebar-left__floor-action"
+                    title="依覆蓋目標自動計算本樓層 AP 的建議位置與頻道（先預覽再套用）"
+                    onClick={(e) => { e.stopPropagation(); setAutoPlaceOpen(true) }}
+                  >
+                    📍 自動規劃 AP 放置
+                  </button>
+                  <button
+                    className="sidebar-left__floor-action"
                     title="自動調整本樓層各 AP 的發射功率，達成目標訊號涵蓋"
                     onClick={(e) => { e.stopPropagation(); setAutoPowerOpen(true) }}
                   >
@@ -553,6 +562,10 @@ function SidebarLeft() {
         open={autoPowerOpen}
         apIds={[]}
         onClose={() => setAutoPowerOpen(false)}
+      />
+      <AutoPlaceModal
+        open={autoPlaceOpen}
+        onClose={() => setAutoPlaceOpen(false)}
       />
     </aside>
   )

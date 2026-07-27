@@ -157,8 +157,37 @@ export function attachHeatmapLayer({
   useHeatmapStore,
   useDragOverlayStore,
   useEditorStore,
+  useAutoPlaceStore,   // Phase 49（選用）：ghost 預覽 AP 併入場計算（what-if 熱圖）
 }) {
   const layer = scene.layers.heatmap
+
+  // Phase 49 — 把自動擺位的 preview AP 併進 apsByFloor。memoize：zustand 的
+  // 陣列/物件 ref 沒變就回傳同一個合併結果，否則 idleInputs 指紋（比 ref）
+  // 會在每次 compute 都失效、任何 store 事件都觸發重算。
+  //
+  // removeApIds 要一起排除 —— fresh / fixed 模式套用時會刪掉現有同頻段 AP，
+  // 只加不減的話 what-if 熱圖是「新 AP + 舊 AP 全在」的疊加，比套用後的
+  // 真實結果樂觀，使用者會照著一張不會發生的圖做決定。
+  let previewMergeCache = { real: null, preview: null, removeIds: null, fid: null, out: null }
+  const mergePreviewAps = (real, fid) => {
+    const st = useAutoPlaceStore ? useAutoPlaceStore.getState() : null
+    const onFloor = st && st.floorId === fid
+    const preview = onFloor && st.previewAps.length > 0 ? st.previewAps : null
+    const removeIds = onFloor && st.removeApIds.length > 0 ? st.removeApIds : null
+    if (!preview && !removeIds) return real
+    const c = previewMergeCache
+    if (c.real === real && c.preview === preview && c.removeIds === removeIds && c.fid === fid) {
+      return c.out
+    }
+    let base = real[fid] ?? []
+    if (removeIds) {
+      const drop = new Set(removeIds)
+      base = base.filter((ap) => !drop.has(ap.id))
+    }
+    const out = { ...real, [fid]: preview ? [...base, ...preview] : base }
+    previewMergeCache = { real, preview, removeIds, fid, out }
+    return out
+  }
   let gl = null
   let sprite = null
   let texture = null
@@ -587,11 +616,13 @@ export function attachHeatmapLayer({
       bandFilter === 'all' ? list : list.filter((a) => String(a.frequency) === bandFilter)
 
     const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
-    const aps = applyBandFilter(applyApOverlay(useAPStore.getState().apsByFloor[activeFloorId] ?? []))
+    // Phase 49：ghost 預覽 AP 併入來源（planar 參數與 crossFloor 共用同一份，
+    // 預覽態的熱圖直接呈現「套用後」的 what-if 場）。
+    const apsByFloorAll = mergePreviewAps(useAPStore.getState().apsByFloor ?? {}, activeFloorId)
+    const aps = applyBandFilter(applyApOverlay(apsByFloorAll[activeFloorId] ?? []))
     // Cross-floor: even when the ACTIVE floor has no APs, other floors'
     // APs can still cast attenuated signal through the slab. Check the
     // building-wide AP count, not just the active floor's.
-    const apsByFloorAll = useAPStore.getState().apsByFloor ?? {}
     // Count band-filtered APs across the building: if the selected band has no
     // APs anywhere there's nothing to render.
     const totalApCount = Object.values(apsByFloorAll)
@@ -631,7 +662,7 @@ export function attachHeatmapLayer({
     const { crossFloor, excludedFloors } = buildCrossFloorData({
       floors,
       activeFloorId,
-      apsByFloor: useAPStore.getState().apsByFloor ?? {},
+      apsByFloor: apsByFloorAll,   // 含 Phase 49 preview 合併
       wallsByFloor: useWallStore.getState().wallsByFloor ?? {},
       holesByFloor: useFloorHoleStore?.getState().floorHolesByFloor ?? {},
       mapAps: (list) => applyBandFilter(applyApOverlay(list)),
@@ -975,6 +1006,9 @@ export function attachHeatmapLayer({
   const unsubFloor = useFloorStore.subscribe(scheduleComputeDebounced)
   const unsubWall = useWallStore.subscribe(scheduleComputeDebounced)
   const unsubAP = useAPStore.subscribe(scheduleComputeDebounced)
+  // Phase 49：ghost 預覽 set / clear 都是單一事件（非連續編輯），走即時路徑，
+  // 預覽一放上去熱圖立刻切到 what-if 場。
+  const unsubAutoPlace = useAutoPlaceStore ? useAutoPlaceStore.subscribe(scheduleCompute) : () => {}
   // NOTE: scopes do NOT trigger a heatmap recompute. They are a purely visual
   // vector clip (rebuildMask / unsubMaskScope below), so the field value never
   // changes when a scope is drawn/dragged/flipped. Subscribing recompute here
@@ -1011,6 +1045,7 @@ export function attachHeatmapLayer({
     unsubFloor()
     unsubWall()
     unsubAP()
+    unsubAutoPlace()
     unsubHole()
     unsubDrag()
     unsubEditor()

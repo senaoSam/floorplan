@@ -30,9 +30,12 @@ function dist2(a, b) {
 //   aps              — array of AP objects (must have id, x, y, frequency)
 //   domainId         — regulatory domain id ('TW', 'US', …)
 //   interferenceRadius — canvas-px radius within which two APs can interfere
+//   fixedChannels    — optional Map<apId, channel>：這些 AP 的頻道視為已定，
+//                      不重新指派、但計入鄰居重疊（Phase 49 fill 模式：
+//                      新 AP 繞著現有 AP 的頻道排）
 //
-// Returns: Map<apId, { channel }>
-export function greedyChannelAssign(aps, domainId, interferenceRadius = 300) {
+// Returns: Map<apId, { channel }>（含 fixed 的 AP，方便呼叫端統一讀）
+export function greedyChannelAssign(aps, domainId, interferenceRadius = 300, fixedChannels = null) {
   const r2 = interferenceRadius * interferenceRadius
   const result = new Map()
 
@@ -44,6 +47,16 @@ export function greedyChannelAssign(aps, domainId, interferenceRadius = 300) {
     const candidates = getNonOverlappingChannels(domainId, band)
     if (candidates.length === 0) continue
 
+    // Seed pre-assigned (fixed) APs first so the greedy loop counts their
+    // overlap but never reassigns them.
+    if (fixedChannels) {
+      for (const ap of bandAPs) {
+        if (fixedChannels.has(ap.id)) {
+          result.set(ap.id, { channel: fixedChannels.get(ap.id) })
+        }
+      }
+    }
+
     // Sort: APs with more neighbours first so they get first pick.
     const sorted = [...bandAPs].sort((a, b) => {
       const na = bandAPs.filter((x) => x.id !== a.id && dist2(x, a) <= r2).length
@@ -52,6 +65,7 @@ export function greedyChannelAssign(aps, domainId, interferenceRadius = 300) {
     })
 
     for (const ap of sorted) {
+      if (result.has(ap.id)) continue  // fixed — keep as-is
       // Count how many already-assigned neighbours use each candidate channel.
       const score = candidates.map((ch) => {
         let overlap = 0
