@@ -655,6 +655,17 @@ const PHASES = [
           { id: '16-3o', done: true,  text: 'Toolbar「AI 偵測牆壁」入口 + 三桶分寫 + Undo/Redo 整合' },
         ],
       },
+      {
+        layer: 'Layer 50 — cv+graph pipeline API',
+        items: [
+          { id: '50-1', done: true, text: 'AI 牆改接 cv+graph pipeline（砍 Gemini 清圖 + API key + 解析度 remap）' },
+          { id: '50-2', done: true, text: '非同步 job 流程：POST /jobs → 輪詢 → lines[]（不打 /coords，省一次往返）' },
+          { id: '50-3', done: true, text: '演算法選單 7 種（預設 cnn）+ 重新偵測不必關窗' },
+          { id: '50-4', done: true, text: '/denoised 中間圖（4 色線稿診斷；依 denoised_url 判定不硬寫規則）' },
+          { id: '50-5', done: true, text: 'ApiTestModal：header 入口，一鍵跑完 7 支 + 逐列狀態/耗時' },
+          { id: '50-6', done: true, text: 'ImageLightbox 共用放大檢視（原尺寸、框內捲動、Esc 不連帶關 modal）' },
+        ],
+      },
     ],
   },
 ]
