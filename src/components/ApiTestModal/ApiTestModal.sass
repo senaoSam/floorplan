@@ -1,0 +1,266 @@
+@use '@/styles/variables' as *
+
+.api-test-modal-overlay
+  position: fixed
+  inset: 0
+  z-index: $z-modal
+  display: flex
+  align-items: center
+  justify-content: center
+  background: rgba(0, 0, 0, 0.5)
+  backdrop-filter: blur(2px)
+
+.api-test-modal
+  background: $bg-secondary
+  border: 1px solid $border-color
+  border-radius: 10px
+  padding: 18px 22px
+  min-width: 640px
+  max-width: 820px
+  max-height: 88vh
+  overflow-y: auto
+  display: flex
+  flex-direction: column
+  gap: 12px
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4)
+
+  &__header
+    display: flex
+    align-items: baseline
+    gap: 12px
+    border-bottom: 1px solid $border-color
+    padding-bottom: 10px
+
+  &__title
+    font-size: 15px
+    font-weight: 600
+    color: $text-primary
+
+  &__sub
+    font-size: 12px
+    color: $text-secondary
+
+  &__config
+    display: grid
+    grid-template-columns: 1fr 1fr
+    gap: 10px
+
+  &__field
+    display: flex
+    flex-direction: column
+    gap: 4px
+    font-size: 12px
+    color: $text-secondary
+    min-width: 0
+
+    input,
+    select
+      background: $bg-primary
+      border: 1px solid $border-color
+      color: $text-primary
+      padding: 6px 10px
+      border-radius: 4px
+      font-size: 13px
+      outline: none
+      min-width: 0
+
+      &:focus
+        border-color: $accent
+
+      &:disabled
+        opacity: 0.5
+        cursor: not-allowed
+
+  &__section
+    display: flex
+    flex-direction: column
+    gap: 6px
+    border-top: 1px solid $border-color
+    padding-top: 10px
+
+  &__section-title
+    font-size: 13px
+    font-weight: 600
+    color: $text-primary
+    display: flex
+    align-items: center
+    gap: 8px
+
+  // <details><summary> uses the same class — make it look clickable.
+  summary.api-test-modal__section-title
+    cursor: pointer
+
+  &__badge
+    font-size: 11px
+    font-weight: 600
+    padding: 1px 8px
+    border-radius: 10px
+    text-transform: uppercase
+    letter-spacing: 0.4px
+
+    &--ok
+      background: rgba(59, 255, 123, 0.15)
+      color: #3bff7b
+
+    &--run
+      background: rgba(255, 210, 74, 0.15)
+      color: #ffd24a
+
+    &--bad
+      background: rgba(239, 68, 68, 0.15)
+      color: $danger-soft
+
+  &__log
+    display: flex
+    flex-direction: column
+    gap: 2px
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace
+    font-size: 12px
+
+  &__log-row
+    display: grid
+    grid-template-columns: 48px 1fr 48px 60px
+    gap: 8px
+    align-items: baseline
+    padding: 3px 6px
+    border-radius: 3px
+    background: rgba(255, 255, 255, 0.02)
+
+    &--ok
+      color: $text-secondary
+      .api-test-modal__log-status
+        color: #3bff7b
+
+    &--fail
+      color: $text-secondary
+      background: rgba(239, 68, 68, 0.08)
+      .api-test-modal__log-status
+        color: $danger-soft
+
+    &--pending
+      color: $text-tertiary
+
+  &__log-method
+    font-weight: 600
+    color: $text-primary
+
+  &__log-path
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+
+  &__log-status
+    text-align: right
+    font-weight: 600
+
+  &__log-time
+    text-align: right
+    color: $text-tertiary
+
+  &__log-note
+    grid-column: 1 / -1
+    color: $danger-soft
+    font-size: 11px
+
+  &__kv
+    display: flex
+    flex-wrap: wrap
+    gap: 4px 16px
+    font-size: 12px
+    color: $text-secondary
+
+    b
+      color: $text-tertiary
+      font-weight: 600
+      margin-right: 4px
+
+  &__pre
+    margin: 0
+    background: $bg-primary
+    border: 1px solid $border-color
+    border-radius: 4px
+    padding: 8px 10px
+    font-size: 11px
+    line-height: 1.5
+    color: $text-secondary
+    max-height: 160px
+    overflow: auto
+    white-space: pre-wrap
+    word-break: break-word
+
+    &--tall
+      max-height: 240px
+
+  &__zoom-btn
+    margin-left: auto
+    background: $bg-primary
+    border: 1px solid $border-color
+    color: $text-secondary
+    padding: 2px 10px
+    border-radius: 4px
+    font-size: 11px
+    cursor: pointer
+
+    &:hover
+      background: rgba(255, 255, 255, 0.06)
+      color: $text-primary
+
+  &__image
+    display: block
+    max-width: 100%
+    max-height: 420px
+    object-fit: contain
+    border: 1px solid $border-color
+    border-radius: 4px
+    background: #000
+
+    &--clickable
+      cursor: zoom-in
+
+  &__hint
+    font-size: 11px
+    color: $text-tertiary
+
+    a
+      color: $text-secondary
+      text-decoration: underline
+
+  &__error
+    color: $danger-soft
+    font-size: 12px
+    line-height: 1.5
+
+  &__actions
+    display: flex
+    gap: 8px
+    justify-content: flex-end
+    align-items: center
+    border-top: 1px solid $border-color
+    padding-top: 10px
+
+  &__btn
+    background: $bg-primary
+    border: 1px solid $border-color
+    color: $text-primary
+    padding: 6px 14px
+    border-radius: 4px
+    font-size: 13px
+    cursor: pointer
+
+    &:hover:not(:disabled)
+      background: rgba(255, 255, 255, 0.05)
+
+    &:disabled
+      opacity: 0.4
+      cursor: not-allowed
+
+    &--primary
+      background: #3a86ff
+      border-color: #3a86ff
+      color: #fff
+      &:hover:not(:disabled)
+        background: #2c6fd9
+
+    &--danger
+      border-color: $danger
+      color: $danger-soft

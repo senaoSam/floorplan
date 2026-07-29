@@ -1,0 +1,82 @@
+@use '@/styles/variables' as *
+
+// Sits above $z-modal (the host modal) but below $z-menu / $z-tooltip so
+// context menus and tooltips still win.
+.image-lightbox
+  position: fixed
+  inset: 0
+  z-index: $z-modal + 50
+  display: flex
+  flex-direction: column
+  align-items: center
+  gap: 8px
+  padding: 12px 16px 16px
+  background: rgba(0, 0, 0, 0.85)
+  backdrop-filter: blur(3px)
+
+  &__bar
+    width: 100%
+    display: flex
+    align-items: center
+    justify-content: space-between
+    gap: 12px
+    flex-shrink: 0
+
+  &__title
+    font-size: 13px
+    font-weight: 600
+    color: $text-primary
+
+  &__actions
+    display: flex
+    align-items: center
+    gap: 10px
+
+  &__link
+    font-size: 12px
+    color: $text-secondary
+    text-decoration: underline
+
+    &:hover
+      color: $text-primary
+
+  &__close
+    background: transparent
+    border: 1px solid $border-color
+    color: $text-primary
+    width: 26px
+    height: 26px
+    border-radius: 4px
+    font-size: 13px
+    line-height: 1
+    cursor: pointer
+
+    &:hover
+      background: rgba(255, 255, 255, 0.08)
+
+  // The image scrolls inside this frame instead of the page, so wide overlays
+  // stay inspectable without the body ever scrolling horizontally.
+  &__frame
+    flex: 1
+    min-height: 0
+    width: 100%
+    overflow: auto
+    display: flex
+    align-items: center
+    justify-content: center
+    background: #000
+    border: 1px solid $border-color
+    border-radius: 6px
+
+  &__img
+    display: block
+    // Native size by default; the frame scrolls when it doesn't fit. This is
+    // the point of the viewer — the inline thumbnails are already fit-to-width.
+    max-width: none
+    max-height: none
+    image-rendering: pixelated
+
+  &__hint
+    font-size: 11px
+    color: $text-tertiary
+    flex-shrink: 0

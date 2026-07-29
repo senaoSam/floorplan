@@ -1,121 +1,76 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAIPreviewStore } from '@/store/useAIPreviewStore'
 import { floorplanFromLines } from '@/utils/floorplanFromLines'
 import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
+import ImageLightbox from '@/components/ImageLightbox/ImageLightbox'
 import './AIWallsModal.sass'
 
-// AI Wall flow:
-//   1. Prompt user for the Gemini API key (temporary input — will move to
-//      settings later).
-//   2. Send the active floor's image to Gemini (gemini-3-pro-image-preview)
-//      with a prompt that strips everything except walls/doors/windows and
-//      re-renders them as clean colored lines.
-//   3. POST the cleaned image to the Python vectorize API.
-//   4. Convert the returned line list into walls via floorplanFromLines
+// AI Wall flow — backed by the "Floorplan cv+graph pipeline" service.
+//
+//   1. POST the active floor's image to /jobs (multipart) and get a job_id.
+//   2. Poll GET /jobs/{id} until the job reaches a terminal state.
+//   3. Convert the returned line list into walls via floorplanFromLines
 //      and REPLACE the active floor's walls.
-//   5. Auto-derive px/m from the returned door segments:
+//   4. Auto-derive px/m from the returned door segments:
 //      sort door lengths, trim top & bottom 25%, average the middle 50%
 //      (if <4 doors, just average all), then divide by REAL_DOOR_WIDTH_M.
+//   5. Fetch GET /jobs/{id}/overlay as a Blob and keep it as the preview
+//      image so the user can compare detected walls against the source.
+//
+// The service runs its own denoising stage (cv+graph or CNN, see `algorithm`),
+// so the raw floor image is uploaded directly — no pre-cleaning pass, and the
+// returned coordinates are already in the source image's pixel space.
 
-const VECTORIZE_API_URL = 'https://analyzetovec.onrender.com/vectorize'
+const API_BASE_URL = 'https://floorplan.senao.net'
+const API_TOKEN = '5yF5qWsxew5RbOfMO5-V1BUwaCgIc8_Bjb9O7Cw4tCE'
 const REAL_DOOR_WIDTH_M = 0.9
 
-const GEMINI_MODEL = 'gemini-3-pro-image-preview'
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent`
-const GEMINI_PROMPT = [
-  '過濾成簡單乾淨線圖,直接產新圖片,不用其他回應',
-  '1.除了門,窗,及柱子外,移除所有不是牆壁的部分',
-  '2.去掉任何文字描述及標記、註記',
-  '3.牆用#000,門用#FFD42A,窗戶用#4FAEE3,都是單直線 ',
-  '4.從牆面施工的角度, 移除不需要的線條',
-  '5.特別注意門窗兩側必須要連接著牆壁,門應該是關門狀態,注意門是否合理,千萬不要扇形',
-  'note 所有東西皆以直線標示,門不要有扇形或雙線,門只能是直線',
-].join('\n')
+const POLL_INTERVAL_MS = 1500
+const POLL_TIMEOUT_MS = 5 * 60 * 1000
 
-// Read a Blob/File as base64 (without the "data:...;base64," prefix).
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = reader.result
-      const comma = typeof result === 'string' ? result.indexOf(',') : -1
-      if (comma < 0) reject(new Error('FileReader 結果格式錯誤'))
-      else resolve(result.slice(comma + 1))
+// Stage-A profiles offered by GET /algorithms. The CNN variants lead the list
+// because cnn is our default; note the service's own default is still v1, so
+// `algorithm` is always sent explicitly rather than relying on the server.
+const ALGORITHMS = [
+  { id: 'cnn', label: 'cnn — ResNet34（預設）' },
+  { id: 'cnn2', label: 'cnn2 — ResNet50' },
+  { id: 'cnn_crf', label: 'cnn_crf — ResNet34+DenseCRF' },
+  { id: 'cnn3', label: 'cnn3 — e2e ConvCRF' },
+  { id: 'v1', label: 'v1 — cv+graph 精準優先' },
+  { id: 'v2', label: 'v2 — cv+graph 全集 F1 最高' },
+  { id: 'baseline', label: 'baseline — cv+graph 未調參' },
+]
+
+const DEFAULT_ALGORITHM = 'cnn'
+
+const TERMINAL_OK = ['done', 'finished', 'succeeded', 'success', 'complete', 'completed']
+const TERMINAL_BAD = ['error', 'failed', 'failure', 'cancelled', 'canceled']
+
+const isTerminal = (s) => {
+  const v = String(s || '').toLowerCase()
+  return TERMINAL_OK.includes(v) || TERMINAL_BAD.includes(v)
+}
+const isFailure = (s) => TERMINAL_BAD.includes(String(s || '').toLowerCase())
+
+const authHeaders = () => ({ Authorization: `Bearer ${API_TOKEN}` })
+
+// Pull a human-readable message out of a non-2xx response (FastAPI puts it in
+// `detail`, which may itself be a validation-error array).
+async function readError(res) {
+  try {
+    const j = await res.json()
+    if (typeof j?.detail === 'string') return j.detail
+    if (Array.isArray(j?.detail)) {
+      return j.detail.map((d) => `${(d.loc ?? []).join('.')}: ${d.msg}`).join('; ')
     }
-    reader.onerror = () => reject(reader.error || new Error('讀取圖片失敗'))
-    reader.readAsDataURL(blob)
-  })
-}
-
-function base64ToBlob(b64, mimeType) {
-  const bin = atob(b64)
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-  return new Blob([bytes], { type: mimeType || 'image/png' })
-}
-
-// Walk a streamGenerateContent response (a JSON array of chunks) and return
-// the first inlineData image part it can find.
-function extractFirstImagePart(payload) {
-  const chunks = Array.isArray(payload) ? payload : [payload]
-  for (const chunk of chunks) {
-    const candidates = chunk?.candidates ?? []
-    for (const c of candidates) {
-      const parts = c?.content?.parts ?? []
-      for (const p of parts) {
-        const inline = p?.inlineData || p?.inline_data
-        if (inline?.data) {
-          return { data: inline.data, mimeType: inline.mimeType || inline.mime_type || 'image/png' }
-        }
-      }
-    }
+    if (j?.detail) return JSON.stringify(j.detail)
+    return JSON.stringify(j)
+  } catch {
+    return `HTTP ${res.status} ${res.statusText}`
   }
-  return null
-}
-
-// Step 2 — hand the floor image to Gemini and get back a cleaned-up image
-// (walls/doors/windows only) as a Blob.
-async function fetchCleanedImageFromGemini(floor, apiKey) {
-  const srcRes = await fetch(floor.imageUrl)
-  if (!srcRes.ok) throw new Error(`讀取底圖失敗 (HTTP ${srcRes.status})`)
-  const srcBlob = await srcRes.blob()
-  const b64 = await blobToBase64(srcBlob)
-
-  const body = {
-    contents: [{
-      role: 'user',
-      parts: [
-        { inlineData: { mimeType: srcBlob.type || 'image/png', data: b64 } },
-        { text: GEMINI_PROMPT },
-      ],
-    }],
-    generationConfig: {
-      responseModalities: ['IMAGE', 'TEXT'],
-      imageConfig: { /*aspectRatio: 'Auto',*/ imageSize: '1K' },
-    },
-    tools: [{ googleSearch: {} }],
-  }
-
-  const res = await fetch(`${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`
-    try {
-      const j = await res.json()
-      detail = j?.error?.message || j?.error || detail
-    } catch { /* ignore */ }
-    throw new Error(`Gemini API 失敗：${detail}`)
-  }
-  const payload = await res.json()
-  const img = extractFirstImagePart(payload)
-  if (!img) throw new Error('Gemini 回應未包含圖片')
-  return { cleanedBlob: base64ToBlob(img.data, img.mimeType) }
 }
 
 function autoScaleFromDoors(lines) {
@@ -152,23 +107,41 @@ export default function AIWallsModal({ open, onClose }) {
   const setFloorScale = useFloorStore((s) => s.setFloorScale)
   const setWalls = useWallStore((s) => s.setWalls)
   const setGeminiPreview = useAIPreviewStore((s) => s.setGeminiPreview)
+  const overlayPreviewUrl = useAIPreviewStore((s) => s.geminiPreviewUrl)
 
-  // step: api-key | running | done | error
-  const [step, setStep] = useState('api-key')
-  const [apiKey, setApiKey] = useState('')
+  // step: idle | running | done | error
+  const [step, setStep] = useState('idle')
+  const [algorithm, setAlgorithm] = useState(DEFAULT_ALGORITHM)
   const [progressMsg, setProgressMsg] = useState('')
   const [error, setError] = useState(null)
   const [result, setResult] = useState(null)
+  // { src, title } while the full-screen viewer is open, else null.
+  const [zoom, setZoom] = useState(null)
+
+  const cancelRef = useRef(false)
+  // The denoised object URL is owned by this component (unlike the overlay,
+  // which is handed to useAIPreviewStore and revoked there), so it has to be
+  // released on replace and on close.
+  const denoisedUrlRef = useRef(null)
+
+  const releaseDenoised = useCallback(() => {
+    if (denoisedUrlRef.current) URL.revokeObjectURL(denoisedUrlRef.current)
+    denoisedUrlRef.current = null
+  }, [])
 
   useEffect(() => {
     if (!open) {
-      setStep('api-key')
-      setApiKey('')
+      cancelRef.current = true
+      setStep('idle')
       setProgressMsg('')
       setError(null)
       setResult(null)
+      setZoom(null)
+      releaseDenoised()
     }
-  }, [open])
+  }, [open, releaseDenoised])
+
+  useEffect(() => () => releaseDenoised(), [releaseDenoised])
 
   const run = useCallback(async () => {
     if (!floor || !floor.imageUrl) {
@@ -176,75 +149,131 @@ export default function AIWallsModal({ open, onClose }) {
       setStep('error')
       return
     }
-    if (!apiKey.trim()) {
-      setError('請輸入 API key。')
-      return
-    }
+    cancelRef.current = false
     setError(null)
+    // A re-detect revokes the previous images, so drop the viewer holding them.
+    setZoom(null)
     setStep('running')
+    const t0 = performance.now()
     try {
-      setProgressMsg('Gemini 清理底圖中…')
-      const { cleanedBlob } = await fetchCleanedImageFromGemini(floor, apiKey.trim())
+      // 1 — upload the raw floor image and enqueue the job.
+      setProgressMsg('上傳底圖…')
+      const srcRes = await fetch(floor.imageUrl)
+      if (!srcRes.ok) throw new Error(`讀取底圖失敗 (HTTP ${srcRes.status})`)
+      const srcBlob = await srcRes.blob()
 
-      setProgressMsg('Python向量化…')
       const fd = new FormData()
-      fd.append('file', cleanedBlob, 'floorplan.png')
-      const res = await fetch(VECTORIZE_API_URL, {
+      fd.append('file', srcBlob, 'floorplan.png')
+      fd.append('algorithm', algorithm)
+      fd.append('output', 'full')
+
+      const created = await fetch(`${API_BASE_URL}/jobs`, {
         method: 'POST',
+        headers: authHeaders(),
         body: fd,
       })
-      if (!res.ok) {
-        let detail = `HTTP ${res.status}`
-        try {
-          const j = await res.json()
-          if (j?.detail) detail = j.detail
-        } catch { /* ignore */ }
-        throw new Error(detail)
+      if (!created.ok) throw new Error(`排入佇列失敗：${await readError(created)}`)
+      const job = await created.json()
+      const jobId = job.job_id
+      if (!jobId) throw new Error('伺服器回應沒有 job_id。')
+      if (cancelRef.current) return
+
+      // 2 — poll until the job reaches a terminal state.
+      const deadline = performance.now() + POLL_TIMEOUT_MS
+      let final = null
+      while (!cancelRef.current) {
+        const st = await fetch(`${API_BASE_URL}/jobs/${jobId}`, { headers: authHeaders() })
+        if (!st.ok) throw new Error(`查詢進度失敗：${await readError(st)}`)
+        const data = await st.json()
+        if (isTerminal(data.status)) { final = data; break }
+        setProgressMsg(
+          data.queue_position > 0
+            ? `排隊中（前面還有 ${data.queue_position} 個）…`
+            : '辨識中…',
+        )
+        if (performance.now() > deadline) {
+          throw new Error(`等待逾時（${POLL_TIMEOUT_MS / 1000}s），最後狀態：${data.status}`)
+        }
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
       }
-      const data = await res.json()
-      if (!data?.lines || !data?.image_size) {
-        throw new Error('回應格式不正確')
+      if (cancelRef.current || !final) return
+      if (isFailure(final.status)) {
+        throw new Error(`辨識失敗（${final.status}）：${final.error || '未提供錯誤訊息'}`)
       }
 
+      // 3 — the coordinates ride along on the completed job; /coords would
+      // return the same lines, so there's no need for a second round trip.
+      const lines = final.lines ?? []
+      if (lines.length === 0) throw new Error('辨識完成，但沒有偵測到任何線段。')
+
       setProgressMsg('轉換並寫入樓層…')
-      // Gemini may return the cleaned image at a different resolution than the
-      // original floor image (e.g. 685×511 → 1200×895). The vectorize API's
-      // coordinates are in the cleaned image's pixel space, so remap them back
-      // to the original image's pixel space before building walls.
-      const sx = floor.imageWidth  / data.image_size.width
-      const sy = floor.imageHeight / data.image_size.height
-      const remappedLines = data.lines.map((l) => ({
-        type: l.type,
-        x1: l.x1 * sx, y1: l.y1 * sy,
-        x2: l.x2 * sx, y2: l.y2 * sy,
-      }))
-      const { walls, stats } = floorplanFromLines(remappedLines)
-      const scaleInfo = autoScaleFromDoors(remappedLines)
+      const { walls, stats } = floorplanFromLines(lines)
+      const scaleInfo = autoScaleFromDoors(lines)
 
       setWalls(floor.id, walls)
       if (scaleInfo) setFloorScale(floor.id, scaleInfo.pxPerM)
 
-      // Persist Gemini cleaned image (what the vectorizer saw) outside the
-      // modal so the user can toggle it on/off from the canvas after closing.
-      setGeminiPreview(URL.createObjectURL(cleanedBlob))
+      // 4 — the preview images are best-effort: the walls are already written,
+      // so a failed image fetch must not fail the whole run.
+      //
+      // `denoised` is the CNN denoiser's intermediate 4-colour line drawing —
+      // only produced by cnn* algorithms, so cv+graph runs skip it. It's a
+      // diagnostic: a dirty denoised image blames the denoiser, while a clean
+      // one paired with bad walls blames vectorization.
+      let overlayUrl = null
+      let denoisedUrl = null
+      try {
+        setProgressMsg('取得疊圖…')
+        const ov = await fetch(`${API_BASE_URL}/jobs/${jobId}/overlay`, { headers: authHeaders() })
+        if (ov.ok) {
+          const blob = await ov.blob()
+          overlayUrl = URL.createObjectURL(blob)
+          setGeminiPreview(overlayUrl)
+        }
+      } catch { /* overlay is optional */ }
+      releaseDenoised()
+      if (final.denoised_url) {
+        try {
+          setProgressMsg('取得去噪線稿…')
+          const dn = await fetch(`${API_BASE_URL}/jobs/${jobId}/denoised`, { headers: authHeaders() })
+          if (dn.ok) {
+            denoisedUrl = URL.createObjectURL(await dn.blob())
+            denoisedUrlRef.current = denoisedUrl
+          }
+        } catch { /* denoised is optional */ }
+      }
 
       setResult({
-        lines: data.lines,
-        imageSize: data.image_size,
+        lines,
         wallCount: walls.length,
         stats,
         scaleInfo,
-        elapsedMs: data.stats?.elapsed_ms ?? null,
+        overlayUrl,
+        denoisedUrl,
+        algorithm: final.algorithm ?? algorithm,
+        profile: final.profile ?? null,
+        size: final.size ?? null,
+        elapsedMs: (final.started_at != null && final.finished_at != null)
+          ? (final.finished_at - final.started_at) * 1000
+          : performance.now() - t0,
       })
       setStep('done')
       setProgressMsg('')
     } catch (e) {
+      if (cancelRef.current) return
       setError(e?.message || String(e))
       setStep('error')
     }
-  }, [floor, apiKey, setWalls, setFloorScale, setGeminiPreview])
+  }, [floor, algorithm, setWalls, setFloorScale, setGeminiPreview, releaseDenoised])
 
-  const dismiss = useOverlayDismiss(onClose)
+  const cancel = useCallback(() => {
+    cancelRef.current = true
+    setStep('idle')
+    setProgressMsg('')
+  }, [])
+
+  const running = step === 'running'
+  const dismiss = useOverlayDismiss(running ? null : onClose)
 
   if (!open) return null
 
@@ -252,6 +281,10 @@ export default function AIWallsModal({ open, onClose }) {
     (acc, l) => { acc[l.type] = (acc[l.type] ?? 0) + 1; return acc },
     {},
   )
+
+  // After a run the store holds this run's overlay; before one it may still
+  // hold the previous run's, which is exactly the comparison view we want.
+  const previewUrl = result?.overlayUrl ?? overlayPreviewUrl
 
   const modal = (
     <div className="ai-walls-modal-overlay" {...dismiss}>
@@ -267,29 +300,24 @@ export default function AIWallsModal({ open, onClose }) {
           <div className="ai-walls-modal__error">此樓層沒有底圖，無法偵測。</div>
         )}
 
-        {step === 'api-key' && floor?.imageUrl && (
-          <>
-            <div className="ai-walls-modal__row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
-              <label style={{ fontSize: 13, color: 'inherit' }}>Gemini API key</label>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') run() }}
-                placeholder="貼上 Gemini API key"
-                autoFocus
-                style={{
-                  background: '#0f0f12', border: '1px solid #2a2a30',
-                  color: '#fff', padding: '6px 10px', borderRadius: 4,
-                  fontSize: 13, outline: 'none',
-                }}
-              />
-              {error && <div className="ai-walls-modal__error">{error}</div>}
-            </div>
-          </>
+        {floor?.imageUrl && (
+          <div className="ai-walls-modal__row">
+            <label htmlFor="ai-walls-algo">演算法</label>
+            <select
+              id="ai-walls-algo"
+              className="ai-walls-modal__select"
+              value={algorithm}
+              onChange={(e) => setAlgorithm(e.target.value)}
+              disabled={running}
+            >
+              {ALGORITHMS.map((a) => (
+                <option key={a.id} value={a.id}>{a.label}</option>
+              ))}
+            </select>
+          </div>
         )}
 
-        {step === 'running' && (
+        {running && (
           <div className="ai-walls-modal__row">
             <span>處理中…</span>
             <span style={{ opacity: 0.6 }}>{progressMsg}</span>
@@ -305,11 +333,12 @@ export default function AIWallsModal({ open, onClose }) {
             <div>
               寫入 {result.wallCount} 條牆 ·
               共 {result.lines.length} 條原始線段
-              {result.elapsedMs != null && ` · 耗時 ${result.elapsedMs}ms`}
+              {` · 耗時 ${Math.round(result.elapsedMs)}ms`}
             </div>
             {counts && (
               <div style={{ marginTop: 4 }}>
                 wall {counts.wall ?? 0} · door {counts.door ?? 0} · window {counts.window ?? 0}
+                {result.profile && ` · profile ${result.profile}`}
               </div>
             )}
             {result.scaleInfo ? (
@@ -326,29 +355,61 @@ export default function AIWallsModal({ open, onClose }) {
           </div>
         )}
 
+        {step === 'done' && (previewUrl || result?.denoisedUrl) && (
+          <div className="ai-walls-modal__previews">
+            {[
+              { src: previewUrl, label: '辨識疊圖' },
+              { src: result?.denoisedUrl, label: '去噪線稿（CNN）' },
+            ].filter((p) => p.src).map((p) => (
+              <div key={p.label} className="ai-walls-modal__preview-item">
+                <span className="ai-walls-modal__preview-label">{p.label}</span>
+                <img
+                  className="ai-walls-modal__preview ai-walls-modal__preview--clickable"
+                  src={p.src}
+                  alt={p.label}
+                  onClick={() => setZoom({ src: p.src, title: p.label })}
+                />
+                <button
+                  type="button"
+                  className="ai-walls-modal__zoom-btn"
+                  onClick={() => setZoom({ src: p.src, title: p.label })}
+                >
+                  🔍 放大
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="ai-walls-modal__actions">
-          <button className="ai-walls-modal__btn" onClick={onClose}>
-            {step === 'done' ? '關閉' : '取消'}
+          <button className="ai-walls-modal__btn" onClick={running ? cancel : onClose}>
+            {running ? '取消' : step === 'done' ? '關閉' : '取消'}
           </button>
-          {step === 'api-key' && floor?.imageUrl && (
+          {(step === 'idle' || step === 'done') && floor?.imageUrl && (
             <button
               className="ai-walls-modal__btn ai-walls-modal__btn--primary"
               onClick={run}
-              disabled={!apiKey.trim()}
             >
-              開始偵測
+              {step === 'done' ? '重新偵測' : '開始偵測'}
             </button>
           )}
           {step === 'error' && (
             <button
               className="ai-walls-modal__btn ai-walls-modal__btn--primary"
-              onClick={() => { setError(null); setStep('api-key') }}
+              onClick={() => { setError(null); setStep('idle') }}
             >
               重試
             </button>
           )}
         </div>
       </div>
+
+      <ImageLightbox
+        open={!!zoom}
+        src={zoom?.src}
+        title={zoom?.title}
+        onClose={() => setZoom(null)}
+      />
     </div>
   )
 

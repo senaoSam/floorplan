@@ -18,6 +18,32 @@
     letter-spacing: 0.5px
     white-space: nowrap
 
+  &__actions
+    display: flex
+    align-items: center
+    gap: 12px
+
+  &__test-btn
+    padding: 4px 12px
+    border: 1px solid $border-color
+    border-radius: 6px
+    background: transparent
+    color: $text-secondary
+    font-size: 12px
+    font-weight: 600
+    cursor: pointer
+    transition: all 0.15s
+    white-space: nowrap
+
+    &:hover
+      border-color: rgba(255, 255, 255, 0.3)
+      color: $text-primary
+
+    &--active
+      background: $accent
+      border-color: $accent
+      color: #fff
+
   &__view
     display: flex
     gap: 6px

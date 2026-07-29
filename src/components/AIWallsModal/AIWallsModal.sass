@@ -48,6 +48,24 @@
     font-size: 13px
     color: $text-secondary
 
+  &__select
+    flex: 1
+    min-width: 0
+    background: $bg-primary
+    border: 1px solid $border-color
+    color: $text-primary
+    padding: 6px 10px
+    border-radius: 4px
+    font-size: 13px
+    outline: none
+
+    &:focus
+      border-color: $accent
+
+    &:disabled
+      opacity: 0.5
+      cursor: not-allowed
+
   &__stats
     font-size: 12px
     line-height: 1.6
@@ -79,6 +97,22 @@
     max-width: 100%
     max-height: 280px
     object-fit: contain
+
+    &--clickable
+      cursor: zoom-in
+
+  &__zoom-btn
+    background: $bg-primary
+    border: 1px solid $border-color
+    color: $text-secondary
+    padding: 2px 10px
+    border-radius: 4px
+    font-size: 11px
+    cursor: pointer
+
+    &:hover
+      background: rgba(255, 255, 255, 0.06)
+      color: $text-primary
 
   &__previews
     display: flex
