@@ -89,7 +89,11 @@
 
 #### 批次 B — 物件細節（逐圖層打磨）
 
-- [ ] **51-6 牆描邊 + 玻璃牆**：每面牆的 ExtrudeGeometry 配 `EdgesGeometry` + LineSegments 細描邊（跟 geometry 同 useMemo 重建/dispose，建築圖感關鍵）；Glass / Low-E 材質的牆體改半透明（參考 `OpeningDetail3D` 現成玻璃：`meshPhysicalMaterial` transmission 0.9 / opacity 0.35）。
+- [x] **51-6 牆描邊 + 玻璃牆**（✅ 2026-08-06，使用者驗收 ok）：① **描邊**——每面牆 `EdgesGeometry(geometry, 1)` + LineSegments，與 geometry 同 useMemo 重建/dispose；因衍生自同一份 geometry，**門窗開口一併有輪廓**。**1° 門檻**保留盒子/開口銳利邊、濾掉平面上的三角化接縫（0° 會把接縫也畫出來）。顏色 `#94a3b8` 冷灰**不用黑**——在 51-3 深色背景下黑色描邊會被讀成「面與面之間的縫隙」而非邊緣。② **玻璃牆**——`glass` + `low_e_glass` 兩種改 `meshPhysicalMaterial`，參數直接沿用 `OpeningDetail3D` 現成窗玻璃（transmission 0.9 / roughness 0.05 / ior 1.5 / opacity 0.35），同畫面玻璃牆與玻璃窗材質感一致。
+  **決策：Low-E 視覺上就是玻璃**（雖 RF 衰減 25dB vs 一般 2dB）——差異由引擎 `dbLoss` 承載，不反映在外觀。**防重做：不要為 Low-E 另做一套更不透明的外觀。**
+  **行為改變（刻意）**：玻璃牆 `castShadow={!isGlass}` **不投影**——three 陰影 pass 不理會 transmission，會投出與混凝土相同的實心影子，那是唯一露餡「這不是真玻璃」的地方。
+  **玻璃牆描邊 alpha 較高**（0.75 vs 一般 0.4）：玻璃本體幾乎透明，沒有框線整面牆會消失。
+  **驗證**：300 AP 穩態 156.3ms（基準內，45 條描邊線近乎零成本）；描邊 `raycast={() => null}` 不影響點選；Camera 模式牆體維持不可選取；0 console errors。對比圖 `.playwright-mcp/compare/51-6-*`（gitignore）。
 - [ ] **51-7 纜線實體化**：1px line → three examples **fat line**（`Line2`/`LineMaterial`，真 px 線寬、支援 dash）或 `TubeGeometry`（世界單位粗細）；建議 Line2（三角形少、dash 現成）。**不可破壞 41-postfix 的值比較 memo**（座標沒變不得重建 geometry）。
 - [ ] **51-8 Riser / FloorHole 輪廓修正**：riser 的 wireframe 外殼（顯示所有三角對角線像網子）→ `EdgesGeometry(thresholdAngle)` 或只畫上下圓環；cylinder segment 16→32。FloorHoleVolume 的 `linewidth 2` no-op 輪廓線 → 需要粗線就用 Line2。
 - [ ] **51-9 Switch / AP 造型**：機箱改 examples `RoundedBoxGeometry` 圓角；Switch 正面用 canvas 貼圖畫 port 格與散熱孔（比建模便宜）；AP 選取時加脈衝光圈（useFrame 對 ring scale/opacity 做正弦動畫）；label sprite 乘 `devicePixelRatio` 提高解析 + mipmap/anisotropy（修拉近糊）。

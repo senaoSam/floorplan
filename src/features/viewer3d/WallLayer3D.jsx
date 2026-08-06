@@ -70,6 +70,21 @@ function buildWallGeometry(length, height, openings, wallBottom, thickness) {
 const SELECT_EMISSIVE = '#e74c3c'
 const HOVER_EMISSIVE  = '#ffffff'
 
+// 51-6: glass walls render as glass rather than as a tinted solid. Matched to
+// the window panes OpeningDetail3D already draws (transmission 0.9 / roughness
+// 0.05 / ior 1.5 / opacity 0.35) so a glass wall and a glass window in the
+// same view read as the same material.
+//
+// Both glass materials qualify. Low-E is the more transmission-blocking of the
+// two for RF, but visually it is still glass — the RF difference is carried by
+// dbLoss in the engine, not by how the wall looks.
+const GLASS_MATERIAL_IDS = new Set(['glass', 'low_e_glass'])
+const GLASS_OPACITY = 0.35
+
+// Outline colour. A cool grey rather than black: against the 51-3 backdrop a
+// black outline reads as a gap between surfaces instead of an edge.
+const EDGE_COLOR = '#94a3b8'
+
 function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true }) {
   const {
     startX, startY, endX, endY,
@@ -108,11 +123,26 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true })
     return () => { if (geometry) geometry.dispose() }
   }, [geometry])
 
+  // 51-6 Wall outline. A shaded box reads as a generic solid; an outlined one
+  // reads as drawn architecture, and it keeps corners and openings legible
+  // where two same-material walls meet and their faces merge into one tone.
+  // Derived from the same geometry, so door/window cut-outs are outlined too.
+  const edges = useMemo(() => {
+    if (!geometry) return null
+    // 1° threshold: keep the crisp box/opening edges, drop the triangulation
+    // seams across the flat faces that a 0° threshold would expose.
+    return new THREE.EdgesGeometry(geometry, 1)
+  }, [geometry])
+  React.useEffect(() => {
+    return () => { if (edges) edges.dispose() }
+  }, [edges])
+
   if (length === 0 || !geometry) return null
 
   const color = material?.color ?? DEFAULT_WALL_COLOR
   const transparent = dimOpacity < 1
   const hasOpenings = (wall.openings?.length ?? 0) > 0
+  const isGlass = GLASS_MATERIAL_IDS.has(material?.id)
 
   // Select/hover visuals. Only the active-floor wall layer is interactive —
   // ghost floors ignore pointer events so the user doesn't accidentally
@@ -145,25 +175,57 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true })
   return (
     <group position={center} rotation={[0, rotationY, 0]}>
       <mesh
-        castShadow
+        // Glass doesn't cast: three's shadow pass ignores transmission and
+        // would throw the same opaque silhouette a concrete wall does, which
+        // is the one thing that would give away that it isn't really glass.
+        castShadow={!isGlass}
         receiveShadow
         onClick={onClick}
         onPointerOver={onPointerOver}
         onPointerOut={onPointerOut}
       >
         <primitive object={geometry} attach="geometry" />
-        <meshStandardMaterial
-          color={color}
-          roughness={0.85}
-          metalness={0.05}
-          side={THREE.DoubleSide}
-          transparent={transparent}
-          opacity={dimOpacity}
-          depthWrite={!transparent}
-          emissive={emissive}
-          emissiveIntensity={emissiveIntensity}
-        />
+        {isGlass ? (
+          <meshPhysicalMaterial
+            color={color}
+            transmission={0.9}
+            roughness={0.05}
+            metalness={0}
+            ior={1.5}
+            side={THREE.DoubleSide}
+            transparent
+            opacity={GLASS_OPACITY * dimOpacity}
+            depthWrite={false}
+            emissive={emissive}
+            emissiveIntensity={emissiveIntensity}
+          />
+        ) : (
+          <meshStandardMaterial
+            color={color}
+            roughness={0.85}
+            metalness={0.05}
+            side={THREE.DoubleSide}
+            transparent={transparent}
+            opacity={dimOpacity}
+            depthWrite={!transparent}
+            emissive={emissive}
+            emissiveIntensity={emissiveIntensity}
+          />
+        )}
       </mesh>
+      {/* 51-6 outline. On a glass wall this carries most of the read — the
+          pane itself is nearly invisible, so without the frame the wall would
+          vanish. Hence the stronger alpha there. */}
+      {edges && (
+        <lineSegments raycast={() => null}>
+          <primitive object={edges} attach="geometry" />
+          <lineBasicMaterial
+            color={isSelected ? SELECT_EMISSIVE : EDGE_COLOR}
+            transparent
+            opacity={(isGlass ? 0.75 : 0.4) * dimOpacity}
+          />
+        </lineSegments>
+      )}
       {hasOpenings && (
         <OpeningsDetail
           wall={wall}

@@ -654,7 +654,7 @@ const PHASES = [
       {
         layer: 'Layer 43 — 物件細節',
         items: [
-          { id: '51-6',  done: false, text: '牆描邊 + 玻璃牆（EdgesGeometry 細描邊；Glass/Low-E 牆體改半透明）' },
+          { id: '51-6',  done: true,  text: '牆描邊 + 玻璃牆（EdgesGeometry 1° 門檻細描邊，門窗開口一併有輪廓；Glass/Low-E 改 meshPhysicalMaterial 真穿透、沿用窗玻璃參數；玻璃不投影避免露餡）' },
           { id: '51-7',  done: false, text: '纜線實體化（1px line → Line2 fat line，真 px 線寬）' },
           { id: '51-8',  done: false, text: 'Riser / FloorHole 輪廓修正（wireframe 網子 → EdgesGeometry；segment 16→32）' },
           { id: '51-9',  done: false, text: 'Switch / AP 造型（RoundedBoxGeometry 圓角、port 貼圖、選取脈衝環、label DPR 提升）' },
