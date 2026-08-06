@@ -47,7 +47,14 @@
 > 動畫類效果只能在 3D 可見時跑（useFrame 本來就受 frameloop 控管，但別加常駐 rAF）；
 > 大改後在 300 AP demo 量一次切 3D 的耗時對照。
 
-#### 批次 A — 全域光影（CP 值最高，幾乎只動 `Viewer3D.jsx`，全場景一起提升）
+#### 批次 A — 全域光影 ✅ 全部完成（2026-08-06，51-1~51-5 逐項使用者驗收）
+
+> **批次 A 收工小結**：三個效能量測點都落在 175–200ms 基準內（IBL 實測中性、其餘皆未回退），
+> Phase 45 隱藏凍結完好、無記憶體洩漏、全程 0 console errors。
+> **跨項共通決策（防重做）**：① 亮度旋鈕兩支語意不同——`EXPOSURE` 壓全畫面含熱圖、
+> `environmentIntensity` 只壓受光面 ② **凡「顏色即數據」的圖層一律不吃霧**（含 `meshStandardMaterial`
+> 的 AP 頻段色／Switch 類型色）③ 覆蓋全視野的裝飾層（shader 格線、樓板）必須 `raycast={() => null}`，
+> 否則吃掉點選 ④ 對比驗收圖用本地腳本產在 `.playwright-mcp/compare/`（gitignore，不上 artifact）。
 
 - [x] **51-1 IBL 環境貼圖**（✅ 2026-08-06，commit 33cb337，使用者驗收 ok）：`SceneEnvironment` 元件——`RoomEnvironment` 經 `PMREMGenerator` 烘成 envMap 掛 `scene.environment`，全場景 PBR 材質一次到位（其他 viewer3d 檔案零改動）；ambient/hemisphere 0.28/0.25 → **0.12/0.12**（避免與環境光重複計算），KeyLight 不動仍是唯一投影光源。
   **順手修既有 bug**：r3f 7.0.29 設 `gl.outputEncoding = THREE.sRGBEncoding`，但 **three 0.167 已移除該常數（值 undefined）**，等於沒設 → 改用 `outputColorSpace` 明確指定（加 IBL 後不管會過曝）。
@@ -73,7 +80,12 @@
   **必要防呆**：`raycast={() => null}`——格線鋪滿整個視野，不擋掉會吃掉「點空白處取消選取」。實測選 AP→點空白正常取消、點牆正常選到牆。
   **驗證**：300 AP 穩態 183.3ms（基準 175–200ms 內）；空場景（未載入平面圖）格線+座標軸正常；Camera 模式正常；0 console errors。
   **驗收注意**：要關熱圖才看得到地板格線；正視角最能看出「往地平線消失、無硬邊」。想微調亮度改 `uMinorAlpha`/`uMajorAlpha`，間距改 `cell`/`major` props。
-- [ ] **51-5 樓板厚度**：每層 FloorPlane 下加 10–15cm `BoxGeometry` 樓板盒（側面/底面深色、頂面維持貼圖平面），疊樓層從「浮空紙片」變建築；最底可加一片 `ShadowMaterial` 承影地面。注意非 active 樓層的 dimOpacity 要同步套在樓板盒。
+- [x] **51-5 樓板厚度**（✅ 2026-08-06，使用者驗收 ok）：`FloorPlane` 內加 `FloorSlab`（14cm `BoxGeometry`）+ `EdgesGeometry` 邊框描邊，疊樓層從「浮空紙片」變有厚度的建築。`opacity` 沿用 caller 傳入的 `dimOpacity`，非 active 樓層自動跟著淡。
+  **座標約定**：樓板掛 **y=0 以下**——y=0 是樓層群組內的可行走表面（牆從 `bottomHeight` 預設 0 長上去、貼圖平面也在 0），掛上面會把平面圖蓋掉。
+  **⚠ 開發中踩到的真 bug + 防重做**：初版樓板放 `-thickness/2`，頂面**剛好落在 y=0 與貼圖平面共面** → **z-fighting**：近看樓板出現橫條紋、**俯瞰視角樓板贏走大部分像素把整張平面圖蓋掉變死灰**。修法＝加 `SLAB_GAP_M = 0.004`（4mm）讓頂面嚴格低於貼圖平面。**這個 4mm 看起來像可以清掉的魔術數字，但拿掉 bug 就回來**——註解已標明，對照圖存於 `.playwright-mcp/compare/51-5-C-Z衝突修復.png`（該資料夾 gitignore，重跑對比腳本可再生）。
+  **防呆**：樓板與邊框皆 `raycast={() => null}`，不攔截原本要點到樓層/物件的點擊。
+  **驗證**：俯瞰平面圖完整無條紋（修復前的失敗症狀）、疊 2 層等角上下樓板邊緣清楚、300 AP 穩態 186.1ms（基準 175–200ms 內）、Camera 模式正常、0 console errors。
+  **未做**：最底層 `ShadowMaterial` 承影地面——51-4 的 shader 格線已提供地面參考，再加一層承影面會與格線互相干擾，暫不做。
 
 #### 批次 B — 物件細節（逐圖層打磨）
 

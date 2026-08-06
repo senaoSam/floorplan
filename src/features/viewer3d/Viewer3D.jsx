@@ -45,6 +45,48 @@ function pxToMeters(floor) {
   }
 }
 
+// 51-5 Structural slab under each floor's image plane. Without it the plan
+// reads as a sheet of paper floating in space, and a stack of them as several
+// sheets — there is nothing to say the building has substance. A slab this
+// thin doesn't obscure anything; it just gives the floor an edge you can see.
+//
+// Hangs BELOW y=0 because y=0 is the walkable surface inside a floor group:
+// walls sit at bottomHeight (default 0) and the image plane is at 0. Putting
+// the slab above would bury the floor plan under it.
+//
+// SLAB_GAP_M matters more than it looks. The slab's top face must sit strictly
+// below the image plane, not level with it — coplanar at y=0 the two z-fight,
+// which showed up as banding across the plate and, from straight above, the
+// slab winning most pixels and hiding the floor plan almost entirely.
+const SLAB_THICKNESS_M = 0.14
+const SLAB_GAP_M = 0.004
+const SLAB_COLOR = '#8d99ae'
+const SLAB_EDGE_COLOR = '#5c6879'
+
+function FloorSlab({ w, h, opacity = 1 }) {
+  const transparent = opacity < 1
+  return (
+    <mesh
+      position={[w / 2, -SLAB_GAP_M - SLAB_THICKNESS_M / 2, h / 2]}
+      receiveShadow
+      castShadow
+      // The image plane sits right on top of this; nothing here should
+      // intercept a click meant for the floor or the objects on it.
+      raycast={() => null}
+    >
+      <boxGeometry args={[w, SLAB_THICKNESS_M, h]} />
+      <meshStandardMaterial
+        color={SLAB_COLOR}
+        roughness={0.9}
+        metalness={0.02}
+        transparent={transparent}
+        opacity={opacity}
+        depthWrite={!transparent}
+      />
+    </mesh>
+  )
+}
+
 // Textured floor plane. Plane geometry is XY by default; rotate -90° around X
 // so it lies on XZ (Three.js Y-up convention) and the image's "up" (−y canvas)
 // faces camera-forward (+z world-negative after flip).
@@ -62,24 +104,52 @@ function FloorPlane({ floor, opacity = 1 }) {
     texture.needsUpdate = true
   }, [texture])
 
+  // Slab edge outline. Reads as a drawn floor plate rather than a shaded box,
+  // and keeps the floor's extent legible where the slab face catches little
+  // light (the underside of a stacked floor, for instance).
+  const edges = useMemo(() => {
+    if (!w || !h) return null
+    const box = new THREE.BoxGeometry(w, SLAB_THICKNESS_M, h)
+    const eg = new THREE.EdgesGeometry(box)
+    box.dispose()
+    return eg
+  }, [w, h])
+  useEffect(() => () => { if (edges) edges.dispose() }, [edges])
+
   if (!w || !h) return null
 
   const transparent = opacity < 1
   return (
-    <mesh
-      rotation={[-Math.PI / 2, 0, 0]}
-      position={[w / 2, 0, h / 2]}
-      receiveShadow
-    >
-      <planeGeometry args={[w, h]} />
-      <meshStandardMaterial
-        map={texture}
-        side={THREE.DoubleSide}
-        transparent={transparent}
-        opacity={opacity}
-        depthWrite={!transparent}
-      />
-    </mesh>
+    <>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[w / 2, 0, h / 2]}
+        receiveShadow
+      >
+        <planeGeometry args={[w, h]} />
+        <meshStandardMaterial
+          map={texture}
+          side={THREE.DoubleSide}
+          transparent={transparent}
+          opacity={opacity}
+          depthWrite={!transparent}
+        />
+      </mesh>
+      <FloorSlab w={w} h={h} opacity={opacity} />
+      {edges && (
+        <lineSegments
+          position={[w / 2, -SLAB_GAP_M - SLAB_THICKNESS_M / 2, h / 2]}
+          raycast={() => null}
+        >
+          <primitive object={edges} attach="geometry" />
+          <lineBasicMaterial
+            color={SLAB_EDGE_COLOR}
+            transparent
+            opacity={0.75 * opacity}
+          />
+        </lineSegments>
+      )}
+    </>
   )
 }
 
