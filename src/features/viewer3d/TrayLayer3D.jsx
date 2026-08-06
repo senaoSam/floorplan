@@ -69,6 +69,10 @@ function TraySegment({ a, b, dimOpacity, pxToM, color }) {
           color={color}
           transparent={dimOpacity < 1}
           opacity={dimOpacity}
+          // 51-3: opt out of scene fog. Tray colour is the 19-3 TRAY_SYSTEMS
+          // legend, matched by eye against 2D; a long run would otherwise
+          // appear to change system colour along its length.
+          fog={false}
         />
       </lineSegments>
       {/* Dashed centreline on the top face */}
@@ -80,6 +84,8 @@ function TraySegment({ a, b, dimOpacity, pxToM, color }) {
           opacity={0.85 * dimOpacity}
           dashSize={0.12}
           gapSize={0.08}
+          // 51-3: legend colour, see the edge outline above.
+          fog={false}
         />
       </line>
     </group>

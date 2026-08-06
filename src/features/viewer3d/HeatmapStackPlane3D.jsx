@@ -53,6 +53,10 @@ export default function HeatmapStackPlane3D({ floorId }) {
         transparent
         opacity={0.7}
         depthWrite={false}
+        // 51-3: opt out of scene fog. These are stacked non-active floors, so
+        // they sit at a different depth than the active floor's heatmap — fog
+        // would render the same dBm as two different colours in one frame.
+        fog={false}
       />
     </mesh>
   )

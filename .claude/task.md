@@ -61,7 +61,12 @@
   **驗收注意**：預設畫面下差異不明顯（iso 視角光從右上、牆影多落在其他牆上或建築外，地板又被熱圖蓋住；初次截圖比對僅 0.64% 像素差）——**要關掉熱圖才看得出邊緣銳利度**，疊樓層時上層投到下層樓板的大片陰影最明顯。
   **驗證**：疊 2 樓 frustum 20.33→20.67 自動撐大無裁切、300 AP 穩態 long task ~200ms 與 51-1 基準持平（只改範圍沒動貼圖尺寸故免費）、0 console errors。
   **未做**：`VSMShadowMap`（可調模糊，需重調 bias）——目前 PCFSoft 邊緣已可接受，有需求再評估。
-- [ ] **51-3 背景漸層 + 場景霧**：死平 `#0f172a` → 容器 CSS 垂直漸層（Canvas 背景設 transparent），加 `THREE.Fog`（near/far 綁樓層對角線倍數）讓遠處格線淡出、拉出深度感。
+- [x] **51-3 背景漸層 + 場景霧**（✅ 2026-08-06，使用者驗收 ok）：① Canvas 改 `background: transparent` + `gl={{ alpha: true }}`，`.viewer3d` 容器加 CSS 垂直漸層（`#0a0f1d` → `#0f172a` → `#16203a`，原死平色成為中間色階）——用 CSS 不用場景 mesh：零 draw call、不進深度緩衝、不會被幾何遮住 ② `THREE.Fog`（`FOG_COLOR #16203a` 對齊漸層底色）範圍接 51-2 的 `shadowRadius`（near ×1.6 / far ×6.5），故 30m 辦公室與 200m 倉庫霧化程度相對自身一致，且**霧從內容之外才開始，編輯中的樓層完全不霧化**。
+  **核心設計決策（防重做）：霧只吃建築，所有「顏色即數據」的圖層一律 `fog={false}`。** three 的霧會套用到**所有** fog-enabled 材質（含 `meshBasicMaterial`），距離會改變顏色 → 使用者判讀的量測值會隨視角漂移。豁免清單：熱圖（`HeatmapPlane3D` + `HeatmapStackPlane3D`）、`CameraOverlay3D`（4 種 overlay 共用同一 mesh）、纜線（dashed+solid）、線槽（邊框+中線）、範圍區（fill+stroke）、AP marker（`matOpts`）、Switch（`matOpts`）、相機 FOV 錐+地面多邊形、名牌 sprite（r3f 的 spriteMaterial **不會**繼承 three 的 `fog:false` 預設，要自己設）。
+  **subagent 全面盤點逼出的關鍵漏網**：**AP 頻段色（橘2.4/藍5/紫6）與 Switch 裝置類型色是 `meshStandardMaterial`**——若只照「不受光材質」篩選會整批漏掉，但它們跟熱圖一樣是判讀資料。故規則不是「豁免 unlit」而是**「豁免所有編碼資料的顏色」**。
+  **最高風險的一條是纜線**：cyan（正常走線槽）與灰（Manhattan fallback＝需注意）本就相近，霧會把 cyan 去飽和往灰色靠 → 距離遠近會改變一條線路「看起來在說什麼」，屬誤導判讀等級。
+  **驗證**：fog `#16203a`/near 32.5/far 132.1；runtime 逐一確認 263 個建築材質吃霧、資料層全豁免、熱圖與 8 個相機 FOV mesh 皆 `fog:false`；300 AP 穩態 191ms（基準 175–200ms 內）；3 次 2D↔3D 循環正常；0 console errors。
+  **驗收注意**：正視角最明顯（格線往地平線淡出、背景有上下漸層）；等角較細微，因建築本身在霧範圍外。
 - [ ] **51-4 漸隱格線**：`gridHelper` → 自製 shader 格線（一大片 plane + ShaderMaterial，`fwidth` 抗鋸齒線 + 距中心距離 alpha 淡出，即常見 infinite-grid 做法），主/次格線兩級粗細。
 - [ ] **51-5 樓板厚度**：每層 FloorPlane 下加 10–15cm `BoxGeometry` 樓板盒（側面/底面深色、頂面維持貼圖平面），疊樓層從「浮空紙片」變建築；最底可加一片 `ShadowMaterial` 承影地面。注意非 active 樓層的 dimOpacity 要同步套在樓板盒。
 

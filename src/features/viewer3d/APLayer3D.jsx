@@ -224,6 +224,9 @@ function APLabel({ text, position, opacity }) {
         opacity={opacity}
         depthTest={false}
         depthWrite={false}
+        // 51-3: these pills already ignore depth (they read as a HUD layer),
+        // so fogging them would only wash out the text at distance.
+        fog={false}
       />
     </sprite>
   )
@@ -247,7 +250,12 @@ const APMarker = React.memo(function APMarker({ ap, pxToM, dimOpacity, isActiveF
   const y = ap.z ?? 2.4  // install height in meters
 
   const transparent = dimOpacity < 1
-  const matOpts = { transparent, opacity: dimOpacity, depthWrite: !transparent }
+  // 51-3: `fog: false` on every marker material. The body/ring colour IS the
+  // frequency band (orange 2.4 / blue 5 / purple 6 GHz) and the beam cone and
+  // custom lobe inherit it, so letting distance tint them would blur the band
+  // apart across a floor. These are meshStandardMaterial, not the unlit
+  // materials the other data layers use, so they need the flag just the same.
+  const matOpts = { transparent, opacity: dimOpacity, depthWrite: !transparent, fog: false }
 
   const mode = ap.antennaMode ?? 'omni'
   const isDirectional = mode === 'directional'

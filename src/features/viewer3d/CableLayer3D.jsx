@@ -108,6 +108,8 @@ const PolylineTube = React.memo(function PolylineTube({ pts3, color, dimOpacity,
           opacity={dimOpacity}
           dashSize={dashSize}
           gapSize={gapSize}
+          // 51-3: see the solid-line note below — same route colour code.
+          fog={false}
         />
       </line>
     )
@@ -119,6 +121,11 @@ const PolylineTube = React.memo(function PolylineTube({ pts3, color, dimOpacity,
         color={color}
         transparent={dimOpacity < 1}
         opacity={dimOpacity}
+        // 51-3: opt out of scene fog. Cable colour is a status code (cyan =
+        // routed via tray, grey = Manhattan fallback, violet/rose = copper /
+        // fibre trunk) and a route spans the whole floor, so fog would
+        // desaturate cyan toward the grey that means "needs attention".
+        fog={false}
       />
     </line>
   )

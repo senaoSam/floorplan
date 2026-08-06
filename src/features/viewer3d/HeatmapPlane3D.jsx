@@ -101,6 +101,10 @@ export default function HeatmapPlane3D({ floorId, elevation }) {
         transparent
         opacity={0.7}
         depthWrite={false}
+        // 51-3: opt out of the scene fog. These colours ARE the RSSI reading;
+        // letting distance tint them would make the same signal level look
+        // different at the near and far end of the floor.
+        fog={false}
       />
     </mesh>
   )

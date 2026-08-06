@@ -82,6 +82,12 @@ function FloorPlane({ floor, opacity = 1 }) {
   )
 }
 
+// 51-3: fog tint. Matches the bottom stop of the CSS sky gradient in
+// Viewer3D.sass — the band the floor plate meets — so fogged geometry fades
+// into the backdrop instead of toward some unrelated grey. Keep the two in
+// sync if either changes.
+const FOG_COLOR = '#16203a'
+
 // Direction the KEY light shines from, as an offset from the scene centre.
 // Scaled by the content radius (below) so the light stays outside the geometry
 // on any floor size instead of sitting at a fixed 60/90/40 that a large plan
@@ -897,6 +903,13 @@ function Viewer3D() {
     return Math.max(maxR * 1.08, 8)
   }, [visibleFloors, elevations, center])
 
+  // 51-3: fog range, tied to the scene's own size (reusing the content radius
+  // 51-2 already computes) so a 30 m office and a 200 m warehouse recede by
+  // the same visual amount. Fog starts past the content, so nothing on the
+  // floor being edited is hazed, and saturates out where the ground grid ends.
+  const fogNear = shadowRadius * 1.6
+  const fogFar = shadowRadius * 6.5
+
   // Initial pose: near-top-down birds-eye so the user enters 3D looking down
   // at the active floor — easy to map back to the 2D editor. We can't sit at
   // exactly (target.x, *, target.z) because that's an OrbitControls gimbal
@@ -1285,10 +1298,14 @@ function Viewer3D() {
         <DeviceHoverReadout hovered={hoveredDevice} pointer={pointer} container={containerRef.current} />
       )}
 
+      {/* 51-3: the canvas is transparent so the CSS gradient on .viewer3d
+          shows through as the sky. Doing it in CSS rather than as a scene mesh
+          keeps it out of the depth buffer entirely and costs no draw call. */}
       <Canvas
         shadows
         camera={{ position: camPos, fov: 50, near: 0.1, far: 2000 }}
-        style={{ width: '100%', height: '100%', background: '#0f172a' }}
+        style={{ width: '100%', height: '100%', background: 'transparent' }}
+        gl={{ alpha: true }}
         frameloop={isVisible ? 'always' : 'never'}
         onPointerMissed={() => clearSelected()}
       >
@@ -1302,6 +1319,13 @@ function Viewer3D() {
           faces off pure black without double-counting the environment.
           KeyLight remains the single shadow caster (51-2 fits its frustum to
           the visible floors rather than a fixed ±80 m). */}
+      {/* 51-3 Distance fog. Tints geometry toward the horizon colour with
+          distance so the far end of a large plan recedes instead of staying
+          as crisp as the near end. Range scales with the scene so small and
+          large plans fog the same amount relative to their own size.
+          FOG_COLOR matches the bottom stop of the CSS sky gradient, which is
+          the band the floor plate meets. */}
+      <fog attach="fog" args={[FOG_COLOR, fogNear, fogFar]} />
       <SceneEnvironment intensity={0.30} />
       <ambientLight intensity={0.12} />
       <KeyLight center={center} radius={shadowRadius} />

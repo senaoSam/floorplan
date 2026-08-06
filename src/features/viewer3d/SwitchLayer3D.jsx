@@ -29,7 +29,9 @@ function SwitchMarker({ sw, pxToM, dimOpacity, isActiveFloor, onHover }) {
   const y = sw.mountHeight ?? 0.5
   const kindColor = getSwitchKindColor(sw.kind ?? 'switch')
   const transparent = dimOpacity < 1
-  const matOpts = { transparent, opacity: dimOpacity, depthWrite: !transparent }
+  // 51-3: `fog: false` — the stripe colour identifies the device kind
+  // (switch / IDF / MDF / router), so distance must not tint it.
+  const matOpts = { transparent, opacity: dimOpacity, depthWrite: !transparent, fog: false }
 
   // Hover readout (28-4 parity with APs): light the chassis and surface the
   // device info tooltip via the parent-provided onHover callback.

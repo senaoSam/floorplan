@@ -96,6 +96,11 @@ function OverlayMesh({ texture, wM, hM, yLift }) {
         side={THREE.DoubleSide}
         transparent
         depthWrite={false}
+        // 51-3: opt out of scene fog. Every texture this mesh carries is a
+        // colour ramp read against the 2D legend (overlap count, occupancy
+        // intensity, flow strength), and these planes are deliberately
+        // pixel-identical to their 2D counterparts — fog would break that.
+        fog={false}
       />
     </mesh>
   )

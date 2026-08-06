@@ -146,6 +146,10 @@ function FovVolume({ poly, camera, pxToM, dimOpacity, selected }) {
         opacity={(selected ? 0.16 : 0.09) * dimOpacity}
         side={THREE.DoubleSide}
         depthWrite={false}
+        // 51-3: opt out of scene fog. At alpha 0.09-0.16 any tint reads as a
+        // density change, so a far camera's cone would look like weaker
+        // coverage than an identical near one.
+        fog={false}
       />
     </mesh>
   )
@@ -177,6 +181,8 @@ function FovGround({ poly, pxToM, dimOpacity, selected = false }) {
         opacity={(selected ? FOV_ALPHA + 0.12 : FOV_ALPHA) * dimOpacity}
         side={THREE.DoubleSide}
         depthWrite={false}
+        // 51-3: coverage footprint — same reasoning as the FOV volume.
+        fog={false}
       />
     </mesh>
   )

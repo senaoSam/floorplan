@@ -61,6 +61,9 @@ export default function Label3D({ text, position, opacity = 1, heightM = 0.5 }) 
         opacity={opacity}
         depthTest={false}
         depthWrite={false}
+        // 51-3: these pills already ignore depth (they read as a HUD layer),
+        // so fogging them would only wash out the text at distance.
+        fog={false}
       />
     </sprite>
   )

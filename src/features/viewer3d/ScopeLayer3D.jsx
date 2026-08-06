@@ -61,6 +61,10 @@ function PolygonFill({ pointsM, yOffset, style, dimOpacity = 1 }) {
           opacity={style.fillAlpha * dimOpacity}
           side={THREE.DoubleSide}
           depthWrite={false}
+          // 51-3: opt out of scene fog. Green vs red is the only thing
+          // distinguishing an in-scope zone from an out-of-scope one, so two
+          // zones at different depths must not drift toward a common tint.
+          fog={false}
         />
       </mesh>
 
@@ -73,7 +77,7 @@ function PolygonFill({ pointsM, yOffset, style, dimOpacity = 1 }) {
             itemSize={3}
           />
         </bufferGeometry>
-        <lineBasicMaterial color={style.stroke} transparent opacity={dimOpacity} linewidth={2} />
+        <lineBasicMaterial color={style.stroke} transparent opacity={dimOpacity} linewidth={2} fog={false} />
       </line>
     </group>
   )
