@@ -647,7 +647,7 @@ const PHASES = [
           { id: '51-1', done: true,  text: 'IBL 環境貼圖（RoomEnvironment + PMREMGenerator → scene.environment，全場景 PBR 材質一次到位；ambient/hemi 降 0.12 避免重複計算；順修 r3f 7 在 three 0.167 失效的 outputEncoding → outputColorSpace）' },
           { id: '51-2', done: true,  text: '陰影品質（KeyLight frustum 從固定 ±80m 改依可見樓層算包圍半徑：貼圖使用率 4.3%→66.3%，面積 15.4x；光源位置跟著縮放 + bias 下修配 normalBias）' },
           { id: '51-3', done: true,  text: '背景漸層 + 場景霧（Canvas 透明 + CSS 垂直漸層；THREE.Fog 範圍綁場景尺寸、編輯中樓層不霧化；所有「顏色即數據」圖層豁免霧含 meshStandardMaterial 的 AP 頻段色／Switch 類型色）' },
-          { id: '51-4', done: false, text: '漸隱格線（gridHelper → shader 格線，fwidth 抗鋸齒 + 距離淡出）' },
+          { id: '51-4', done: true,  text: '漸隱格線（GroundGrid3D：shader 程序化格線取代 gridHelper，fwidth 維持 1px 線寬 + 距離淡出無硬邊；1m 細線/10m 粗線兩級比例感；raycast 停用不擋點選）' },
           { id: '51-5', done: false, text: '樓板厚度（貼圖平面下加 10–15cm 樓板盒，疊樓從紙片變建築）' },
         ],
       },

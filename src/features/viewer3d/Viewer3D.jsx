@@ -25,6 +25,7 @@ import RiserLayer3D from './RiserLayer3D'
 import TrayLayer3D from './TrayLayer3D'
 import SwitchLayer3D from './SwitchLayer3D'
 import CableLayer3D from './CableLayer3D'
+import GroundGrid3D from './GroundGrid3D'
 import { computeFloorElevations } from '@/utils/floorStacking'
 import Icon from '@/components/Icon/Icon'
 import './Viewer3D.sass'
@@ -557,7 +558,7 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart
 function EmptyScene() {
   return (
     <>
-      <gridHelper args={[20, 20, '#475569', '#334155']} />
+      <GroundGrid3D center={[0, 0, 0]} radius={40} cell={1} major={10} />
       <axesHelper args={[3]} />
     </>
   )
@@ -909,6 +910,18 @@ function Viewer3D() {
   // floor being edited is hazed, and saturates out where the ground grid ends.
   const fogNear = shadowRadius * 1.6
   const fogFar = shadowRadius * 6.5
+
+  // 51-4: ground grid placement. Sits a hair below the active floor so it
+  // reads as the ground plane the building stands on. Radius scales with the
+  // same content radius the shadow and fog use, so the apron of visible grid
+  // around the building is proportional on any plan size. At 3.5x it fades
+  // out inside fog's 6.5x far distance, so the grid is already gone before
+  // its own plane edge could come into view.
+  const gridCenter = useMemo(
+    () => [w / 2, activeElev - 0.01, h / 2],
+    [w, h, activeElev],
+  )
+  const gridRadius = Math.max(shadowRadius * 3.5, 45)
 
   // Initial pose: near-top-down birds-eye so the user enters 3D looking down
   // at the active floor — easy to map back to the 2D editor. We can't sit at
@@ -1359,11 +1372,15 @@ function Viewer3D() {
 
       {/* Ground grid anchored to the active floor size, placed just under the
           active floor's elevation so orientation is clear even when viewing
-          upper stories. */}
+          upper stories. 51-4: shader grid that fades out with distance
+          (see GroundGrid3D) rather than a gridHelper ending at a hard edge.
+          1 m minor / 10 m major gives the plan a readable sense of scale. */}
       {activeFloor && (
-        <gridHelper
-          args={[Math.max(w, h) * 1.5, 20, '#334155', '#1e293b']}
-          position={[w / 2, activeElev - 0.01, h / 2]}
+        <GroundGrid3D
+          center={gridCenter}
+          radius={gridRadius}
+          cell={1}
+          major={10}
         />
       )}
 
