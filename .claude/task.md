@@ -35,6 +35,39 @@
 
 ## 還沒做的事
 
+### Phase 51 3D 視覺美化（2026-08-06 立項，逐項優化、每項瀏覽器驗收後再下一項）
+
+> **現況盤點（生硬陽春的根源）**：無環境貼圖（IBL）→ meshStandardMaterial 的 metal/rough 發揮不出來全是塑膠平色；
+> 纜線全是 1px `lineBasicMaterial` 硬線（`TUBE_RADIUS` 宣告未用）；riser「外框」是 wireframe 圓柱（顯示三角網）；
+> 多處 `linewidth={2}` 是 WebGL no-op；格線/背景是最原始的 gridHelper + 死平 `#0f172a`；
+> 樓層是零厚度貼圖平面（疊樓像紙片）；label sprite 固定 42px 拉近會糊；segment 數偏低（6/8/16）。
+>
+> **限制**：不可用 drei（要 React 18）；three 0.167 的 examples jsm 模組可直接 import（同 OrbitControls 模式）。
+> **效能紅線**：Phase 45/46 戰果不可回退——隱藏 3D 凍結（`frameloop='never'`）不可破壞；
+> 動畫類效果只能在 3D 可見時跑（useFrame 本來就受 frameloop 控管，但別加常駐 rAF）；
+> 大改後在 300 AP demo 量一次切 3D 的耗時對照。
+
+#### 批次 A — 全域光影（CP 值最高，幾乎只動 `Viewer3D.jsx`，全場景一起提升）
+
+- [ ] **51-1 IBL 環境貼圖**：`RoomEnvironment` + `PMREMGenerator` → `scene.environment`（three 內建，`three/examples/jsm/environments/RoomEnvironment`，~30 行）。所有 standard/physical 材質立刻有柔和反射與層次。r3f 7 預設已是 ACESFilmicToneMapping，視情況微調 `toneMappingExposure`。
+- [ ] **51-2 陰影品質**：`<Canvas shadows>` 已是 PCFSoft；重點是 KeyLight shadow frustum 從固定 ±80m 改**依樓層對角線動態縮緊**（解析度全用在樓板上，邊緣鋸齒立減）；要可調模糊再評估換 `VSMShadowMap`（radius/blurSamples，需重調 bias）。
+- [ ] **51-3 背景漸層 + 場景霧**：死平 `#0f172a` → 容器 CSS 垂直漸層（Canvas 背景設 transparent），加 `THREE.Fog`（near/far 綁樓層對角線倍數）讓遠處格線淡出、拉出深度感。
+- [ ] **51-4 漸隱格線**：`gridHelper` → 自製 shader 格線（一大片 plane + ShaderMaterial，`fwidth` 抗鋸齒線 + 距中心距離 alpha 淡出，即常見 infinite-grid 做法），主/次格線兩級粗細。
+- [ ] **51-5 樓板厚度**：每層 FloorPlane 下加 10–15cm `BoxGeometry` 樓板盒（側面/底面深色、頂面維持貼圖平面），疊樓層從「浮空紙片」變建築；最底可加一片 `ShadowMaterial` 承影地面。注意非 active 樓層的 dimOpacity 要同步套在樓板盒。
+
+#### 批次 B — 物件細節（逐圖層打磨）
+
+- [ ] **51-6 牆描邊 + 玻璃牆**：每面牆的 ExtrudeGeometry 配 `EdgesGeometry` + LineSegments 細描邊（跟 geometry 同 useMemo 重建/dispose，建築圖感關鍵）；Glass / Low-E 材質的牆體改半透明（參考 `OpeningDetail3D` 現成玻璃：`meshPhysicalMaterial` transmission 0.9 / opacity 0.35）。
+- [ ] **51-7 纜線實體化**：1px line → three examples **fat line**（`Line2`/`LineMaterial`，真 px 線寬、支援 dash）或 `TubeGeometry`（世界單位粗細）；建議 Line2（三角形少、dash 現成）。**不可破壞 41-postfix 的值比較 memo**（座標沒變不得重建 geometry）。
+- [ ] **51-8 Riser / FloorHole 輪廓修正**：riser 的 wireframe 外殼（顯示所有三角對角線像網子）→ `EdgesGeometry(thresholdAngle)` 或只畫上下圓環；cylinder segment 16→32。FloorHoleVolume 的 `linewidth 2` no-op 輪廓線 → 需要粗線就用 Line2。
+- [ ] **51-9 Switch / AP 造型**：機箱改 examples `RoundedBoxGeometry` 圓角；Switch 正面用 canvas 貼圖畫 port 格與散熱孔（比建模便宜）；AP 選取時加脈衝光圈（useFrame 對 ring scale/opacity 做正弦動畫）；label sprite 乘 `devicePixelRatio` 提高解析 + mipmap/anisotropy（修拉近糊）。
+- [ ] **51-10 相機 FOV 漸層衰減**：FOV volume / 地面多邊形改 `vertexColors` + 頂點 alpha 由近至遠衰減（現在均勻 alpha 看不出距離感），地面 footprint 加 Line2 輪廓線。
+- [ ] **51-11 Scope / 熱圖平面收尾（低優先）**：scope 邊界 hairline → Line2 描邊；熱圖 plane 硬矩形邊緣 → texture 邊緣 alpha 羽化。
+
+#### 批次 C — 後製特效（最後評估，效能風險最高）
+
+- [ ] **51-12 EffectComposer 後製鏈**：OutlinePass（選取描邊，取代 emissive 變紅）+ 微量 UnrealBloomPass（LED/emissive 發光）+ SSAO。r3f 7 無 postprocessing 套件 → 手動建 composer、`useFrame(..., 1)` 接管 render。**做前先在 SW 渲染機 300 AP 場景量測**，過不了效能紅線就不做。
+
 ### Phase 49 自動規劃 AP 放置（auto place）— 已實作，待使用者驗收（2026-07-23 起）
 
 > Spec 與所有拍板決策見 `.claude/auto-place-spec.md`。
