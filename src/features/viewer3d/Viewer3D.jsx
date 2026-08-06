@@ -2,6 +2,7 @@ import React, { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useR
 import { Canvas, extend, useFrame, useLoader, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore, VIEW_MODE, EDITOR_MODE } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
@@ -696,6 +697,81 @@ function DeviceHoverReadout({ hovered, pointer, container }) {
 // file that owns scene-graph concerns.
 const FREQ_COLOR_3D = { 2.4: '#f39c12', 5: '#4fc3f7', 6: '#a855f7' }
 
+// Overall scene brightness. Lowering EXPOSURE darkens everything uniformly —
+// the floor heatmap included, since tone mapping runs after all shading.
+// Lowering SceneEnvironment's `intensity` instead darkens only the lit
+// surfaces and lets KeyLight's modelling dominate. Both are set low here on
+// purpose; see the sweep table at environmentIntensity below.
+const EXPOSURE = 0.8
+
+// 51-1 Image-based lighting. Without an environment map every
+// meshStandardMaterial falls back to the three analytic lights alone, so
+// roughness/metalness have nothing to reflect and every surface reads as flat
+// plastic. RoomEnvironment is three's built-in procedural studio box (a few
+// emissive planes in a room); PMREMGenerator pre-filters it into the roughness
+// mip chain that standard/physical materials sample. Assigning the result to
+// scene.environment applies it to every PBR material in the scene at once —
+// no per-material change anywhere else in viewer3d/.
+//
+// Also repairs the renderer colour pipeline: r3f 7.0.29 sets
+// `gl.outputEncoding = THREE.sRGBEncoding`, but three 0.167 removed that
+// constant (it evaluates to undefined), leaving the renderer on its default.
+// We set outputColorSpace explicitly — with IBL added, an unmanaged output
+// would wash the whole scene out.
+//
+// The generator + the baked cube target are disposed on unmount; the
+// RoomEnvironment scene itself is disposed right after baking since PMREM only
+// needs it for the one render.
+function SceneEnvironment({ intensity = 1 }) {
+  const gl = useThree((s) => s.gl)
+  const scene = useThree((s) => s.scene)
+  const invalidate = useThree((s) => s.invalidate)
+
+  useEffect(() => {
+    if (!gl || !scene) return undefined
+    if ('outputColorSpace' in gl) gl.outputColorSpace = THREE.SRGBColorSpace
+    gl.toneMapping = THREE.ACESFilmicToneMapping
+    gl.toneMappingExposure = EXPOSURE
+
+    const pmrem = new THREE.PMREMGenerator(gl)
+    pmrem.compileEquirectangularShader()
+    const room = new RoomEnvironment()
+    const envRT = pmrem.fromScene(room, 0.04)
+    scene.environment = envRT.texture
+    room.dispose?.()
+    // Repaint: the frameloop may already be idle when the bake lands.
+    invalidate()
+
+    return () => {
+      if (scene.environment === envRT.texture) scene.environment = null
+      envRT.dispose()
+      pmrem.dispose()
+    }
+  }, [gl, scene, invalidate])
+
+  // scene.environmentIntensity (three r163+) scales the IBL contribution
+  // without re-baking, so the knob stays cheap to turn.
+  //
+  // Kept well below 1: RoomEnvironment is a fairly uniform studio box, so
+  // cranking it drowns out KeyLight and the walls go bright but FLAT. Swept on
+  // the demo floor (mean / p05-p95 spread of wall-grey pixels, exposure 1.0
+  // unless noted):
+  //   pre-51-1  112.7 / 46.7    env .85  205.4 / 26.9
+  //   env .60   191.2 / 29.4    env .45  178.8 / 32.2
+  //   env .35   167.6 / 33.0    env .30 @ exp .80  145.1 / 35.2
+  // Note the trend: less environment = more contrast, because KeyLight's
+  // share of the lighting goes up. Settled on the darkest pairing (0.30 with
+  // EXPOSURE 0.80) — still brighter than the flat pre-51-1 look, but with the
+  // material depth IBL buys and the strongest face-to-face separation.
+  useEffect(() => {
+    if (!scene) return
+    if ('environmentIntensity' in scene) scene.environmentIntensity = intensity
+    invalidate()
+  }, [scene, intensity, invalidate])
+
+  return null
+}
+
 // r3f's setFrameloop('always') only flips the store flag — the rAF loop stays
 // parked until the next invalidate(), and with the previous mode 'never' every
 // queued invalidate was dropped. Kick one on the hidden→visible edge so the
@@ -1152,13 +1228,18 @@ function Viewer3D() {
         onPointerMissed={() => clearSelected()}
       >
       <WakeOnVisible isVisible={isVisible} />
-      {/* Weak ambient so back faces aren't pure black, plus a single
-          shadow-casting directional KEY light (KeyLight) that dominates the
-          scene so the oblique shadows read clearly. A slight hemisphere fill
-          keeps the lighting from going flat. Applies in ALL modes (not gated). */}
-      <ambientLight intensity={0.28} />
+      {/* 51-1: IBL now supplies the omnidirectional fill that ambient +
+          hemisphere used to fake, and it does so with direction — surfaces
+          pick up different light per normal, which is what makes roughness /
+          metalness read at all. The analytic fills are pulled down (ambient
+          0.28 → 0.12, hemisphere 0.25 → 0.12) rather than removed: they still
+          lift the unlit meshBasicMaterial-adjacent surfaces and keep back
+          faces off pure black without double-counting the environment.
+          KeyLight is unchanged — it remains the single shadow caster. */}
+      <SceneEnvironment intensity={0.30} />
+      <ambientLight intensity={0.12} />
       <KeyLight center={center} />
-      <hemisphereLight args={['#e2e8f0', '#1e293b', 0.25]} />
+      <hemisphereLight args={['#e2e8f0', '#1e293b', 0.12]} />
 
       {floors.length === 0 && <EmptyScene />}
 
