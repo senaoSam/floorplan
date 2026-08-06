@@ -54,7 +54,13 @@
   **亮度拍板 = env `0.30` + exposure `0.80`（使用者選最暗組合）**。實測牆面灰階 mean/對比落差：原本 112.7/46.7、env .85 → 205.4/**26.9**、env .45 → 178.8/32.2、**採用值 145.6/35.2**。**反直覺重點（防重做）：環境光越弱、對比越高**（KeyLight 佔比上升）——env 0.85 雖最亮但把牆壓成平板，不要為了「更亮」往上調。掃描表寫在 `SceneEnvironment` 註解裡。
   **兩個旋鈕語意不同**：`EXPOSURE`（檔案上方常數）壓暗**全畫面含地板熱圖**（tone mapping 在著色之後）；`intensity` 只壓受光表面。想「熱圖保持鮮豔、只暗建築」就只降 intensity。
   **驗證**：300 AP 開/關 IBL 穩態 long task 174.6 vs 177.1ms（雜訊內，PMREM 只烘一次故效能中性）、Phase 45 隱藏凍結完好（隱藏 0 幀、切回恢復）、4 次 2D↔3D 循環 texture 穩定 306 無洩漏、0 console errors。Camera 模式另外截圖確認：機身/支架跟著變暗正常，**FOV 錐是 `meshBasicMaterial` 不受光完全不變**（其漸層衰減屬 51-10）。
-- [ ] **51-2 陰影品質**：`<Canvas shadows>` 已是 PCFSoft；重點是 KeyLight shadow frustum 從固定 ±80m 改**依樓層對角線動態縮緊**（解析度全用在樓板上，邊緣鋸齒立減）；要可調模糊再評估換 `VSMShadowMap`（radius/blurSamples，需重調 bias）。
+- [x] **51-2 陰影品質**（✅ 2026-08-06，commit 3ad1127，使用者驗收 ok）：KeyLight shadow frustum 從固定 ±80m 改成**依畫面上實際顯示樓層算包圍半徑**（`shadowRadius` useMemo 吃 `visibleFloors`）——單樓層收緊、切全樓層自動撐大涵蓋整個堆疊。
+  **實測（投影樓層包圍盒到 light clip space，非估算）**：±80m 時 452×397 texels / 貼圖使用率 **4.3%** → 貼合後 1780×1563 / **66.3%**，**面積增益 15.4x**（每軸約 4x）。`shadow-mapSize` 維持 2048 沒動。
+  **連鎖調整**：① 光源位置改成跟半徑縮放（原固定 60/90/40 偏移，大平面圖會被建築吞掉），方向抽成 `KEY_LIGHT_DIR` 常數 ② bias −0.0005 → **−0.0002 + normalBias 0.02**（每 texel 世界單位縮小 ~4x，舊 bias 會過重讓陰影與物體脫節）。
+  **設計決策（防重做）：用包圍半徑，不要改成精確貼合方框。** frustum 在**光源空間**軸對齊而非世界空間，需要多大取決於光照方向；半徑具旋轉不變性，光源怎麼移/平面圖比例多奇怪都不會裁到。犧牲一點解析度換掉「陰影在 frustum 邊緣被切斷」這個更嚴重的失敗模式。
+  **驗收注意**：預設畫面下差異不明顯（iso 視角光從右上、牆影多落在其他牆上或建築外，地板又被熱圖蓋住；初次截圖比對僅 0.64% 像素差）——**要關掉熱圖才看得出邊緣銳利度**，疊樓層時上層投到下層樓板的大片陰影最明顯。
+  **驗證**：疊 2 樓 frustum 20.33→20.67 自動撐大無裁切、300 AP 穩態 long task ~200ms 與 51-1 基準持平（只改範圍沒動貼圖尺寸故免費）、0 console errors。
+  **未做**：`VSMShadowMap`（可調模糊，需重調 bias）——目前 PCFSoft 邊緣已可接受，有需求再評估。
 - [ ] **51-3 背景漸層 + 場景霧**：死平 `#0f172a` → 容器 CSS 垂直漸層（Canvas 背景設 transparent），加 `THREE.Fog`（near/far 綁樓層對角線倍數）讓遠處格線淡出、拉出深度感。
 - [ ] **51-4 漸隱格線**：`gridHelper` → 自製 shader 格線（一大片 plane + ShaderMaterial，`fwidth` 抗鋸齒線 + 距中心距離 alpha 淡出，即常見 infinite-grid 做法），主/次格線兩級粗細。
 - [ ] **51-5 樓板厚度**：每層 FloorPlane 下加 10–15cm `BoxGeometry` 樓板盒（側面/底面深色、頂面維持貼圖平面），疊樓層從「浮空紙片」變建築；最底可加一片 `ShadowMaterial` 承影地面。注意非 active 樓層的 dimOpacity 要同步套在樓板盒。
