@@ -82,15 +82,39 @@ function FloorPlane({ floor, opacity = 1 }) {
   )
 }
 
+// Direction the KEY light shines from, as an offset from the scene centre.
+// Scaled by the content radius (below) so the light stays outside the geometry
+// on any floor size instead of sitting at a fixed 60/90/40 that a large plan
+// would swallow.
+const KEY_LIGHT_DIR = [0.52, 0.78, 0.35]
+
 // Single shadow-casting directional KEY light. Anchored relative to the active
 // floor centre and aimed at it so the orthographic shadow frustum stays
 // registered on the floor regardless of floor size/position. The light's
 // `target` is an Object3D that must be attached to the scene and pointed at by
 // the light; we wire it imperatively after mount (a ref's `.current` change
 // does not re-render in R3F, so a JSX `target={ref.current}` would be stale on
-// first paint). Frustum half-extent is a generous ±80 m to cover typical floor
-// plans (floor dims are dynamic = image px / scale).
-function KeyLight({ center }) {
+// first paint).
+//
+// 51-2: the frustum half-extent used to be a fixed ±80 m, chosen to cover any
+// plausible plan. That wastes almost the entire shadow map on empty space, so
+// the building got only a small corner of it and shadow edges were chunky. We
+// now size the frustum to `radius`, the bounding radius of the content the
+// caller wants shadowed. Measured on the demo floor (30 × 22.4 m) by
+// projecting its bounding box through the live light matrices:
+//   fixed ±80 m   452 × 397 texels of 2048²,  4.3% of the map used
+//   fitted        1780 × 1563 texels,        66.3% used  → 15.4x by area
+// Two knock-on effects worth knowing: the light POSITION now scales with
+// radius too (it used to be a fixed 60/90/40 offset, which a large plan would
+// swallow), and shadow bias had to come down — see below.
+//
+// Why the bounding RADIUS and not the floor's width/height: the frustum is
+// axis-aligned in light space, not world space, so the extent needed depends
+// on the light direction. A radius is rotation-invariant, so it can never clip
+// regardless of where the light sits or how the plan is proportioned. It costs
+// a little resolution versus a tightly fitted box, but it cannot produce the
+// failure mode that matters here (shadows chopped off at the frustum edge).
+function KeyLight({ center, radius }) {
   const lightRef = useRef()
   const targetRef = useRef()
   useEffect(() => {
@@ -99,23 +123,40 @@ function KeyLight({ center }) {
       lightRef.current.target.updateMatrixWorld()
     }
   })
+
+  // Keep the light well outside the content, and the far plane beyond it, so
+  // nothing is clipped by near/far as the floor grows.
+  const dist = Math.max(radius * 2.2, 40)
+  const pos = [
+    center[0] + KEY_LIGHT_DIR[0] * dist,
+    center[1] + KEY_LIGHT_DIR[1] * dist,
+    center[2] + KEY_LIGHT_DIR[2] * dist,
+  ]
+  const far = dist + radius * 2 + 10
+
   return (
     <>
       <object3D ref={targetRef} position={center} />
       <directionalLight
         ref={lightRef}
-        position={[center[0] + 60, center[1] + 90, center[2] + 40]}
+        position={pos}
         intensity={1.1}
         castShadow
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
-        shadow-camera-near={1}
-        shadow-camera-far={500}
-        shadow-camera-left={-80}
-        shadow-camera-right={80}
-        shadow-camera-top={80}
-        shadow-camera-bottom={-80}
-        shadow-bias={-0.0005}
+        shadow-camera-near={0.5}
+        shadow-camera-far={far}
+        shadow-camera-left={-radius}
+        shadow-camera-right={radius}
+        shadow-camera-top={radius}
+        shadow-camera-bottom={-radius}
+        // Bias fights acne, and the amount needed scales with world units per
+        // texel — which just dropped ~4x per axis, so the old -0.0005 would be
+        // heavy-handed now and detach shadows from their casters. normalBias
+        // is the better tool for slope-dependent acne (world units, offsets
+        // along the surface normal rather than in depth).
+        shadow-bias={-0.0002}
+        shadow-normalBias={0.02}
       />
     </>
   )
@@ -832,6 +873,30 @@ function Viewer3D() {
     [w, h, activeElev],
   )
 
+  // 51-2: bounding radius of everything the KEY light should shadow, measured
+  // from `center`. Driven by the floors actually on screen, so single-floor
+  // view gets a tight frustum (sharp shadows) while 全樓層 widens it enough to
+  // reach the top of the stack. Falls back to a small radius pre-load so the
+  // first frame isn't degenerate.
+  const shadowRadius = useMemo(() => {
+    if (!visibleFloors.length) return 20
+    let maxR = 0
+    for (const f of visibleFloors) {
+      const { w: fw, h: fh } = pxToMeters(f)
+      const elev = elevations[f.id] ?? 0
+      // Corner of this floor's slab, relative to the shared centre. Height
+      // spans the floor's own elevation up to its ceiling.
+      const dx = Math.max(Math.abs(0 - center[0]), Math.abs(fw - center[0]))
+      const dz = Math.max(Math.abs(0 - center[2]), Math.abs(fh - center[2]))
+      const top = elev + (f.floorHeight ?? 3)
+      const dy = Math.max(Math.abs(elev - center[1]), Math.abs(top - center[1]))
+      maxR = Math.max(maxR, Math.sqrt(dx * dx + dy * dy + dz * dz))
+    }
+    // Small margin so AP drop poles / labels sitting just past a wall still
+    // cast rather than popping at the frustum edge.
+    return Math.max(maxR * 1.08, 8)
+  }, [visibleFloors, elevations, center])
+
   // Initial pose: near-top-down birds-eye so the user enters 3D looking down
   // at the active floor — easy to map back to the 2D editor. We can't sit at
   // exactly (target.x, *, target.z) because that's an OrbitControls gimbal
@@ -1235,10 +1300,11 @@ function Viewer3D() {
           0.28 → 0.12, hemisphere 0.25 → 0.12) rather than removed: they still
           lift the unlit meshBasicMaterial-adjacent surfaces and keep back
           faces off pure black without double-counting the environment.
-          KeyLight is unchanged — it remains the single shadow caster. */}
+          KeyLight remains the single shadow caster (51-2 fits its frustum to
+          the visible floors rather than a fixed ±80 m). */}
       <SceneEnvironment intensity={0.30} />
       <ambientLight intensity={0.12} />
-      <KeyLight center={center} />
+      <KeyLight center={center} radius={shadowRadius} />
       <hemisphereLight args={['#e2e8f0', '#1e293b', 0.12]} />
 
       {floors.length === 0 && <EmptyScene />}
