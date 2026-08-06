@@ -49,7 +49,11 @@
 
 #### 批次 A — 全域光影（CP 值最高，幾乎只動 `Viewer3D.jsx`，全場景一起提升）
 
-- [ ] **51-1 IBL 環境貼圖**：`RoomEnvironment` + `PMREMGenerator` → `scene.environment`（three 內建，`three/examples/jsm/environments/RoomEnvironment`，~30 行）。所有 standard/physical 材質立刻有柔和反射與層次。r3f 7 預設已是 ACESFilmicToneMapping，視情況微調 `toneMappingExposure`。
+- [x] **51-1 IBL 環境貼圖**（✅ 2026-08-06，commit 33cb337，使用者驗收 ok）：`SceneEnvironment` 元件——`RoomEnvironment` 經 `PMREMGenerator` 烘成 envMap 掛 `scene.environment`，全場景 PBR 材質一次到位（其他 viewer3d 檔案零改動）；ambient/hemisphere 0.28/0.25 → **0.12/0.12**（避免與環境光重複計算），KeyLight 不動仍是唯一投影光源。
+  **順手修既有 bug**：r3f 7.0.29 設 `gl.outputEncoding = THREE.sRGBEncoding`，但 **three 0.167 已移除該常數（值 undefined）**，等於沒設 → 改用 `outputColorSpace` 明確指定（加 IBL 後不管會過曝）。
+  **亮度拍板 = env `0.30` + exposure `0.80`（使用者選最暗組合）**。實測牆面灰階 mean/對比落差：原本 112.7/46.7、env .85 → 205.4/**26.9**、env .45 → 178.8/32.2、**採用值 145.6/35.2**。**反直覺重點（防重做）：環境光越弱、對比越高**（KeyLight 佔比上升）——env 0.85 雖最亮但把牆壓成平板，不要為了「更亮」往上調。掃描表寫在 `SceneEnvironment` 註解裡。
+  **兩個旋鈕語意不同**：`EXPOSURE`（檔案上方常數）壓暗**全畫面含地板熱圖**（tone mapping 在著色之後）；`intensity` 只壓受光表面。想「熱圖保持鮮豔、只暗建築」就只降 intensity。
+  **驗證**：300 AP 開/關 IBL 穩態 long task 174.6 vs 177.1ms（雜訊內，PMREM 只烘一次故效能中性）、Phase 45 隱藏凍結完好（隱藏 0 幀、切回恢復）、4 次 2D↔3D 循環 texture 穩定 306 無洩漏、0 console errors。Camera 模式另外截圖確認：機身/支架跟著變暗正常，**FOV 錐是 `meshBasicMaterial` 不受光完全不變**（其漸層衰減屬 51-10）。
 - [ ] **51-2 陰影品質**：`<Canvas shadows>` 已是 PCFSoft；重點是 KeyLight shadow frustum 從固定 ±80m 改**依樓層對角線動態縮緊**（解析度全用在樓板上，邊緣鋸齒立減）；要可調模糊再評估換 `VSMShadowMap`（radius/blurSamples，需重調 bias）。
 - [ ] **51-3 背景漸層 + 場景霧**：死平 `#0f172a` → 容器 CSS 垂直漸層（Canvas 背景設 transparent），加 `THREE.Fog`（near/far 綁樓層對角線倍數）讓遠處格線淡出、拉出深度感。
 - [ ] **51-4 漸隱格線**：`gridHelper` → 自製 shader 格線（一大片 plane + ShaderMaterial，`fwidth` 抗鋸齒線 + 距中心距離 alpha 淡出，即常見 infinite-grid 做法），主/次格線兩級粗細。

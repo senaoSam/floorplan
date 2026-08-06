@@ -639,6 +639,38 @@ const PHASES = [
     ],
   },
   {
+    phase: 'Phase 51 — 3D 視覺美化',
+    groups: [
+      {
+        layer: 'Layer 42 — 全域光影',
+        items: [
+          { id: '51-1', done: true,  text: 'IBL 環境貼圖（RoomEnvironment + PMREMGenerator → scene.environment，全場景 PBR 材質一次到位；ambient/hemi 降 0.12 避免重複計算；順修 r3f 7 在 three 0.167 失效的 outputEncoding → outputColorSpace）' },
+          { id: '51-2', done: false, text: '陰影品質（KeyLight shadow frustum 從固定 ±80m 改依樓層對角線動態縮緊）' },
+          { id: '51-3', done: false, text: '背景漸層 + 場景霧（CSS 垂直漸層 + THREE.Fog 讓遠景淡出）' },
+          { id: '51-4', done: false, text: '漸隱格線（gridHelper → shader 格線，fwidth 抗鋸齒 + 距離淡出）' },
+          { id: '51-5', done: false, text: '樓板厚度（貼圖平面下加 10–15cm 樓板盒，疊樓從紙片變建築）' },
+        ],
+      },
+      {
+        layer: 'Layer 43 — 物件細節',
+        items: [
+          { id: '51-6',  done: false, text: '牆描邊 + 玻璃牆（EdgesGeometry 細描邊；Glass/Low-E 牆體改半透明）' },
+          { id: '51-7',  done: false, text: '纜線實體化（1px line → Line2 fat line，真 px 線寬）' },
+          { id: '51-8',  done: false, text: 'Riser / FloorHole 輪廓修正（wireframe 網子 → EdgesGeometry；segment 16→32）' },
+          { id: '51-9',  done: false, text: 'Switch / AP 造型（RoundedBoxGeometry 圓角、port 貼圖、選取脈衝環、label DPR 提升）' },
+          { id: '51-10', done: false, text: '相機 FOV 漸層衰減（頂點 alpha 由近至遠衰減 + 地面 footprint 輪廓線）' },
+          { id: '51-11', done: false, text: 'Scope / 熱圖平面收尾（Line2 描邊、熱圖邊緣羽化）' },
+        ],
+      },
+      {
+        layer: 'Layer 44 — 後製特效（效能評估後才做）',
+        items: [
+          { id: '51-12', done: false, text: 'EffectComposer 後製鏈（OutlinePass 選取描邊 + 微量 Bloom + SSAO；做前先在 SW 渲染機 300 AP 量測）' },
+        ],
+      },
+    ],
+  },
+  {
     phase: 'Phase 9 — AI 輔助',
     groups: [
       {
