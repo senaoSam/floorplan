@@ -1,5 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
+import { useThree } from '@react-three/fiber'
+import { Line2 } from 'three/examples/jsm/lines/Line2'
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry'
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial'
 import { useCameraStore } from '@/store/useCameraStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useEditorStore } from '@/store/useEditorStore'
@@ -15,6 +19,12 @@ import Label3D from './Label3D'
 const CAMERA_COLOR = '#10b981'
 const BODY_COLOR = '#e2e8f0'
 const FOV_ALPHA = 0.16
+// 51-10: how far the cone dims toward its outer rim. 0.25 keeps the far edge
+// visible while making the near field unmistakably the stronger end.
+const FOV_RIM_FALLOFF = 0.25
+// Footprint outline thickness, world units. Thinner than the floor-opening
+// ring (0.12) — this marks a coverage boundary, not a structural one.
+const FOOTPRINT_WIDTH_M = 0.07
 const SELECT_EMISSIVE = '#e74c3c'
 const HOVER_EMISSIVE = '#ffffff'
 
@@ -118,11 +128,27 @@ function FovVolume({ poly, camera, pxToM, dimOpacity, selected }) {
     const apex = [camera.x * pxToM, Math.max(0.3, camera.z ?? 2.5), camera.y * pxToM]
     const n = poly.length / 2
     const positions = new Float32Array((n + 1) * 3)
+    // 51-10: per-vertex alpha, carried in a colour attribute. The cone used a
+    // single flat opacity, so a camera's coverage looked equally strong at the
+    // lens and at the far edge of its range — the one thing the shape should
+    // communicate is that detection falls off with distance. Bright at the
+    // apex, fading toward the floor ring.
+    //
+    // Encoded as vertex COLOUR rather than a real alpha attribute because
+    // meshBasicMaterial multiplies vertexColors into the base colour but has
+    // no per-vertex alpha channel; darkening toward the rim against the dark
+    // backdrop reads as the same falloff and needs no custom shader.
+    const colors = new Float32Array((n + 1) * 3)
+    const c = new THREE.Color(CAMERA_COLOR)
     positions[0] = apex[0]; positions[1] = apex[1]; positions[2] = apex[2]
+    colors[0] = c.r; colors[1] = c.g; colors[2] = c.b
     for (let i = 0; i < n; i++) {
       positions[(i + 1) * 3]     = poly[i * 2] * pxToM
       positions[(i + 1) * 3 + 1] = 0.02
       positions[(i + 1) * 3 + 2] = poly[i * 2 + 1] * pxToM
+      colors[(i + 1) * 3]     = c.r * FOV_RIM_FALLOFF
+      colors[(i + 1) * 3 + 1] = c.g * FOV_RIM_FALLOFF
+      colors[(i + 1) * 3 + 2] = c.b * FOV_RIM_FALLOFF
     }
     const index = []
     for (let i = 1; i <= n; i++) {
@@ -131,6 +157,7 @@ function FovVolume({ poly, camera, pxToM, dimOpacity, selected }) {
     }
     const geom = new THREE.BufferGeometry()
     geom.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geom.setAttribute('color', new THREE.BufferAttribute(colors, 3))
     geom.setIndex(index)
     return geom
   }, [poly, camera.x, camera.y, camera.z, pxToM])
@@ -141,18 +168,59 @@ function FovVolume({ poly, camera, pxToM, dimOpacity, selected }) {
   return (
     <mesh geometry={geometry}>
       <meshBasicMaterial
-        color={CAMERA_COLOR}
+        vertexColors
         transparent
-        opacity={(selected ? 0.16 : 0.09) * dimOpacity}
+        // Lifted from 0.09/0.16: the falloff darkens the outer two-thirds of
+        // the cone, so the old flat value left it barely visible.
+        opacity={(selected ? 0.22 : 0.14) * dimOpacity}
         side={THREE.DoubleSide}
         depthWrite={false}
-        // 51-3: opt out of scene fog. At alpha 0.09-0.16 any tint reads as a
+        // 51-3: opt out of scene fog. At this alpha any tint reads as a
         // density change, so a far camera's cone would look like weaker
         // coverage than an identical near one.
         fog={false}
       />
     </mesh>
   )
+}
+
+// 51-10: coverage-footprint outline, drawn with real width (same Line2
+// approach 51-7 used for cables and 51-8 for opening rings).
+function FovFootprintOutline({ positions, opacity }) {
+  const size = useThree((s) => s.size)
+
+  const geom = useMemo(() => {
+    const g = new LineGeometry()
+    g.setPositions(positions)
+    return g
+  }, [positions])
+  useEffect(() => () => geom.dispose(), [geom])
+
+  const material = useMemo(() => new LineMaterial({
+    color: new THREE.Color(CAMERA_COLOR),
+    worldUnits: true,
+    linewidth: FOOTPRINT_WIDTH_M,
+    transparent: true,
+    opacity,
+    // Same reasoning as the fill: green identifies camera coverage.
+    fog: false,
+  }), [opacity])
+  useEffect(() => () => material.dispose(), [material])
+
+  useEffect(() => {
+    material.resolution.set(size.width, size.height)
+  }, [material, size.width, size.height])
+
+  const line = useMemo(() => {
+    const l = new Line2(geom, material)
+    l.computeLineDistances()
+    l.raycast = () => null
+    // Just above the fill (0.03) so it isn't z-fought by it.
+    l.position.y = 0.035
+    return l
+  }, [geom, material])
+
+  return <primitive object={line} />
 }
 
 // Flat translucent visibility polygon on the floor. Shape is authored in
@@ -169,22 +237,50 @@ function FovGround({ poly, pxToM, dimOpacity, selected = false }) {
     return new THREE.ShapeGeometry(shape)
   }, [poly, pxToM])
 
+  // 51-10: outline of the coverage footprint. The fill alone has soft edges
+  // against the floor image, so where coverage actually STOPS was hard to
+  // read — which is the question a blind-spot check is asking. A closed ring
+  // through the same polygon points answers it directly.
+  const outlinePositions = useMemo(() => {
+    if (!poly || poly.length < 6) return null
+    const n = poly.length / 2
+    const arr = new Float32Array((n + 1) * 3)
+    for (let i = 0; i < n; i++) {
+      arr[i * 3]     = poly[i * 2] * pxToM
+      arr[i * 3 + 1] = 0
+      arr[i * 3 + 2] = poly[i * 2 + 1] * pxToM
+    }
+    // Close the loop.
+    arr[n * 3]     = poly[0] * pxToM
+    arr[n * 3 + 1] = 0
+    arr[n * 3 + 2] = poly[1] * pxToM
+    return arr
+  }, [poly, pxToM])
+
   useEffect(() => () => { if (geometry) geometry.dispose() }, [geometry])
   if (!geometry) return null
 
   return (
-    <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
-      <primitive object={geometry} attach="geometry" />
-      <meshBasicMaterial
-        color={CAMERA_COLOR}
-        transparent
-        opacity={(selected ? FOV_ALPHA + 0.12 : FOV_ALPHA) * dimOpacity}
-        side={THREE.DoubleSide}
-        depthWrite={false}
-        // 51-3: coverage footprint — same reasoning as the FOV volume.
-        fog={false}
-      />
-    </mesh>
+    <>
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
+        <primitive object={geometry} attach="geometry" />
+        <meshBasicMaterial
+          color={CAMERA_COLOR}
+          transparent
+          opacity={(selected ? FOV_ALPHA + 0.12 : FOV_ALPHA) * dimOpacity}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+          // 51-3: coverage footprint — same reasoning as the FOV volume.
+          fog={false}
+        />
+      </mesh>
+      {outlinePositions && (
+        <FovFootprintOutline
+          positions={outlinePositions}
+          opacity={(selected ? 0.95 : 0.7) * dimOpacity}
+        />
+      )}
+    </>
   )
 }
 

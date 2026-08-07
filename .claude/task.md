@@ -109,7 +109,12 @@
   **關鍵驗證：脈衝動畫不破壞 Phase 45 凍結**——`useFrame` 受 frameloop 控管，實測隱藏時 **0 幀**、切回 **68 幀**。300 AP（脈衝執行中）穩態 135.1ms 在基準內。0 console errors。
   **對比圖踩到的坑（防重做）**：直接設 `camera.position` **無效**——`CameraRig` 的 OrbitControls 每幀會拉回去，導致前後兩張視角不同（第一版算出「98.2% 變化」的假數字，實際是在比較牆 vs 門）。要固定視角必須用 rig 的 `park(camPos, target)`（它會取消 tween 並同步 controls.target）。修正後為合理的 2.7% / 1.3%。
   **另註**：`RoundedBoxGeometry` **不暴露 `.parameters`**（不像 `BoxGeometry`），驗證是否套用要看 `geometry.constructor.name`。
-- [ ] **51-10 相機 FOV 漸層衰減**：FOV volume / 地面多邊形改 `vertexColors` + 頂點 alpha 由近至遠衰減（現在均勻 alpha 看不出距離感），地面 footprint 加 Line2 輪廓線。
+- [x] **51-10 相機 FOV 漸層衰減**（✅ 2026-08-07，使用者驗收 ok）：① **錐體漸層**——`FovVolume` 本就是 indexed fan（頂點 0 = apex、其餘為地面環），正好對應「近亮遠暗」：apex 用滿色、地面環乘 `FOV_RIM_FALLOFF = 0.25`。原本均勻 alpha 讓鏡頭旁與最遠處覆蓋強度看起來一樣，但這個形狀最該傳達的就是偵測隨距離衰減。因衰減壓暗外側，整體 opacity 0.09/0.16 → **0.14/0.22**，否則遠端幾乎看不見。
+  **技術選擇（防重做）：用 `vertexColors` 而非真正的 per-vertex alpha**——`meshBasicMaterial` 會把 vertexColors 乘進基色，但**沒有 per-vertex alpha 通道**；在深色背景上往邊緣變暗讀起來就是衰減，且不必寫自訂 shader。
+  ② **地面 footprint 輪廓**——`Line2`（沿用 51-7/51-8）沿多邊形畫封閉環，寬 `FOOTPRINT_WIDTH_M = 0.07`（比開口環 0.12 細，這是覆蓋邊界不是結構邊界），y=0.035 疊在填充 0.03 之上避免 z-fight。原本填充在地板圖上邊緣糊掉，「覆蓋到底在哪停」看不出來——而那正是盲區檢查要問的。
+  **未做**：地面多邊形本身的漸層——它是 `ShapeGeometry`，頂點沒有天然的近/遠排序，硬做要重寫三角化，CP 值不對；輪廓線已解決「邊界在哪」的核心問題。
+  **驗證**：三視角切換 **0 long task**（相機場景輕量、頂點顏色零成本）、0 console errors。
+  **對比圖注意（此圖層固有限制）**：mock 人形是時間驅動的追蹤模擬，**前後兩張必然不同位置**，無法消除。且普通像素差異掃描會被橘色人形帶偏 → 需**只計算綠色通道差異**才能定位到真正的 FOV 變化區。
 - [ ] **51-11 Scope / 熱圖平面收尾（低優先）**：scope 邊界 hairline → Line2 描邊；熱圖 plane 硬矩形邊緣 → texture 邊緣 alpha 羽化。
 
 #### 批次 C — 後製特效（最後評估，效能風險最高）

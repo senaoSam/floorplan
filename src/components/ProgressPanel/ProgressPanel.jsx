@@ -658,7 +658,7 @@ const PHASES = [
           { id: '51-7',  done: true,  text: '纜線實體化（Line2 fat line 10cm 世界單位；groupRuns 合併同樣式線段修掉 Line2 逐段的效能回歸：19449→843 物件、232→117ms，比原基準還快）' },
           { id: '51-8',  done: true,  text: 'Riser / FloorHole 輪廓修正（riser wireframe 網子→環+脊線、segment 16→32；hole 環改 Line2 有實寬 + 每角垂直線成完整框；順手修好柱體擠出方向錯誤導致長到樓板下方的既有 bug）' },
           { id: '51-9',  done: true,  text: 'Switch / AP 造型（RoundedBoxGeometry 圓角 + canvas port 面板貼圖；AP 選取脈衝環 useFrame 受 frameloop 控管不破壞隱藏凍結；label 超取樣 + mipmap 修拉近糊，順手刪掉 APLayer 內的 Label3D 複製）' },
-          { id: '51-10', done: false, text: '相機 FOV 漸層衰減（頂點 alpha 由近至遠衰減 + 地面 footprint 輪廓線）' },
+          { id: '51-10', done: true,  text: '相機 FOV 漸層衰減（錐體 vertexColors 近亮遠暗，傳達偵測隨距離衰減；地面 footprint 加 Line2 輪廓線標出覆蓋邊界）' },
           { id: '51-11', done: false, text: 'Scope / 熱圖平面收尾（Line2 描邊、熱圖邊緣羽化）' },
         ],
       },
