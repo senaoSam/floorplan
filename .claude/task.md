@@ -104,7 +104,11 @@
   **設計差異（刻意，非疏漏）**：riser 固定 4 條垂直線（圓柱沒有真實的角，4 條只是勾勒輪廓，太多會變回網子感）；floor hole 每個角一條（多邊形的角是真實幾何邊界）。註解已標明。垂直線各自是獨立 2 點線段，不是一條折線——否則會在「上一角頂點」與「下一角底點」之間畫出不存在的斜線。
   **⚠ 順手抓到的既有 bug（使用者目視發現「線與柱體在不同地方」）**：`ExtrudeGeometry` 在 XY 畫形狀往 +Z 擠出，原本用 `rotation +π/2` 轉正 —— **但這個旋轉把擠出方向送到 −Y，柱體一直是往樓板下方長的**（實測 y −6→0，應為 0→6）。原本框線是髮絲線看不見，沒有參照物所以長期沒被發現；加粗後錯位才現形。**修法＝旋轉改 `−π/2`（擠出朝 +Y）+ 餵給擠出器的形狀 Y 取負**（抵銷該旋轉造成的 Z 鏡像）。**防重做：這兩個改動必須成對，只改其一會變成鏡像或倒插。**
   **驗證（三情境 + 獨立預期值，非拿渲染結果回推）**：① L 形多邊形跨 2 層 x10.07–17.96/z4.82–14.89 ② 單樓層開口 y 0–**3**（正確只跨一層） ③ **旋轉 30°+位移對齊** x19.03–27.40/z3.41–11.79（預期值由 `floorAlign.js` 的 `makeAlignMatrixM`/`applyAlignMatrix` 獨立算出）。三組柱體與框線邊界皆完全一致。另純幾何驗算確認映射是**逐點運算**故與多邊形形狀無關。目視補確認旋轉案例無鏡像（bounding box 相同不代表沒鏡像）。0 console errors。
-- [ ] **51-9 Switch / AP 造型**：機箱改 examples `RoundedBoxGeometry` 圓角；Switch 正面用 canvas 貼圖畫 port 格與散熱孔（比建模便宜）；AP 選取時加脈衝光圈（useFrame 對 ring scale/opacity 做正弦動畫）；label sprite 乘 `devicePixelRatio` 提高解析 + mipmap/anisotropy（修拉近糊）。
+- [x] **51-9 Switch / AP 造型**（✅ 2026-08-07，使用者驗收 ok，四子項全做）：① **Switch 圓角機箱** `RoundedBoxGeometry`（半徑 0.012 取小，目的是讓邊緣吃到高光，不是做成塑膠感）② **Switch 前面板 port 貼圖**——canvas 畫兩排 port 凹槽 + 綠色連線 LED，貼在前面板薄 quad 上（+0.001 避免與機箱 z-fight）。**決策：貼圖不建模**——48 port 建模要多 ~100 個 box，但面板只會在幾公分寬被看到，貼圖同樣資訊只要一個 draw call；依 port 數快取，同型號 switch 共用一張 ③ **AP 選取脈衝環**——`useFrame` 驅動由內而外擴散淡出（週期 1.6s，scale 1.0→1.5）。選中的 AP 本來就變紅，但密集場景裡那只是「又一個紅色東西」，**動態**才是讓它跳出來的原因 ④ **Label 銳利度**——原本固定 42px 光柵化，HiDPI 或拉近就糊；改 `devicePixelRatio` 超取樣（**上限 ×2 再 ×1.5**，因為 label 依字串永久快取，3x DPR 會讓每個裝置名都吃三倍面積）+ mipmap + anisotropy 4。世界尺寸不變（sprite 用**版面尺寸**縮放而非像素尺寸）。
+  **順手消重複**：`APLayer3D` 內的 label 是 `Label3D` 的逐字複製，銳利度修正等於要做兩次 → AP 改用共用元件，刪掉複製（−117 行）。
+  **關鍵驗證：脈衝動畫不破壞 Phase 45 凍結**——`useFrame` 受 frameloop 控管，實測隱藏時 **0 幀**、切回 **68 幀**。300 AP（脈衝執行中）穩態 135.1ms 在基準內。0 console errors。
+  **對比圖踩到的坑（防重做）**：直接設 `camera.position` **無效**——`CameraRig` 的 OrbitControls 每幀會拉回去，導致前後兩張視角不同（第一版算出「98.2% 變化」的假數字，實際是在比較牆 vs 門）。要固定視角必須用 rig 的 `park(camPos, target)`（它會取消 tween 並同步 controls.target）。修正後為合理的 2.7% / 1.3%。
+  **另註**：`RoundedBoxGeometry` **不暴露 `.parameters`**（不像 `BoxGeometry`），驗證是否套用要看 `geometry.constructor.name`。
 - [ ] **51-10 相機 FOV 漸層衰減**：FOV volume / 地面多邊形改 `vertexColors` + 頂點 alpha 由近至遠衰減（現在均勻 alpha 看不出距離感），地面 footprint 加 Line2 輪廓線。
 - [ ] **51-11 Scope / 熱圖平面收尾（低優先）**：scope 邊界 hairline → Line2 描邊；熱圖 plane 硬矩形邊緣 → texture 邊緣 alpha 羽化。
 

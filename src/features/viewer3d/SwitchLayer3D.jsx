@@ -1,4 +1,6 @@
-import React, { useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
+import * as THREE from 'three'
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry'
 import { useCableStore, getSwitchKindColor } from '@/store/useCableStore'
 import { useEditorStore } from '@/store/useEditorStore'
 
@@ -22,6 +24,64 @@ const BODY_COLOR = '#1f2937'   // slate-800 — reads as black rack metal
 const STRIPE_THICKNESS = 0.012  // 1.2 cm front-panel LED strip
 const STRIPE_INSET     = 0.008  // peek the strip outside the body so the
                                 // emissive isn't drowned by the dark face
+
+// 51-9: rounded chassis edges. Real rack hardware has a chamfer, and at this
+// size a hard-edged box reads as a placeholder cube. Small radius — the point
+// is to catch a highlight along the edge, not to look moulded.
+const CHASSIS_RADIUS = 0.012
+const CHASSIS_SEGMENTS = 2
+
+// 51-9 Front-panel port strip, drawn as a canvas texture rather than modelled.
+// A 48-port switch would need ~100 extra boxes per device to model; the panel
+// is only ever seen face-on at a few centimetres across, so a texture carries
+// the same information for one draw call.
+//
+// Cached per port count: every 24-port switch in the scene shares one texture.
+const portTextureCache = new Map()
+function getPortTexture(portCount) {
+  const n = Math.max(4, Math.min(portCount || 24, 48))
+  if (portTextureCache.has(n)) return portTextureCache.get(n)
+
+  // Ports run in two rows, as on real 1U gear.
+  const cols = Math.ceil(n / 2)
+  const cw = 16, ch = 22, gap = 3, padX = 10, padY = 8
+  const w = padX * 2 + cols * cw + (cols - 1) * gap
+  const h = padY * 2 + 2 * ch + gap
+
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = '#1a2230'
+  ctx.fillRect(0, 0, w, h)
+
+  for (let i = 0; i < n; i++) {
+    const row = i % 2
+    const col = Math.floor(i / 2)
+    const x = padX + col * (cw + gap)
+    const y = padY + row * (ch + gap)
+    // Port cavity, then a lighter lip so it reads as recessed.
+    ctx.fillStyle = '#0b0f16'
+    ctx.fillRect(x, y, cw, ch)
+    ctx.fillStyle = '#39465c'
+    ctx.fillRect(x, y, cw, 2)
+    // Link LED above alternating ports, so the panel isn't uniformly dead.
+    if (i % 3 !== 2) {
+      ctx.fillStyle = '#4ade80'
+      ctx.fillRect(x + 2, y + ch - 4, 4, 2)
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.minFilter = THREE.LinearMipmapLinearFilter
+  tex.magFilter = THREE.LinearFilter
+  tex.anisotropy = 4
+  if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace
+  else tex.encoding = THREE.sRGBEncoding
+  tex.needsUpdate = true
+  portTextureCache.set(n, tex)
+  return tex
+}
 
 function SwitchMarker({ sw, pxToM, dimOpacity, isActiveFloor, onHover }) {
   const x = (sw.x ?? 0) * pxToM
@@ -58,6 +118,15 @@ function SwitchMarker({ sw, pxToM, dimOpacity, isActiveFloor, onHover }) {
   const bodyD = BASE_D
   const isRouter = sw.kind === 'router'
 
+  // 51-9: rounded chassis. Built per size rather than shared, since the three
+  // size classes differ; disposed with the component.
+  const chassisGeom = useMemo(
+    () => new RoundedBoxGeometry(bodyW, bodyH, bodyD, CHASSIS_SEGMENTS, CHASSIS_RADIUS),
+    [bodyW, bodyH, bodyD],
+  )
+  useEffect(() => () => chassisGeom.dispose(), [chassisGeom])
+  const portTexture = useMemo(() => getPortTexture(portCount), [portCount])
+
   // Front-panel stripe sits along the +Z face of the chassis, centred
   // vertically but slightly inset so it reads as a recessed indicator.
   const stripeZ = bodyD / 2 + STRIPE_INSET / 2
@@ -74,15 +143,25 @@ function SwitchMarker({ sw, pxToM, dimOpacity, isActiveFloor, onHover }) {
           <meshStandardMaterial color="#64748b" roughness={0.7} {...matOpts} />
         </mesh>
       )}
-      {/* Body — dark "metal" chassis */}
-      <mesh position={[0, y, 0]} castShadow receiveShadow>
-        <boxGeometry args={[bodyW, bodyH, bodyD]} />
+      {/* Body — dark "metal" chassis, 51-9: rounded edges */}
+      <mesh position={[0, y, 0]} castShadow receiveShadow geometry={chassisGeom}>
         <meshStandardMaterial
           color={BODY_COLOR}
           roughness={0.6}
           metalness={0.45}
           emissive={isHovered ? '#ffffff' : '#000000'}
           emissiveIntensity={isHovered ? 0.3 : 0}
+          {...matOpts}
+        />
+      </mesh>
+      {/* 51-9 Front-panel ports. A thin quad just proud of the face, so the
+          texture isn't z-fighting the chassis it sits on. */}
+      <mesh position={[0, y - bodyH * 0.08, bodyD / 2 + 0.001]} raycast={() => null}>
+        <planeGeometry args={[bodyW * 0.86, bodyH * 0.52]} />
+        <meshStandardMaterial
+          map={portTexture}
+          roughness={0.8}
+          metalness={0.1}
           {...matOpts}
         />
       </mesh>

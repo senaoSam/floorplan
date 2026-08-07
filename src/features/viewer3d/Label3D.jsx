@@ -6,46 +6,68 @@ import * as THREE from 'three'
 // should use this shared one). Textures are cached per text string so
 // re-renders never rebuild the canvas.
 
+// 51-9: the pill used to rasterise at a flat 42px regardless of display, so
+// on a HiDPI screen — or simply zoomed in — the text went soft. Render at
+// SUPERSAMPLE x the layout size and let the GPU downscale, which keeps it
+// crisp without changing the label's world size (the sprite is scaled from
+// the LAYOUT dimensions, not the pixel ones).
+//
+// Capped rather than taken straight from devicePixelRatio: labels are cached
+// per string for the life of the page, so a 3x-DPR display would otherwise
+// hold triple-area canvases for every device name in the scene.
+const SUPERSAMPLE = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2) * 1.5
+
 const labelTextureCache = new Map()
 function getLabelTexture(text) {
   if (labelTextureCache.has(text)) return labelTextureCache.get(text)
   const pad = 18
   const fontSize = 42
+  const s = SUPERSAMPLE
+
+  // Measure at layout scale so the pill proportions are unchanged.
+  const probe = document.createElement('canvas').getContext('2d')
+  probe.font = `600 ${fontSize}px sans-serif`
+  const textW = Math.ceil(probe.measureText(text).width)
+  const layoutW = textW + pad * 2
+  const layoutH = fontSize + pad * 2
+
   const canvas = document.createElement('canvas')
+  canvas.width  = Math.ceil(layoutW * s)
+  canvas.height = Math.ceil(layoutH * s)
   const ctx = canvas.getContext('2d')
+  // Draw in layout units; the transform does the upscaling.
+  ctx.scale(s, s)
   ctx.font = `600 ${fontSize}px sans-serif`
-  const textW = Math.ceil(ctx.measureText(text).width)
-  canvas.width  = textW + pad * 2
-  canvas.height = fontSize + pad * 2
-  // Re-set font after resizing canvas (context resets).
-  const ctx2 = canvas.getContext('2d')
-  ctx2.font = `600 ${fontSize}px sans-serif`
-  ctx2.textBaseline = 'middle'
-  ctx2.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.textAlign = 'center'
   // Pill background
-  const r = canvas.height / 2
-  ctx2.fillStyle = 'rgba(15, 23, 42, 0.88)'
-  ctx2.beginPath()
-  ctx2.moveTo(r, 0)
-  ctx2.lineTo(canvas.width - r, 0)
-  ctx2.arc(canvas.width - r, r, r, -Math.PI / 2, Math.PI / 2)
-  ctx2.lineTo(r, canvas.height)
-  ctx2.arc(r, r, r, Math.PI / 2, -Math.PI / 2)
-  ctx2.fill()
-  ctx2.strokeStyle = 'rgba(255, 255, 255, 0.25)'
-  ctx2.lineWidth = 2
-  ctx2.stroke()
+  const r = layoutH / 2
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.88)'
+  ctx.beginPath()
+  ctx.moveTo(r, 0)
+  ctx.lineTo(layoutW - r, 0)
+  ctx.arc(layoutW - r, r, r, -Math.PI / 2, Math.PI / 2)
+  ctx.lineTo(r, layoutH)
+  ctx.arc(r, r, r, Math.PI / 2, -Math.PI / 2)
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)'
+  ctx.lineWidth = 2
+  ctx.stroke()
   // Text
-  ctx2.fillStyle = '#f1f5f9'
-  ctx2.fillText(text, canvas.width / 2, canvas.height / 2)
+  ctx.fillStyle = '#f1f5f9'
+  ctx.fillText(text, layoutW / 2, layoutH / 2)
 
   const tex = new THREE.CanvasTexture(canvas)
-  tex.minFilter = THREE.LinearFilter
+  // Mipmaps + anisotropy: without them a supersampled texture shimmers when
+  // the label is small on screen, which is most of the time in a wide view.
+  tex.minFilter = THREE.LinearMipmapLinearFilter
   tex.magFilter = THREE.LinearFilter
+  tex.generateMipmaps = true
+  tex.anisotropy = 4
   if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace
   else tex.encoding = THREE.sRGBEncoding
   tex.needsUpdate = true
-  const entry = { texture: tex, aspect: canvas.width / canvas.height }
+  const entry = { texture: tex, aspect: layoutW / layoutH }
   labelTextureCache.set(text, entry)
   return entry
 }

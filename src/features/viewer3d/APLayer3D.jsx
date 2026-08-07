@@ -1,9 +1,11 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
+import { useFrame } from '@react-three/fiber'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { getPatternById, sampleGain } from '@/constants/antennaPatterns'
+import Label3D from './Label3D'
 
 // 47-8a: off-band APs are dimmed (not hidden) to match the 2D heatmap band
 // filter — keep the same factor as apsLayer's BAND_DIM_ALPHA.
@@ -161,81 +163,51 @@ function CustomLobe({ patternId, azimuthDeg, tiltDeg, color, opacity, matOpts })
   )
 }
 
-// Build a sprite texture showing the AP name as white text on a dark pill.
-// Cached per-name so dragging / re-renders don't rebuild the canvas.
-const labelTextureCache = new Map()
-function getLabelTexture(text) {
-  if (labelTextureCache.has(text)) return labelTextureCache.get(text)
-  const pad = 18
-  const fontSize = 42
-  const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')
-  ctx.font = `600 ${fontSize}px sans-serif`
-  const metrics = ctx.measureText(text)
-  const textW = Math.ceil(metrics.width)
-  canvas.width  = textW + pad * 2
-  canvas.height = fontSize + pad * 2
-  // Re-set font after resizing canvas (context resets).
-  const ctx2 = canvas.getContext('2d')
-  ctx2.font = `600 ${fontSize}px sans-serif`
-  ctx2.textBaseline = 'middle'
-  ctx2.textAlign = 'center'
-  // Pill background
-  const r = canvas.height / 2
-  ctx2.fillStyle = 'rgba(15, 23, 42, 0.88)'
-  ctx2.beginPath()
-  ctx2.moveTo(r, 0)
-  ctx2.lineTo(canvas.width - r, 0)
-  ctx2.arc(canvas.width - r, r, r, -Math.PI / 2, Math.PI / 2)
-  ctx2.lineTo(r, canvas.height)
-  ctx2.arc(r, r, r, Math.PI / 2, -Math.PI / 2)
-  ctx2.fill()
-  ctx2.strokeStyle = 'rgba(255, 255, 255, 0.25)'
-  ctx2.lineWidth = 2
-  ctx2.stroke()
-  // Text
-  ctx2.fillStyle = '#f1f5f9'
-  ctx2.fillText(text, canvas.width / 2, canvas.height / 2)
-
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.minFilter = THREE.LinearFilter
-  tex.magFilter = THREE.LinearFilter
-  if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace
-  else tex.encoding = THREE.sRGBEncoding
-  tex.needsUpdate = true
-  const entry = { texture: tex, aspect: canvas.width / canvas.height }
-  labelTextureCache.set(text, entry)
-  return entry
-}
-
-// Billboarded AP name label. Sprite always faces the camera, scales so the
-// text stays at a consistent on-screen size as the user zooms.
-function APLabel({ text, position, opacity }) {
-  const { texture, aspect } = useMemo(() => getLabelTexture(text), [text])
-  // World-space height of the pill. 0.5 m reads well alongside the 0.36 m AP
-  // disc without dominating the scene.
-  const heightM = 0.5
-  const widthM = heightM * aspect
-  return (
-    <sprite position={position} scale={[widthM, heightM, 1]}>
-      <spriteMaterial
-        map={texture}
-        transparent
-        opacity={opacity}
-        depthTest={false}
-        depthWrite={false}
-        // 51-3: these pills already ignore depth (they read as a HUD layer),
-        // so fogging them would only wash out the text at distance.
-        fog={false}
-      />
-    </sprite>
-  )
-}
+// 51-9: the AP label used to be a byte-for-byte copy of Label3D (canvas pill
+// + billboarded sprite), which meant the supersampling fix had to be made
+// twice. Uses the shared component now; the 0.5 m pill height that read well
+// against the 0.36 m AP disc is Label3D's default.
 
 // Selection / hover accent — red emissive glow (matches 2D APLayer) layered
 // on top of the existing freq color so the AP still reads as its band.
 const SELECT_EMISSIVE = '#e74c3c'
 const HOVER_EMISSIVE  = '#ffffff'
+
+// 51-9 Selection pulse. A selected AP is already tinted red, but in a dense
+// scene that reads as "one more red thing" rather than "this is the one you
+// picked" — motion is what separates it, since nothing else in the view moves.
+//
+// Driven by useFrame, which is gated by r3f's frameloop, so this animates only
+// while 3D is actually visible and does not resurrect the Phase 45 freeze.
+const PULSE_PERIOD_S = 1.6
+const PULSE_MIN_SCALE = 1.0
+const PULSE_MAX_SCALE = 1.5
+
+function SelectionPulse({ radius }) {
+  const ref = useRef(null)
+  useFrame(({ clock }) => {
+    const g = ref.current
+    if (!g) return
+    // 0..1 sawtooth: expand outward, fading as it goes, then restart.
+    const t = (clock.elapsedTime % PULSE_PERIOD_S) / PULSE_PERIOD_S
+    const s = PULSE_MIN_SCALE + (PULSE_MAX_SCALE - PULSE_MIN_SCALE) * t
+    g.scale.set(s, s, s)
+    if (g.material) g.material.opacity = 0.55 * (1 - t)
+  })
+  return (
+    <mesh ref={ref} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
+      <ringGeometry args={[radius * 0.92, radius, 48]} />
+      <meshBasicMaterial
+        color={SELECT_EMISSIVE}
+        transparent
+        opacity={0.55}
+        side={THREE.DoubleSide}
+        depthWrite={false}
+        fog={false}
+      />
+    </mesh>
+  )
+}
 
 // Memoized: updateAP replaces only the edited AP's object (per-item immutable
 // map in useAPStore), so a single-AP move re-renders ONE marker instead of
@@ -342,9 +314,18 @@ const APMarker = React.memo(function APMarker({ ap, pxToM, dimOpacity, isActiveF
         </group>
       </group>
 
+      {/* 51-9: expanding ring on the selected AP. Sits just under the disc so
+          it reads as emanating from the unit. Active floor only — a pulsing
+          ghost on a dimmed floor would pull the eye to the wrong storey. */}
+      {isSelected && (
+        <group position={[0, y - BODY_HEIGHT_M / 2 - 0.01, 0]}>
+          <SelectionPulse radius={RING_RADIUS_M * 1.15} />
+        </group>
+      )}
+
       {/* Floating name label above the ring */}
       {ap.name && (
-        <APLabel
+        <Label3D
           text={ap.name}
           position={[0, y + 0.6, 0]}
           opacity={dimOpacity}
