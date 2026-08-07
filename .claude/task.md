@@ -100,7 +100,10 @@
   **線寬拍板 `CABLE_WIDTH_M = 0.10`（非真實 3cm）**：真實 Cat6 約 3cm，在 30m 樓層預設視角下不到一個像素，**第一版就是這樣整條消失**。0.10m 是「看得到又不搶眼、且比 AP drop pole 細」的最小值。**防重做：不要為了物理正確改回 0.03。**
   **量化的誠實註記**：本項改的是線的「實心程度」不是覆蓋面積，整幅像素百分比會低估（0.1%）、纜線色像素數只有 1.08x，兩個數字都會誤導。實際採樣發現渲染後纜線最亮只到 blue=216（非假設的飽和值）。**證據以對比圖為準**（`.playwright-mcp/compare/51-7-*`，C 俯瞰放大最清楚），效能數據才是本項的硬指標。
   纜線設 `raycast = () => null` 不擋後方裝置點選。0 console errors。
-- [ ] **51-8 Riser / FloorHole 輪廓修正**：riser 的 wireframe 外殼（顯示所有三角對角線像網子）→ `EdgesGeometry(thresholdAngle)` 或只畫上下圓環；cylinder segment 16→32。FloorHoleVolume 的 `linewidth 2` no-op 輪廓線 → 需要粗線就用 Line2。
+- [x] **51-8 Riser / FloorHole 輪廓修正**（✅ 2026-08-07，使用者驗收 ok）：① **Riser**——`wireframe` 圓柱外殼（會畫出每個三角形的邊含側面對角線，看起來像網子）→ 自建 LineSegments：上下兩圓環 + **4 條垂直線**（`RISER_SPINES`）；圓柱 segment 16 → **32**（18cm 半徑下 16 段看得出是多邊形）。② **FloorHole**——上下環的 `linewidth={2}` 是 **WebGL no-op**（實際是髮絲線，在淡紫填充上看不見）→ 改 `Line2`（沿用 51-7 做法）0.12m 世界單位寬；**新增每個角一條垂直線**（使用者要求「變成全立方體」）。
+  **設計差異（刻意，非疏漏）**：riser 固定 4 條垂直線（圓柱沒有真實的角，4 條只是勾勒輪廓，太多會變回網子感）；floor hole 每個角一條（多邊形的角是真實幾何邊界）。註解已標明。垂直線各自是獨立 2 點線段，不是一條折線——否則會在「上一角頂點」與「下一角底點」之間畫出不存在的斜線。
+  **⚠ 順手抓到的既有 bug（使用者目視發現「線與柱體在不同地方」）**：`ExtrudeGeometry` 在 XY 畫形狀往 +Z 擠出，原本用 `rotation +π/2` 轉正 —— **但這個旋轉把擠出方向送到 −Y，柱體一直是往樓板下方長的**（實測 y −6→0，應為 0→6）。原本框線是髮絲線看不見，沒有參照物所以長期沒被發現；加粗後錯位才現形。**修法＝旋轉改 `−π/2`（擠出朝 +Y）+ 餵給擠出器的形狀 Y 取負**（抵銷該旋轉造成的 Z 鏡像）。**防重做：這兩個改動必須成對，只改其一會變成鏡像或倒插。**
+  **驗證（三情境 + 獨立預期值，非拿渲染結果回推）**：① L 形多邊形跨 2 層 x10.07–17.96/z4.82–14.89 ② 單樓層開口 y 0–**3**（正確只跨一層） ③ **旋轉 30°+位移對齊** x19.03–27.40/z3.41–11.79（預期值由 `floorAlign.js` 的 `makeAlignMatrixM`/`applyAlignMatrix` 獨立算出）。三組柱體與框線邊界皆完全一致。另純幾何驗算確認映射是**逐點運算**故與多邊形形狀無關。目視補確認旋轉案例無鏡像（bounding box 相同不代表沒鏡像）。0 console errors。
 - [ ] **51-9 Switch / AP 造型**：機箱改 examples `RoundedBoxGeometry` 圓角；Switch 正面用 canvas 貼圖畫 port 格與散熱孔（比建模便宜）；AP 選取時加脈衝光圈（useFrame 對 ring scale/opacity 做正弦動畫）；label sprite 乘 `devicePixelRatio` 提高解析 + mipmap/anisotropy（修拉近糊）。
 - [ ] **51-10 相機 FOV 漸層衰減**：FOV volume / 地面多邊形改 `vertexColors` + 頂點 alpha 由近至遠衰減（現在均勻 alpha 看不出距離感），地面 footprint 加 Line2 輪廓線。
 - [ ] **51-11 Scope / 熱圖平面收尾（低優先）**：scope 邊界 hairline → Line2 描邊；熱圖 plane 硬矩形邊緣 → texture 邊緣 alpha 羽化。

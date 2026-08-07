@@ -14,6 +14,46 @@ import { makeAlignMatrixM, applyAlignMatrix, isIdentityAlign } from '@/utils/flo
 const RISER_COLOR  = '#a78bfa'   // violet-400 (matches 2D RiserLayer)
 const STROKE_COLOR = '#7c3aed'
 const RADIUS_M     = 0.18        // ~18 cm — small but readable in a typical scene
+const RISER_SEGMENTS = 32        // 51-8: was 16, visibly faceted at this radius
+// Verticals drawn down the shaft. Four reads as a round column being outlined;
+// more starts to look like the netting this replaced.
+const RISER_SPINES = 4
+
+// 51-8 Riser outline: two end rings plus a few verticals. Built as one
+// LineSegments so the whole outline is a single object per riser.
+function RiserOutline({ height, opacity }) {
+  const geom = useMemo(() => {
+    const r = RADIUS_M * 1.02   // just outside the shaft so it isn't z-fought
+    const hy = height / 2
+    const pts = []
+    // Two rings: consecutive point pairs around the circumference.
+    for (const y of [-hy, hy]) {
+      for (let i = 0; i < RISER_SEGMENTS; i++) {
+        const a0 = (i / RISER_SEGMENTS) * Math.PI * 2
+        const a1 = ((i + 1) / RISER_SEGMENTS) * Math.PI * 2
+        pts.push(Math.cos(a0) * r, y, Math.sin(a0) * r)
+        pts.push(Math.cos(a1) * r, y, Math.sin(a1) * r)
+      }
+    }
+    // Verticals joining the rings.
+    for (let i = 0; i < RISER_SPINES; i++) {
+      const a = (i / RISER_SPINES) * Math.PI * 2
+      const x = Math.cos(a) * r, z = Math.sin(a) * r
+      pts.push(x, -hy, z, x, hy, z)
+    }
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
+    return g
+  }, [height])
+  React.useEffect(() => () => geom.dispose(), [geom])
+
+  return (
+    <lineSegments raycast={() => null}>
+      <primitive object={geom} attach="geometry" />
+      <lineBasicMaterial color={STROKE_COLOR} transparent opacity={opacity} />
+    </lineSegments>
+  )
+}
 
 export default function RiserLayer3D({ activeFloorId }) {
   const floors = useFloorStore((s) => s.floors)
@@ -74,7 +114,10 @@ export default function RiserLayer3D({ activeFloorId }) {
         return (
           <group key={it.key} position={[it.x, yCenter, it.z]}>
             <mesh castShadow receiveShadow>
-              <cylinderGeometry args={[RADIUS_M, RADIUS_M, height, 16]} />
+              {/* 51-8: 16 → 32 segments. At 18cm radius the facets on a
+                  16-segment cylinder are visible as a polygon rather than a
+                  round shaft. */}
+              <cylinderGeometry args={[RADIUS_M, RADIUS_M, height, RISER_SEGMENTS]} />
               <meshStandardMaterial
                 color={RISER_COLOR}
                 transparent
@@ -82,17 +125,14 @@ export default function RiserLayer3D({ activeFloorId }) {
                 depthWrite={false}
               />
             </mesh>
-            {/* Sharper outline so the column reads as a discrete object even
-                when it overlaps a floor plane. */}
-            <mesh>
-              <cylinderGeometry args={[RADIUS_M * 1.02, RADIUS_M * 1.02, height, 16, 1, true]} />
-              <meshBasicMaterial
-                color={STROKE_COLOR}
-                wireframe
-                transparent
-                opacity={0.4 * it.dimOpacity}
-              />
-            </mesh>
+            {/* Outline so the column reads as a discrete object even when it
+                overlaps a floor plane.
+                51-8: was a `wireframe` cylinder, which draws every triangle
+                edge — including the diagonal across each side quad — so the
+                shaft looked wrapped in netting rather than outlined. Rings at
+                the two ends plus a few verticals give the silhouette without
+                the mesh triangulation showing through. */}
+            <RiserOutline height={height} opacity={0.55 * it.dimOpacity} />
           </group>
         )
       })}
