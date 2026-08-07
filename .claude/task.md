@@ -94,7 +94,12 @@
   **行為改變（刻意）**：玻璃牆 `castShadow={!isGlass}` **不投影**——three 陰影 pass 不理會 transmission，會投出與混凝土相同的實心影子，那是唯一露餡「這不是真玻璃」的地方。
   **玻璃牆描邊 alpha 較高**（0.75 vs 一般 0.4）：玻璃本體幾乎透明，沒有框線整面牆會消失。
   **驗證**：300 AP 穩態 156.3ms（基準內，45 條描邊線近乎零成本）；描邊 `raycast={() => null}` 不影響點選；Camera 模式牆體維持不可選取；0 console errors。對比圖 `.playwright-mcp/compare/51-6-*`（gitignore）。
-- [ ] **51-7 纜線實體化**：1px line → three examples **fat line**（`Line2`/`LineMaterial`，真 px 線寬、支援 dash）或 `TubeGeometry`（世界單位粗細）；建議 Line2（三角形少、dash 現成）。**不可破壞 41-postfix 的值比較 memo**（座標沒變不得重建 geometry）。
+- [x] **51-7 纜線實體化**（✅ 2026-08-07，使用者驗收 ok）：1px line → **`Line2` + `LineGeometry` + `LineMaterial`**（`worldUnits: true`）。`lineBasicMaterial` 的 `linewidth` 在桌面 GL 後端一律被忽略，所以舊版不管怎麼設都是髮絲線；Line2 把每段展開成面向相機的四邊形，粗細才真的生效。41-postfix 的值比較 memo **原封保留**。
+  **⚠ 踩到並修復的效能回歸（防重做，最重要）**：第一版「每線段一個 `PolylineTube`」在 Line2 下爆掉——Line2 每物件帶 instanced geometry + 自己的 shader material，遠重於普通線。300 AP 實測 **19,449 個 Line2 / 穩態 232.3ms / 尖峰 5948ms**，vs 基準 157.3ms / 2112ms（用 `git stash` 前後對照量的），**明確踩線**。
+  修法＝新增 `groupRuns()`：把**樣式相同且首尾相接**的線段合併成一條 polyline。不能全部合一條（同路由內 drop leg 虛線、線槽段實線必須區分）；合併條件含「首尾相接」防呆，路由跨樓層又折返的斷點不會被錯接。結果 **843 物件 / 117.5ms / 614ms — 比原始基準還快**（減 draw call 對普通線也是賺的）。
+  **線寬拍板 `CABLE_WIDTH_M = 0.10`（非真實 3cm）**：真實 Cat6 約 3cm，在 30m 樓層預設視角下不到一個像素，**第一版就是這樣整條消失**。0.10m 是「看得到又不搶眼、且比 AP drop pole 細」的最小值。**防重做：不要為了物理正確改回 0.03。**
+  **量化的誠實註記**：本項改的是線的「實心程度」不是覆蓋面積，整幅像素百分比會低估（0.1%）、纜線色像素數只有 1.08x，兩個數字都會誤導。實際採樣發現渲染後纜線最亮只到 blue=216（非假設的飽和值）。**證據以對比圖為準**（`.playwright-mcp/compare/51-7-*`，C 俯瞰放大最清楚），效能數據才是本項的硬指標。
+  纜線設 `raycast = () => null` 不擋後方裝置點選。0 console errors。
 - [ ] **51-8 Riser / FloorHole 輪廓修正**：riser 的 wireframe 外殼（顯示所有三角對角線像網子）→ `EdgesGeometry(thresholdAngle)` 或只畫上下圓環；cylinder segment 16→32。FloorHoleVolume 的 `linewidth 2` no-op 輪廓線 → 需要粗線就用 Line2。
 - [ ] **51-9 Switch / AP 造型**：機箱改 examples `RoundedBoxGeometry` 圓角；Switch 正面用 canvas 貼圖畫 port 格與散熱孔（比建模便宜）；AP 選取時加脈衝光圈（useFrame 對 ring scale/opacity 做正弦動畫）；label sprite 乘 `devicePixelRatio` 提高解析 + mipmap/anisotropy（修拉近糊）。
 - [ ] **51-10 相機 FOV 漸層衰減**：FOV volume / 地面多邊形改 `vertexColors` + 頂點 alpha 由近至遠衰減（現在均勻 alpha 看不出距離感），地面 footprint 加 Line2 輪廓線。

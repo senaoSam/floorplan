@@ -1,5 +1,9 @@
 import React, { useMemo, useRef } from 'react'
 import * as THREE from 'three'
+import { useThree } from '@react-three/fiber'
+import { Line2 } from 'three/examples/jsm/lines/Line2'
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry'
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial'
 import { useAPStore } from '@/store/useAPStore'
 import { useCableStore, resolveTrayMountHeight } from '@/store/useCableStore'
 import { useFloorStore } from '@/store/useFloorStore'
@@ -25,7 +29,17 @@ const CABLE_COLOR    = '#22d3ee'    // cyan — AP-to-switch via tray
 const FALLBACK_COLOR = '#9ca3af'    // grey — Manhattan fallback
 const TRUNK_COLOR    = '#a78bfa'    // violet — copper S2S
 const TRUNK_FIBER    = '#fb7185'    // rose  — fiber S2S
-const TUBE_RADIUS    = 0.018        // 1.8 cm — thin enough to read as wire
+// 51-7: cable diameter in world units, driving LineMaterial's world-space
+// linewidth. (Replaces a TUBE_RADIUS constant that was declared for a tube
+// implementation that never happened and sat unused while cables rendered as
+// 1px hairlines.)
+//
+// Deliberately NOT the true ~3cm of a real Cat6 run. At the default iso
+// framing of a 30m floor that is well under a pixel, and the cables simply
+// vanish — which is what the first attempt at this did. 10cm is the smallest
+// value that still reads at normal zoom while staying thinner than the
+// AP drop poles it runs alongside.
+const CABLE_WIDTH_M  = 0.10
 
 function plenumYForFloor(floor, traysOnFloor) {
   // If trays exist, average their resolved mountHeights. Otherwise fall
@@ -71,14 +85,21 @@ function liftPoint(p, idx, lastIdx, route, ctx) {
   return [x, plenumY, z]
 }
 
-// Build a BufferGeometry from a polyline. For dashed materials the caller
-// must run computeLineDistances on the resulting line — without that the
-// dashed shader has no parameter to gap on and renders solid.
+// 51-7: build a LineGeometry (the instanced-quad geometry Line2 expects)
+// rather than a plain BufferGeometry. `line` with lineBasicMaterial ignores
+// linewidth on every desktop GL backend, so cables rendered as 1px hairlines
+// no matter what — invisible at a glance and impossible to tell apart from
+// the dashed variants at distance. LineGeometry expands each segment into a
+// camera-facing quad, so LineMaterial's linewidth actually applies.
+//
+// setPositions wants a flat array; LineGeometry computes its own instance
+// distances, so dashes work without a computeLineDistances call on the object
+// (Line2.computeLineDistances is still needed and is done at mount).
 function buildLineGeom(pts3) {
-  const g = new THREE.BufferGeometry()
+  const g = new LineGeometry()
   const flat = new Float32Array(pts3.length * 3)
   pts3.forEach((p, i) => { flat[i * 3] = p[0]; flat[i * 3 + 1] = p[1]; flat[i * 3 + 2] = p[2] })
-  g.setAttribute('position', new THREE.BufferAttribute(flat, 3))
+  g.setPositions(flat)
   return g
 }
 
@@ -92,43 +113,47 @@ function buildLineGeom(pts3) {
 const PolylineTube = React.memo(function PolylineTube({ pts3, color, dimOpacity, dashed = false, dashSize = 0.18, gapSize = 0.10 }) {
   const geom = useMemo(() => buildLineGeom(pts3), [pts3])
   React.useEffect(() => () => geom.dispose(), [geom])
-  // Critical for dashed lines: distance attribute drives the dash UV.
-  const lineRef = React.useRef(null)
-  React.useEffect(() => {
-    if (dashed && lineRef.current) lineRef.current.computeLineDistances()
-  }, [dashed, geom])
 
-  if (dashed) {
-    return (
-      <line ref={lineRef}>
-        <primitive object={geom} attach="geometry" />
-        <lineDashedMaterial
-          color={color}
-          transparent={dimOpacity < 1}
-          opacity={dimOpacity}
-          dashSize={dashSize}
-          gapSize={gapSize}
-          // 51-3: see the solid-line note below — same route colour code.
-          fog={false}
-        />
-      </line>
-    )
-  }
-  return (
-    <line>
-      <primitive object={geom} attach="geometry" />
-      <lineBasicMaterial
-        color={color}
-        transparent={dimOpacity < 1}
-        opacity={dimOpacity}
-        // 51-3: opt out of scene fog. Cable colour is a status code (cyan =
-        // routed via tray, grey = Manhattan fallback, violet/rose = copper /
-        // fibre trunk) and a route spans the whole floor, so fog would
-        // desaturate cyan toward the grey that means "needs attention".
-        fog={false}
-      />
-    </line>
-  )
+  // LineMaterial sizes its quads in screen space, so it needs the drawing
+  // buffer size. Without this every line collapses to nothing.
+  const size = useThree((s) => s.size)
+
+  const material = useMemo(() => new LineMaterial({
+    color: new THREE.Color(color),
+    // World units: a cable should read as a physical thing that gets thinner
+    // with distance, not a constant-width screen annotation. linewidth is a
+    // world-space width here, so CABLE_WIDTH_M is the cable's diameter.
+    worldUnits: true,
+    linewidth: CABLE_WIDTH_M,
+    dashed,
+    dashSize,
+    gapSize,
+    transparent: dimOpacity < 1,
+    opacity: dimOpacity,
+    // 51-3: opt out of scene fog. Cable colour is a status code (cyan =
+    // routed via tray, grey = Manhattan fallback, violet/rose = copper /
+    // fibre trunk) and a route spans the whole floor, so fog would
+    // desaturate cyan toward the grey that means "needs attention".
+    fog: false,
+  }), [color, dashed, dashSize, gapSize, dimOpacity])
+  React.useEffect(() => () => material.dispose(), [material])
+
+  // Keep the material's resolution in step with the canvas.
+  React.useEffect(() => {
+    material.resolution.set(size.width, size.height)
+  }, [material, size.width, size.height])
+
+  const line = useMemo(() => {
+    const l = new Line2(geom, material)
+    // Line2 needs its own distance pass for dashes; harmless when solid.
+    l.computeLineDistances()
+    // Cables are reference geometry — never intercept a click meant for a
+    // device behind them.
+    l.raycast = () => null
+    return l
+  }, [geom, material])
+
+  return <primitive object={line} />
 }, (a, b) => {
   if (a.color !== b.color || a.dimOpacity !== b.dimOpacity ||
       a.dashed !== b.dashed || a.dashSize !== b.dashSize || a.gapSize !== b.gapSize) return false
@@ -154,6 +179,37 @@ function buildSegments(pts, floorId) {
     segs.push({ aIdx: i, bIdx: i + 1, isDrop })
   }
   return segs
+}
+
+// 51-7: merge consecutive segments that share a dash style into one polyline.
+//
+// Line2 is far heavier per object than a plain line — it carries an instanced
+// geometry and its own shader material — so the old one-component-per-segment
+// shape did not survive the switch: a 300-AP scene built ~19,400 Line2s and
+// pushed steady-state long tasks from 157ms to 232ms. Segments within a route
+// genuinely differ (drop legs dash, tray runs are solid), so they can't all
+// collapse into one line, but consecutive segments of the SAME style can.
+// That is the difference between one object per segment and one per style run.
+//
+// Returns [{ dashed, idxs }] where idxs are indices into the route's pts3,
+// forming a continuous polyline.
+function groupRuns(segs, isDashed) {
+  const runs = []
+  let cur = null
+  for (const s of segs) {
+    const dashed = isDashed(s)
+    // A run continues only if the style matches AND this segment starts where
+    // the last one ended — a gap means the route left this floor and came
+    // back, and joining across it would draw a cable that doesn't exist.
+    const contiguous = cur && cur.dashed === dashed && cur.idxs[cur.idxs.length - 1] === s.aIdx
+    if (contiguous) {
+      cur.idxs.push(s.bIdx)
+    } else {
+      cur = { dashed, idxs: [s.aIdx, s.bIdx] }
+      runs.push(cur)
+    }
+  }
+  return runs
 }
 
 export default function CableLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
@@ -228,26 +284,24 @@ export default function CableLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
     if (!segs.length) return null
     const isFallback = r.routeStatus === 'fallback-manhattan'
     const color = isFallback ? FALLBACK_COLOR : baseColor
+    // Longer dash for fiber to read as different material, matches 2D.
+    const dashSize = isFiber ? 0.30 : 0.18
+    const gapSize  = isFiber ? 0.14 : 0.10
+    // Fallback whole route + tray drop legs + fiber all use dashed.
+    const runs = groupRuns(segs, (s) => isFallback || s.isDrop || isFiber)
     return (
       <group key={key}>
-        {segs.map((s, i) => {
-          // Fallback whole route + tray drop legs + fiber all use dashed.
-          const dashed = isFallback || s.isDrop || isFiber
-          // Longer dash for fiber to read as different material, matches 2D.
-          const dashSize = isFiber ? 0.30 : 0.18
-          const gapSize  = isFiber ? 0.14 : 0.10
-          return (
-            <PolylineTube
-              key={i}
-              pts3={[pts3[s.aIdx], pts3[s.bIdx]]}
-              color={color}
-              dimOpacity={dimOpacity}
-              dashed={dashed}
-              dashSize={dashSize}
-              gapSize={gapSize}
-            />
-          )
-        })}
+        {runs.map((run, i) => (
+          <PolylineTube
+            key={i}
+            pts3={run.idxs.map((ix) => pts3[ix])}
+            color={color}
+            dimOpacity={dimOpacity}
+            dashed={run.dashed}
+            dashSize={dashSize}
+            gapSize={gapSize}
+          />
+        ))}
       </group>
     )
   }
