@@ -30,7 +30,7 @@
 **Phase 47 B4 UX/一致性完成（47-22~27，commit 1a4bf16，使用者驗收 ok；含 off-band dim/多頻段 demo/3D toolbar 精簡等使用者追加）。**
 **Phase 47 B5 全部完成（2026-07-22，使用者驗收 ok，MCP 通過）：47-12 TX 逐頻段預設 + 47-13 PoE per-port class（Opus 4.8）、47-10 天線增益 + 47-11 材質庫（Fable 5，雙引擎 parity 已驗）。B1~B5 收工，Phase 47 六角色審查缺陷全數清完（47-8b 單台三頻 / 47-6 autoChannelPlan 半徑為 backlog/防重做，非缺陷）。**
 **Phase 50 AI 牆改接 cv+graph pipeline API 完成（2026-07-29，commit e242f6d，MCP 驗證通過，見下表）。**
-**Phase 51 批次 B 收工：51-11 完成 → 51-1~51-11 全數完成，只剩批次 C（51-12 後製鏈，需先量測效能才決定做不做）。**
+**Phase 51 全部收工（2026-08-10）：51-1~51-11 完成；51-12 後製鏈實作後量測 +25ms／fps 砍半，照門檻整包撤回不做。**
 **Backlog 清掉兩項：PDF 規劃報告輸出（含新增的 RF 涵蓋率/verdict 頁）、spec.md 全面同步。以上三項 2026-08-10 使用者驗收 ok。**
 
 ---
@@ -127,7 +127,18 @@
 
 #### 批次 C — 後製特效（最後評估，效能風險最高）
 
-- [ ] **51-12 EffectComposer 後製鏈**：OutlinePass（選取描邊，取代 emissive 變紅）+ 微量 UnrealBloomPass（LED/emissive 發光）+ SSAO。r3f 7 無 postprocessing 套件 → 手動建 composer、`useFrame(..., 1)` 接管 render。**做前先在 SW 渲染機 300 AP 場景量測**，過不了效能紅線就不做。
+- [x] **51-12 EffectComposer 後製鏈 — 實作後量測不過，已整包撤回（2026-08-10）**。**結論：不做。Phase 51 到此收工。**
+  照本項自訂的門檻「做前先量測，過不了效能紅線就不做」執行：完整實作（`PostFx3D.jsx` + 四個 layer 的 `userData.selectKey` 標記）→ 量測 → **回退**。程式碼已刪，只留下這則紀錄與 `DevBridge`。
+  **實測（Intel UHD 770／1340×952／300 AP／等角／熱圖開，非 SwiftShader）**：
+  | 情境 | ms/frame | fps |
+  |---|---|---|
+  | 無 composer（同場次基準） | ~34.3 | 29.1 |
+  | RenderPass+Outline+Bloom+Output | **59.4** | **16.8**（p95 201ms） |
+  **+25ms／1.73×，fps 幾乎砍半**——遠超紅線（Phase 45/46 好不容易把 300 AP 拉到可用）。**明確不做。**
+  **逐 pass 成本（interleaved 中位數，同場次）**：Outline ≈ 0、Bloom ≈ 0（都在雜訊內）、**SSAO +3.5~7.4ms**；**SSAO 降半解析度 33.74 vs 全解析度 33.75＝完全沒省**——它的成本在整場景 depth/normal prepass，不在 AO 解析度，**沒有便宜的旋鈕可調**。（故即使只上 Outline+Bloom 也已經是上表的 59.4ms，問題不只 SSAO。）
+  **⚠ 量測陷阱（防重做，最重要）**：直接拿 `gl.render()` 對比 composer 會得到「composer 比較快」的荒謬結果（實測 0.74×）。原因＝**畫進 default framebuffer 要付瀏覽器合成成本（33.8 vs 26.6ms，約 7ms）**，而 composer 畫進 offscreen target 不用付。**任何後續比較都必須讓基準也畫進 render target**，否則結論相反。
+  **另外兩個踩到的架構衝突（若日後重啟需先解）**：① composer 最後一道 pass 是全螢幕 quad，預設不透明，會蓋掉 51-3「CSS 漸層透過透明 canvas 透出來」的做法（背景變全黑，連帶 51-4 格線淡出失去可淡入的底色）。試過 `CustomBlending`／`NoBlending`／把漸層改成 `scene.background` 貼圖三種解法。② **不是** double tone-mapping——查 three 原始碼 `WebGLPrograms.js:164-175` 確認 tone mapping 只在 `currentRenderTarget === null` 時套用，RenderPass 畫進 target 故不會重複，這條假設已排除。
+  **保留下來的東西**：`Viewer3D.jsx` 的 **`DevBridge`**（DEV-only `window.__r3f = {gl, scene, camera, size, invalidate}`）。r3f 7 把 store 藏在 context、canvas 元素上沒有把手，先前**完全無法**從 MCP/devtools 量測 3D；本項所有數據都靠它才拿得到，日後任何 3D 效能工作都需要。對照既有的 `window.__pixiApp` / `__scene` / `__stores` 慣例。
 
 ### Phase 49 自動規劃 AP 放置（auto place）— 已實作，待使用者驗收（2026-07-23 起）
 
@@ -360,6 +371,7 @@
 | 30-3 ~ 30-7 Konva 多層拆分 | react-konva 環境做會白工；融入 Phase 25 PixiJS Container 階層 |
 | 31-4 Wall Mesh + line shader | 5000 wall 對 GPU trivial，Graphics + batching 撐得到；日後實測卡頓再重啟 |
 | Verkada Tier 3（多站 Sites/Subsites 導覽、Google Maps 地理定位） | 2026-07-02 使用者確定不做——本專案維持單站閉環畫布，不做導覽 IA / 地圖底圖級改動 |
+| 51-12 EffectComposer 後製鏈（Outline / Bloom / SSAO） | 2026-08-10 實作後實測：300 AP 從 34.3ms(29fps) → **59.4ms(16.8fps)**，+25ms／1.73×，p95 201ms。SSAO 降解析度完全不省（成本在 depth/normal prepass）。另與 51-3 透明 canvas + CSS 天空漸層架構衝突。細節與量測陷阱見 Phase 51 該條 |
 
 ---
 

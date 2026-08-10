@@ -902,6 +902,25 @@ function WakeOnVisible({ isVisible }) {
   return null
 }
 
+// DEV-only bridge to the r3f root, mirroring window.__pixiApp / __scene /
+// __stores in FloorplanSystem. r3f 7 keeps its store in context with no handle
+// on the canvas element, so without this there is no way for the MCP / devtools
+// console to reach the renderer, scene or camera — which is what any 3D
+// measurement (frame cost, pass cost, draw calls) has to talk to.
+function DevBridge() {
+  const gl = useThree((s) => s.gl)
+  const scene = useThree((s) => s.scene)
+  const camera = useThree((s) => s.camera)
+  const size = useThree((s) => s.size)
+  const invalidate = useThree((s) => s.invalidate)
+  useEffect(() => {
+    if (!import.meta.env.DEV) return undefined
+    window.__r3f = { gl, scene, camera, size, invalidate }
+    return () => { delete window.__r3f }
+  }, [gl, scene, camera, size, invalidate])
+  return null
+}
+
 function Viewer3D() {
   const floors = useFloorStore((s) => s.floors)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
@@ -1393,6 +1412,7 @@ function Viewer3D() {
         onPointerMissed={() => clearSelected()}
       >
       <WakeOnVisible isVisible={isVisible} />
+      <DevBridge />
       {/* 51-1: IBL now supplies the omnidirectional fill that ambient +
           hemisphere used to fake, and it does so with direction — surfaces
           pick up different light per normal, which is what makes roughness /

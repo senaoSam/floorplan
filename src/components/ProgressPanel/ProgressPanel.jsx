@@ -665,7 +665,7 @@ const PHASES = [
       {
         layer: 'Layer 44 — 後製特效（效能評估後才做）',
         items: [
-          { id: '51-12', done: false, text: 'EffectComposer 後製鏈（OutlinePass 選取描邊 + 微量 Bloom + SSAO；做前先在 SW 渲染機 300 AP 量測）' },
+          { id: '51-12', done: true, text: '撤回 — EffectComposer 後製鏈（實作後實測 300 AP 34.3ms/29fps → 59.4ms/16.8fps，+25ms、fps 砍半；SSAO 降解析度不省，成本在 depth/normal prepass。照本項門檻整包回退）' },
         ],
       },
     ],
