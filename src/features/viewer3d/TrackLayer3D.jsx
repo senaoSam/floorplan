@@ -147,7 +147,9 @@ function buildGeometries() {
     // Shirt: wider than the body underneath, with a flared hem cylinder at
     // the waist — garments hang OVER the body, they don't paint it.
     torso: new THREE.CapsuleGeometry(0.15, 0.4, 4, 12),   // total ~0.70
-    hem: new THREE.CylinderGeometry(0.165, 0.175, 0.1, 12),
+    // Hem barely flares past the torso (0.15) — the earlier 0.175 bottom
+    // radius read as a tool belt rather than a shirt hanging over the waist.
+    hem: new THREE.CylinderGeometry(0.155, 0.162, 0.09, 12),
     pelvis: new THREE.CylinderGeometry(0.14, 0.125, 0.16, 10),
     sleeve: new THREE.CapsuleGeometry(0.062, 0.16, 4, 8), // total ~0.28
     forearm: new THREE.CapsuleGeometry(0.04, 0.26, 4, 8), // total ~0.34, skin
@@ -158,7 +160,10 @@ function buildGeometries() {
     carGlass: extrudeCentered(carGlassShape(), CAR_GLASS_W, 0.05),
     wheel: new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, 0.24, 18),
     hub: new THREE.CylinderGeometry(0.14, 0.14, 0.25, 12),
-    doorHandle: new THREE.BoxGeometry(0.17, 0.05, 0.055),
+    // Handle is deliberately oversized vs a real one (~11 cm long): at the
+    // mid-range distance a planner actually orbits from, true scale shrank
+    // below a pixel and the car lost its only side-surface detail.
+    doorHandle: new THREE.BoxGeometry(0.26, 0.075, 0.075),
     exhaust: new THREE.CylinderGeometry(0.045, 0.045, 0.18, 10),
   }
 }
@@ -327,9 +332,11 @@ function applyState(group, detected, baseColor, highlight = false) {
     tinted.push(pantsMat)
   }
   if (skinMat) {
-    // Head/neck/forearms: heavily desaturated + lifted → skin against the
+    // Head/neck/forearms: desaturated + slightly lifted → skin against the
     // coloured garment (greys along with everything in the ghost state).
-    skinMat.color.copy(_stateColor).offsetHSL(0, -0.45, 0.18)
+    // Lift trimmed from 0.18 to 0.10: the paler tone washed out to near-white
+    // under the key light, so heads read as bald highlights from above.
+    skinMat.color.copy(_stateColor).offsetHSL(0, -0.4, 0.1)
     tinted.push(skinMat)
   }
   for (const m of tinted) {
