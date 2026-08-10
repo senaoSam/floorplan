@@ -122,7 +122,7 @@ function CameraBody({ camera, pxToM, dimOpacity, isActiveFloor, onHover }) {
 // footprint — apex at mount height, sides following the clipped silhouette,
 // so the "light" visibly shoots out of the camera instead of lying on the
 // ground. Built as an indexed fan: apex + the footprint ring.
-function FovVolume({ poly, camera, pxToM, dimOpacity, selected }) {
+function FovVolume({ poly, camera, pxToM, dimOpacity, selected, dimmed }) {
   const geometry = useMemo(() => {
     if (!poly || poly.length < 6) return null
     const apex = [camera.x * pxToM, Math.max(0.3, camera.z ?? 2.5), camera.y * pxToM]
@@ -171,8 +171,10 @@ function FovVolume({ poly, camera, pxToM, dimOpacity, selected }) {
         vertexColors
         transparent
         // Lifted from 0.09/0.16: the falloff darkens the outer two-thirds of
-        // the cone, so the old flat value left it barely visible.
-        opacity={(selected ? 0.22 : 0.14) * dimOpacity}
+        // the cone, so the old flat value left it barely visible. `dimmed`
+        // (another camera is selected) pushes the cone well back so the
+        // selected one owns the scene.
+        opacity={(selected ? 0.22 : dimmed ? 0.05 : 0.14) * dimOpacity}
         side={THREE.DoubleSide}
         depthWrite={false}
         // 51-3: opt out of scene fog. At this alpha any tint reads as a
@@ -225,7 +227,7 @@ function FovFootprintOutline({ positions, opacity }) {
 
 // Flat translucent visibility polygon on the floor. Shape is authored in
 // canvas-metric XY and rotated +90° about X so shape-Y lands on world +Z.
-function FovGround({ poly, pxToM, dimOpacity, selected = false }) {
+function FovGround({ poly, pxToM, dimOpacity, selected = false, dimmed = false }) {
   const geometry = useMemo(() => {
     if (!poly || poly.length < 6) return null
     const shape = new THREE.Shape()
@@ -267,7 +269,7 @@ function FovGround({ poly, pxToM, dimOpacity, selected = false }) {
         <meshBasicMaterial
           color={CAMERA_COLOR}
           transparent
-          opacity={(selected ? FOV_ALPHA + 0.12 : FOV_ALPHA) * dimOpacity}
+          opacity={(selected ? FOV_ALPHA + 0.12 : dimmed ? FOV_ALPHA * 0.3 : FOV_ALPHA) * dimOpacity}
           side={THREE.DoubleSide}
           depthWrite={false}
           // 51-3: coverage footprint — same reasoning as the FOV volume.
@@ -277,7 +279,7 @@ function FovGround({ poly, pxToM, dimOpacity, selected = false }) {
       {outlinePositions && (
         <FovFootprintOutline
           positions={outlinePositions}
-          opacity={(selected ? 0.95 : 0.7) * dimOpacity}
+          opacity={(selected ? 0.95 : dimmed ? 0.25 : 0.7) * dimOpacity}
         />
       )}
     </>
@@ -305,10 +307,14 @@ export default function CameraLayer3D({ floorId, pxToM, dimOpacity = 1, isActive
   }), [cameras, segments, pxToM])
 
   if (!cameras.length || !pxToM) return null
+  // While one of THIS floor's cameras is selected, every other camera's cone
+  // steps back (dimmed) so the selected coverage owns the scene.
+  const anySelected = isActiveFloor && selectedType === 'camera' && cameras.some((c) => c.id === selectedId)
   return (
     <group>
       {cameras.map((cam, i) => {
         const isSelected = isActiveFloor && selectedType === 'camera' && selectedId === cam.id
+        const dimmed = anySelected && !isSelected
         return (
           <group key={cam.id}>
             <CameraBody camera={cam} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActiveFloor} onHover={isActiveFloor ? onCameraHover : undefined} />
@@ -320,12 +326,14 @@ export default function CameraLayer3D({ floorId, pxToM, dimOpacity = 1, isActive
                   pxToM={pxToM}
                   dimOpacity={dimOpacity}
                   selected={isSelected}
+                  dimmed={dimmed}
                 />
                 <FovGround
                   poly={polys[i]}
                   pxToM={pxToM}
                   dimOpacity={dimOpacity}
                   selected={isSelected}
+                  dimmed={dimmed}
                 />
               </>
             )}
