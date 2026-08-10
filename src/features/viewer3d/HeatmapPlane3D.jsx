@@ -30,6 +30,13 @@ import { subscribeHeatmapFrame, getHeatmapFrame } from '@/render/heatmapFrameBus
 // Same as the previous self-computed plane (the scope clip moved out of the
 // sampled field into the 2D vector mask in fix/scope-vector-clip).
 
+// 51-11 note: the plan-edge alpha feather is NOT applied here. It is baked into
+// the shared canvas by heatmapGL's colormap pass (see EDGE_FEATHER_M in
+// render/heatmapAdapter), so this plane inherits the identical ramp the 2D
+// sprite shows — which is the whole point of the shared-canvas design. Adding a
+// second feather on this material would double-apply it and desynchronise 3D
+// from 2D.
+
 export default function HeatmapPlane3D({ floorId, elevation }) {
   const floors = useFloorStore((s) => s.floors)
   const floor  = floors.find((f) => f.id === floorId) ?? null
@@ -46,6 +53,7 @@ export default function HeatmapPlane3D({ floorId, elevation }) {
     setFrame(getHeatmapFrame())
     return subscribeHeatmapFrame(setFrame)
   }, [isVisible])
+
 
   // Recreate the CanvasTexture only when the canvas identity changes (adapter
   // teardown/rebuild). Repaints of the same canvas are handled below with a

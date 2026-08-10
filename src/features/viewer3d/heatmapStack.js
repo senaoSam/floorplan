@@ -127,6 +127,11 @@ const ensureStack = async () => {
     if (!paintGL) paintGL = createHeatmapGL()
     const outW = f.imageWidth
     const outH = f.imageHeight
+    // No `edgeFeather` here, deliberately (51-11): unlike the active floor, the
+    // stack samples the plan rect EXACTLY — no PAD_M margin — so its boundary
+    // has no data beyond it to fade into, and a ramp would just dim real
+    // readings at the edge. Stacked floors are background context anyway; the
+    // feather is for the floor being read.
     paintGL.render(
       { rssi: grid, nx: field.nx, ny: field.ny },
       outW, outH, 1 / f.scale, hm.blur, hm.showContours,

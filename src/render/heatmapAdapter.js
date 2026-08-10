@@ -81,6 +81,27 @@ function computePadding(scenario) {
   }
 }
 
+// 51-11: width (metres) of the alpha ramp that softens the heatmap's outer
+// boundary, applied ONLY on plan edges that computePadding decided were
+// UNFRAMED (no wall running along them).
+//
+// The distinction is the whole point, so don't "simplify" it to all four sides:
+//   - framed edge   → the field really does stop there (building envelope), so
+//                     a hard cut is the truth and must stay hard.
+//   - unframed edge → the cut is an artifact of where sampling stops. The field
+//                     physically continues; the straight line across the floor
+//                     is us, not the RF.
+// Keeping it narrow (1.5 m vs the 12 m PAD_M) matters: this fades only the last
+// sliver of a region we DO have data for, so almost no readable area is dimmed,
+// while the eye stops reading the boundary as a coverage cliff.
+//
+// Implemented in the heatmapGL colormap shader (the single place the output
+// alpha is written) rather than as a PIXI mask: PIXI v8 sprite masks are BINARY
+// coverage — verified by setting the whole mask to alpha 0.15 and getting a
+// byte-identical render (0 px changed). Doing it in the shared canvas also means
+// the 2D sprite and the 3D plane inherit the same ramp for free.
+const EDGE_FEATHER_M = 1.5
+
 // ---- Phase 41-1/41-2 constants + pure helpers ----
 // Coarse first-stage grid step: max(user step, 1.0 m). Same visual sweet spot
 // as the drag-LOD step — near-indistinguishable once blur/bicubic upsample
@@ -218,6 +239,12 @@ export function attachHeatmapLayer({
   // maskG clips the sprite to that rect (oldSrc HeatmapLayer used a
   // Konva clipFunc for the same effect).
   let maskG = null
+  // 51-11: which plan edges the last compute() decided were UNFRAMED, so the
+  // mask knows where a soft boundary is honest and where it would be a lie.
+  // Null until the first compute — the mask then falls back to a hard rect,
+  // which is the correct conservative default (never invent a soft edge on an
+  // edge we haven't yet established is unframed).
+  let lastFeatherEdges = null
 
   const ensureSprite = () => {
     if (sprite) return sprite
@@ -244,6 +271,39 @@ export function attachHeatmapLayer({
     return sprite
   }
 
+  // 51-11: describe the plan-rect boundary fade for heatmapGL's colormap pass,
+  // in that pass's UV space. Returns null (feature off) until computePadding has
+  // reported which edges are unframed, and whenever no edge qualifies.
+  //
+  // The canvas spans the PADDED sample region, so the plan rect is an inset
+  // sub-rect of it — that inset, not the canvas border, is what we fade.
+  const buildEdgeFeather = (ctx) => {
+    const edges = lastFeatherEdges
+    if (!edges) return null
+    if (!edges.left && !edges.right && !edges.top && !edges.bottom) return null
+    if (!ctx.fullW || !ctx.fullH) return null
+
+    // Plan rect as UV fractions of the padded canvas.
+    const uMin = ctx.padLpx / ctx.fullW
+    const uMax = (ctx.padLpx + ctx.imgW) / ctx.fullW
+    // World +y runs DOWN the plan but v runs UP the canvas (FS_SAMPLE does the
+    // flip, this pass doesn't) — so the plan's TOP edge is at the HIGH v end.
+    const vMin = (ctx.fullH - ctx.padTpx - ctx.imgH) / ctx.fullH   // world bottom
+    const vMax = (ctx.fullH - ctx.padTpx) / ctx.fullH              // world top
+
+    const wU = (EDGE_FEATHER_M * ctx.scale) / ctx.fullW
+    const wV = (EDGE_FEATHER_M * ctx.scale) / ctx.fullH
+    // A ramp wide enough to meet itself would dim the whole floor.
+    if (wU * 2 >= uMax - uMin || wV * 2 >= vMax - vMin) return null
+
+    return {
+      rect: [uMin, vMin, uMax, vMax],
+      widthUv: [wU, wV],
+      // UV order (uMin, uMax, vMin, vMax) = (left, right, world-bottom, world-top).
+      sides: [edges.left, edges.right, edges.bottom, edges.top],
+    }
+  }
+
   // Sprite clip geometry = plan rect ∩ in-scopes − out-scopes.
   //
   // Two jobs in one mask:
@@ -258,6 +318,10 @@ export function attachHeatmapLayer({
   //
   // Rebuilt ONLY on scope / floor-size change (see subscriptions), never per
   // heatmap frame, so ripple animation and dragging pay nothing here.
+  //
+  // NOTE (51-11): the plan-edge feather is NOT here. PIXI v8 sprite masks are
+  // binary coverage — per-fill alpha in the mask is discarded — so the fade
+  // lives in the heatmapGL colormap shader instead (see buildEdgeFeather).
   const rebuildMask = () => {
     if (!maskG) return
     const floorState = useFloorStore.getState()
@@ -277,6 +341,11 @@ export function attachHeatmapLayer({
     // with several subpaths, which PIXI's checkForHoles would mis-read as
     // "inner subpath = hole" if two in-scopes nest.
     if (inScopes.length > 0) {
+      // NOTE (51-11): no edge feather in the scoped case. Here the visible
+      // boundary is the scope polygon, which is a deliberate user-drawn line
+      // that the drawn scope stroke sits exactly on top of — softening it would
+      // desynchronise fill and stroke, and a scope edge is a real answer
+      // ("don't count this area"), not a sampling artifact.
       for (const s of inScopes) maskG.poly(s.points).fill({ color: 0xffffff, alpha: 1 })
     } else {
       maskG.rect(0, 0, imgW, imgH).fill({ color: 0xffffff, alpha: 1 })
@@ -334,6 +403,7 @@ export function attachHeatmapLayer({
   const paintCanvas = (grid, nx, ny, ctx) => {
     gl.render({ rssi: grid, nx, ny }, ctx.outW, ctx.outH, 1 / ctx.scale, ctx.blur, ctx.contours, {
       anchors: ctx.anchors,
+      edgeFeather: buildEdgeFeather(ctx),
     })
     // PIXI v8 CanvasSource caches its dimensions at create-time. When
     // heatmapGL mutates canvas.width/height in-place (full-res idle ↔
@@ -717,6 +787,18 @@ export function attachHeatmapLayer({
     }
 
     const padding = computePadding(scenario)
+
+    // 51-11: an edge got padding exactly when no wall frames it — which is also
+    // exactly when its hard cut is a sampling artifact rather than the building
+    // envelope. Reuse that decision instead of re-deriving it, so the feather can
+    // never disagree with where padding was actually added. Read per paint by
+    // buildEdgeFeather (plain uniforms — no geometry to rebuild).
+    lastFeatherEdges = {
+      left:   padding.left   > 0,
+      right:  padding.right  > 0,
+      top:    padding.top    > 0,
+      bottom: padding.bottom > 0,
+    }
 
     // 任務 4 (b): large-scene downgrade. The per-AP path cost scales with
     // wall×AP (each AP's pass scans the walls for penetration + reflection +

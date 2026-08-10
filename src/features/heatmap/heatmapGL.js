@@ -134,7 +134,43 @@ uniform sampler2D uSrc;
 uniform vec4  uAnchors[5];      // xyzw = (dbm, r, g, b) with r,g,b in 0..255
 uniform float uAnchorAlpha[5]; // alpha 0..255 per anchor
 uniform int   uContours;        // 0 = off, 1 = draw iso-lines at anchor dbm
+// 51-11 edge feather.
+//   uFeatherRect  = plan rect in this pass's UV space, as (uMin, vMin, uMax, vMax)
+//   uFeatherWidth = ramp width in UV per axis
+//   uFeatherSides = per-side enable as 0/1, ordered (uMin, uMax, vMin, vMax)
+// All-zero width ⇒ feature off and the alpha passes through untouched.
+//
+// NOTE the side order is in UV terms, NOT world terms. This pass does not flip
+// Y (only FS_SAMPLE does, to reconcile the CPU's j=0-at-top layout with GL's
+// row-0-at-bottom), so v increases toward world −y: the caller is responsible
+// for mapping world top/bottom onto vMax/vMin.
+uniform vec4  uFeatherRect;
+uniform vec2  uFeatherWidth;
+uniform vec4  uFeatherSides;
 out vec4 outColor;
+
+// Fraction of alpha to keep at this pixel: 1 in the interior, ramping to 0 at
+// each ENABLED plan-rect edge. Sides multiply, so corners fall off on both axes.
+float edgeFeather(vec2 uv) {
+  float k = 1.0;
+  if (uFeatherWidth.x > 0.0) {
+    if (uFeatherSides.x > 0.5)
+      k *= clamp((uv.x - uFeatherRect.x) / uFeatherWidth.x, 0.0, 1.0);
+    if (uFeatherSides.y > 0.5)
+      k *= clamp((uFeatherRect.z - uv.x) / uFeatherWidth.x, 0.0, 1.0);
+  }
+  if (uFeatherWidth.y > 0.0) {
+    if (uFeatherSides.z > 0.5)
+      k *= clamp((uv.y - uFeatherRect.y) / uFeatherWidth.y, 0.0, 1.0);
+    if (uFeatherSides.w > 0.5)
+      k *= clamp((uFeatherRect.w - uv.y) / uFeatherWidth.y, 0.0, 1.0);
+  }
+  // smoothstep rather than a raw linear ramp (or k*k, which biases the whole
+  // band darker and reads as a wide dimmed margin): this keeps the interior end
+  // of the ramp near 1 so almost no readable area is dimmed, and puts the actual
+  // falloff in the last fraction next to the boundary.
+  return k * k * (3.0 - 2.0 * k);
+}
 
 void main() {
   float d = texture(uSrc, vUv).r;
@@ -181,7 +217,10 @@ void main() {
     a   = mix(a, 255.0, lineAlpha);
   }
 
-  outColor = vec4(rgb / 255.0, a / 255.0);
+  // 51-11: scale ONLY the alpha. rgb is the RSSI colour and must not shift —
+  // a pixel near the plan edge has to keep reading as the dBm it is, just
+  // more transparent.
+  outColor = vec4(rgb / 255.0, (a / 255.0) * edgeFeather(vUv));
 }`;
 
 function compile(gl, type, src) {
@@ -363,6 +402,19 @@ export function createHeatmapGL() {
     gl.uniform4fv(gl.getUniformLocation(progColormap, 'uAnchors'), anchorData);
     gl.uniform1fv(gl.getUniformLocation(progColormap, 'uAnchorAlpha'), alphaData);
     gl.uniform1i(gl.getUniformLocation(progColormap, 'uContours'), showContours ? 1 : 0);
+    // 51-11 edge feather. Absent config ⇒ all-zero width, which the shader reads
+    // as "off" and leaves the alpha exactly as the colormap produced it — so
+    // every existing caller (and the JS/GL parity fixtures) is bit-unaffected.
+    const ef = colorConfig?.edgeFeather ?? null;
+    gl.uniform4f(gl.getUniformLocation(progColormap, 'uFeatherRect'),
+      ef?.rect?.[0] ?? 0, ef?.rect?.[1] ?? 0, ef?.rect?.[2] ?? 1, ef?.rect?.[3] ?? 1);
+    gl.uniform2f(gl.getUniformLocation(progColormap, 'uFeatherWidth'),
+      ef?.widthUv?.[0] ?? 0, ef?.widthUv?.[1] ?? 0);
+    // Sides arrive already expressed in UV order (uMin, uMax, vMin, vMax) —
+    // see the note on uFeatherSides; the world→UV Y mapping is the caller's job.
+    gl.uniform4f(gl.getUniformLocation(progColormap, 'uFeatherSides'),
+      ef?.sides?.[0] ? 1 : 0, ef?.sides?.[1] ? 1 : 0,
+      ef?.sides?.[2] ? 1 : 0, ef?.sides?.[3] ? 1 : 0);
     drawQuad();
 
     return canvas;

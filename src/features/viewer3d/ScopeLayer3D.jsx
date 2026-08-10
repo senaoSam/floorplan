@@ -1,5 +1,9 @@
 import React, { useMemo } from 'react'
 import * as THREE from 'three'
+import { useThree } from '@react-three/fiber'
+import { Line2 } from 'three/examples/jsm/lines/Line2'
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry'
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial'
 import { useScopeStore } from '@/store/useScopeStore'
 
 // Match 2D ScopeLayer color choices so the 3D overlay reads as the same
@@ -9,6 +13,13 @@ const STYLES = {
   in:  { fill: '#2ed573', fillAlpha: 0.40, stroke: '#2ed573' },
   out: { fill: '#ff4757', fillAlpha: 0.18, stroke: '#ff4757' },
 }
+
+// 51-11: scope boundary thickness in world units. Thinner than the floor-hole
+// ring (0.12) and the cables (0.10) on purpose — a scope is a PLANNING
+// boundary, not a physical object, so it should read as an annotation rather
+// than something you could bump into. Same reasoning that set the camera
+// coverage footprint to 0.07 in 51-10.
+const SCOPE_WIDTH_M = 0.07
 
 // Build a flat (XY) THREE.Shape from a flat [x0,y0,x1,y1,...] point list in
 // meters. The caller rotates it onto the XZ ground plane.
@@ -21,6 +32,53 @@ function buildShape(pointsM) {
   }
   shape.closePath()
   return shape
+}
+
+// 51-11: the closed boundary ring, drawn with real width via Line2. The old
+// `lineBasicMaterial linewidth={2}` was a WebGL no-op on desktop backends
+// (same trap as the floor-hole rings in 51-8) — it always rasterised as a
+// 1px hairline, which on the translucent fill left the zone edge ambiguous:
+// where a scope stops is exactly what the user is checking when they draw one.
+function ScopeOutline({ positions, color, opacity }) {
+  const size = useThree((s) => s.size)
+
+  const geom = useMemo(() => {
+    const g = new LineGeometry()
+    g.setPositions(positions)
+    return g
+  }, [positions])
+  React.useEffect(() => () => geom.dispose(), [geom])
+
+  const material = useMemo(() => new LineMaterial({
+    color: new THREE.Color(color),
+    // World units so the boundary keeps a constant physical thickness while
+    // the user zooms, matching cables (51-7) and hole rings (51-8).
+    worldUnits: true,
+    linewidth: SCOPE_WIDTH_M,
+    transparent: true,
+    opacity,
+    // Same reasoning as 51-3: green vs red IS the in-/out-of-scope reading,
+    // so distance must not tint it toward a common colour.
+    fog: false,
+  }), [color, opacity])
+  React.useEffect(() => () => material.dispose(), [material])
+
+  // LineMaterial sizes its quads with help from the drawing-buffer size even
+  // in worldUnits mode; keep it in sync with the canvas.
+  React.useEffect(() => {
+    material.resolution.set(size.width, size.height)
+  }, [material, size.width, size.height])
+
+  const line = useMemo(() => {
+    const l = new Line2(geom, material)
+    l.computeLineDistances()
+    // The ring lies flat across the floor; letting it swallow clicks would
+    // steal selection from whatever sits inside the zone.
+    l.raycast = () => null
+    return l
+  }, [geom, material])
+
+  return <primitive object={line} />
 }
 
 // Polygon outline as a continuous Line Loop on the ground plane. Slightly
@@ -68,17 +126,7 @@ function PolygonFill({ pointsM, yOffset, style, dimOpacity = 1 }) {
         />
       </mesh>
 
-      <line>
-        <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            count={outlinePts.length / 3}
-            array={outlinePts}
-            itemSize={3}
-          />
-        </bufferGeometry>
-        <lineBasicMaterial color={style.stroke} transparent opacity={dimOpacity} linewidth={2} fog={false} />
-      </line>
+      <ScopeOutline positions={outlinePts} color={style.stroke} opacity={dimOpacity} />
     </group>
   )
 }
