@@ -345,7 +345,7 @@ const PHASES = [
         layer: 'Layer 22 — Export',
         items: [
           { id: '22-1', done: true,  text: 'CSV Planning BOM export（4 區塊：AP CABLES / S2S / CABLE TRAYS / SUMMARY）' },
-          { id: '22-2', done: true,  text: 'PDF report — 封面 + 每樓層平面圖 + AP / S2S / Tray 詳表 + 警告（jsPDF + autotable）' },
+          { id: '22-2', done: true,  text: 'PDF report — 封面 + RF 涵蓋率/達標判定 + 每樓層平面圖 + AP / S2S / Tray 詳表 + 警告（jsPDF + autotable）。Phase 25 port 時漏掉，2026-08-10 補回 PIXI 版並加上 RF 涵蓋頁' },
           { id: '22-3a', done: true,  text: 'PNG plan view export（樓層 ⋯ 選單「匯出 PNG」，fit-to-content，2× pixelRatio）' },
           { id: '22-3b', done: true,  text: '撤回 — SVG export（Konva 無 SVG renderer + PNG/PDF 已覆蓋 95% 需求）' },
           { id: '22-4',  done: true,  text: '撤回 — DXF export（AutoCAD 交付不在 AP planner 工作流；Hamina 也無）' },
@@ -659,7 +659,7 @@ const PHASES = [
           { id: '51-8',  done: true,  text: 'Riser / FloorHole 輪廓修正（riser wireframe 網子→環+脊線、segment 16→32；hole 環改 Line2 有實寬 + 每角垂直線成完整框；順手修好柱體擠出方向錯誤導致長到樓板下方的既有 bug）' },
           { id: '51-9',  done: true,  text: 'Switch / AP 造型（RoundedBoxGeometry 圓角 + canvas port 面板貼圖；AP 選取脈衝環 useFrame 受 frameloop 控管不破壞隱藏凍結；label 超取樣 + mipmap 修拉近糊，順手刪掉 APLayer 內的 Label3D 複製）' },
           { id: '51-10', done: true,  text: '相機 FOV 漸層衰減（錐體 vertexColors 近亮遠暗，傳達偵測隨距離衰減；地面 footprint 加 Line2 輪廓線標出覆蓋邊界）' },
-          { id: '51-11', done: false, text: 'Scope / 熱圖平面收尾（Line2 描邊、熱圖邊緣羽化）' },
+          { id: '51-11', done: true,  text: 'Scope / 熱圖平面收尾（scope 邊界改 Line2 實寬描邊；熱圖邊緣羽化做在 heatmapGL colormap shader 只乘 alpha 不動 RGB，2D/3D 共用 canvas 故一處生效兩邊一致；只羽化未被牆框住的邊）' },
         ],
       },
       {

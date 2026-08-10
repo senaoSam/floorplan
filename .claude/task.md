@@ -30,6 +30,8 @@
 **Phase 47 B4 UX/一致性完成（47-22~27，commit 1a4bf16，使用者驗收 ok；含 off-band dim/多頻段 demo/3D toolbar 精簡等使用者追加）。**
 **Phase 47 B5 全部完成（2026-07-22，使用者驗收 ok，MCP 通過）：47-12 TX 逐頻段預設 + 47-13 PoE per-port class（Opus 4.8）、47-10 天線增益 + 47-11 材質庫（Fable 5，雙引擎 parity 已驗）。B1~B5 收工，Phase 47 六角色審查缺陷全數清完（47-8b 單台三頻 / 47-6 autoChannelPlan 半徑為 backlog/防重做，非缺陷）。**
 **Phase 50 AI 牆改接 cv+graph pipeline API 完成（2026-07-29，commit e242f6d，MCP 驗證通過，見下表）。**
+**Phase 51 批次 B 收工：51-11 完成 → 51-1~51-11 全數完成，只剩批次 C（51-12 後製鏈，需先量測效能才決定做不做）。**
+**Backlog 清掉兩項：PDF 規劃報告輸出（含新增的 RF 涵蓋率/verdict 頁）、spec.md 全面同步。以上三項 2026-08-10 使用者驗收 ok。**
 
 ---
 
@@ -115,7 +117,13 @@
   **未做**：地面多邊形本身的漸層——它是 `ShapeGeometry`，頂點沒有天然的近/遠排序，硬做要重寫三角化，CP 值不對；輪廓線已解決「邊界在哪」的核心問題。
   **驗證**：三視角切換 **0 long task**（相機場景輕量、頂點顏色零成本）、0 console errors。
   **對比圖注意（此圖層固有限制）**：mock 人形是時間驅動的追蹤模擬，**前後兩張必然不同位置**，無法消除。且普通像素差異掃描會被橘色人形帶偏 → 需**只計算綠色通道差異**才能定位到真正的 FOV 變化區。
-- [ ] **51-11 Scope / 熱圖平面收尾（低優先）**：scope 邊界 hairline → Line2 描邊；熱圖 plane 硬矩形邊緣 → texture 邊緣 alpha 羽化。
+- [x] **51-11 Scope / 熱圖平面收尾**（✅ 2026-08-10 使用者驗收 ok）：① **scope 邊界描邊**——`ScopeLayer3D` 的 `lineBasicMaterial linewidth={2}` 是 **WebGL no-op**（同 51-8 的坑），實際永遠是髮絲線，在半透明填充上「範圍到哪為止」看不出來 → 改 `Line2`（沿用 51-7/51-8/51-10），寬 `SCOPE_WIDTH_M = 0.07`。**寬度階層理由**：比開口環 0.12、纜線 0.10 細——scope 是**規劃邊界不是實體物**，該讀成註記；與 51-10 相機覆蓋輪廓同級。`raycast = () => null`（環鋪滿整個 zone，不擋掉區內物件點選）。
+  ② **熱圖邊緣羽化**——做在 **`heatmapGL` FS_COLORMAP**（唯一寫出 alpha 的地方），只乘 alpha **不動 rgb**（顏色即 RSSI 讀值，不可位移）。因 2D/3D 共用同一張 canvas（Phase 45），一處實作**兩邊同時生效且必然一致**。
+  **⚠ 走過的死路（防重做，兩條都別再試）**：**(a) PIXI mask 行不通**——PIXI v8 sprite mask 是**二元覆蓋**，mask 內的 per-fill alpha 直接被丟棄。實測把整個 mask 設 alpha 0.15，畫面**0 px 變化**（不是幾何寫錯：我先做到 tiling 完全正確——maxCover 1 / 0 double-covered / 0 uncovered / tiledArea 350035 = planArea 精確相等、alpha ramp 0.083→1 單調——結果仍完全無效）。**(b) canvas 2D composite 行不通**——`gl.canvas` 是 WebGL2 canvas，`getContext('2d')` 回 null，寫了會靜默 no-op。
+  **只羽化「未被牆框住」的邊**（`computePadding` 已判定的 unframed 邊，直接複用它的結論，不重新推導）：牆框住的邊，場真的到那裡就停（建築外殼），硬切是**事實**要保留；沒牆的邊才是取樣邊界造成的假象。`EDGE_FEATHER_M = 1.5`（demo 實測 34.2px = 5% 平面寬，非「看起來很寬」的錯覺——白邊看起來寬是因為平面圖矩形遠大於建築本體，那圈本來就已經很淡）。曲線用 **smoothstep**（`k*k` 會把整條帶壓暗成一圈灰邊）。
+  **`heatmapStack`（3D 全樓層）刻意不羽化**：它取樣**恰好**是平面矩形、無 PAD_M 邊界外資料，羽化只會淡掉真實讀值；且疊層是背景脈絡。已在該處加註。
+  **驗證**：UV 數學獨立驗算（rect 寬高 = imgW/fullW、imgH/fullH 完全相符；34.2 = 1.5×22.83）；**y 軸翻轉陷阱**——`FS_SAMPLE` 有 `1.0 - vUv.y`、colormap pass 沒有，故世界 top 落在 **高 v 端**，side 順序以 UV 表達並加註；raycast 防呆用**行為**驗（掃 37 次點擊全部命中牆/物件，**沒有一次**被 scope 環攔截）；2D/3D 共用 canvas 確認 `sameCanvas: true`；planQuality 數字不受影響（由 `sampleField` 直接算，與渲染像素無關）；**300 AP 穩態 long task 174ms（基準 175–200ms 內）**、0 console errors。
+  對比圖：`.playwright-mcp/compare/51-11-A-scope邊界描邊.png`、`-B-in-scope綠邊界.png`、`-C-3D熱圖邊緣羽化.png`、`-D-2D熱圖邊緣羽化.png`（gitignore）。
 
 #### 批次 C — 後製特效（最後評估，效能風險最高）
 
@@ -273,10 +281,21 @@
 
 #### 保留為 backlog（缺口非 bug，依產品優先序拍板）
 
-- [ ] **PDF 規劃報告輸出**：Ekahau/Hamina 核心交付物（涵蓋熱圖截圖 + AP 清單 + verdict + Planning BOM）。jspdf 仍在 package.json；數據皆現成，缺組版。（CSV/SVG/DXF 已撤回，尊重。）
+- [x] **PDF 規劃報告輸出**（✅ 2026-08-10 使用者驗收 ok）：新增 `src/features/cable/exportPlanningPdf.js`。
+  **重要發現**：oldSrc **已有**完整實作（Phase 22-2，封面+每層+AP線纜+S2S+線槽BOM+警告），Phase 25 port 時漏掉（CSV 是明確撤回、PDF 只是沒 port）→ 依嚴格重構規則**照原結構移植**，非重新設計。
+  **port 必須改的三處**：① `capturePlanPng` 從 Konva stage 改吃 `{app, world}`，經 `getSceneRefs()` 取得（production build 也能用）② routes/switchLinks/warnings 改用現成 `getCachedRoutes` 一次取得（取代 oldSrc 的 buildPlanningSnapshot）③ tray fill 改在此地用 `computeTrayCableLoads`+`computeTrayFill` 現算（不吃外部傳入的 map，避免 caller 遞進過期快照）。
+  **新增 oldSrc 沒有的 RF 半邊**（backlog 要求的「涵蓋熱圖 + verdict」）：**RF COVERAGE 頁**——逐樓層跑 `computePlanQualityStats`（Phase 42 同一引擎，故 PDF 與畫面 verdict **不可能不一致**）列涵蓋率 / 雙重涵蓋 / 盲區 % / 盲區面積 / **PASS ∣ BELOW TARGET** 判定（只給 verdict 那格上色，整列染色會跟表格打架）；未校正比例尺的樓層報 **NOT MEASURED** 不硬算（沒比例尺的涵蓋率無意義）。另把**頻道衝突**併進警告頁。
+  **jsPDF 只有拉丁字型 → 三處 CJK 必須處理（不然出 `??`）**：`CAPACITY_PROFILES.label`（"Planning（25% / 40%）"）改用 value + 數值比率描述；`CAPACITY_STATUS.label`（注意/滿載/超出）用 `FILL_STATUS_EN` 對 status **key** 映射英文；樓層名等使用者字串走 `asciiSafe`。封面的「非 ASCII 轉寫」註記改成**只有真的發生時才印**。graph warnings 本身已是英文（實查）。
+  **驗證（不是只看有沒有下載）**：用專案現成 `utils/pdfUtils.renderAllPdfPages` 把 7 頁**渲染成圖逐頁目視**——7 頁 / 全 A4 橫向 842×595pt；RF 頁數字（84.3% / 39.8% / 15.7% / 112m²）與 live 引擎實測**逐項相符**；AP 線纜表 5 筆長度合計 71.30 = 封面 71.3、線槽 25.84 = 封面 25.8（內部自洽）；頻道衝突正確報 AP-03(CH36/40) vs AP-04(CH40/40)、空的 Unroutable/Graph 區段正確省略；真按鈕點擊路徑產生 `floorplan-report-2026-08-07.pdf`，執行中按鈕 disabled + label 顯示進度後復原；0 console errors。
+  **UI**：`CableSummaryPanel` 底部「📄 匯出規劃報告 PDF」（此面板本就是全建築彙總，是唯一合理位置；PNG 匯出在樓層右鍵選單，兩者不衝突）。walls/scopes/regulatoryDomain 用 `getState()` 點擊時讀、**不訂閱**（否則每次改牆都重 render 這個面板）。
+  對比圖：`.playwright-mcp/compare/51-B-PDF匯出鈕.png`（gitignore）。
 - [ ] **容量/airtime 規劃**：純覆蓋工具，缺高密度場域容量輸入（Ekahau Capacity Planner 對標）。
 - [ ] **A/B plan diff、漫遊重疊區**：原有 backlog，待拍板。
-- [ ] **spec.md 同步**：已嚴重落後實作（Camera/ClientView/Stats/Cable 整域未寫）；自訂材質、CAD 匯入等承諾與現況對不上，建議修 spec 或明列不做。
+- [x] **spec.md 同步**（✅ 2026-08-10 使用者驗收 ok）：`.claude/spec.md` 全面重寫（171 → 約 300 行）。方法＝**逐條拿 spec 去對 `src/`**（subagent 全庫掃 + 人工覆核關鍵值），每條標 ✅ 已實作 / ⚠️ 部分 / ❌ 未實作；**未實作的保留不刪**（刪掉會被當成需求遺漏而重複提案）。
+  **抓到 6 條與實作不符的舊承諾**：① **CAD 匯入未實作**（accept 只有 `.png,.jpg,.jpeg,.pdf`，無解析器依賴）② **去色/灰階未實作**（opacity/旋轉/裁切三項有）③ **滑鼠 vs 觸控板模式未實作**（viewport 只有單一固定 ZOOM_PER_NOTCH；`EDITOR_MODE.PAN` 是*工具*不是輸入模式）④ **自訂材質未實作**（materials.js 硬編碼 7 種；現有的是「選內建」+「單面牆 customDb 覆寫」兩件事，不是使用者自建材質庫）⑤ **Fill top & bottom 未實作**（只有兩個手動輸入框）⑥ **AI 偵測 scope zone / 電梯井未實作**（AI 只回 wall/door/window，完全不碰 useScopeStore；垂直貫穿物只有手動的中庭與豎井）。
+  **另兩條語意需修正**：樓層對齊實作是**數值滑桿 + 疊圖目視**，不是舊 spec 寫的「用對齊點（樓梯/電梯）解算」；熱圖指標是 **4 種**（多 SINR）不是 3 種。自動比例尺**是**有（門寬回推）但標注已知弱點（門偵測率低 → 樣本不足時抗離群失效）。
+  **補上舊版整域缺漏的五大領域**：相機/CCTV、Client View、統計（兩態）、網路布線、自動規劃；並收錄不可違反的架構決策（JS 引擎不可移除、3D read-only、BOM 是 Planning BOM、warning ≠ code violation）、效能紅線、以及已撤回清單（避免重複提案）。
+  **順手發現需使用者決策（未改，非本次範圍）**：`AIWallsModal.jsx:27-28` 把 `API_BASE_URL` 與 `API_TOKEN` 硬編碼成前端常數 → **會隨 bundle 出貨到瀏覽器**。內部服務尚可，正式對外前需改後端代理或短期憑證。已記在 spec §十二 風險清單。
 
 ---
 
