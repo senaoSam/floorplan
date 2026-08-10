@@ -31,6 +31,7 @@
 **Phase 47 B5 全部完成（2026-07-22，使用者驗收 ok，MCP 通過）：47-12 TX 逐頻段預設 + 47-13 PoE per-port class（Opus 4.8）、47-10 天線增益 + 47-11 材質庫（Fable 5，雙引擎 parity 已驗）。B1~B5 收工，Phase 47 六角色審查缺陷全數清完（47-8b 單台三頻 / 47-6 autoChannelPlan 半徑為 backlog/防重做，非缺陷）。**
 **Phase 50 AI 牆改接 cv+graph pipeline API 完成（2026-07-29，commit e242f6d，MCP 驗證通過，見下表）。**
 **Phase 51 全部收工（2026-08-10）：51-1~51-11 完成；51-12 後製鏈實作後量測 +25ms／fps 砍半，照門檻整包撤回不做。**
+**Camera 3D 目標擬真化完成（2026-08-10 使用者驗收 ok）：人車模型重造（轎車擠出輪廓/衣著輪廓人偶）＋trail 色帶＋選取相機高亮＋2D/3D 共用色彩抖動（trackColor.js）＋步態修復（r3f delta NaN、擺動軸 x→z）。門縫做過又依使用者要求移除（只留門把），細節見 git log。**
 **Backlog 清掉兩項：PDF 規劃報告輸出（含新增的 RF 涵蓋率/verdict 頁）、spec.md 全面同步。以上三項 2026-08-10 使用者驗收 ok。**
 
 ---

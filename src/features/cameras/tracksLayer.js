@@ -2,6 +2,7 @@ import { Container, Graphics, Text, TextStyle } from 'pixi.js'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { sampleTrackAt, trackSpeedAt, trackHeadingAt } from './mockTracks'
+import { trackTint } from './trackColor'
 import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from './fovPolygon'
 import { FALLBACK_PX_PER_M } from './camerasLayer'
 import { setDetectingCameras, resetDetection } from './detectionBus'
@@ -214,7 +215,9 @@ export function attachTracksLayer({
       if (!det && !showGhosts) continue
       activeIcons.push({ track, x: pos.x, y: pos.y, detected: det })
 
-      const color = det ? (track.type === 'car' ? CAR_COLOR : PERSON_COLOR) : UNDETECTED_COLOR
+      // Detected targets carry a per-track lightness jitter (trackColor.js)
+      // so a crowd doesn't read as clones; ghosts stay uniform grey.
+      const color = det ? trackTint(track.type === 'car' ? CAR_COLOR : PERSON_COLOR, track.id) : UNDETECTED_COLOR
       const alpha = det ? 1 : UNDETECTED_ALPHA
 
       // Trail — the last TRAIL_SEC of path, faded.

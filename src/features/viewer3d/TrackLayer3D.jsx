@@ -6,6 +6,7 @@ import { useCameraStore } from '@/store/useCameraStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { sampleTrackAt, trackHeadingAt } from '@/features/cameras/mockTracks'
+import { trackTint } from '@/features/cameras/trackColor'
 import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from '@/features/cameras/fovPolygon'
 
 // Live tracking targets in 3D (Phase 34, CAMERA mode only — Viewer3D gates
@@ -15,11 +16,13 @@ import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from '@
 // fading trail ribbon (last TRAIL_SEC of path, same window as 2D), and while
 // a camera is selected the targets inside ITS fov glow (emissive boost).
 //
-// Figures are low-poly primitive assemblies (head/torso/arms/legs; extruded
-// body profile/glass/wheels) — recognisable at plan scale without shipping
-// model assets. The playback clock writes the tracking store every frame, so
-// this layer updates IMPERATIVELY: fixed pools of THREE.Group figures
-// repositioned in useFrame — no React re-render per tick.
+// Figures are low-poly primitive assemblies (two-tone clothed person with
+// knees and shoes; extruded car profile with glass/wheels/door seams) —
+// recognisable at plan scale without shipping model assets. Detected targets
+// carry a per-track lightness jitter (trackColor.js, shared with 2D) so a
+// crowd doesn't read as clones. The playback clock writes the tracking store
+// every frame, so this layer updates IMPERATIVELY: fixed pools of THREE.Group
+// figures repositioned in useFrame — no React re-render per tick.
 
 const POOL_PERSON = 90
 const POOL_CAR = 30
@@ -45,17 +48,25 @@ const TRAIL_HALF_W_CAR = 0.16
 // picking a camera answers "who does this one see" at a glance.
 const HIGHLIGHT_EMISSIVE = 0.45
 
-// Scratch colours for the per-frame trail writes (no per-frame allocation).
-const TRAIL_COLOR_PERSON = new THREE.Color(PERSON_COLOR)
-const TRAIL_COLOR_CAR = new THREE.Color(CAR_COLOR)
+// Scratch colours for the per-frame state/trail writes (no per-frame allocation).
 const TRAIL_COLOR_GHOST = new THREE.Color(UNDETECTED_COLOR)
 const BLACK = new THREE.Color('#000000')
+const _trailColor = new THREE.Color()
+const _stateColor = new THREE.Color()
 
-// Walk-cycle tuning (people only).
+// Walk-cycle tuning (people only). Limbs swing about their LOCAL Z axis —
+// the figure walks along its local +X (yaw faces the heading), so fore/aft
+// stride lives in the XY plane. (Rotation about X would be a sideways
+// scissor, which reads as no gait at all.)
 const STRIDE_M = 0.75        // metres of travel per full leg-swing cycle
 const LEG_SWING_MAX = 0.5    // rad — max hip swing at full walking speed
 const WALK_FULL_SPEED = 1.4  // m/s — speed at which the stride is at full amp
 const BODY_BOB_M = 0.05      // m — vertical torso bob amplitude
+const KNEE_FACTOR = 1.4      // knee flexion vs hip amplitude (swing phase only)
+// Cap per-frame phase advance: at 10x/60x playback a target crosses metres per
+// frame and an uncapped phase strobes (legs freeze at random poses = gliding).
+// 0.45 rad/frame ≈ a brisk 4 Hz stride at 60 fps — fast but still a walk.
+const MAX_PHASE_STEP = 0.45
 
 function pointInPoly(x, y, pts) {
   const n = pts.length / 2
@@ -132,13 +143,23 @@ function extrudeCentered(shape, depth, bevel) {
 function buildGeometries() {
   return {
     head: new THREE.SphereGeometry(0.11, 16, 12),
-    torso: new THREE.CapsuleGeometry(0.14, 0.46, 4, 12),
-    arm: new THREE.CapsuleGeometry(0.045, 0.46, 4, 8),
-    leg: new THREE.CapsuleGeometry(0.06, 0.62, 4, 8),
+    neck: new THREE.CylinderGeometry(0.05, 0.055, 0.1, 8),
+    // Shirt: wider than the body underneath, with a flared hem cylinder at
+    // the waist — garments hang OVER the body, they don't paint it.
+    torso: new THREE.CapsuleGeometry(0.15, 0.4, 4, 12),   // total ~0.70
+    hem: new THREE.CylinderGeometry(0.165, 0.175, 0.1, 12),
+    pelvis: new THREE.CylinderGeometry(0.14, 0.125, 0.16, 10),
+    sleeve: new THREE.CapsuleGeometry(0.062, 0.16, 4, 8), // total ~0.28
+    forearm: new THREE.CapsuleGeometry(0.04, 0.26, 4, 8), // total ~0.34, skin
+    thigh: new THREE.CapsuleGeometry(0.062, 0.3, 4, 8),   // total ~0.42
+    shin: new THREE.CapsuleGeometry(0.052, 0.28, 4, 8),   // total ~0.38
+    shoe: new THREE.BoxGeometry(0.24, 0.08, 0.11),        // long axis = forward
     carBody: extrudeCentered(carBodyShape(), CAR_BODY_W, 0.08),
     carGlass: extrudeCentered(carGlassShape(), CAR_GLASS_W, 0.05),
     wheel: new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, 0.24, 18),
     hub: new THREE.CylinderGeometry(0.14, 0.14, 0.25, 12),
+    doorHandle: new THREE.BoxGeometry(0.17, 0.05, 0.055),
+    exhaust: new THREE.CylinderGeometry(0.045, 0.045, 0.18, 10),
   }
 }
 
@@ -148,49 +169,94 @@ function buildGeometries() {
 const HIP_Y = 0.84
 const SHOULDER_Y = 1.42
 
-// Little person: head + capsule torso + shoulder-pivoted arms + hip-pivoted
-// legs, ~1.7 m tall, single state-tinted material (matches the single-colour
-// 2D icon). Everything above the hips (head/torso/arms) lives in a `body`
-// group so the walk cycle can bob the whole upper body without disturbing
-// the leg pivots.
+// Little person, ~1.7 m tall, actually CLOTHED — the garment reads from the
+// SILHOUETTE, not from paint: the shirt is wider than the body with a flared
+// hem overhanging the waist, the sleeves are thicker than the skin-coloured
+// forearms sticking out of them, and a pants-coloured pelvis bridges the
+// waist to the two-segment legs (hip → thigh → knee → shin + shoe). Skin
+// shows only at head/neck/forearms. All shades derive from the state tint,
+// so the hue still says "detected amber" / "ghost grey" (applyState
+// recomputes them). Everything above the hips lives in a `body` group so the
+// walk cycle can bob the whole upper body without disturbing the leg pivots.
 function makePerson(geo) {
-  const mat = new THREE.MeshStandardMaterial({ color: PERSON_COLOR, roughness: 0.7 })
+  const shirtMat = new THREE.MeshStandardMaterial({ color: PERSON_COLOR, roughness: 0.7 })
+  const pantsMat = new THREE.MeshStandardMaterial({ color: PERSON_COLOR, roughness: 0.8 })
+  const skinMat = new THREE.MeshStandardMaterial({ color: PERSON_COLOR, roughness: 0.6 })
+  const shoeMat = new THREE.MeshStandardMaterial({ color: DARK_PART_COLOR, roughness: 0.5 })
   const g = new THREE.Group()
 
   const body = new THREE.Group()
-  const head = new THREE.Mesh(geo.head, mat)
+  const head = new THREE.Mesh(geo.head, skinMat)
   head.position.y = 1.58
   head.castShadow = true
-  const torso = new THREE.Mesh(geo.torso, mat)
-  torso.position.y = 1.13   // capsule spans ~0.76–1.50 (shoulders round off)
+  const neck = new THREE.Mesh(geo.neck, skinMat)
+  neck.position.y = 1.47
+  const torso = new THREE.Mesh(geo.torso, shirtMat)
+  torso.position.y = 1.16   // shirt spans ~0.81–1.51 (shoulders round off)
   torso.castShadow = true
-  body.add(head, torso)
+  const hem = new THREE.Mesh(geo.hem, shirtMat)
+  hem.position.y = 0.86     // flared shirt hem overhanging the waist
+  const pelvis = new THREE.Mesh(geo.pelvis, pantsMat)
+  pelvis.position.y = 0.78
+  pelvis.castShadow = true
+  body.add(head, neck, torso, hem, pelvis)
 
-  // Limb pivots at the joint; the limb mesh hangs `drop` below it.
-  const makeLimb = (limbGeo, pivotY, z, drop) => {
+  // Arms hang from shoulder pivots on the body group (the bob carries them):
+  // a thick shirt-coloured sleeve with a thinner skin forearm below it — the
+  // sleeve/skin step is what sells "wearing clothes" at a glance.
+  const makeArm = (z) => {
     const pivot = new THREE.Group()
-    pivot.position.set(0, pivotY, z)
-    const limb = new THREE.Mesh(limbGeo, mat)
-    limb.position.y = -drop
-    limb.castShadow = true
-    pivot.add(limb)
+    pivot.position.set(0, SHOULDER_Y, z)
+    const sleeve = new THREE.Mesh(geo.sleeve, shirtMat)
+    sleeve.position.y = -0.14
+    sleeve.castShadow = true
+    const forearm = new THREE.Mesh(geo.forearm, skinMat)
+    forearm.position.y = -0.43
+    forearm.castShadow = true
+    pivot.add(sleeve, forearm)
     return pivot
   }
-  const legL = makeLimb(geo.leg, HIP_Y, -0.1, 0.42)    // feet land near y=0.05
-  const legR = makeLimb(geo.leg, HIP_Y, 0.1, 0.42)
-  // Arms sit on the body group so the walk-cycle bob carries the shoulders.
-  const armL = makeLimb(geo.arm, SHOULDER_Y, -0.19, 0.28)
-  const armR = makeLimb(geo.arm, SHOULDER_Y, 0.19, 0.28)
+  const armL = makeArm(-0.2)
+  const armR = makeArm(0.2)
   body.add(armL, armR)
 
-  g.add(body, legL, legR)
+  // Two-segment leg: hip pivot carries the thigh and a knee pivot; the knee
+  // carries the shin and the shoe, so knee flexion bends the lower leg and
+  // foot together.
+  const makeLeg = (z) => {
+    const hip = new THREE.Group()
+    hip.position.set(0, HIP_Y, z)
+    const thigh = new THREE.Mesh(geo.thigh, pantsMat)
+    thigh.position.y = -0.21
+    thigh.castShadow = true
+    const knee = new THREE.Group()
+    knee.position.set(0, -0.4, 0)     // knee joint ~0.44 above ground
+    const shin = new THREE.Mesh(geo.shin, pantsMat)
+    shin.position.y = -0.19
+    shin.castShadow = true
+    const shoe = new THREE.Mesh(geo.shoe, shoeMat)
+    shoe.position.set(0.05, -0.37, 0) // toe forward, sole near the floor
+    shoe.castShadow = true
+    knee.add(shin, shoe)
+    hip.add(thigh, knee)
+    return { hip, knee }
+  }
+  const legL = makeLeg(-0.1)
+  const legR = makeLeg(0.1)
+
+  g.add(body, legL.hip, legR.hip)
   g.visible = false
-  g.userData.tintMat = mat
+  g.userData.tintMat = shirtMat
+  g.userData.pantsMat = pantsMat
+  g.userData.skinMat = skinMat
+  g.userData.shoeMat = shoeMat
   g.userData.darkMat = null
   // Walk-cycle handles + per-figure phase so figures don't march in lockstep.
   g.userData.body = body
-  g.userData.legL = legL
-  g.userData.legR = legR
+  g.userData.legL = legL.hip
+  g.userData.legR = legR.hip
+  g.userData.kneeL = legL.knee
+  g.userData.kneeR = legR.knee
   g.userData.armL = armL
   g.userData.armR = armR
   g.userData.walkPhase = 0
@@ -221,6 +287,23 @@ function makeCar(geo) {
     hub.position.set(wx, WHEEL_R, wz)
     g.add(tire, hub)
   }
+  // Door handles (front/rear door) on the flat body side. NOTE the extrude's
+  // flat side CAP sits at |z| = depth/2 + bevelThickness = 0.83 (the bevel
+  // expands outward from z ∈ [0, depth]; the cap fills the original contour
+  // at the outer end) — anything placed at |z| < 0.83 is buried inside the
+  // body. Proud ~3 cm so they stay readable as dark hardware.
+  for (const sz of [0.835, -0.835]) {
+    for (const hx of [0.34, -0.56]) {
+      const handle = new THREE.Mesh(geo.doorHandle, darkMat)
+      handle.position.set(hx, 0.93, sz)
+      g.add(handle)
+    }
+  }
+  // Exhaust tip poking out under the rear bumper, driver side.
+  const exhaust = new THREE.Mesh(geo.exhaust, hubMat)
+  exhaust.rotation.z = Math.PI / 2
+  exhaust.position.set(-2.28, 0.24, 0.48)
+  g.add(exhaust)
   g.visible = false
   g.userData.tintMat = tintMat
   g.userData.darkMat = darkMat
@@ -228,22 +311,42 @@ function makeCar(geo) {
   return g
 }
 
+// `baseColor` arrives already per-track jittered (trackColor.js). People
+// derive their outfit from it every call: pants a darker shade, head a
+// lighter desaturated (skin-ish) shade — derived rather than fixed so the
+// ghost state greys the whole figure consistently.
 function applyState(group, detected, baseColor, highlight = false) {
-  const { tintMat, darkMat, hubMat } = group.userData
-  tintMat.color.set(detected ? baseColor : UNDETECTED_COLOR)
-  tintMat.opacity = detected ? 1 : GHOST_OPACITY
-  tintMat.transparent = !detected
-  // Selected-camera highlight: the whole tinted body glows its own colour.
-  tintMat.emissive.copy(highlight ? tintMat.color : BLACK)
-  tintMat.emissiveIntensity = highlight ? HIGHLIGHT_EMISSIVE : 0
-  // Keep depthWrite ON even when ghosted. A car is several overlapping meshes
-  // (body + glass + wheels); with depthWrite off, three.js sorts the whole
-  // transparent meshes by distance and the glass (roof) can be drawn behind
-  // the body from some angles and vanish. Writing depth makes each fragment
-  // occlude correctly, so the roof never drops out. (Minor cost: a ghost car
-  // doesn't show its own far side through itself — acceptable for a solid car.)
-  tintMat.depthWrite = true
-  for (const m of [darkMat, hubMat]) {
+  const { tintMat, pantsMat, skinMat, shoeMat, darkMat, hubMat } = group.userData
+  _stateColor.set(detected ? baseColor : UNDETECTED_COLOR)
+  const tinted = [tintMat]
+  tintMat.color.copy(_stateColor)
+  if (pantsMat) {
+    // Strong offsets — subtler ones (−0.08) disappeared under the ±0.10
+    // per-track jitter and normal viewing distance.
+    pantsMat.color.copy(_stateColor).offsetHSL(0, 0, -0.16)
+    tinted.push(pantsMat)
+  }
+  if (skinMat) {
+    // Head/neck/forearms: heavily desaturated + lifted → skin against the
+    // coloured garment (greys along with everything in the ghost state).
+    skinMat.color.copy(_stateColor).offsetHSL(0, -0.45, 0.18)
+    tinted.push(skinMat)
+  }
+  for (const m of tinted) {
+    m.opacity = detected ? 1 : GHOST_OPACITY
+    m.transparent = !detected
+    // Selected-camera highlight: the whole tinted outfit glows its own colour.
+    m.emissive.copy(highlight ? m.color : BLACK)
+    m.emissiveIntensity = highlight ? HIGHLIGHT_EMISSIVE : 0
+    // Keep depthWrite ON even when ghosted. A figure is several overlapping
+    // meshes (body + glass + wheels / torso + limbs); with depthWrite off,
+    // three.js sorts whole transparent meshes by distance and a part can be
+    // drawn behind the body from some angles and vanish. Writing depth makes
+    // each fragment occlude correctly. (Minor cost: a ghost doesn't show its
+    // own far side through itself — acceptable.)
+    m.depthWrite = true
+  }
+  for (const m of [darkMat, hubMat, shoeMat]) {
     if (!m) continue
     m.opacity = detected ? 1 : GHOST_OPACITY
     m.transparent = !detected
@@ -367,6 +470,9 @@ export default function TrackLayer3D({ floorId, pxToM }) {
     Object.values(geo).forEach((g) => g.dispose())
     for (const g of [...personPool, ...carPool]) {
       g.userData.tintMat?.dispose()
+      g.userData.pantsMat?.dispose()
+      g.userData.skinMat?.dispose()
+      g.userData.shoeMat?.dispose()
       g.userData.darkMat?.dispose()
       g.userData.hubMat?.dispose()
     }
@@ -376,15 +482,21 @@ export default function TrackLayer3D({ floorId, pxToM }) {
 
   // FOV polygons in CANVAS PX space for detection — cached on refs.
   const fovCache = useRef({ cams: null, walls: null, polys: [] })
+  const lastFrameMs = useRef(0)
 
-  useFrame((_, delta) => {
+  useFrame(() => {
     const tr = useTrackingStore.getState()
     const cams = useCameraStore.getState().camerasByFloor[floorId] ?? []
     const walls = useWallStore.getState().wallsByFloor[floorId] ?? []
     const tracks = tr.tracksByFloor[floorId] ?? []
     const t = tr.clockSec
-    // Clamp delta so a tab-switch hiccup doesn't fling the walk phase.
-    const dtSec = Math.min(delta, 0.05)
+    // Wall-clock frame delta, tracked ourselves — r3f 7's useFrame delta arg
+    // arrived unusable here (NaN → walk amplitude stuck at 0, figures glided
+    // with frozen legs). Clamped so a tab-switch hiccup doesn't fling the
+    // walk phase.
+    const nowMs = performance.now()
+    const dtSec = Math.min(lastFrameMs.current > 0 ? (nowMs - lastFrameMs.current) / 1000 : 0.016, 0.05)
+    lastFrameMs.current = nowMs
 
     if (fovCache.current.cams !== cams || fovCache.current.walls !== walls) {
       const segs = buildBlockingSegments(walls)
@@ -439,12 +551,12 @@ export default function TrackLayer3D({ floorId, pxToM }) {
       // Cars and people both face their walking/driving direction
       // (yaw = −heading per the wall convention).
       fig.rotation.y = -trackHeadingAt(track, t)
-      applyState(fig, detected, isCar ? CAR_COLOR : PERSON_COLOR, seenBySelected)
+      // Per-track lightness-jittered base colour (memoised in trackColor.js).
+      const tint = trackTint(isCar ? CAR_COLOR : PERSON_COLOR, track.id)
+      applyState(fig, detected, tint, seenBySelected)
 
       // Trail ribbon — same colour/alpha state as the figure, at half alpha.
-      const trailColor = detected
-        ? (isCar ? TRAIL_COLOR_CAR : TRAIL_COLOR_PERSON)
-        : TRAIL_COLOR_GHOST
+      const trailColor = detected ? _trailColor.set(tint) : TRAIL_COLOR_GHOST
       updateTrail(
         isCar ? carTrails[idx] : personTrails[idx],
         track, t, pos, trailColor, detected ? 1 : GHOST_OPACITY, pxToM,
@@ -463,18 +575,25 @@ export default function TrackLayer3D({ floorId, pxToM }) {
         let stepDist = 0
         if (ud.hasLast) stepDist = Math.hypot(wx - ud.lastX, wz - ud.lastZ)
         ud.lastX = wx; ud.lastZ = wz; ud.hasLast = true
-        // Advance phase by metres walked / stride length (× 2π per stride).
-        ud.walkPhase += (stepDist / STRIDE_M) * Math.PI * 2
+        // Advance phase by metres walked / stride length (× 2π per stride),
+        // capped per frame so fast playback stays a readable brisk walk
+        // instead of strobing.
+        ud.walkPhase += Math.min((stepDist / STRIDE_M) * Math.PI * 2, MAX_PHASE_STEP)
         // Amplitude from instantaneous speed (distance this frame / dt), eased
         // in and capped so a near-still person barely moves.
         const speedMps = dtSec > 0 ? stepDist / dtSec : 0
         const amp = Math.min(1, speedMps / WALK_FULL_SPEED) * LEG_SWING_MAX
         const sw = Math.sin(ud.walkPhase)
-        ud.legL.rotation.x = sw * amp
-        ud.legR.rotation.x = -sw * amp
+        const cw = Math.cos(ud.walkPhase)
+        ud.legL.rotation.z = sw * amp
+        ud.legR.rotation.z = -sw * amp
+        // Knees flex while their leg swings forward (cos gates the swing
+        // phase), stay straight in stance — the shin+shoe trail the thigh.
+        ud.kneeL.rotation.z = -KNEE_FACTOR * amp * Math.max(0, cw)
+        ud.kneeR.rotation.z = -KNEE_FACTOR * amp * Math.max(0, -cw)
         // Arms swing opposite their same-side leg, at reduced amplitude.
-        ud.armL.rotation.x = -sw * amp * 0.7
-        ud.armR.rotation.x = sw * amp * 0.7
+        ud.armL.rotation.z = -sw * amp * 0.7
+        ud.armR.rotation.z = sw * amp * 0.7
         // Vertical bob: lowest at mid-stride (legs splayed), twice per cycle.
         ud.body.position.y = -Math.abs(sw) * amp * BODY_BOB_M
       }
