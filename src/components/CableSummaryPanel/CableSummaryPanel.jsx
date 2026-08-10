@@ -3,6 +3,8 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useCableStore, CAPACITY_PROFILES, getCapacityProfile } from '@/store/useCableStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { useWallStore } from '@/store/useWallStore'
+import { useScopeStore } from '@/store/useScopeStore'
 import { getCachedRoutes } from '@/features/cable/routesCache'
 import { computeTrayBOM } from '@/features/cable/computeTrayBOM'
 import { computeTrayCableLoads, computeTrayFill } from '@/features/cable/computeTrayFill'
@@ -56,6 +58,46 @@ function CableSummaryPanel() {
     () => computeTrayBOM({ floors, traysByFloor, wasteFactor }),
     [floors, traysByFloor, wasteFactor],
   )
+
+  // PDF planning report. Async because each floor's snapshot waits for React to
+  // commit the floor switch, so the status string doubles as the busy flag
+  // (non-null ⇒ a run is in flight ⇒ the button is disabled).
+  const [exportStatus, setExportStatus] = useState(null)
+  const handleExportPdf = async () => {
+    if (exportStatus) return
+    setExportStatus('準備中...')
+    try {
+      const { buildPlanningPdf, triggerPdfDownload } =
+        await import('@/features/cable/exportPlanningPdf')
+      const blob = await buildPlanningPdf({
+        floors,
+        apsByFloor,
+        // Walls / scopes / regulatoryDomain are read at click time instead of
+        // subscribed: they only matter to the report, and subscribing would
+        // re-render this panel on every wall edit for no visible benefit.
+        wallsByFloor: useWallStore.getState().wallsByFloor,
+        scopesByFloor: useScopeStore.getState().scopesByFloor,
+        switchesByFloor,
+        traysByFloor,
+        risers,
+        wasteFactor,
+        capacityProfile,
+        customCapacity,
+        regulatoryDomain: useEditorStore.getState().regulatoryDomain,
+        setActiveFloor,
+        getActiveFloorId: () => useFloorStore.getState().activeFloorId,
+        onProgress: setExportStatus,
+      })
+      const stamp = new Date().toISOString().slice(0, 10)
+      triggerPdfDownload(blob, `floorplan-report-${stamp}.pdf`)
+    } catch (err) {
+      console.error('PDF export failed:', err)
+      setExportStatus('失敗 — 請看 console')
+      setTimeout(() => setExportStatus(null), 2500)
+      return
+    }
+    setExportStatus(null)
+  }
 
   const [collapsed, setCollapsed] = useState(true)
   // Per-section collapse (same pattern as StatsDashboard). Defaults fold the
@@ -504,6 +546,18 @@ function CableSummaryPanel() {
               ))}
             </Section>
           )}
+
+          <section className="cable-summary__section">
+            <button
+              type="button"
+              className="cable-summary__export"
+              disabled={!!exportStatus}
+              onClick={handleExportPdf}
+              title="輸出多頁 PDF：封面 / RF 涵蓋率與達標判定 / 每層平面圖快照 / AP 線纜表 / 線槽 BOM / 警告"
+            >
+              {exportStatus ?? '📄 匯出規劃報告 PDF'}
+            </button>
+          </section>
         </div>
       )}
     </div>
