@@ -38,6 +38,12 @@
 
 ## 還沒做的事
 
+### Phase 52 三角色稽核修復（2026-08-11 立項，**尚未開工**，詳見下方 Phase 52 專節）
+
+> 工程師／QA／普通使用者三個 subagent 平行稽核 + 兩輪交叉對質，共 30 條。
+> **修復順序：批次 1（全 S，打掉「不能上工」的理由）→ 批次 2（錯誤數字，比 crash 危險）→ 批次 3（資源洩漏）→ 批次 4（UX）。**
+> 使用者已剔除「零持久化／儲存鈕／beforeunload」（之後資料來自 API，目前只是 demo）。
+
 ### Phase 51 3D 視覺美化（2026-08-06 立項，逐項優化、每項瀏覽器驗收後再下一項）
 
 > **現況盤點（生硬陽春的根源）**：無環境貼圖（IBL）→ meshStandardMaterial 的 metal/rough 發揮不出來全是塑膠平色；
@@ -308,6 +314,128 @@
   **另兩條語意需修正**：樓層對齊實作是**數值滑桿 + 疊圖目視**，不是舊 spec 寫的「用對齊點（樓梯/電梯）解算」；熱圖指標是 **4 種**（多 SINR）不是 3 種。自動比例尺**是**有（門寬回推）但標注已知弱點（門偵測率低 → 樣本不足時抗離群失效）。
   **補上舊版整域缺漏的五大領域**：相機/CCTV、Client View、統計（兩態）、網路布線、自動規劃；並收錄不可違反的架構決策（JS 引擎不可移除、3D read-only、BOM 是 Planning BOM、warning ≠ code violation）、效能紅線、以及已撤回清單（避免重複提案）。
   **順手發現需使用者決策（未改，非本次範圍）**：`AIWallsModal.jsx:27-28` 把 `API_BASE_URL` 與 `API_TOKEN` 硬編碼成前端常數 → **會隨 bundle 出貨到瀏覽器**。內部服務尚可，正式對外前需改後端代理或短期憑證。已記在 spec §十二 風險清單。
+
+---
+
+### Phase 52 三角色稽核修復（2026-08-11 立項，尚未開工）
+
+> **來源**：2026-08-11 三個 subagent 平行稽核 —— 資深工程師（`src/` 靜態全掃，不開瀏覽器）／資深 QA（Playwright 探索式 + 破壞性測試）／普通使用者（IT 網管人設，不看文件不看碼）。
+> 之後跑**兩輪交叉對質**（工程師裁決 QA/User 的實測、QA 用瀏覽器實證工程師的靜態推論），逆轉 4 條結論，詳見本節末「交叉對質逆轉」。
+> **全程只讀**，未改任何檔案。截圖在 `.playwright-mcp/`（前綴 `qa-` / `ux-` / `verify-`，gitignore）。
+>
+> **已剔除（使用者 2026-08-11 拍板，不要再提案）**：**零持久化 / 無「儲存」鈕 / reload 資料全失** —— 使用者回覆「之後資料都會來自 API，目前只是 demo，自然無所謂」。
+> 這符合 spec §十二.1 設計；整合後 `buildingData` 由 API 進、`onSave` 出，本地存檔在架構上多餘。連帶 `beforeunload` 警告一併不做。
+> 使用者那條抱怨（U-06）的本質是「不知道自己在看 demo」的認知落差 → 已收斂進 **52-D4（mock 標示）**。
+
+#### 批次 1 — 立即修（全 S，打掉「不能上工」的理由）
+
+- [ ] **52-A1 Demo 載入後 Ctrl+Z 全毀**（Critical，一行）：載入 Demo 後不做任何操作按一次 Ctrl+Z → **45 牆 + 5 AP + 4 相機全消失**，且工具列「復原」鈕此時是 **enabled**，等於介面主動邀請使用者清空全場。
+  **根因**（工程師定位，非 off-by-one）：`useHistoryStore.js:245-265` 存的確實是「變化前」狀態，邏輯正確；問題是 `DemoLoader.jsx:156-157` 的 `setWalls`/`setAPs` 被 `useHistoryStore.js:268-275` 的 subscribe 捕捉，把「載入前的空樓層」推進 stack（`undoStack.length === 1`，內容 `walls:[], aps:[]`）。**漏呼叫 `clearHistory()`**（該函式已存在，`:128`）。
+  **修法**：`DemoLoader` 載入後補 `useHistoryStore.getState().clearHistory()`。同理檢查 `StressLoader` 與 `AIWallsModal.jsx:213` 的整層取代。
+  **不影響 redo**（`:110-123` 對稱實作正確，與使用者實測「Redo 可救回」一致）。
+  **次症狀不修（設計取捨）**：畫 2 段牆只扣一格 stack —— `DEBOUNCE_MS = 300` + `:198` `if (!_pendingRaw)` 只保留最初那份，屬拖曳合併的**設計意圖**，對離散操作誤傷。要修需區分連續/離散來源（M），本批不做。
+- [ ] **52-A2 比例尺無上限 → 分頁 OOM**（Critical，一處 clamp 解三個問題）：量 20px 卻輸入 5000 公尺 → `scale = 0.004 px/m` → `sampleField.js:32-37` 以 `imageSize/scale` 開網格並配置**四個** Float32Array（`indoorMask.js:102-108` 同樣）→ 實測 4.8e11 元素 → 立即 OOM。
+  只驗 `> 0`（`min="0.01"` 只是瀏覽器提示，Enter 路徑繞過）；`heatmapAdapter.js:654` 只檢查 truthy，`0.004` 過關。
+  **修法**：`useFloorStore.js:56 setFloorScale` 夾到合理範圍（如 0.5–5000 px/m）。兩個寫入點（`ScaleDialog.jsx:19-23`、`AIWallsModal.jsx:214` 的 AI 自動比例尺）**都匯流到這一個 chokepoint**，一處修好三個問題。
+- [ ] **52-A4 AP 撞名（PDF 出現兩列同名 AP-01）**（Major，一處）：Demo 已有 AP-01~05，新放的也叫 AP-01。**匯出 PDF 的 AP CABLES 表出現兩列 `Demo AP-01`**，施工人員無法分辨哪條線走哪顆 AP。
+  **根因**：`useAPStore.js:67-70 setAPs` **不推進 `globalAPCounter`**（只有 `:14-21 addAP` 會）。Demo 用 `setAPs` 灌 5 顆 → counter 仍為 0。
+  **修法**：`setAPs` 依傳入清單同步推進 counter。這是真正的單一修復點，可根治撞名，並讓 `AutoPlaceModal.jsx:41-52 apNameBase()` 那個「counter 與現有 AP-NN 最大值取大者」的 workaround 得以簡化。
+- [ ] **52-D4 統計頁 mock 標示強度失衡**（使用者剔除 A5 後**升一級**）：「● 即時」綠點 11px、綠 `rgb(16,185,129)`、置於面板**頂端**；「即時聚合 — mock 資料」免責 10px、灰 `rgb(154,163,181)`、壓在面板**最底**。**聲稱即時的訊號比澄清是假資料的訊號更大更亮更靠上。**
+  使用者差點截圖去跟老闆報告「有一台 AP 掛了」。QA 判定**功能邏輯正確**（`DemoLoader.jsx:104` 只有 demo AP-03 釘 `mockStatus:'offline'`，使用者自畫的 AP 一律無），純呈現誤導。
+  **修法**：mock 標示上移到標題列與「即時」同級，或直接把「即時」改成「即時（mock）」。同一類的還有「規劃 VS 實測 12 個落差點」（mock 對 mock 卻呈現得像實測驗證）。
+  **這條在 demo 階段是 D 組 CP 值最高的** —— 既然這階段本來就全是假資料，把假資料呈現得像真的就是最容易誤導的地方。
+
+#### 批次 2 — 會產出「看起來很權威的錯誤數字」（比 crash 更危險，因為沒人會發現）
+
+- [ ] **52-A3 相機模式假比例尺**（Critical；工程師發現 → QA 實測證實）：未設 scale 時靜默套用 `40 px/m`。**同一張圖、同兩台相機，唯一差別是有無 scale**：無 scale → 涵蓋率 **96.0%**／盲區 8.8 m²／**✓ 已達標**；真實 scale 22.83 → **38.3%**／盲區 414 m²／未達標。無 scale 時**完全沒有任何提示**。
+  **決定性對照**：同一張無 scale 樓層，Wi-Fi 側明確拒算「尚未設定比例尺，無法計算涵蓋率」（`buildScenario.js:163` 回 null + `heatmapAdapter` `setScaleMissing`）。**同一個 App 兩套標準。**
+  根因 `coverageStats.js:23`（`fovRasterize.js:20,72`、`trackingBinder.js:40`、`mockTracks.js:150` 同樣 fallback，共 9 處）。`CameraPanel.jsx:49` 已算了 `hasScale`，統計路徑沒去用它。
+  **注意**：這條與 demo 資料無關，換了真 API 資料照樣會錯，而且錯得很有說服力。
+- [ ] **52-B1 PDF 多樓層熱圖系統性錯層**（High；工程師算術 → QA 實測證實）：`exportPlanningPdf.js:319-321` 切樓層後固定等 **220ms**，但 `heatmapAdapter.js:1082` 的 floor store 訂閱是 **400ms** debounce。220 < 400 是**算術上的必然，不是偶發競態**。
+  QA 實測（真實 `capturePlanPng` + `heatmapFrameBus`）：切到 B 樓層後第 220ms，`getHeatmapFrame().floorId` **仍是前一層 A**；第一張正確 frame 要到約 **1457ms**。同時點 bake 出的 PNG：220ms = 528KB（A 的 5-AP 場）vs 正確 409KB。**交給客戶的報告第 2 頁起熱圖會是上一層的。**
+  **修法**：等真正的「熱圖已穩定」信號（`heatmapFrameBus` 已有 `floorId`，不要用固定延遲）。
+  **順手修**：`originalFloorId` 還原（`:383`）不在 `finally` 裡，中途拋錯會把使用者留在錯誤樓層。
+- [ ] **52-B2 相機校正交叉四邊形 → 座標變 `Infinity`**（Critical，工程師已實際執行驗證）：`applyHomography` 沒有 `w ≈ 0` 防護。交叉（bowtie）四邊形產生的 H **非奇異**（`solveLinear8` 的 pivot 檢查抓不到），但其「無窮遠線」正好穿過相機畫面：
+  ```
+  solveHomography 回傳非 null（Save 鈕可按，因為只 gate 在 !H）
+  pt(300,225)  w=0.000e+0  ->  { x: Infinity, y: -Infinity }
+  ```
+  `CalibrationModal.jsx:27-36` 的 `quadArea` 用了 `Math.abs()`（`:35`），**正好抹掉判斷交叉所需的正負號**；`quadWarn` 只顯示文字警告、不擋存檔。污染值經 `useTrackingStore.js:58-77` 寫進 `tracksByFloor` 持久化。
+  **修法**：用「各邊 cross product 正負號一致」判凸性擋掉交叉四邊形（存檔要真的 disable）+ `homography.js:64-69` 加 `Number.isFinite(w) && Math.abs(w) > 1e-9`。
+- [ ] **52-B3 `Math.max(0, NaN)` 夾不住 NaN，網格資料靜默遺失**（High，承 B2）：實測 `Math.max(0, NaN) === NaN`，此慣用法只擋得住有限範圍值；`grid[NaN] += 1` 在 TypedArray 上**靜默丟棄**。若是 `Infinity` 則夾到最後一格，所有軌跡堆到右下角 → 產出「看起來合理但完全錯誤」的熱圖。
+  位置：`occupancyGrid.js:57-58`、`analyticsStats.js:294-295, 498-499`。**修法**：迴圈前 `Number.isFinite(x) && Number.isFinite(y)` 明確 gate。
+- [ ] **52-B4 樓高/衰減 dB/AP 安裝高度缺 `max`**（Major）：樓高輸入 999999 → 3D 中纜線衝出畫面、牆面與樓板嚴重 z-fighting、場景不可用；AP 屬性面板線長顯示 **1000009.06 m（約 1000 公里）**且外觀像正常估算值，**會直接寫進 BOM**。
+  負值已正確擋下（min 生效），問題**只在缺 max**。對照組：AP 發射功率有正確夾值（輸 99999 → 夾成型號上限 23）。
+- [ ] **52-B5 AI 牆偵測「取消後重跑」會復活前一次**（High）：`AIWallsModal.jsx:151` 的 `run()` 內 `cancelRef.current = false` —— 「開始偵測」→「取消」→ 再「開始偵測」，第二次把 flag 設回 false，**讓仍在 await 中的第一次跑復活**，一路執行到 `:213 setWalls`（整層取代）。兩次都寫牆，後完成者覆蓋先完成者。
+  另 `setGeminiPreview` 會 revoke 前一個 blob URL，敗方的 `result.overlayUrl` 指向已撤銷 URL → 破圖。
+  **修法**：改用 per-run generation id，每個 await 後比對（`AutoPlaceModal` 的 per-run worker 寫法就是正確範本）。
+
+#### 批次 3 — 資源洩漏（長時間 session 會累積到崩）
+
+> **工程師觀察（決定修復成本）**：這組有共通模式 —— **每個缺陷旁邊就有一個寫對的對照組**，是覆蓋率問題不是知識問題，照隔壁抄即可。
+
+- [ ] **52-C1 樓層底圖 texture 永不釋放**（Critical）：`floorImageLayer.js:12-18, 58-66` 每次載入都 `new window.Image()` → `Texture.from(img)` 拿到全新 ImageSource（**繞過 Pixi v8 Cache**，因為 Cache 以 source 物件為 key），而 `clearSprite()` 用 `destroy({ texture: false })` 明確不刪 texture。
+  **觸發**：3 層 4000×3000 平面圖來回切樓層 30 次 → **約 1.4 GB VRAM 永不回收**。
+  `refOverlayLayer.js:23-29,51-55`（ALIGN_FLOOR 參考疊圖）是**同一份複製碼、同樣漏**，且每次進出對齊模式都重跑，額外還漏 `ColorMatrixFilter`（持有 GL program）。**兩處共用同一個 helper 一起修。**
+  **修法**：以 `imageUrl` 為 key 做 module 級 texture cache 共用；或 `destroy({texture:true})` 並清掉 Cache entry。
+- [ ] **52-C2 `Label3D` texture cache 無上限**（High）：`Label3D.jsx:20-22, 60-72` module 級 `Map` 以**使用者可編輯的裝置名稱字串**為 key，永不 evict、永不 `dispose()`。每個 entry 是一張 canvas + 帶完整 mipmap 鏈、最高 3× 超取樣的 GPU texture。**在 3D 中改名時每按一個鍵就產生一個新 key**（`"AP-0"`, `"AP-01"`, …）。
+  **對照組**：`SwitchLayer3D.jsx:40` 同樣模式但 key 是夾在 4–48 的 port 數（上限 45 筆）—— 寫法本身沒錯，錯在 key 的基數。**修法**：LRU 上限 + evict 時 `texture.dispose()`。
+- [ ] **52-C3 `heatmapGL` 無 context-loss 處理**（Med-High）：全檔 0 個 `isContextLost` —— TDR 後 `render()` 持續對死 context 畫圖，**畫面永久空白**。另 `createHeatmapGL()` 失敗後 `gl` 沒設回 null，每次 compute 都重試建 context。
+  **對照組**：`propagationGL`/`sampleFieldGL` 都有處理（`sampleFieldGL.js:42` 會 dispose + 重建）。
+  順帶：`useHeatmapStore` 有 `scaleMissing`/`simplifiedLargeScene` 通知管道，卻沒有 WebGL2 不可用的管道 → 使用者只看到開關是開的但沒東西。
+- [ ] **52-C4 `heatmapStack.paintGL` 洩漏整個 WebGL2 context**（Med-High）：`heatmapStack.js:41-44, 162-181` 的 `paintGL` 是 module 全域的第三個 WebGL2 context，driver 的 teardown 清了 timer 和 unsubs，**就是沒呼叫 `paintGL.dispose()`**。瀏覽器有 context 數量硬上限（約 8–16），本專案已有 Pixi、three、propagationGL、heatmapGL 幾個常駐，逼近上限會讓 C3 的 context loss 更容易發生。
+- [ ] **52-C5 圖片匯入三個缺陷擠在四行**（Medium）：`useFloorImport.js:25-32` —— ① 沒有 `img.onerror`，損壞的 PNG 永遠不觸發 `onload`，「載入圖片中…」**永久卡住**且 `isLoading` 擋掉後續匯入 ② `:32` 的 object URL 純粹用來探測尺寸、從未 revoke，而 `useFloorStore.js:112` 又為同一個 File 建**第二個** URL（只有這個會在刪樓層時 revoke）→ 每次匯入固定洩漏一個 blob ③ PDF 失敗只 `console.error`，使用者零回饋（`showUiToast` 已存在但未使用）。
+- [ ] **52-C6 規劃品質面板在主執行緒同步全樓層掃描**（Medium）：`planQuality.js:75` 的 `sampleField` 是**同步**的直接跑主執行緒。估算作業量：100×80 m / 300 AP / 600 牆段 → 約 **1.48e9** 次核心運算。`useAPStore` 每個 action 都回傳新陣列 identity，所以拖曳 AP 時 `DevicePlanningPanel.jsx:61-68` 的 effect 反覆重入，200ms debounce 只是延後而非避免凍結。**此路徑沒有走 Phase 46 建立的非同步管線。**
+
+#### 批次 4 — UX（使用者總評：「還不會用 —— 但它離『會』只差一個匯出按鈕」）
+
+- [ ] **52-D1 匯出功能做得很好，但藏到沒人找得到**（Major，純擺放位置問題）：**兩個入口都不在 Toolbar**（已確認 `Toolbar.jsx` 無任何匯出入口），且預設狀態下**根本不在 DOM 裡**，肉眼掃描不可能找到 ——
+  | 功能 | 位置 | 條件 |
+  |---|---|---|
+  | PNG | `SidebarLeft.jsx:427-434` 樓層列 hover → `⋯` 選單第 4 項（**緊鄰紅色「刪除樓層」**） | `disabled={!floor.imageUrl}` |
+  | 7 頁 PDF 報告 | `CableSummaryPanel.jsx:550-559`，掛載於 `CanvasArea.jsx:65` | `hasFloor && !inCameraMode`；面板 `:102 useState(true)` **預設收合**，展開後還要捲過 BOM/階層/長度級距/TRAY BOM/容量規則才到底部 |
+  **使用者原話**：「我完全沒有理由去點『線纜總結』找報告 —— 我要的是整份規劃，不是算線材。」
+  **修法**：TopBar 加一顆「匯出」彙整兩者（功能都已寫好）。**注意 Phase 51-B 已拍板「PDF 放 CableSummaryPanel 是唯一合理位置」—— 本條不是推翻該決定，是主張再加一個顯眼入口。**
+- [ ] **52-D2 「📻 自動頻道」凍結畫面且零回饋**（Major）：QA 三顆按鈕對照實測 ——
+  | 按鈕 | 5 AP | 300 AP | 進度條 | 進度文字 | 取消 | 主執行緒 |
+  |---|---|---|---|---|---|---|
+  | 📍 自動規劃 AP 放置 | 47ms | 68ms | ✅ | ✅ | ✅ 中止 | 不凍結（最大 frame gap 18ms） |
+  | ⚡ 自動規劃整層 AP 功率 | 49ms | — | ✅ | ✅ | ✅ 中止 | 不凍結 |
+  | **📻 自動頻道** | — | **同步阻塞 296–379ms／累計凍結 2715ms／約 5.8s 才恢復** | ❌ | ❌ | ❌ | **完全凍結** |
+  根因 `DevicePlanningPanel.jsx:70-79 runAutoChannel` 同步無 worker（與 52-C6 同一個面板、互相加成）。
+  **修法**：移進 worker 或加 busy 遮罩。**不要去改 AutoPlaceModal 的進度條 —— 那裡沒壞。**
+- [ ] **52-D3 術語零解釋**：RSSI/SINR/SNR/CCI 四個下拉選項**無任何 tooltip**（只有整個選單一句「最強 AP 的接收功率」）；色階只有 `≤-75 … ≥-35` 沒有「可視訊／堪用／很差」分級。使用者原話：「四個數字對我來說是天書。」
+  **對照組（產品內就有正解）**：Camera 模式「52.6% 地板已涵蓋／目標 80%／未達標／盲區 318 m²」使用者**完全不用人教就看懂**；自動規劃對話框「業界慣例以 5 GHz 做覆蓋設計」是全站最好的說明文字。**把那種口氣搬到 Wi-Fi 這邊。**
+- [ ] **52-D5 空狀態零引導 + 前置條件不足時零回饋**（Major）：① 打開一片黑，沒有一句話說「第一步請先匯入平面圖」，使用者**從頭到尾沒找到匯入按鈕在哪** ② 未載入樓層時點「無線 AP」再點畫布 **完全無反應無提示**，使用者以為程式壞了連點好幾下 —— 而旁邊的 50/150/300 AP 按鈕**卻懂得變灰**，同一排標準不一。
+  **修法**：空畫布放虛線框「把平面圖拖進來，或點此選擇檔案」；不能做的事要嘛 disabled 要嘛給 toast 說原因。
+- [ ] **52-D6 熱圖滿江紅但紅的大多在建築物外**：使用者第一反應「這間辦公室的網路爛透了，我完了」，後來才發現紅色大多在草地、屋外空地。熱圖一路暈到圖片邊緣，紅色面積比房子還大。
+  自動規劃對話框已有「僅室內放置」這個聰明選項，**熱圖卻不預設這樣**。
+- [ ] **52-D7 視窗 <1196px 佈局重疊**：1190px 時「設備規劃」面板 right=619、工具列 left=616（重疊）；1024px 時重疊達 86px，「設備規劃」文字被工具列蓋住**無法點擊**（1280px 正常，斷點約 1196px）。同族：「線纜總結」展開時會蓋住規劃品質面板。
+  另 **resize 後畫布不重新 fit**：1600→1024 時 viewport 的 scale/pan 完全不變，平面圖以 1085x809 繪製在 764x552 的 canvas 裡，使用者只看到放大的一角。
+- [ ] **52-D8 多樓層 React `unique key` warning ×2**（Minor）：`SidebarLeft.jsx:49:18` 與 `Viewer3D.jsx:286:23`（`FloorStack`），單樓層時不出現、≥2 樓層必現，與圖片載入無關。缺 key 在樓層排序/刪除時有 render 錯位風險。
+- [ ] **52-D9 小瑕疵集合**（各 S，可一起做）：① AP 名稱可存純空白 `"   "` → 畫布標籤與屬性面板標題列變空白、報告中無法識別 ② **AP 編號跳號**（套用自動規劃後 AP-01,02,05...12 共 10 顆；成因是 fresh 模式移除同頻段 AP-03/04 後新號從 06 續編，`AutoPlaceModal.jsx:196` 先算 `base` 但 `:201` 逐顆 `addAP` 又各自推進 counter；資料無誤純觀感/可追溯性，真正該做的是套用前講清楚「將移除 2 顆」）③ 刪除相機後 `liveViewCameraId` 未清（UI 無可見故障，狀態衛生）④ **STATS 模式熱圖圖例與開關仍顯示啟用但畫面無熱圖**（`heatmap.enabled === true` 卻被 `layerVisibilityBinder` 抑制，控制項與畫面不一致）⑤ 最小縮放（scale 0.05）時底圖與熱圖**完全沒畫出來**，只剩 5 個原尺寸 AP 標籤重疊成不可讀黑塊 ⑥ 範例圖是住家（bed 2/double garage/patio）不是辦公室 ⑦ 深色主題無淺色/列印模式（截圖貼進白底 Word 突兀、印出來整頁黑）。
+- [ ] **52-E8 選取狀態跨樓層殘留**（降級為狀態衛生，QA 實測後**不急**）：切樓層/刪樓層後 `selectedId`/`selectedType` 不清（仍指向前一層的 AP）。
+  **工程師原推論「會顯示幽靈面板或綁錯物件」經 QA 實測不成立** —— ID 全域唯一，`PanelRight` 用 `activeFloorId` 查不到就 render null，右側面板是空白；「此類型的屬性面板即將推出」需要 `selectedType` 無對應路由才會出現（注入 `'gateway'` 才觸發），正常切樓層走不到。
+  **修法（順手做）**：`FloorplanSystem.jsx:890-899` 已有追蹤 `prevFid` 的樓層切換 subscriber（目前只清 scale draft），加一行 `clearSelected()`；`confirmRemove`（`SidebarLeft.jsx:219-243`，已清 7 個 store + history）補同一行。
+
+#### 已查核並確認乾淨（負面結果，避免重工）
+
+- **Zustand getter 訂閱：零違規**。`getWalls`/`getAPs` 等 getter 存在於 store 但**無人訂閱**，CLAUDE.md 規則被確實遵守。無跨 store 循環相依、無 self-feedback set。
+- **JS ↔ shader 物理一致性**：逐條比對 `pathLossDb`(27.55/dEff 0.5)、`indoorLossPerM`、`SLAB_SEC_CAP 3.5`、`sec` 0.2 夾取、`SQRT2` 激發、0.05/0.02 剔除門檻、`1e-30` **全部鏡像且有註解標明**。shader 的 `NMAX=40` 與 JS `ceil(160/4)=40` 恰好相等（最大頻寬 160 MHz），無分歧。
+- 零長度牆、`log10(0)`、0 顆 AP、flood fill（顯式 stack 並在 push 時標記）、`contour` 迴圈上限、worker 生命週期、`localStorage`/`JSON.parse`（**全專案零使用**）、24 個 Pixi layer 的 Graphics 重用、`heatmapAdapter`/`propagationGL` 的 dispose、viewer3d 各層 geometry/material dispose、rAF/timer/DOM listener 清理 —— **皆正確**。
+- QA 已驗證正常：畫牆多點連續繪製、Esc 清 draft、連續 12 次極速點擊放 AP 無掉點無重複 id、輸入框聚焦時 Delete 被正確攔截、Redo 每次都能完整還原、**未設比例尺時 Wi-Fi 側正確拒算並給 CTA**、AP 發射功率正確夾值、縮放 clamp（max 40／min 0.05 無溢位）、36 次極速切換 9 種模式 0 error、PNG/PDF 匯出內容與 App 內數字**逐項相符**（84.3%／39.8%／15.7%／112m²；線長 71.3m 加總正確）。
+
+#### 交叉對質逆轉（單一角色測不出來的，記錄方法論）
+
+| # | 初判 | 逆轉後 | 意義 |
+|---|---|---|---|
+| 1 | User：「完全找不到匯出，沒東西能給老闆」 | QA 拿出實體 7 頁 PDF + PNG → User 二次確認後**收回**，改為「藏太深」 | 成本從「開發新功能」降到「搬個按鈕」（52-D1） |
+| 2 | User：「自動規劃卡 33 秒無回饋」 | 工程師讀碼證明該顆有 worker+進度條+取消 → QA 實測 47ms；**真兇是隔壁的📻自動頻道**（5.8s 全凍結） | **若只信使用者，會去修沒壞的那顆**（52-D2） |
+| 3 | 工程師靜態稽核**完全漏掉** Undo 全毀 | QA 與 User 各自獨立踩到；但根因（`DemoLoader` 漏一行 `clearHistory()`）只有讀碼定位得出來 | 兩種方法互補，缺一不可（52-A1） |
+| 4 | 工程師：E-08 選取殘留會綁錯物件（High） | QA 實測 ID 全域唯一、面板 render null，實際使用者不可見 → **降級** | 避免一次過度修復（52-E8） |
+
+> **誠實標註**：QA 未複現到 33 秒（最重壓測 5.8s），可能是使用者機器較慢或連按多次 —— **兇手可定案，數字不可**。
+> **未測到區域**：檔案匯入全鏈（無合法平面圖檔）、AI 牆偵測（會打外部真實 API）、多樓層真實情境（需兩張真實底圖）、拖曳物件到畫布外、貼上多行文字。
 
 ---
 
