@@ -38,10 +38,10 @@
 
 ## 還沒做的事
 
-### Phase 52 三角色稽核修復（2026-08-11 立項，**批次 1 已完成**，詳見下方 Phase 52 專節）
+### Phase 52 三角色稽核修復（2026-08-11 立項，**批次 1+2 已完成**，詳見下方 Phase 52 專節）
 
 > 工程師／QA／普通使用者三個 subagent 平行稽核 + 兩輪交叉對質，共 30 條。
-> **修復順序：批次 1 ✅（2026-08-12 使用者驗收 ok）→ 批次 2（錯誤數字，比 crash 危險）→ 批次 3（資源洩漏）→ 批次 4（UX）。**
+> **修復順序：批次 1 ✅ → 批次 2 ✅（皆 2026-08-12 使用者驗收 ok）→ 批次 3（資源洩漏）→ 批次 4（UX）。**
 > 使用者已剔除「零持久化／儲存鈕／beforeunload」（之後資料來自 API，目前只是 demo）。
 
 ### Phase 51 3D 視覺美化（2026-08-06 立項，逐項優化、每項瀏覽器驗收後再下一項）
@@ -357,30 +357,48 @@
   **修法（三處齊改，缺一都還是會被誤讀）**：① 標題列加琥珀 `MOCK` 徽章（`&__mock-badge`，9px/700/`#fbbf24`，`cursor: help` + title 說明），與 ● 即時同一列 ② 「● 即時」→「**● 即時（mock）**」，讓最醒目那行自己帶上限定詞 ③ 底部說明擴充為「本頁所有數值（含告警與『規劃 VS 實測』落差）皆為示範用 mock 資料」—— 把 PM 護城河那塊 mock 對 mock 的比較也一併涵蓋。
   **驗證**：徽章與 live 文字 `getBoundingClientRect().top` 同為 75px（確認同級而非又被塞到底部）。
 
-#### 批次 2 — 會產出「看起來很權威的錯誤數字」（比 crash 更危險，因為沒人會發現）
+#### 批次 2 — 會產出「看起來很權威的錯誤數字」✅ 全部完成（2026-08-12 使用者驗收 ok）
 
-- [ ] **52-A3 相機模式假比例尺**（Critical；工程師發現 → QA 實測證實）：未設 scale 時靜默套用 `40 px/m`。**同一張圖、同兩台相機，唯一差別是有無 scale**：無 scale → 涵蓋率 **96.0%**／盲區 8.8 m²／**✓ 已達標**；真實 scale 22.83 → **38.3%**／盲區 414 m²／未達標。無 scale 時**完全沒有任何提示**。
+> **收工小結**：六項全數 MCP 實測通過、0 console errors。兩處超出原計畫的發現記在條目內：
+> ① B5 除了 `setWalls`，**overlay blob URL 也要擋**（敗方發布會 revoke 掉勝方的圖 → 破圖）；
+> ② B4 的上限使用者實測後從 200m 收到 **20m**，且 AP 安裝高度改為**綁該樓層天花板**而非固定值。
+
+- [x] **52-A3 相機模式假比例尺**（✅ Critical；工程師發現 → QA 實測證實）：未設 scale 時靜默套用 `40 px/m`。**同一張圖、同兩台相機，唯一差別是有無 scale**：無 scale → 涵蓋率 **96.0%**／盲區 8.8 m²／**✓ 已達標**；真實 scale 22.83 → **38.3%**／盲區 414 m²／未達標。無 scale 時**完全沒有任何提示**。
   **決定性對照**：同一張無 scale 樓層，Wi-Fi 側明確拒算「尚未設定比例尺，無法計算涵蓋率」（`buildScenario.js:163` 回 null + `heatmapAdapter` `setScaleMissing`）。**同一個 App 兩套標準。**
   根因 `coverageStats.js:23`（`fovRasterize.js:20,72`、`trackingBinder.js:40`、`mockTracks.js:150` 同樣 fallback，共 9 處）。`CameraPanel.jsx:49` 已算了 `hasScale`，統計路徑沒去用它。
   **注意**：這條與 demo 資料無關，換了真 API 資料照樣會錯，而且錯得很有說服力。
-- [ ] **52-B1 PDF 多樓層熱圖系統性錯層**（High；工程師算術 → QA 實測證實）：`exportPlanningPdf.js:319-321` 切樓層後固定等 **220ms**，但 `heatmapAdapter.js:1082` 的 floor store 訂閱是 **400ms** debounce。220 < 400 是**算術上的必然，不是偶發競態**。
+  **修法（只改「統計」不改「渲染」）**：`computeCoverageStats` 開頭 `if (!floor?.scale) return { scaleMissing: true }`，`CoveragePanel` 收到就整塊換成「尚未設定比例尺，無法計算涵蓋率」+ 操作提示（比照 `DevicePlanningPanel:142` 的既有文案）。solo 那塊也加 `!soloStats.scaleMissing` 護欄（目前 early-return 走不到，但順序若變不會印出 NaN%）。
+  **`camerasLayer` / `tracksLayer` / `blindSpotLayer` 的 `FALLBACK_PX_PER_M` 刻意保留** —— 那些是**繪圖**路徑，沒有 scale 就畫不出東西；拒繪只會變成空白畫面。分界是「**會被當成數字報出去的才拒算**」。
+  **驗證**：同一組相機，無 scale → `{scaleMissing:true}`（不再有 coveredPct）；有 scale 22.83 → 照常 52.6%／盲區 318 m²（確認沒有過度拒算）；UI 實測無 scale 樓層進 Camera 模式顯示拒算文案且畫面無任何百分比。
+- [x] **52-B1 PDF 多樓層熱圖系統性錯層**（✅ High；工程師算術 → QA 實測證實）：`exportPlanningPdf.js:319-321` 切樓層後固定等 **220ms**，但 `heatmapAdapter.js:1082` 的 floor store 訂閱是 **400ms** debounce。220 < 400 是**算術上的必然，不是偶發競態**。
   QA 實測（真實 `capturePlanPng` + `heatmapFrameBus`）：切到 B 樓層後第 220ms，`getHeatmapFrame().floorId` **仍是前一層 A**；第一張正確 frame 要到約 **1457ms**。同時點 bake 出的 PNG：220ms = 528KB（A 的 5-AP 場）vs 正確 409KB。**交給客戶的報告第 2 頁起熱圖會是上一層的。**
-  **修法**：等真正的「熱圖已穩定」信號（`heatmapFrameBus` 已有 `floorId`，不要用固定延遲）。
-  **順手修**：`originalFloorId` 還原（`:383`）不在 `finally` 裡，中途拋錯會把使用者留在錯誤樓層。
-- [ ] **52-B2 相機校正交叉四邊形 → 座標變 `Infinity`**（Critical，工程師已實際執行驗證）：`applyHomography` 沒有 `w ≈ 0` 防護。交叉（bowtie）四邊形產生的 H **非奇異**（`solveLinear8` 的 pivot 檢查抓不到），但其「無窮遠線」正好穿過相機畫面：
+  **修法**：新增 `waitForFloorRepaint(floorId)` —— 訂閱 `heatmapFrameBus`，等它發布的 frame `floorId` 等於目標樓層才繼續，之後再 settle 220ms 讓 sprite 合成完。**兩個必要的逃生口**：① 熱圖關閉時永遠不會有 frame → 直接走固定 delay ② 4s timeout，GL 卡住不能讓整個匯出吊死。
+  **順手修**：整段 per-floor 迴圈包 `try/finally`，`originalFloorId` 還原移進 `finally`（原本中途拋錯會把使用者留在錯誤樓層）。
+  **驗證**：獨立重現 bug——切樓層後第 220ms `getHeatmapFrame().floorId` 仍是舊樓層，正確 frame 在 **874ms** 才到；同一次切換用兩種策略各 bake 一次，固定 220ms 得 524,962 bytes、等 bus 得 600,842 bytes（**實質不同的圖**）。端到端：2 樓層 PDF 6 頁 4.8s、還原原樓層正確；熱圖關閉時 708ms 完成（沒有吃到 timeout）。
+- [x] **52-B2 相機校正交叉四邊形 → 座標變 `Infinity`**（✅ Critical，工程師已實際執行驗證）：`applyHomography` 沒有 `w ≈ 0` 防護。交叉（bowtie）四邊形產生的 H **非奇異**（`solveLinear8` 的 pivot 檢查抓不到），但其「無窮遠線」正好穿過相機畫面：
   ```
   solveHomography 回傳非 null（Save 鈕可按，因為只 gate 在 !H）
   pt(300,225)  w=0.000e+0  ->  { x: Infinity, y: -Infinity }
   ```
   `CalibrationModal.jsx:27-36` 的 `quadArea` 用了 `Math.abs()`（`:35`），**正好抹掉判斷交叉所需的正負號**；`quadWarn` 只顯示文字警告、不擋存檔。污染值經 `useTrackingStore.js:58-77` 寫進 `tracksByFloor` 持久化。
-  **修法**：用「各邊 cross product 正負號一致」判凸性擋掉交叉四邊形（存檔要真的 disable）+ `homography.js:64-69` 加 `Number.isFinite(w) && Math.abs(w) > 1e-9`。
-- [ ] **52-B3 `Math.max(0, NaN)` 夾不住 NaN，網格資料靜默遺失**（High，承 B2）：實測 `Math.max(0, NaN) === NaN`，此慣用法只擋得住有限範圍值；`grid[NaN] += 1` 在 TypedArray 上**靜默丟棄**。若是 `Infinity` 則夾到最後一格，所有軌跡堆到右下角 → 產出「看起來合理但完全錯誤」的熱圖。
-  位置：`occupancyGrid.js:57-58`、`analyticsStats.js:294-295, 498-499`。**修法**：迴圈前 `Number.isFinite(x) && Number.isFinite(y)` 明確 gate。
-- [ ] **52-B4 樓高/衰減 dB/AP 安裝高度缺 `max`**（Major）：樓高輸入 999999 → 3D 中纜線衝出畫面、牆面與樓板嚴重 z-fighting、場景不可用；AP 屬性面板線長顯示 **1000009.06 m（約 1000 公里）**且外觀像正常估算值，**會直接寫進 BOM**。
+  **修法（三層）**：① `applyHomography` 在 `w` 非有限或 `|w| < 1e-9` 時回 **`null`**（不是回 Infinity 讓下游猜）② `CalibrationModal` 新增 `isConvexQuad()` —— 逐角 cross product **正負號需一致**，任一反轉即為交叉；兩個 pane 都要通過，否則 `canSave=false`、儲存鈕 disabled、狀態列給明確文案（「四點順序交叉成『Z 字』…請依同一方向重點」）③ `reprojectionError` 遇到 null 直接回 `Infinity`，不把 NaN 平均成一個看似正常的數字。
+  **`quadArea` 保留不動**：它負責的是「太小／太接近共線」的精度警告，與凸性是兩件事；但註解已標明它的 `Math.abs` 正是掩蓋交叉的原因，避免日後有人拿它去做凸性判斷。
+  **驗證**：bowtie 的 H **仍非奇異**（證實 pivot 檢查抓不到，必須另判）；掃 441 點有 21 點落在消失線（y=150，正是交叉處）**全部回 null、零個 Infinity/NaN 逸出**；`isConvexQuad` 對順時針/逆時針皆 true、交叉/共線/凹四邊形皆 false；關鍵對照——bowtie 與正常矩形的 `Math.abs` 面積分別是 0 與 120000，**面積無法區分**（bowtie 剛好抵消為 0 是巧合，換個交叉形狀就不為 0），凸性判斷才是對的工具。
+- [x] **52-B3 `Math.max(0, NaN)` 夾不住 NaN，網格資料靜默遺失**（✅ High，承 B2）：實測 `Math.max(0, NaN) === NaN`，此慣用法只擋得住有限範圍值；`grid[NaN] += 1` 在 TypedArray 上**靜默丟棄**。若是 `Infinity` 則夾到最後一格，所有軌跡堆到右下角 → 產出「看起來合理但完全錯誤」的熱圖。
+  位置：`occupancyGrid.js:57-58`、`analyticsStats.js:294-295, 498-499`。**修法**：三處索引前一律 `if (!Number.isFinite(x) || !Number.isFinite(y)) continue`。
+  **同時堵住上游**：`useTrackingStore.reprojectCameraTracks` 改用 `project()` helper——`applyHomography` 回 null 的樣本**直接丟棄**（不寫進 store）並統計 `dropped` 數量 `console.warn` 提示校正有問題。這樣壞座標連進 store 的機會都沒有，B3 的 gate 是第二道防線。
+  **驗證**：`Math.max(0, NaN) === NaN` 確認；舊行為重現——NaN 寫入靜默消失、Infinity 堆進最後一格（`lastCellValue: 1`）；新行為——四個樣本（NaN/Infinity/-Infinity/正常）只有正常那個落格，最後一格為 0。
+- [x] **52-B4 樓高/衰減 dB/AP 安裝高度缺 `max`**（✅ Major）：樓高輸入 999999 → 3D 中纜線衝出畫面、牆面與樓板嚴重 z-fighting、場景不可用；AP 屬性面板線長顯示 **1000009.06 m（約 1000 公里）**且外觀像正常估算值，**會直接寫進 BOM**。
   負值已正確擋下（min 生效），問題**只在缺 max**。對照組：AP 發射功率有正確夾值（輸 99999 → 夾成型號上限 23）。
-- [ ] **52-B5 AI 牆偵測「取消後重跑」會復活前一次**（High）：`AIWallsModal.jsx:151` 的 `run()` 內 `cancelRef.current = false` —— 「開始偵測」→「取消」→ 再「開始偵測」，第二次把 flag 設回 false，**讓仍在 await 中的第一次跑復活**，一路執行到 `:213 setWalls`（整層取代）。兩次都寫牆，後完成者覆蓋先完成者。
+  **`max` 屬性本身無效**：`NumberInput` 只把 `max` 傳給原生 input，**鍵入可繞過**（同 ScaleDialog 的 Enter 繞過）。一律在 handler 夾（比照 txPower 的既有寫法）。
+  **上限經使用者實測後修正（防重做）**：初版訂 200m，使用者問「設 100 在 3D 看得到嗎」——追查後確認 **`floorHeight` 是樓層間距不是牆高**（牆高由每面牆自己的 `topHeight` 決定，Demo 全 3m），所以**單層改樓高 3D 幾乎沒變化是正常的**，要多樓層才看得出來。它實際餵三條下游：① 3D 堆疊 `floorStacking` ② `computeRoutes` 的 `floorHeight - ap.z` 垂降 ③ tray `ceiling` preset。因為同時是纜線垂降長度，200m 仍會產生 197m 的單條垂降進 BOM → **收到 20m**（涵蓋中庭/廠房/體育館）。
+  **AP 安裝高度改綁樓層天花板**（不用固定值）：`maxMountHeight = min(該樓層 floorHeight, MAX_FLOOR_HEIGHT_M)`。AP 裝在自己樓層天花板之上本來就沒意義，而那正是荒謬垂降的來源。
+  **驗證**：樓高輸 999999 → 20、100 → 20、20 → 20、3 → 3；衰減 99999 → 100；AP 高度在 3m 樓層輸 999999 → 3，把樓高改 10m 後上限自動變 10。多樓層堆疊 elevation 隨樓高正確縮放（3/10/20）。20m 兩層 3D 截圖確認畫面內、纜線正常（`.playwright-mcp/b2-floorheight-20m-3d.png`），該圖右側面板顯示 AP-01 線長 29.76m（含垂降 17.30m）——正是收緊上限的理由。
+- [x] **52-B5 AI 牆偵測「取消後重跑」會復活前一次**（✅ High）：`AIWallsModal.jsx:151` 的 `run()` 內 `cancelRef.current = false` —— 「開始偵測」→「取消」→ 再「開始偵測」，第二次把 flag 設回 false，**讓仍在 await 中的第一次跑復活**，一路執行到 `:213 setWalls`（整層取代）。兩次都寫牆，後完成者覆蓋先完成者。
   另 `setGeminiPreview` 會 revoke 前一個 blob URL，敗方的 `result.overlayUrl` 指向已撤銷 URL → 破圖。
-  **修法**：改用 per-run generation id，每個 await 後比對（`AutoPlaceModal` 的 per-run worker 寫法就是正確範本）。
+  **修法**：`cancelRef`（單一布林）→ `runIdRef`（單調遞增）。`run()` 開頭 `const runId = ++runIdRef.current`，`cancelled = () => runIdRef.current !== runId`；取消與關窗都只做 `runIdRef.current += 1`（**永不重設**，所以被放棄的 run 無法復活）。
+  **計畫沒寫到、實作時補的一條**：除了 `setWalls`，**overlay blob URL 也必須擋**——`setGeminiPreview` 會 revoke 它當前持有的 URL，敗方若在此發布會**把勝方的疊圖 revoke 掉變破圖**。故在 `createObjectURL` 之前就 bail。
+  **五個檢查點**：取得 jobId 後、輪詢迴圈條件、輪詢結束、**`setWalls` 之前（破壞性寫入）**、overlay/denoised 建 URL 之前、`setResult` 之前。
 
 #### 批次 3 — 資源洩漏（長時間 session 會累積到崩）
 

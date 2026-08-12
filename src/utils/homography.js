@@ -60,12 +60,20 @@ export function solveHomography(src, dst) {
   return [h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], 1]
 }
 
-// Apply a 3×3 homography (number[9], row-major) to a {x,y} point. Returns {x,y}.
+// Apply a 3×3 homography (number[9], row-major) to a {x,y} point.
+// Returns {x,y}, or null when the point maps to (or near) the line at infinity.
+//
+// 52-B2: a crossed ("bowtie") quad yields an H that is NOT singular — the 1e-12
+// pivot check in solveLinear8 passes — but whose vanishing line runs through the
+// camera frame. Points on it have w ≈ 0, and dividing produced ±Infinity, which
+// then flowed into persisted track coordinates. Callers must handle null.
 export function applyHomography(H, p) {
   const x = H[0] * p.x + H[1] * p.y + H[2]
   const y = H[3] * p.x + H[4] * p.y + H[5]
   const w = H[6] * p.x + H[7] * p.y + H[8]
-  return { x: x / w, y: y / w }
+  if (!Number.isFinite(w) || Math.abs(w) < 1e-9) return null
+  const out = { x: x / w, y: y / w }
+  return Number.isFinite(out.x) && Number.isFinite(out.y) ? out : null
 }
 
 // Invert a 3×3 homography (number[9], row-major) via the adjugate / determinant.
@@ -97,6 +105,9 @@ export function reprojectionError(H, src, dst) {
   let sum = 0
   for (let i = 0; i < src.length; i++) {
     const q = applyHomography(H, src[i])
+    // 52-B2: a control point that maps to infinity means the calibration is
+    // unusable — report that, don't average a NaN into a plausible number.
+    if (!q) return Infinity
     sum += Math.hypot(q.x - dst[i].x, q.y - dst[i].y)
   }
   return sum / src.length

@@ -1,5 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react'
-import { useFloorStore, DEFAULT_FLOOR_HEIGHT_M, getAlignAnchorId } from '@/store/useFloorStore'
+import {
+  useFloorStore, DEFAULT_FLOOR_HEIGHT_M, getAlignAnchorId,
+  MIN_FLOOR_HEIGHT_M, MAX_FLOOR_HEIGHT_M, MAX_SLAB_ATTEN_DB,
+} from '@/store/useFloorStore'
 import {
   MATERIAL_LIST,
   FLOOR_SLAB_DEFAULT_DB,
@@ -442,12 +445,15 @@ function SidebarLeft() {
                     <span>樓高</span>
                     <input
                       type="number"
-                      min="0.5"
+                      min={MIN_FLOOR_HEIGHT_M}
+                      max={MAX_FLOOR_HEIGHT_M}
                       step="0.1"
                       value={floorHeight}
                       onChange={(e) => {
+                        // 52-B4: clamp both ends — `min` alone let 999999 m through.
                         const num = parseFloat(e.target.value)
-                        if (!isNaN(num) && num >= 0.5) updateFloor(floor.id, { floorHeight: num })
+                        if (isNaN(num) || num < MIN_FLOOR_HEIGHT_M) return
+                        updateFloor(floor.id, { floorHeight: Math.min(num, MAX_FLOOR_HEIGHT_M) })
                       }}
                       onClick={(e) => e.stopPropagation()}
                     />
@@ -476,11 +482,14 @@ function SidebarLeft() {
                     <input
                       type="number"
                       min="0"
+                      max={MAX_SLAB_ATTEN_DB}
                       step="0.5"
                       value={floor.floorSlabAttenuationDb ?? DEFAULT_FLOOR_SLAB_DB}
                       onChange={(e) => {
+                        // 52-B4: clamp the top end too.
                         const num = parseFloat(e.target.value)
-                        if (!isNaN(num) && num >= 0) updateFloor(floor.id, { floorSlabAttenuationDb: num })
+                        if (isNaN(num) || num < 0) return
+                        updateFloor(floor.id, { floorSlabAttenuationDb: Math.min(num, MAX_SLAB_ATTEN_DB) })
                       }}
                       onClick={(e) => e.stopPropagation()}
                     />

@@ -6,6 +6,24 @@ import { DEFAULT_FLOOR_SLAB_MATERIAL_ID, DEFAULT_FLOOR_SLAB_DB } from '@/constan
 // a multi-storey 3D stack lines up.
 export const DEFAULT_FLOOR_HEIGHT_M = 3.0
 
+// 52-B4: bounds for the per-floor numeric inputs. Only `min` was enforced, so
+// a floor height of 999999 m was accepted — it broke the 3D stack (cables shot
+// off-screen, slabs z-fighting) and, worse, showed a cable length of 1000009 m
+// in the AP panel that looked like a normal estimate and would land in the BOM.
+//
+// floorHeight is the storey-to-storey SPACING, not the wall height (walls carry
+// their own topHeight). It feeds three things, so the ceiling is set by the
+// tightest of them rather than by "tallest plausible storey":
+//   1. 3D stacking — each floor sits at the running sum of the ones below
+//   2. cable drop  — computeRoutes adds (floorHeight - ap.z) per AP
+//   3. tray 'ceiling' preset — resolves to floorHeight - 0.05
+// 20 m covers an atrium, warehouse or sports hall while keeping a single
+// cable drop from silently reaching BOM-breaking lengths.
+// 100 dB is past total blockage (metal is 30).
+export const MIN_FLOOR_HEIGHT_M = 0.5
+export const MAX_FLOOR_HEIGHT_M = 20
+export const MAX_SLAB_ATTEN_DB = 100
+
 // 52-A2: typo guard for a floorplan's px/m scale — NOT a performance limit.
 // A 1000px image spans 20 km at 0.05 px/m and 20 cm at 5000 px/m; outside that
 // the user mistyped. Large-but-real sites (a 2 km campus is ~0.5 px/m) must

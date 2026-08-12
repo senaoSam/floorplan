@@ -68,6 +68,22 @@ function CoveragePanel() {
 
   if (!inCameraMode || !activeFloorId || !stats) return null
 
+  // 52-A3: no scale → no trustworthy coverage figure. Say so instead of
+  // printing percentages derived from an assumed px/m.
+  if (stats.scaleMissing) {
+    return (
+      <div className="coverage-panel">
+        <div className="coverage-panel__title">覆蓋率報表</div>
+        <p className="coverage-panel__empty">
+          尚未設定比例尺，無法計算涵蓋率
+          <span className="coverage-panel__empty-hint">
+            請先用「量測 → 比例尺」設定，涵蓋率與盲區面積都以此換算
+          </span>
+        </p>
+      </div>
+    )
+  }
+
   const offline = stats.cameraCount - stats.onlineCount
   const meetsTarget = stats.coveredPct >= targetPct
 
@@ -126,7 +142,7 @@ function CoveragePanel() {
         </div>
       </div>
 
-      {selCam && soloStats && (
+      {selCam && soloStats && !soloStats.scaleMissing && (
         <div className="coverage-panel__solo" title="這台相機單獨能看到的範圍（不計其他相機）">
           <span>📷 {selCam.name} 單獨涵蓋</span>
           <b>{fmtPct(soloStats.coveredPct)} · {fmtArea(soloStats.coveredAreaM2)}</b>

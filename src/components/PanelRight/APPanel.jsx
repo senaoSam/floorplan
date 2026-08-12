@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo } from 'react'
 import { useAPStore } from '@/store/useAPStore'
 import { useCableStore } from '@/store/useCableStore'
-import { useFloorStore } from '@/store/useFloorStore'
+import { useFloorStore, MAX_FLOOR_HEIGHT_M, DEFAULT_FLOOR_HEIGHT_M } from '@/store/useFloorStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { getCachedRoutes } from '@/features/cable/routesCache'
 import { AP_MODEL_LIST, DEFAULT_AP_MODEL_ID, getAPModelById } from '@/constants/apModels'
@@ -56,6 +56,12 @@ function APPanel({ floorId, apId }) {
   const traysByFloor    = useCableStore((s) => s.traysByFloor)
   const risers          = useCableStore((s) => s.risers)
 
+  // 52-B4: an AP can sit at most at its own floor's ceiling.
+  const maxMountHeight = useMemo(() => {
+    const f = floors.find((x) => x.id === floorId)
+    return Math.min(f?.floorHeight ?? DEFAULT_FLOOR_HEIGHT_M, MAX_FLOOR_HEIGHT_M)
+  }, [floors, floorId])
+
   const route = useMemo(() => {
     const { routes } = getCachedRoutes({ floors, apsByFloor, switchesByFloor, traysByFloor, risers })
     return routes.get(apId)
@@ -108,10 +114,16 @@ function APPanel({ floorId, apId }) {
     if (field === 'txPower') {
       const maxTx = model.maxTxPower[ap.frequency] ?? 23
       updateAP(floorId, apId, { txPower: Math.min(num, maxTx) })
+    } else if (field === 'z') {
+      // 52-B4: the `max` prop is only a native attribute — typing bypasses it,
+      // exactly as it did for the floor height. Clamp here like txPower does.
+      // Bound by THIS floor's ceiling: an AP mounted above its own ceiling is
+      // what made computeRoutes emit a kilometre-long drop into the BOM.
+      updateAP(floorId, apId, { z: Math.min(num, maxMountHeight) })
     } else {
       updateAP(floorId, apId, { [field]: num })
     }
-  }, [floorId, apId, ap, updateAP, model])
+  }, [floorId, apId, ap, updateAP, model, maxMountHeight])
 
   const handleAntennaMode = useCallback((mode) => {
     const patch = { antennaMode: mode }
@@ -260,9 +272,13 @@ function APPanel({ floorId, apId }) {
           />
         </PanelField>
         <PanelField label="安裝高度">
+          {/* 52-B4: cap at this floor's ceiling — an AP mounted at 999999 m
+              feeds the same absurd cable-length estimate into the BOM that the
+              floor height did. */}
           <NumberInput
             value={ap.z}
             min={0}
+            max={maxMountHeight}
             step={0.1}
             unit="m"
             width={70}

@@ -42,6 +42,8 @@ import { computeTrayCableLoads, computeTrayFill } from '@/features/cable/compute
 import { getCapacityProfile, DEFAULT_CAPACITY_PROFILE } from '@/store/useCableStore'
 import { computePlanQualityStats } from '@/features/heatmap/planQuality'
 import { COVERAGE_THRESHOLD_DBM, COVERAGE_TARGET_PCT } from '@/constants/coverage'
+import { getHeatmapFrame, subscribeHeatmapFrame } from '@/render/heatmapFrameBus'
+import { useHeatmapStore } from '@/store/useHeatmapStore'
 
 const FONT = 'helvetica'
 
@@ -53,6 +55,42 @@ const WARN_FILL = [217, 119, 6]
 // Replace any code point outside printable ASCII with `?`, keeping a couple of
 // sensible substitutions. jsPDF drops an entire text run when it hits a glyph
 // the font can't map, so this must run on every user-supplied string.
+// 52-B1: wait for the heatmap to actually repaint for `floorId` before baking
+// the page. The old code slept a fixed 220 ms, but heatmapAdapter debounces its
+// floor-store subscription by 400 ms — 220 < 400 is an arithmetic certainty,
+// not a flaky race, so every page after the first carried the PREVIOUS floor's
+// heatmap. Measured: at 220 ms the published frame still reported the old
+// floorId; the correct one arrived at ~1457 ms.
+//
+// The frame bus publishes {floorId} on every paint, so we can wait for the real
+// signal. Falls back to a plain delay when the heatmap is off (no frame will
+// ever arrive) and always yields to a timeout so a stalled GL context can't
+// hang the export.
+const REPAINT_TIMEOUT_MS = 4000
+const REPAINT_SETTLE_MS = 220   // scene/DOM commit when there's no heatmap
+
+function waitForFloorRepaint(floorId) {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, REPAINT_SETTLE_MS))
+  if (!useHeatmapStore.getState().enabled) return settle()
+
+  const frame = getHeatmapFrame()
+  if (frame && frame.floorId === floorId) return settle()
+
+  return new Promise((resolve) => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      unsub()
+      // One more settle so the sprite is composited, not just the frame published.
+      setTimeout(resolve, REPAINT_SETTLE_MS)
+    }
+    const unsub = subscribeHeatmapFrame((f) => { if (f && f.floorId === floorId) finish() })
+    const timer = setTimeout(finish, REPAINT_TIMEOUT_MS)
+  })
+}
+
 function asciiSafe(s) {
   if (s == null) return { text: '', dirty: false }
   let dirty = false
@@ -312,13 +350,16 @@ export async function buildPlanningPdf({
   // ever holds the active floor's content. We restore the user's floor after.
   const originalFloorId = getActiveFloorId()
 
+  // 52-B1: the restore below must run even if a page throws — otherwise a
+  // failed export silently leaves the user parked on the last floor it touched.
+  try {
   for (let i = 0; i < floors.length; i++) {
     const floor = floors[i]
     onProgress(`產生 ${T(floor.name ?? floor.id)} (${i + 1}/${floors.length})...`)
 
     setActiveFloor(floor.id)
     // Let React commit and the scene repaint the new floor before we bake it.
-    await new Promise((resolve) => setTimeout(resolve, 220))
+    await waitForFloorRepaint(floor.id)
 
     doc.addPage()
     doc.setFont(FONT, 'bold')
@@ -379,10 +420,11 @@ export async function buildPlanningPdf({
       doc.setTextColor(0)
     }
   }
-
-  if (originalFloorId) {
-    setActiveFloor(originalFloorId)
-    await new Promise((resolve) => setTimeout(resolve, 120))
+  } finally {
+    if (originalFloorId) {
+      setActiveFloor(originalFloorId)
+      await new Promise((resolve) => setTimeout(resolve, 120))
+    }
   }
 
   // ── AP cables ──────────────────────────────────────────────────────

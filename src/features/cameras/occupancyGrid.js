@@ -54,6 +54,11 @@ export function computeOccupancyGrid({
         const f = legDur > 0 ? (t - a.t) / legDur : 0
         const x = a.x + (b.x - a.x) * f
         const y = a.y + (b.y - a.y) * f
+        // 52-B3: Math.max(0, NaN) is NaN, so the clamp below cannot stop a
+        // bad coordinate on its own — grid[NaN] is silently dropped, and an
+        // Infinity clamps to the last cell, heaping every track into the
+        // bottom-right corner. Gate explicitly before indexing.
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue
         const cx = Math.min(cols - 1, Math.max(0, Math.floor(x / cellPx)))
         const cy = Math.min(rows - 1, Math.max(0, Math.floor(y / cellPx)))
         const idx = cy * cols + cx

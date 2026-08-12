@@ -118,7 +118,9 @@ export default function AIWallsModal({ open, onClose }) {
   // { src, title } while the full-screen viewer is open, else null.
   const [zoom, setZoom] = useState(null)
 
-  const cancelRef = useRef(false)
+  // 52-B5: monotonic run counter. A run stays valid only while it owns the
+  // latest id; cancelling or re-running bumps it and orphans the old one.
+  const runIdRef = useRef(0)
   // The denoised object URL is owned by this component (unlike the overlay,
   // which is handed to useAIPreviewStore and revoked there), so it has to be
   // released on replace and on close.
@@ -131,7 +133,7 @@ export default function AIWallsModal({ open, onClose }) {
 
   useEffect(() => {
     if (!open) {
-      cancelRef.current = true
+      runIdRef.current += 1   // orphan any in-flight run
       setStep('idle')
       setProgressMsg('')
       setError(null)
@@ -149,7 +151,14 @@ export default function AIWallsModal({ open, onClose }) {
       setStep('error')
       return
     }
-    cancelRef.current = false
+    // 52-B5: a single shared boolean let a re-run resurrect a cancelled one —
+    // `cancelRef.current = false` here also un-cancelled the previous run,
+    // which was still parked in an await and would go on to setWalls() and
+    // overwrite this run's result (whichever finished last won). Tag each run
+    // with its own id and treat "I am no longer the current run" as cancelled,
+    // so an abandoned run can never be revived.
+    const runId = ++runIdRef.current
+    const cancelled = () => runIdRef.current !== runId
     setError(null)
     // A re-detect revokes the previous images, so drop the viewer holding them.
     setZoom(null)
@@ -176,12 +185,12 @@ export default function AIWallsModal({ open, onClose }) {
       const job = await created.json()
       const jobId = job.job_id
       if (!jobId) throw new Error('伺服器回應沒有 job_id。')
-      if (cancelRef.current) return
+      if (cancelled()) return
 
       // 2 — poll until the job reaches a terminal state.
       const deadline = performance.now() + POLL_TIMEOUT_MS
       let final = null
-      while (!cancelRef.current) {
+      while (!cancelled()) {
         const st = await fetch(`${API_BASE_URL}/jobs/${jobId}`, { headers: authHeaders() })
         if (!st.ok) throw new Error(`查詢進度失敗：${await readError(st)}`)
         const data = await st.json()
@@ -196,7 +205,7 @@ export default function AIWallsModal({ open, onClose }) {
         }
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
       }
-      if (cancelRef.current || !final) return
+      if (cancelled() || !final) return
       if (isFailure(final.status)) {
         throw new Error(`辨識失敗（${final.status}）：${final.error || '未提供錯誤訊息'}`)
       }
@@ -210,6 +219,9 @@ export default function AIWallsModal({ open, onClose }) {
       const { walls, stats } = floorplanFromLines(lines)
       const scaleInfo = autoScaleFromDoors(lines)
 
+      // 52-B5: last check before the destructive write — setWalls replaces the
+      // whole layer, so a stale run landing here would clobber the live one.
+      if (cancelled()) return
       setWalls(floor.id, walls)
       if (scaleInfo) setFloorScale(floor.id, scaleInfo.pxPerM)
 
@@ -227,6 +239,10 @@ export default function AIWallsModal({ open, onClose }) {
         const ov = await fetch(`${API_BASE_URL}/jobs/${jobId}/overlay`, { headers: authHeaders() })
         if (ov.ok) {
           const blob = await ov.blob()
+          // 52-B5: setGeminiPreview revokes whatever URL it currently holds.
+          // A stale run publishing here would revoke the winner's overlay and
+          // leave a broken image, so bail before minting the URL at all.
+          if (cancelled()) return
           overlayUrl = URL.createObjectURL(blob)
           setGeminiPreview(overlayUrl)
         }
@@ -237,12 +253,15 @@ export default function AIWallsModal({ open, onClose }) {
           setProgressMsg('取得去噪線稿…')
           const dn = await fetch(`${API_BASE_URL}/jobs/${jobId}/denoised`, { headers: authHeaders() })
           if (dn.ok) {
-            denoisedUrl = URL.createObjectURL(await dn.blob())
+            const blob = await dn.blob()
+            if (cancelled()) return   // 52-B5: don't leak a URL nobody will revoke
+            denoisedUrl = URL.createObjectURL(blob)
             denoisedUrlRef.current = denoisedUrl
           }
         } catch { /* denoised is optional */ }
       }
 
+      if (cancelled()) return   // 52-B5
       setResult({
         lines,
         wallCount: walls.length,
@@ -260,14 +279,14 @@ export default function AIWallsModal({ open, onClose }) {
       setStep('done')
       setProgressMsg('')
     } catch (e) {
-      if (cancelRef.current) return
+      if (cancelled()) return
       setError(e?.message || String(e))
       setStep('error')
     }
   }, [floor, algorithm, setWalls, setFloorScale, setGeminiPreview, releaseDenoised])
 
   const cancel = useCallback(() => {
-    cancelRef.current = true
+    runIdRef.current += 1   // orphan the in-flight run (see 52-B5 in `run`)
     setStep('idle')
     setProgressMsg('')
   }, [])

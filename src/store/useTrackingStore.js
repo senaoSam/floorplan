@@ -61,18 +61,32 @@ export const useTrackingStore = create((set) => ({
     const Hinv = invertHomography(H)
     if (!Hinv) return {}
     let changed = false
+    let dropped = 0
     const next = list.map((trk) => {
       if (trk.cameraId !== cameraId) return trk
       const base = trk.baseSamples ?? trk.samples
-      const frameSamples = trk.frameSamples
-        ?? base.map((p) => { const q = applyHomography(Hinv, p); return { t: p.t, x: q.x, y: q.y } })
-      const samples = frameSamples.map((p) => {
-        const q = applyHomography(H, p)
-        return { t: p.t, x: q.x, y: q.y }
-      })
+      // 52-B2/B3: applyHomography returns null for samples that land on the
+      // vanishing line. Drop those instead of writing Infinity/NaN into the
+      // store — downstream grids index by coordinate, and a NaN index is
+      // silently discarded while an Infinity one piles every track into the
+      // last cell, producing a plausible-looking but wholly wrong heatmap.
+      const project = (pts, M) => {
+        const out = []
+        for (const p of pts) {
+          const q = applyHomography(M, p)
+          if (q) out.push({ t: p.t, x: q.x, y: q.y })
+          else dropped += 1
+        }
+        return out
+      }
+      const frameSamples = trk.frameSamples ?? project(base, Hinv)
+      const samples = project(frameSamples, H)
       changed = true
       return { ...trk, baseSamples: base, frameSamples, samples }
     })
+    if (dropped > 0) {
+      console.warn(`[tracking] dropped ${dropped} sample(s) that projected to infinity — check the camera calibration`)
+    }
     return changed ? { tracksByFloor: { ...s.tracksByFloor, [floorId]: next } } : {}
   }),
 

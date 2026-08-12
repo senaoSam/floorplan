@@ -16,11 +16,21 @@ const MAX_CANVAS_PX = 900   // sampling resolution cap — plenty for a percenta
 // Returns null when there's nothing to measure, else:
 //   { coveredPct, blindPct, redundantPct, cameraCount, onlineCount,
 //     coveredAreaM2, blindAreaM2, avgOverlap }
+// …or { scaleMissing: true } when the floor has no scale — see below.
 export function computeCoverageStats({ cameras, walls, floor }) {
+  // 52-A3: refuse rather than assume a scale. Every number here depends on
+  // px/m — not just the m² figures but the percentages too, because the FOV
+  // cone radius is itself derived from it. With the old `?? 40` fallback an
+  // uncalibrated floor reported "96.0% covered ✓ 已達標" where the true
+  // figure at 22.83 px/m was 38.3% — authoritative-looking and wrong. The
+  // Wi-Fi side already refuses in this situation (buildScenario returns null,
+  // the planning panel shows 尚未設定比例尺); match it instead of guessing.
+  if (!floor?.scale) return { scaleMissing: true }
+
   const raster = rasterizeCoverageCounts({ cameras, walls, floor, maxCanvasPx: MAX_CANVAS_PX })
   if (!raster) return null
   const { counts, cw, ch, k, total } = raster
-  const scale = floor.scale ?? 40   // px per metre (FALLBACK_PX_PER_M)
+  const scale = floor.scale
   const online = (cameras ?? []).filter((c) => deviceStatus(c) !== DEVICE_STATUS.OFFLINE)
 
   let covered = 0

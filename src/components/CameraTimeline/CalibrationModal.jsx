@@ -24,6 +24,10 @@ const DOT_COLORS = ['#f97316', '#10b981', '#38bdf8', '#a855f7']   // 1..4
 
 // Shoelace area of a 4-point ring (abs). Used to flag a near-collinear or
 // cramped quad — those make the homography ill-conditioned and inaccurate.
+//
+// 52-B2: the Math.abs() here is exactly what hides a crossed quad — the two
+// triangles of a bowtie have opposite signs and partly cancel, so the area
+// alone can look healthy. Convexity needs the per-corner cross products, below.
 function quadArea(pts) {
   if (pts.length < 4) return 0
   let a = 0
@@ -33,6 +37,27 @@ function quadArea(pts) {
     a += p.x * q.y - q.x * p.y
   }
   return Math.abs(a) / 2
+}
+
+// 52-B2: true when the 4-point ring is a simple convex quad — every turn has
+// the same sign. A crossed ("bowtie") ordering flips one, and the homography
+// it produces is non-singular yet maps part of the frame to infinity, writing
+// ±Infinity into persisted track coordinates. Winding may be CW or CCW; only
+// consistency matters.
+function isConvexQuad(pts) {
+  if (pts.length < 4) return false
+  let sign = 0
+  for (let i = 0; i < 4; i++) {
+    const a = pts[i]
+    const b = pts[(i + 1) % 4]
+    const c = pts[(i + 2) % 4]
+    const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)
+    if (Math.abs(cross) < 1e-9) return false      // collinear corner
+    const s = Math.sign(cross)
+    if (sign === 0) sign = s
+    else if (s !== sign) return false             // turn reversed → crossed
+  }
+  return true
 }
 
 function CalibrationModal() {
@@ -127,8 +152,15 @@ function CalibrationModal() {
     ? quadArea(floorPts.map((p) => imageToPlan(p.x, p.y))) / (fit.dw * fit.dh) : 0
   const quadWarn = ready && Math.min(frameFrac, planFrac) < MIN_SPREAD_FRAC
 
+  // 52-B2: a crossed quad in EITHER pane is unusable — block the save rather
+  // than warn, since the resulting H silently produces infinite coordinates.
+  const crossedQuad = ready && !(
+    isConvexQuad(framePts) && isConvexQuad(floorPts.map((p) => imageToPlan(p.x, p.y)))
+  )
+  const canSave = !!H && !crossedQuad
+
   const save = () => {
-    if (!H) return
+    if (!canSave) return
     updateCamera(activeFloorId, camera.id, {
       calibration: { floorPts, framePts, H, source: 'manual' },
     })
@@ -208,18 +240,20 @@ function CalibrationModal() {
         </div>
 
         <div className="calib__footer">
-          <span className={`calib__status${(ready && (!H || quadWarn)) ? ' calib__status--warn' : ''}`}>
+          <span className={`calib__status${(ready && (!H || crossedQuad || quadWarn)) ? ' calib__status--warn' : ''}`}>
             {ready
               ? (!H
                 ? '⚠ 四點過於共線，無法求解，請重設'
-                : quadWarn
-                  ? '⚠ 四邊形過小／太接近共線，精度低；建議攤開四角重點'
-                  : '校正完成')
+                : crossedQuad
+                  ? '⚠ 四點順序交叉成「Z 字」，會算出無效座標；請依同一方向（順時針或逆時針）重點'
+                  : quadWarn
+                    ? '⚠ 四邊形過小／太接近共線，精度低；建議攤開四角重點'
+                    : '校正完成')
               : `已點 ${floorPts.length}+${framePts.length} / 4+4`}
           </span>
           <div className="calib__actions">
             <button type="button" className="calib__btn" onClick={reset}>重設</button>
-            <button type="button" className="calib__btn calib__btn--primary" onClick={save} disabled={!H}>
+            <button type="button" className="calib__btn calib__btn--primary" onClick={save} disabled={!canSave}>
               儲存校正
             </button>
           </div>

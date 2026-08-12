@@ -291,6 +291,9 @@ export function computeFlowGrid({
         const f = (t - a.t) / legDur
         const x = a.x + (b.x - a.x) * f
         const y = a.y + (b.y - a.y) * f
+        // 52-B3: see occupancyGrid — Math.max(0, NaN) is NaN, so clamping
+        // alone doesn't make a bad coordinate safe to index with.
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue
         const cx = Math.min(cols - 1, Math.max(0, Math.floor(x / cellPx)))
         const cy = Math.min(rows - 1, Math.max(0, Math.floor(y / cellPx)))
         const bidx = (cy * cols + cx) * FLOW_BINS + bin
@@ -495,6 +498,8 @@ export function computeStreamlines(flow) {
     // same-direction seeds are suppressed (parallel copies), while the opposite
     // direction can still seed the same corridor.
     for (const p of pts) {
+      // 52-B3: same NaN-clamp trap as above.
+      if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue
       const cx = Math.min(cols - 1, Math.max(0, Math.floor(p.x / cellPx)))
       const cy = Math.min(rows - 1, Math.max(0, Math.floor(p.y / cellPx)))
       markFootprint(occ, cx, cy)
