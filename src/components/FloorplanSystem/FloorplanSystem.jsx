@@ -63,6 +63,8 @@ import { MATERIAL_LIST } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 import { isTypingTarget } from '@/utils/isTypingTarget'
 import { getModeCapability } from '@/render/modeCapabilities'
+import { __floorTextureCacheStats } from '@/features/floorImage/floorTextureCache'
+import { __labelCacheStats } from '@/features/viewer3d/Label3D'
 import MaterialToast from '@/components/MaterialToast/MaterialToast'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import './FloorplanSystem.sass'
@@ -508,6 +510,11 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (import.meta.env.DEV) {
         window.__pixiApp = s.app
         window.__scene = s
+        // 52-C1: expose the texture cache from the instance the app actually
+        // uses. A console `await import()` can resolve to a second module
+        // instance after HMR, which reads as an empty cache and hides leaks.
+        window.__floorTextureCacheStats = __floorTextureCacheStats
+        window.__labelCacheStats = __labelCacheStats
         window.__stores = {
           editor: useEditorStore,
           floor: useFloorStore,
@@ -865,6 +872,8 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (import.meta.env.DEV) {
         delete window.__pixiApp
         delete window.__scene
+        delete window.__floorTextureCacheStats
+        delete window.__labelCacheStats
       }
     }
   }, [])

@@ -18,6 +18,42 @@ const GRID_STEP_M = 1.0   // coarse enough to run debounced without a GPU
 const GAP_GRID = 8        // 8×8 coarse cells to locate the densest blind area
 const CONFLICT_DIST_M = 12   // physical interference radius (metres)
 
+// 52-C6: cost is cells × APs, and this runs SYNCHRONOUSLY on the main thread —
+// it never joined the async pipeline Phase 46 built for the heatmap. A fixed
+// 1 m step is fine on the demo floor (300 APs = 256 ms) but not on a real
+// large one: measured 100×75 m / 600 walls / 300 APs = 12.9 s of frozen UI,
+// and useAPStore hands back a new array identity on every action, so dragging
+// an AP re-enters this repeatedly (the 200 ms debounce delays the freeze
+// rather than preventing it).
+//
+// Coarsening the grid is the right lever here: this panel reports a coverage
+// PERCENTAGE and a blind-area location, neither of which needs metre
+// resolution — and the alternative levers are worse (a worker means porting
+// the whole propagation path; refusing to compute removes the feature).
+//
+// The budget counts cells × APs × WALLS, not just cells × APs: every sample
+// ray is tested against every wall segment, so walls are a first-class factor.
+// Measured on the 100×75 m plan at 300 APs — 0 walls 1.2 s, 150 walls 3.8 s,
+// 600 walls 12.9 s, i.e. linear in walls. Budgeting without them leaves the
+// step unchanged on exactly the plans that need it most.
+//
+// The constant is calibrated from those measurements: ~2.3 M cells×APs with
+// 600 walls (1.4 G total) took 12.9 s, so ~100 M lands near a quarter-second.
+const MAX_SAMPLE_WORK = 100_000_000   // cells × APs × wall segments
+
+function fitQualityStep(scenario, apCount) {
+  if (apCount <= 0) return GRID_STEP_M
+  const { w, h } = scenario.size
+  const cells = (Math.ceil(w / GRID_STEP_M) + 1) * (Math.ceil(h / GRID_STEP_M) + 1)
+  // At least 1 — a wall-free plan still costs one distance evaluation per ray.
+  const wallFactor = Math.max(1, scenario.walls?.length ?? 0)
+  const work = cells * apCount * wallFactor
+  if (work <= MAX_SAMPLE_WORK) return GRID_STEP_M
+  // Cells scale with 1/step², so the step grows with the square root of the
+  // overshoot. Capped so a pathological plan still returns something usable.
+  return Math.min(GRID_STEP_M * Math.sqrt(work / MAX_SAMPLE_WORK), 8)
+}
+
 // Detect co-channel conflicts: two APs whose spectra overlap (same band AND
 // intersecting frequency ranges — so ch36@80 vs ch44@20 counts, not just exact
 // channel matches) and that sit within CONFLICT_DIST_M metres of each other.
@@ -72,7 +108,7 @@ export function computePlanQualityStats({ floor, walls, aps, scopes, thresholdDb
   // Sample RSSI with the coarse JS engine. Reflections/diffraction OFF keeps a
   // debounced full-floor sweep cheap; the panel is a coverage summary, not the
   // final heatmap, so first-order accuracy is plenty for a %.
-  const field = sampleField(scenario, GRID_STEP_M, {
+  const field = sampleField(scenario, fitQualityStep(scenario, apList.length), {
     maxReflOrder: 0,
     enableDiffraction: false,
     redundancyThresholdDbm: thresholdDbm,   // 47-9: per-cell count of APs ≥ threshold

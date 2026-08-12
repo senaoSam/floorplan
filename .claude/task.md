@@ -38,10 +38,10 @@
 
 ## 還沒做的事
 
-### Phase 52 三角色稽核修復（2026-08-11 立項，**批次 1+2 已完成**，詳見下方 Phase 52 專節）
+### Phase 52 三角色稽核修復（2026-08-11 立項，**批次 1+2+3 已完成**，詳見下方 Phase 52 專節）
 
 > 工程師／QA／普通使用者三個 subagent 平行稽核 + 兩輪交叉對質，共 30 條。
-> **修復順序：批次 1 ✅ → 批次 2 ✅（皆 2026-08-12 使用者驗收 ok）→ 批次 3（資源洩漏）→ 批次 4（UX）。**
+> **修復順序：批次 1 ✅ → 批次 2 ✅ → 批次 3 ✅（皆 2026-08-12 使用者驗收 ok）→ 批次 4（UX，唯一剩下的）。**
 > 使用者已剔除「零持久化／儲存鈕／beforeunload」（之後資料來自 API，目前只是 demo）。
 
 ### Phase 51 3D 視覺美化（2026-08-06 立項，逐項優化、每項瀏覽器驗收後再下一項）
@@ -400,22 +400,54 @@
   **計畫沒寫到、實作時補的一條**：除了 `setWalls`，**overlay blob URL 也必須擋**——`setGeminiPreview` 會 revoke 它當前持有的 URL，敗方若在此發布會**把勝方的疊圖 revoke 掉變破圖**。故在 `createObjectURL` 之前就 bail。
   **五個檢查點**：取得 jobId 後、輪詢迴圈條件、輪詢結束、**`setWalls` 之前（破壞性寫入）**、overlay/denoised 建 URL 之前、`setResult` 之前。
 
-#### 批次 3 — 資源洩漏（長時間 session 會累積到崩）
+#### 批次 3 — 資源洩漏 ✅ 全部完成（2026-08-12 使用者驗收 ok）
 
 > **工程師觀察（決定修復成本）**：這組有共通模式 —— **每個缺陷旁邊就有一個寫對的對照組**，是覆蓋率問題不是知識問題，照隔壁抄即可。
+>
+> **收工小結**：六項全數實測通過、0 console errors。兩個超出原計畫的發現記在條目內：
+> ① C6 的成本模型**原稽核寫錯**（不是 cells×APs，是 cells×APs×**walls**）；② C1 的 1.4 GB VRAM 推估**未能獨立驗證**（見下方「未驗證項」）。
+>
+> **驗證方法論教訓（比修法本身更重要，防重蹈）**：第一輪驗證有兩個指標是**假通過**——
+> ① Label3D cache 讀到 `size: 0`，是 `await import()` 拿到 HMR 後的另一個 module instance（playwright-mcp-notes §9 的坑）。
+> **「我親手改名 38 次，cache 卻是 0」本身就不合理，當下就該停下追問，而不是接受這個「沒看到問題」的結果。**
+> 修法：診斷 hook 一律掛 `window`（與 `__stores` 同一 instance），不要用 `await import()` 讀。
+> ② Pixi `_managedTextures` 計數對「故意製造的洩漏」也不動 —— **敏感度測試失敗的指標必須丟棄**，不能因為它「看起來沒問題」就當通過。
+> **通則：先證明指標會動（對已知壞情況有反應），再信它的「沒問題」。** 一個「什麼都沒發生」的結果 ≠ 一個「證明沒問題」的結果。
 
-- [ ] **52-C1 樓層底圖 texture 永不釋放**（Critical）：`floorImageLayer.js:12-18, 58-66` 每次載入都 `new window.Image()` → `Texture.from(img)` 拿到全新 ImageSource（**繞過 Pixi v8 Cache**，因為 Cache 以 source 物件為 key），而 `clearSprite()` 用 `destroy({ texture: false })` 明確不刪 texture。
+- [x] **52-C1 樓層底圖 texture 永不釋放**（✅ Critical）：`floorImageLayer.js:12-18, 58-66` 每次載入都 `new window.Image()` → `Texture.from(img)` 拿到全新 ImageSource（**繞過 Pixi v8 Cache**，因為 Cache 以 source 物件為 key），而 `clearSprite()` 用 `destroy({ texture: false })` 明確不刪 texture。
   **觸發**：3 層 4000×3000 平面圖來回切樓層 30 次 → **約 1.4 GB VRAM 永不回收**。
   `refOverlayLayer.js:23-29,51-55`（ALIGN_FLOOR 參考疊圖）是**同一份複製碼、同樣漏**，且每次進出對齊模式都重跑，額外還漏 `ColorMatrixFilter`（持有 GL program）。**兩處共用同一個 helper 一起修。**
-  **修法**：以 `imageUrl` 為 key 做 module 級 texture cache 共用；或 `destroy({texture:true})` 並清掉 Cache entry。
-- [ ] **52-C2 `Label3D` texture cache 無上限**（High）：`Label3D.jsx:20-22, 60-72` module 級 `Map` 以**使用者可編輯的裝置名稱字串**為 key，永不 evict、永不 `dispose()`。每個 entry 是一張 canvas + 帶完整 mipmap 鏈、最高 3× 超取樣的 GPU texture。**在 3D 中改名時每按一個鍵就產生一個新 key**（`"AP-0"`, `"AP-01"`, …）。
-  **對照組**：`SwitchLayer3D.jsx:40` 同樣模式但 key 是夾在 4–48 的 port 數（上限 45 筆）—— 寫法本身沒錯，錯在 key 的基數。**修法**：LRU 上限 + evict 時 `texture.dispose()`。
-- [ ] **52-C3 `heatmapGL` 無 context-loss 處理**（Med-High）：全檔 0 個 `isContextLost` —— TDR 後 `render()` 持續對死 context 畫圖，**畫面永久空白**。另 `createHeatmapGL()` 失敗後 `gl` 沒設回 null，每次 compute 都重試建 context。
+  **修法**：新增 `features/floorImage/floorTextureCache.js` —— 以 **`imageUrl` 為 key** 的 module 級 cache + **引用計數**，`acquire()`/`release()` 成對；最後一個 holder 放手才 `texture.destroy(true)`。兩個 layer 共用同一份（`refOverlayLayer` 的 `loadTextureFromUrl` 整段刪除），並補 `ColorMatrixFilter.destroy()`。
+  **三個容易漏的釋放點**（都已處理）：① `floorImageLayer` 快速切樓層時，輸掉 race 的那次 load 必須 `release()`（否則 cache 永遠抓著沒人畫的 texture）② `refOverlayLayer` 的 sprite 在 texture 載入完成前就被 destroy 時同理 ③ load 失敗時 cache entry 自我刪除，不留下 refs>0 的殭屍。
+  **驗證（使用者在旁觀察 Performance monitor）**：兩樓層來回切 40 次 —— texture cache **全程恆為 1 筆 / refs 1**，且**跟著 active floor 換**（Demo→V2→Demo，舊碼是兩張都永久留著）。JS heap 走勢：起始 39MB → 峰值約 800MB（使用者截圖，我的取樣點只抓到 578MB）→ 靜置後 **88MB 打平**（連續五次讀數相同）。使用者截圖顯示**五個完整鋸齒週期、每個週期底線同高**、收尾一條水平直線，DOM Nodes 亦回到 500 基線。
+  **WeakRef 決定性測試**：追蹤每次切換產生的 sprite —— 10 次切換留 3 個（看似可疑），但 **40 次切換只留 1 個、39 個被回收**。存活數**不隨次數成長** → 是 GC 延遲不是滯留。（`usedJSHeapSize` 只反映 V8 要了多少記憶體，無法區分垃圾與洩漏，不可單獨當判準。）
+- [x] **52-C2 `Label3D` texture cache 無上限**（✅ High）：`Label3D.jsx:20-22, 60-72` module 級 `Map` 以**使用者可編輯的裝置名稱字串**為 key，永不 evict、永不 `dispose()`。每個 entry 是一張 canvas + 帶完整 mipmap 鏈、最高 3× 超取樣的 GPU texture。**在 3D 中改名時每按一個鍵就產生一個新 key**（`"AP-0"`, `"AP-01"`, …）。
+  **對照組**：`SwitchLayer3D.jsx:40` 同樣模式但 key 是夾在 4–48 的 port 數（上限 45 筆）—— 寫法本身沒錯，錯在 key 的基數。
+  **修法**：`LABEL_CACHE_MAX = 256` + LRU。命中時 `delete`+`set` 刷新順序（Map 保序），確保**畫面上正在用的 label 不會被一連串改名擠掉**；evict 時 `texture.dispose()`。256 足夠涵蓋 300 AP + switch + camera 同時在場。
+  **驗證（讀 app 真實 instance，非 `await import()`）**：3D 中逐字打一個 52 字名稱 → cache **5 → 57**（重現洩漏行為，證明指標會動）；再連續改名 400 次 → 57→157→**256→256→256**，撞頂後打平，eviction 確實觸發。舊碼此時應為 457 且持續成長。
+- [x] **52-C3 `heatmapGL` 無 context-loss 處理**（✅ Med-High）：全檔 0 個 `isContextLost` —— TDR 後 `render()` 持續對死 context 畫圖，**畫面永久空白**。另 `createHeatmapGL()` 失敗後 `gl` 沒設回 null，每次 compute 都重試建 context。
   **對照組**：`propagationGL`/`sampleFieldGL` 都有處理（`sampleFieldGL.js:42` 會 dispose + 重建）。
   順帶：`useHeatmapStore` 有 `scaleMissing`/`simplifiedLargeScene` 通知管道，卻沒有 WebGL2 不可用的管道 → 使用者只看到開關是開的但沒東西。
-- [ ] **52-C4 `heatmapStack.paintGL` 洩漏整個 WebGL2 context**（Med-High）：`heatmapStack.js:41-44, 162-181` 的 `paintGL` 是 module 全域的第三個 WebGL2 context，driver 的 teardown 清了 timer 和 unsubs，**就是沒呼叫 `paintGL.dispose()`**。瀏覽器有 context 數量硬上限（約 8–16），本專案已有 Pixi、three、propagationGL、heatmapGL 幾個常駐，逼近上限會讓 C3 的 context loss 更容易發生。
-- [ ] **52-C5 圖片匯入三個缺陷擠在四行**（Medium）：`useFloorImport.js:25-32` —— ① 沒有 `img.onerror`，損壞的 PNG 永遠不觸發 `onload`，「載入圖片中…」**永久卡住**且 `isLoading` 擋掉後續匯入 ② `:32` 的 object URL 純粹用來探測尺寸、從未 revoke，而 `useFloorStore.js:112` 又為同一個 File 建**第二個** URL（只有這個會在刪樓層時 revoke）→ 每次匯入固定洩漏一個 blob ③ PDF 失敗只 `console.error`，使用者零回饋（`showUiToast` 已存在但未使用）。
-- [ ] **52-C6 規劃品質面板在主執行緒同步全樓層掃描**（Medium）：`planQuality.js:75` 的 `sampleField` 是**同步**的直接跑主執行緒。估算作業量：100×80 m / 300 AP / 600 牆段 → 約 **1.48e9** 次核心運算。`useAPStore` 每個 action 都回傳新陣列 identity，所以拖曳 AP 時 `DevicePlanningPanel.jsx:61-68` 的 effect 反覆重入，200ms debounce 只是延後而非避免凍結。**此路徑沒有走 Phase 46 建立的非同步管線。**
+  **修法（三件）**：① `heatmapGL` 匯出 `isContextLost()` ② `heatmapAdapter` 新增 `dropIfContextLost()` —— 偵測到就 dispose GL 並**連帶重建 sprite/texture/maskG**（兩者都包著 `gl.canvas`，只換 GL 會留下指向死 canvas 的 sprite），`ensureSprite()` 進入時先檢查 ③ init 失敗改為 latch `glUnavailable`（原本 `gl` 留 null，每次 compute 都重試建 context）+ 新增 store 旗標與 `HeatmapControl` 提示，補齊與 `scaleMissing` 對等的通知管道。
+  **語意界線**：`glUnavailable` 只代表**永久不可用**（不支援／建立被拒）；**單純 context lost 由 adapter 靜默重建**，不打擾使用者。
+  **驗證**：`WEBGL_lose_context` 真的弄丟 context → `isContextLost()` false→true，其後 `dispose()` 不拋錯；`glUnavailable` 旗標存在且正常情況為 false。
+- [x] **52-C4 `heatmapStack.paintGL` 洩漏整個 WebGL2 context**（✅ Med-High）：`heatmapStack.js:41-44, 162-181` 的 `paintGL` 是 module 全域的第三個 WebGL2 context，driver 的 teardown 清了 timer 和 unsubs，**就是沒呼叫 `paintGL.dispose()`**。瀏覽器有 context 數量硬上限（約 8–16），本專案已有 Pixi、three、propagationGL、heatmapGL 幾個常駐，逼近上限會讓 C3 的 context loss 更容易發生。
+  **修法**：teardown 補 `paintGL.dispose()` + `paintGL = null`，並**先 `generation += 1`** —— in-flight 的 `ensureStack()` 在 `await` 後有 `isStale()` 檢查（`:124`）才輪到用 `paintGL`（`:127`），bump 後它會提前 return，不會碰到已釋放的 context。
+  **驗證**：15 次 attach/detach 後，連開 6 個 canary WebGL2 context 全部成功（未耗盡配額），app renderer 仍正常。
+- [x] **52-C5 圖片匯入三個缺陷擠在四行**（✅ Medium）：`useFloorImport.js:25-32` —— ① 沒有 `img.onerror`，損壞的 PNG 永遠不觸發 `onload`，「載入圖片中…」**永久卡住**且 `isLoading` 擋掉後續匯入 ② `:32` 的 object URL 純粹用來探測尺寸、從未 revoke，而 `useFloorStore.js:112` 又為同一個 File 建**第二個** URL（只有這個會在刪樓層時 revoke）→ 每次匯入固定洩漏一個 blob ③ PDF 失敗只 `console.error`，使用者零回饋（`showUiToast` 已存在但未使用）。
+  **修法**：探測尺寸改成 `await` 一個帶 `onerror` 的 Promise，object URL 在 `finally` 裡 revoke；`setLoadingMsg(null)` 統一移進外層 `finally`；catch 發 `showUiToast` 並**帶檔名**（多檔拖曳時才知道是哪個壞）。
+  **驗證（走真實 file input，非模擬）**：丟壞掉的 PNG → 不卡「載入圖片中…」、跳出「「corrupt-plan.png」匯入失敗：檔案可能已損毀或格式不支援」、樓層數不變；**緊接著匯入正常圖片仍成功**（1→2 樓層）——這條最關鍵，舊碼的 `isLoading` 被永久卡住後，之後任何匯入都會被擋掉。
+- [x] **52-C6 規劃品質面板在主執行緒同步全樓層掃描**（✅ Medium）：`planQuality.js:75` 的 `sampleField` 是**同步**的直接跑主執行緒。`useAPStore` 每個 action 都回傳新陣列 identity，所以拖曳 AP 時 `DevicePlanningPanel.jsx:61-68` 的 effect 反覆重入，200ms debounce 只是延後而非避免凍結。**此路徑沒有走 Phase 46 建立的非同步管線。**
+  **原稽核的成本模型是錯的（防重做）**：報告寫 cells×APs（估 1.48e9）。照這個實作 `MAX_SAMPLE_WORK` 後**完全沒生效** —— 實測 100×75 m 只有 7,752 格 × 300 AP = 2.3 M，遠低於任何合理預算，但耗時仍是 12.9 秒。隔離變因後真正的驅動是**牆**（每條取樣射線都要測所有牆段）：300 AP 固定下 0 牆 1,195 ms / 150 牆 3,792 ms / 300 牆 6,807 ms / 600 牆 12,945 ms，**線性於牆數**。
+  **修法**：`fitQualityStep()` 以 **cells × APs × walls** 為預算（`MAX_SAMPLE_WORK = 100_000_000`，由上述實測反推），超過就把取樣間距**放粗**（cells ∝ 1/step²，故 step 乘上超額的平方根），上限 8 m。選這個槓桿是因為本面板輸出的是**涵蓋率百分比與盲區位置**，都不需要公尺級解析度；另外兩個選項更糟（搬進 worker 要移植整條 propagation；拒算等於砍功能）。
+  **驗證**：100×75 m / 600 牆 **12.9 s → 0.98 s**，且 50/150/300 AP 都約 0.9 s（不再隨量成長）。**Demo 樓層完全未受影響**：6/39/247 ms 與修改前逐項相同，涵蓋率百分比亦相同（預算未觸發，維持 1 m 全解析度）。
+
+> **批次 3 未驗證項（誠實標註，不要當成已驗證）**：
+> ① **C1 的「1.4 GB VRAM」是稽核推估，我沒有獨立量到** —— 驗到的是 JS 端 sprite 可回收、cache 不累積、heap 回到基線。真正的 GPU 記憶體要用 DevTools Memory 或 `chrome://gpu` 才量得到。
+> ② **C4 只證明「context 沒被吃光」（6 個 canary 都建得起來），沒有直接數 context 數量** —— 屬間接證據。
+> ③ **`ColorMatrixFilter.destroy()` 沒有獨立驗證 GL program 真的釋放**。
+> ④ 長時間（數十分鐘）真實操作未做，MCP 不適合。
+> ⑤ CPU 曲線顯示**每次切樓層仍是重操作**（熱圖重算，規律衝到 100%）——屬 Phase 41/45/46 既有範疇，非本批造成，但確實還在。
 
 #### 批次 4 — UX（使用者總評：「還不會用 —— 但它離『會』只差一個匯出按鈕」）
 

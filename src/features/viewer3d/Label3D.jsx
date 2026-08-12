@@ -17,9 +17,37 @@ import * as THREE from 'three'
 // hold triple-area canvases for every device name in the scene.
 const SUPERSAMPLE = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2) * 1.5
 
+// 52-C2: bounded, with disposal on eviction. The key is a user-editable
+// device name, so renaming in 3D minted a new entry per keystroke ("AP-0",
+// "AP-01", …) and nothing was ever disposed — each entry is a canvas plus a
+// GPU texture carrying a full mipmap chain at up to 3x supersampling.
+// SwitchLayer3D caches the same way but keys on a port count clamped to
+// 4–48, so it tops out at 45 entries; the pattern was fine, the key wasn't.
+// 256 comfortably covers every label on screen at once (a 300-AP floor plus
+// switches and cameras), so eviction only ever touches stale entries.
+const LABEL_CACHE_MAX = 256
 const labelTextureCache = new Map()
+
+function cacheLabel(text, entry) {
+  // Map preserves insertion order, so the first key is the oldest.
+  while (labelTextureCache.size >= LABEL_CACHE_MAX) {
+    const oldestKey = labelTextureCache.keys().next().value
+    const oldest = labelTextureCache.get(oldestKey)
+    labelTextureCache.delete(oldestKey)
+    oldest?.texture?.dispose()
+  }
+  labelTextureCache.set(text, entry)
+}
+
 function getLabelTexture(text) {
-  if (labelTextureCache.has(text)) return labelTextureCache.get(text)
+  const hit = labelTextureCache.get(text)
+  if (hit) {
+    // Refresh recency: delete + re-set moves it to the end of the order, so
+    // labels currently on screen aren't evicted by a burst of renames.
+    labelTextureCache.delete(text)
+    labelTextureCache.set(text, hit)
+    return hit
+  }
   const pad = 18
   const fontSize = 42
   const s = SUPERSAMPLE
@@ -68,8 +96,13 @@ function getLabelTexture(text) {
   else tex.encoding = THREE.sRGBEncoding
   tex.needsUpdate = true
   const entry = { texture: tex, aspect: layoutW / layoutH }
-  labelTextureCache.set(text, entry)
+  cacheLabel(text, entry)
   return entry
+}
+
+// Test/diagnostic hook — never used by render code.
+export function __labelCacheStats() {
+  return { size: labelTextureCache.size, max: LABEL_CACHE_MAX }
 }
 
 export default function Label3D({ text, position, opacity = 1, heightM = 0.5 }) {

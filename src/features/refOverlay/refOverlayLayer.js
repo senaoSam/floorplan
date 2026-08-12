@@ -1,6 +1,7 @@
-import { Container, Graphics, Sprite, Texture, ColorMatrixFilter } from 'pixi.js'
+import { Container, Graphics, Sprite, ColorMatrixFilter } from 'pixi.js'
 import { EDITOR_MODE } from '@/store/useEditorStore'
 import { getFloorColor } from '@/utils/floorColor'
+import { acquireFloorTexture, releaseFloorTexture } from '@/features/floorImage/floorTextureCache'
 
 // Render translucent tinted overlays of reference floors during
 // ALIGN_FLOOR mode. Each ref floor gets a single Container under
@@ -19,14 +20,6 @@ import { getFloorColor } from '@/utils/floorColor'
 //
 // ⚠ [REF-OVERLAY-TYPE] adding a new overlayed object type → also update
 // AlignFloorPanel legend.
-
-const loadTextureFromUrl = (url) =>
-  new Promise((resolve, reject) => {
-    const img = new window.Image()
-    img.onload  = () => resolve(Texture.from(img))
-    img.onerror = (e) => reject(e instanceof Error ? e : new Error(`image load failed: ${url}`))
-    img.src = url
-  })
 
 const hexToInt = (hex) => {
   if (typeof hex !== 'string') return 0xffffff
@@ -48,9 +41,22 @@ export function attachRefOverlayLayer({
   // floorId → { container, walls, vectors, sprite }
   const built = new Map()
 
+  // 52-C1: this runs on every exit from ALIGN_FLOOR, so anything not freed
+  // here accumulates once per visit. Two things were being kept: the floor
+  // texture (destroy used `texture: false`, and each build loaded a brand-new
+  // one via `Texture.from(new Image())`) and the ColorMatrixFilter, which
+  // holds a GL program.
   const destroyEntry = (entry) => {
     if (!entry) return
     root.removeChild(entry.container)
+    if (entry.textureUrl) {
+      releaseFloorTexture(entry.textureUrl)
+      entry.textureUrl = null
+    }
+    if (entry.tintFilter) {
+      entry.tintFilter.destroy?.()
+      entry.tintFilter = null
+    }
     entry.container.destroy({ children: true, texture: false })
   }
 
@@ -117,17 +123,6 @@ export function attachRefOverlayLayer({
     sprite.filters = [tintFilter]
     container.addChild(sprite)
 
-    if (floor.imageUrl) {
-      loadTextureFromUrl(floor.imageUrl).then((tex) => {
-        if (sprite.destroyed) return
-        sprite.texture = tex
-        sprite.visible = true
-      }).catch((err) => {
-        // Tolerate missing/broken images — vector overlays still render.
-        console.warn('[refOverlay] image load failed for floor', floor.id, err)
-      })
-    }
-
     const walls = new Graphics()
     walls.eventMode = 'none'
     container.addChild(walls)
@@ -136,7 +131,30 @@ export function attachRefOverlayLayer({
     vectors.eventMode = 'none'
     container.addChild(vectors)
 
-    return { container, sprite, walls, vectors, color, opacity, floorId: floor.id }
+    const entry = {
+      container, sprite, walls, vectors, color, opacity,
+      floorId: floor.id, tintFilter, textureUrl: null,
+    }
+
+    if (floor.imageUrl) {
+      const url = floor.imageUrl
+      acquireFloorTexture(url).then((tex) => {
+        // Entry was destroyed while the texture loaded — give the reference
+        // straight back rather than pinning it for the rest of the session.
+        if (sprite.destroyed) {
+          releaseFloorTexture(url)
+          return
+        }
+        entry.textureUrl = url
+        sprite.texture = tex
+        sprite.visible = true
+      }).catch((err) => {
+        // Tolerate missing/broken images — vector overlays still render.
+        console.warn('[refOverlay] image load failed for floor', floor.id, err)
+      })
+    }
+
+    return entry
   }
 
   // Draw tinted walls for one ref floor — solid stroke width 2 in floor

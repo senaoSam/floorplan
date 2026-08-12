@@ -1,21 +1,12 @@
-import { Sprite, Texture, Graphics } from 'pixi.js'
+import { Sprite, Graphics } from 'pixi.js'
 import { getModeCapability } from '@/render/modeCapabilities'
 import { useDraftStore } from '@/store/useDraftStore'
 import { EDITOR_MODE } from '@/store/useEditorStore'
-
-// Load an image URL via HTMLImageElement and wrap as PIXI.Texture. We
-// avoid PIXI's Assets.load() because v8's resolver uses URL extension to
-// pick a parser — blob URLs (from file upload / PDF import) have none, so
-// the texture parser returns null and `.texture` access throws. The
-// HTMLImageElement path matches what oldSrc FloorImageLayer used with
-// Konva and handles blob / data / http URLs uniformly.
-const loadTextureFromUrl = (url) =>
-  new Promise((resolve, reject) => {
-    const img = new window.Image()
-    img.onload  = () => resolve(Texture.from(img))
-    img.onerror = (e) => reject(e instanceof Error ? e : new Error(`image load failed: ${url}`))
-    img.src = url
-  })
+// 52-C1: textures come from a shared refcounted cache now. The old inline
+// `Texture.from(new Image())` built a fresh GPU texture per load (Pixi keys
+// its cache on the source object, so a new Image() always missed) and
+// clearSprite destroyed with `{ texture: false }`, so none were ever freed.
+import { acquireFloorTexture, releaseFloorTexture } from './floorTextureCache'
 
 // Floor image adapter — subscribes to useFloorStore and mounts the active
 // floor's image as a PIXI.Sprite into scene.layers.floorImage.
@@ -59,10 +50,16 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, 
     clearMask()
     if (!currentSprite) return
     layer.removeChild(currentSprite)
+    // Still `texture: false` — the cache owns the texture's lifetime, and
+    // another layer (or a later visit to this floor) may still be using it.
+    // The matching release() below is what actually frees it.
     currentSprite.destroy({ children: true, texture: false })
     currentSprite = null
     currentFloorId = null
-    currentImageUrl = null
+    if (currentImageUrl) {
+      releaseFloorTexture(currentImageUrl)
+      currentImageUrl = null
+    }
   }
 
   // Apply rotation + opacity from the floor record (oldSrc parity).
@@ -158,8 +155,13 @@ export function attachFloorImageLayer({ scene, useFloorStore, useViewportStore, 
     }
 
     try {
-      const texture = await loadTextureFromUrl(floor.imageUrl)
-      if (pendingLoadKey !== loadKey) return
+      const texture = await acquireFloorTexture(floor.imageUrl)
+      // A faster floor-swap won this race. Hand the reference back, or the
+      // cache would hold this texture forever with nobody drawing it.
+      if (pendingLoadKey !== loadKey) {
+        releaseFloorTexture(floor.imageUrl)
+        return
+      }
 
       clearSprite()
       const sprite = new Sprite(texture)

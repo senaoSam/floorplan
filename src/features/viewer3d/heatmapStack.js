@@ -177,5 +177,18 @@ export function attachHeatmapStackDriver() {
     // Abandon any in-flight run's staleness only on the NEXT ensure — an
     // almost-finished run may as well land in the cache for the next open.
     for (const u of unsubs) u()
+    // 52-C4: paintGL is a module-global WebGL2 context — the third one in
+    // this app after Pixi, three, propagationGL and heatmapGL. The teardown
+    // cleared the timer and the subscriptions but never released it, so every
+    // attach/detach of the 全樓層熱圖 driver stranded another context. Browsers
+    // cap live contexts (~8–16) and silently kill the oldest past the limit,
+    // which is exactly the context-loss that heatmapGL had no recovery path
+    // for (52-C3). Bump the generation first so an in-flight ensureStack()
+    // can't touch the context we're about to free.
+    generation += 1
+    if (paintGL) {
+      paintGL.dispose()
+      paintGL = null
+    }
   }
 }

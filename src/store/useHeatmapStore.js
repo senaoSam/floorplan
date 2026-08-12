@@ -66,6 +66,14 @@ export const useHeatmapStore = create((set) => ({
   // "large scene simplified" notice so the user knows the field is approximate.
   simplifiedLargeScene: false,
 
+  // 52-C3: WebGL2 could not be initialised at all (no support, or context
+  // creation refused). Previously there was no channel for this: the toggle
+  // stayed on, nothing drew, and the user had no idea why. Sibling notices
+  // (scaleMissing / simplifiedLargeScene) already had one; this completes the
+  // set. Note this is the permanent case — a merely LOST context is recovered
+  // silently by the adapter and never reaches here.
+  glUnavailable: false,
+
   // Set by heatmapAdapter while editorMode === DRAW_WALL: the heatmap is frozen
   // (showing the pre-draw field) and not recomputing, because each drawn wall
   // segment commits immediately and would otherwise fire a full recompute per
@@ -105,6 +113,7 @@ export const useHeatmapStore = create((set) => ({
   // 任務 4 (b): adapter calls this each compute; guarded to a no-op when the
   // value is unchanged so it never triggers an extra subscriber recompute loop.
   setSimplifiedLargeScene: (v) => set((s) => (s.simplifiedLargeScene === v ? s : { simplifiedLargeScene: v })),
+  setGlUnavailable: (v) => set((s) => (s.glUnavailable === v ? s : { glUnavailable: v })),
   // Same no-op-when-unchanged guard: adapter calls it every compute, but the
   // heatmap store is one of its own compute triggers, so an unconditional set
   // would loop.

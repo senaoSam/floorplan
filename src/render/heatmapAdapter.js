@@ -246,13 +246,43 @@ export function attachHeatmapLayer({
   // edge we haven't yet established is unframed).
   let lastFeatherEdges = null
 
+  // 52-C3: once WebGL2 init has genuinely failed there is no point retrying on
+  // every compute — the old code left `gl` null and re-entered the try block
+  // each time, hammering context creation. Latch the failure and surface it.
+  let glUnavailable = false
+
+  // 52-C3: a lost context (Windows TDR, GPU reset, too many live contexts)
+  // leaves every subsequent render() drawing into a dead context, so the
+  // heatmap stays blank permanently. propagationGL/sampleFieldGL already
+  // dispose-and-rebuild in this situation; do the same here. Returns true if
+  // the caller must rebuild the sprite/texture, since both wrap gl.canvas.
+  const dropIfContextLost = () => {
+    if (!gl || !gl.isContextLost?.()) return false
+    console.warn('[heatmap] WebGL2 context lost — rebuilding')
+    try { gl.dispose() } catch (_) { /* the context is already gone */ }
+    gl = null
+    if (sprite) {
+      sprite.mask = null
+      layer.removeChild(sprite)
+      sprite.destroy({ texture: false })
+      sprite = null
+    }
+    if (texture) { texture.destroy(true); texture = null }
+    if (maskG) { layer.removeChild(maskG); maskG.destroy(); maskG = null }
+    return true
+  }
+
   const ensureSprite = () => {
+    dropIfContextLost()
     if (sprite) return sprite
+    if (glUnavailable) return null
     if (!gl) {
       try {
         gl = createHeatmapGL()
       } catch (e) {
         console.warn('[heatmap] WebGL2 init failed:', e.message)
+        glUnavailable = true
+        useHeatmapStore.getState().setGlUnavailable?.(true)
         return null
       }
     }

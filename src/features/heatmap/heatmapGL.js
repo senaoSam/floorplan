@@ -433,7 +433,15 @@ export function createHeatmapGL() {
     }
   }
 
-  return { render, dispose, canvas };
+  // 52-C3: expose the context so callers can detect a lost one and rebuild.
+  // propagationGL/sampleFieldGL already do this (see sampleFieldGL getGL());
+  // without it a Windows TDR left this renderer drawing into a dead context
+  // forever — the heatmap just went blank with no way back.
+  function isContextLost() {
+    return gl.isContextLost();
+  }
+
+  return { render, dispose, canvas, isContextLost };
 }
 
 function createTarget(gl) {

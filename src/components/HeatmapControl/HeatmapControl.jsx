@@ -51,6 +51,7 @@ function HeatmapControl() {
   const alignFrozen = useHeatmapStore((s) => s.alignFrozen)
   // 47-22: enabled but the active floor has no scale → nothing can render.
   const scaleMissing = useHeatmapStore((s) => s.scaleMissing)
+  const glUnavailable = useHeatmapStore((s) => s.glUnavailable)
   // Phase 48: other floors excluded from cross-floor computation (no scale).
   const crossFloorExcluded = useHeatmapStore((s) => s.crossFloorExcluded)
   const setEditorMode = useEditorStore((s) => s.setEditorMode)
@@ -101,6 +102,13 @@ function HeatmapControl() {
           >
             設定比例尺
           </button>
+        </div>
+      )}
+      {/* 52-C3: WebGL2 unavailable — same reasoning as the scale notice above.
+          Without this the toggle reads "on" while nothing ever draws. */}
+      {enabled && glUnavailable && (
+        <div className="heatmap-control__notice">
+          ⚠️ 這個瀏覽器／裝置無法使用 WebGL2，熱圖無法繪製
         </div>
       )}
       {/* Readout — stacked above the button. Shows all four metrics so the
