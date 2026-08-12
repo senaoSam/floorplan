@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useEditorStore, VIEW_MODE } from '@/store/useEditorStore'
 import ApiTestModal from '@/components/ApiTestModal/ApiTestModal'
+import ExportMenu from '@/components/ExportMenu/ExportMenu'
 import './TopBar.sass'
 
 // Phase 18 top banner — product brand + 2D/3D view switch.
@@ -22,6 +23,11 @@ function TopBar() {
         >
           API 測試
         </button>
+
+        {/* 52-D1: the discoverable export entry. Both actions already existed
+            but were buried (floor-row ⋯ menu / bottom of the cable-summary
+            panel), so a user scanning the UI concluded there was no export. */}
+        <ExportMenu />
 
         <div className="topbar__view">
           <button

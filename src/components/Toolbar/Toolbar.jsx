@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { useEditorStore, EDITOR_MODE, PRIMARY_MODE, VIEW_MODE, getPrimaryMode } from '@/store/useEditorStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { useFloorStore } from '@/store/useFloorStore'
+import { showUiToast } from '@/store/useUiToastStore'
 import Icon from '@/components/Icon/Icon'
 import Tooltip from '@/components/Tooltip/Tooltip'
 import AIWallsModal from '@/components/AIWallsModal/AIWallsModal'
@@ -32,6 +33,15 @@ const PRIMARY_BUTTONS = [
 // the active primary mode are rendered — so entering Camera / Stats hides the
 // entire AP-planning tool family (walls / AP / cabling / measure), which is
 // exactly the point: those tools do nothing in those read-only worlds.
+// 52-D5: tools that act ON a floor. Pointer tools (select / marquee / pan)
+// are harmless with an empty canvas and stay available.
+const MODES_NEEDING_FLOOR = new Set([
+  EDITOR_MODE.DRAW_WALL, EDITOR_MODE.DRAW_DOOR, EDITOR_MODE.DRAW_WINDOW,
+  EDITOR_MODE.DRAW_FLOOR_HOLE, EDITOR_MODE.PLACE_AP, EDITOR_MODE.DRAW_SCOPE,
+  EDITOR_MODE.CLIENT_VIEW, EDITOR_MODE.PLACE_SWITCH, EDITOR_MODE.DRAW_CABLE_TRAY,
+  EDITOR_MODE.PLACE_RISER, EDITOR_MODE.DRAW_SCALE,
+])
+
 const GROUPS = [
   {
     id: 'pointer',
@@ -192,6 +202,17 @@ function Toolbar() {
       closeImmediate()
       return
     }
+    // 52-D5: with no floor, entering a draw/place tool used to succeed
+    // silently and then swallow every canvas click — the tester clicked
+    // 無線 AP, clicked the canvas several times, got nothing, and assumed the
+    // app had crashed. Meanwhile the 50/150/300 AP buttons right next to it
+    // correctly grey out, so the toolbar was holding two different standards.
+    // Say why instead of no-oping.
+    if (!activeFloor && item.mode && MODES_NEEDING_FLOOR.has(item.mode)) {
+      showUiToast('請先匯入平面圖，才能使用這項工具')
+      closeImmediate()
+      return
+    }
     if (item.band != null) setPlaceApBand(item.band)
     if (item.switchKind != null) setPlaceSwitchKind(item.switchKind)
     // In ALIGN_FLOOR, switching to any other tool would silently end align
@@ -336,9 +357,14 @@ function Toolbar() {
                   {group.items.map((it, idx) => {
                     const key = `${it.mode ?? it.action}-${it.band ?? it.switchKind ?? idx}`
                     const itemActive = isItemActive(it, editorMode, placeApBand, placeSwitchKind)
+                    // 52-D5: grey out floor-dependent tools when there is no
+                    // floor, so the state is visible before the click — the
+                    // toast in handleItemClick is the fallback for anyone who
+                    // clicks anyway (a disabled button fires no onClick).
+                    const needsFloor = !activeFloor && it.mode && MODES_NEEDING_FLOOR.has(it.mode)
                     const { enabled } = it.action
                       ? resolveAction(it.action)
-                      : { enabled: true }
+                      : { enabled: !needsFloor }
                     return (
                       <button
                         key={key}
@@ -349,6 +375,7 @@ function Toolbar() {
                           (itemActive ? ' toolbar-floating__menu-item--active' : '')
                         }
                         disabled={!enabled}
+                        title={needsFloor ? '需先匯入平面圖' : undefined}
                         onClick={() => handleItemClick(it)}
                       >
                         <Icon name={it.icon} size={16} />

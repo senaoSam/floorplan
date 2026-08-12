@@ -1,0 +1,80 @@
+@use '@/styles/variables' as *
+
+// 52-D1: sits in the TopBar next to the 2D/3D switch. Button styling matches
+// .topbar__test-btn so the bar reads as one row of controls; the accent fill
+// on open matches the same active treatment.
+.export-menu
+  position: relative
+
+  &__btn
+    padding: 4px 12px
+    border: 1px solid $border-color
+    border-radius: 6px
+    background: transparent
+    color: $text-secondary
+    font-size: 12px
+    font-weight: 600
+    cursor: pointer
+    transition: all 0.15s
+    white-space: nowrap
+
+    &:hover:not(:disabled)
+      border-color: rgba(255, 255, 255, 0.3)
+      color: $text-primary
+
+    &--active
+      background: $accent
+      border-color: $accent
+      color: #fff
+
+    &:disabled
+      opacity: 0.6
+      cursor: default
+
+  // Container mirrors .sidebar-left__floor-menu (the app's other dropdown):
+  // same $bg-secondary / $border-color / shadow family, wider because these
+  // items carry a hint line.
+  &__dropdown
+    position: absolute
+    top: calc(100% + 6px)
+    right: 0
+    z-index: $z-menu
+    min-width: 248px
+    display: flex
+    flex-direction: column
+    padding: 4px
+    background: $bg-secondary
+    border: 1px solid $border-color
+    border-radius: 8px
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45)
+
+  &__item
+    display: flex
+    flex-direction: column
+    gap: 2px
+    padding: 8px 10px
+    border: none
+    border-radius: 6px
+    background: transparent
+    text-align: left
+    cursor: pointer
+    transition: background 0.12s
+
+    &:hover:not(:disabled)
+      background: rgba(255, 255, 255, 0.06)
+
+    &:disabled
+      opacity: 0.45
+      cursor: not-allowed
+
+  &__item-label
+    font-size: 12px
+    font-weight: 600
+    color: $text-primary
+
+  // The hint is what makes the entry self-explanatory — the tester could not
+  // tell what the PDF contained without opening it.
+  &__item-hint
+    font-size: 10px
+    color: $text-tertiary
+    line-height: 1.35

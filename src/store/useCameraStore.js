@@ -89,6 +89,11 @@ export const useCameraStore = create((set, get) => ({
           (c) => c.id !== cameraId
         ),
       },
+      // 52-D9: drop the live-view pointer when its camera goes away. Nothing
+      // renders from it today (the popover checks the camera exists), so this
+      // is state hygiene — but a dangling id is exactly the kind of thing a
+      // later consumer trusts and then crashes on.
+      liveViewCameraId: state.liveViewCameraId === cameraId ? null : state.liveViewCameraId,
     })),
 
   setCameras: (floorId, cameras) =>

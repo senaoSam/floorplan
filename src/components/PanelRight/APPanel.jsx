@@ -180,7 +180,19 @@ function APPanel({ floorId, apId }) {
           支援頻段：{model.supportedBands.map((b) => `${b} GHz`).join(' / ')}
         </div>
         <PanelField label="名稱">
-          <TextInput value={ap.name} onChange={(v) => handleField('name', v)} />
+          {/* 52-D9: an all-whitespace name left the AP with no identity —
+              blank on the canvas label, blank in the panel header, and
+              unidentifiable in the exported report. Revert on blur rather than
+              block typing, so clearing the field to retype still works. */}
+          <TextInput
+            value={ap.name}
+            onChange={(v) => handleField('name', v)}
+            onBlur={() => {
+              if (!ap.name || !ap.name.trim()) {
+                updateAP(floorId, apId, { name: useAPStore.getState().nextAPName() })
+              }
+            }}
+          />
         </PanelField>
       </PanelSection>
 

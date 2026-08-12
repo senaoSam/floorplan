@@ -36,6 +36,24 @@ function valueToPercent(value, minVal, maxVal, leftToRightAsc) {
   return (leftToRightAsc ? ratio : 1 - ratio) * 100
 }
 
+// 52-D3: the scale showed only "≤-75 … ≥-35", leaving the reader to guess
+// whether -73 dBm is usable. These are the conventional Wi-Fi planning bands
+// (-67 dBm is the industry coverage target this app already uses as its
+// default threshold, see constants/coverage). Only RSSI gets this: SINR/SNR/
+// CCI have no comparably settled plain-language mapping, and inventing one
+// would be worse than saying nothing.
+const RSSI_BANDS = [
+  { max: -75, label: '幾乎沒訊號' },
+  { max: -67, label: '訊號差' },
+  { max: -55, label: '堪用（收信 / 網頁）' },
+  { max: Infinity, label: '很好（可視訊）' },
+]
+
+function rssiQualityLabel(v) {
+  if (!isFinite(v)) return null
+  return RSSI_BANDS.find((b) => v <= b.max)?.label ?? null
+}
+
 function HeatmapLegend({ mode, hoverValue }) {
   const cfg = getModeConfig(mode)
   const { stops, minVal, maxVal, leftToRightAsc } = buildLegendData(cfg)
@@ -85,6 +103,25 @@ function HeatmapLegend({ mode, hoverValue }) {
           )
         })}
       </div>
+
+      {/* 52-D3: plain-language bands so the numbers mean something without
+          RF background. Shows the hovered reading's verdict when there is one,
+          otherwise the scale's own key. */}
+      {cfg.id === 'rssi' && (
+        <div className="heatmap-legend__quality">
+          {isFinite(hoverValue) ? (
+            <span className="heatmap-legend__quality-now">
+              {hoverValue.toFixed(0)} dBm — {rssiQualityLabel(hoverValue)}
+            </span>
+          ) : (
+            <>
+              <span>差</span>
+              <span className="heatmap-legend__quality-mid">-67 起堪用</span>
+              <span>可視訊</span>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }

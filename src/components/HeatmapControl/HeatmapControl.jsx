@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
-import { HEATMAP_MODE_LIST, getModeConfig } from '@/features/heatmap/modes'
+import { HEATMAP_MODE_LIST, HEATMAP_MODE_CONFIG, getModeConfig } from '@/features/heatmap/modes'
 import FormulaNote from '@/components/FormulaNote/FormulaNote'
 import Icon from '@/components/Icon/Icon'
 import HeatmapLegend from './HeatmapLegend'
@@ -115,16 +115,17 @@ function HeatmapControl() {
           user can compare without flipping modes. */}
       {enabled && hover && (
         <div className="heatmap-control__readout">
-          <div className="heatmap-control__readout-row">
+          {/* 52-D3: hovering a row now explains the acronym in place. */}
+          <div className="heatmap-control__readout-row" title={HEATMAP_MODE_CONFIG.rssi.plainHelp}>
             <b>RSSI</b> <span>{formatReading(hover.rssiDbm, 'dBm')}</span>
           </div>
-          <div className="heatmap-control__readout-row">
+          <div className="heatmap-control__readout-row" title={HEATMAP_MODE_CONFIG.sinr.plainHelp}>
             <b>SINR</b> <span>{formatReading(hover.sinrDb, 'dB')}</span>
           </div>
-          <div className="heatmap-control__readout-row">
+          <div className="heatmap-control__readout-row" title={HEATMAP_MODE_CONFIG.snr.plainHelp}>
             <b>SNR</b> <span>{formatReading(hover.snrDb, 'dB')}</span>
           </div>
-          <div className="heatmap-control__readout-row">
+          <div className="heatmap-control__readout-row" title={HEATMAP_MODE_CONFIG.cci.plainHelp}>
             <b>CCI</b> <span>{formatReading(hover.cciDbm, 'dBm')}</span>
           </div>
           <div className="heatmap-control__readout-row heatmap-control__readout-pos">
@@ -175,10 +176,14 @@ function HeatmapControl() {
               className="heatmap-control__mode"
               value={mode}
               onChange={(e) => setMode(e.target.value)}
-              title={activeCfg.description}
+              title={`${activeCfg.plain}：${activeCfg.plainHelp}`}
             >
+              {/* 52-D3: each option carries its plain name, and the hovered
+                  option explains itself — a bare "SINR" told the user nothing. */}
               {HEATMAP_MODE_LIST.map((m) => (
-                <option key={m.id} value={m.id}>{m.label}</option>
+                <option key={m.id} value={m.id} title={m.plainHelp}>
+                  {m.label}（{m.plain}）
+                </option>
               ))}
             </select>
             <select

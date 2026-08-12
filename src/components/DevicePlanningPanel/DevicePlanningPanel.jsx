@@ -67,15 +67,37 @@ function DevicePlanningPanel() {
     return () => { if (qualityTimerRef.current) clearTimeout(qualityTimerRef.current) }
   }, [collapsed, floor, hasScale, walls, aps, scopes, thresholdDbm])
 
-  const runAutoChannel = () => {
-    if (aps.length === 0) return
-    const assignments = greedyChannelAssign(aps, regulatoryDomain)
-    const updated = aps.map((ap) => {
-      const a = assignments.get(ap.id)
-      return a ? { ...ap, channel: a.channel } : ap
-    })
-    setAPs(activeFloorId, updated)
-    setToast({ kind: 'channel', count: assignments.size })
+  // 52-D2: this was the button that froze the UI with zero feedback — the
+  // tester hit it, saw nothing move for seconds, and assumed a crash.
+  //
+  // The obvious reading ("put the planner in a worker, like AutoPlaceModal")
+  // is wrong: measured at 300 APs, greedyChannelAssign is only ~15 ms. The
+  // stall is the SYNCHRONOUS re-render cascade that setAPs triggers (~161 ms
+  // in the store commit, ~274 ms of blocked frames after it, and more on a
+  // slow machine — the tester reported ~5.8 s). A worker would move the 15 ms
+  // and leave the freeze exactly as it is.
+  //
+  // So the fix is honest feedback rather than parallelism: flip a busy flag,
+  // yield twice so the browser actually paints it, then do the heavy commit.
+  // Without the double rAF the paint and the commit land in the same frame and
+  // the user still sees nothing.
+  const [channelBusy, setChannelBusy] = useState(false)
+
+  const runAutoChannel = async () => {
+    if (aps.length === 0 || channelBusy) return
+    setChannelBusy(true)
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+    try {
+      const assignments = greedyChannelAssign(aps, regulatoryDomain)
+      const updated = aps.map((ap) => {
+        const a = assignments.get(ap.id)
+        return a ? { ...ap, channel: a.channel } : ap
+      })
+      setAPs(activeFloorId, updated)
+      setToast({ kind: 'channel', count: assignments.size })
+    } finally {
+      setChannelBusy(false)
+    }
   }
 
   const locateBiggestGap = () => {
@@ -126,10 +148,12 @@ function DevicePlanningPanel() {
               <button
                 className="device-planning__btn"
                 onClick={runAutoChannel}
-                disabled={apsOnFloor === 0}
-                title="自動為本樓層所有 AP 指派互不干擾的頻道"
+                disabled={apsOnFloor === 0 || channelBusy}
+                title={channelBusy
+                  ? `正在為 ${apsOnFloor} 顆 AP 指派頻道…`
+                  : '自動為本樓層所有 AP 指派互不干擾的頻道'}
               >
-                📻 自動頻道
+                {channelBusy ? `⏳ 指派頻道中（${apsOnFloor} 顆）…` : '📻 自動頻道'}
               </button>
             </div>
           </section>

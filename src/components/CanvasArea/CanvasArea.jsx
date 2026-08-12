@@ -18,6 +18,7 @@ import TrendPanel from '@/components/CameraTimeline/TrendPanel'
 import CoveragePanel from '@/components/CameraTimeline/CoveragePanel'
 import LiveViewModal from '@/components/CameraTimeline/LiveViewModal'
 import CalibrationModal from '@/components/CameraTimeline/CalibrationModal'
+import DropZone from '@/features/importer/DropZone'
 import './CanvasArea.sass'
 
 // Standalone-mode canvas pane — wraps the embeddable FloorplanSystem
@@ -30,6 +31,11 @@ function CanvasArea() {
   // + hover readout, cable BOM, AP planning, regulatory domain) are all
   // irrelevant there and would float over a canvas that hides their subject.
   const inCameraMode = useEditorStore((s) => s.editorMode === EDITOR_MODE.CAMERA)
+  // 52-D9: STATS blanks the heatmap layer on purpose (layerVisibilityBinder —
+  // its own AP-load glow reads clearer without a colour field underneath), but
+  // the heatmap control kept showing an enabled toggle and a live RSSI legend.
+  // Control said "on", canvas showed nothing. Hide it here like CAMERA does.
+  const inStatsMode = useEditorStore((s) => s.editorMode === EDITOR_MODE.STATS)
   // 47-26: in 3D the floating 2D overlays (corner stacks, timeline bar, scale
   // bar) sit over the 3D canvas and edit a plane the user isn't looking at.
   // Hide them; keep the toolbar + mode badge so the user can switch mode / go
@@ -40,6 +46,17 @@ function CanvasArea() {
       <div className="canvas-area__pane">
         <FloorplanSystem />
       </div>
+      {/* 52-D5: with no floor the canvas was an empty black rectangle that said
+          nothing — the tester stared at it for a minute and never found the
+          import entry ("I never found where to import my own floor plan").
+          DropZone already existed with exactly the right copy and drag-and-drop
+          handling, but was never mounted anywhere: dead code since the Phase 25
+          port. Mounting it is the whole fix. */}
+      {!hasFloor && !is3D && (
+        <div className="canvas-area__empty">
+          <DropZone />
+        </div>
+      )}
       <Toolbar />
       <ActiveModeBadge />
       {/* Top-left stack: layer toggle row → regulatory → coverage report
@@ -63,7 +80,7 @@ function CanvasArea() {
         <div className="canvas-area__overlay canvas-area__overlay--bl">
           <TrendPanel />
           {hasFloor && !inCameraMode && <CableSummaryPanel />}
-          {hasFloor && !inCameraMode && <HeatmapControl />}
+          {hasFloor && !inCameraMode && !inStatsMode && <HeatmapControl />}
         </div>
       )}
       <ClientPanelMount />

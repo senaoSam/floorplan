@@ -1,29 +1,31 @@
 import React, { useRef, useState, useCallback } from 'react'
 import { useFloorImport } from './useFloorImport'
-import { useWarmupStore } from '@/store/useWarmupStore'
 import './DropZone.sass'
 
+// 52-D5: this component had the right copy all along but was never mounted —
+// dead code since the Phase 25 port, which is why a first-time user faced a
+// blank canvas with no hint. CanvasArea now renders it whenever there is no
+// floor. It also still referenced `useWarmupStore`, a store deleted somewhere
+// along the way; being unmounted, nothing ever surfaced the broken import.
 function DropZone() {
   const fileInputRef = useRef(null)
   const [isDragging, setIsDragging] = useState(false)
   const { processFile, loadingMsg, isLoading } = useFloorImport()
-  const warmingUp = useWarmupStore((s) => s.warmingUp)
 
   const handleDrop = useCallback((e) => {
     e.preventDefault()
     setIsDragging(false)
-    if (warmingUp) return
     processFile(e.dataTransfer.files?.[0])
-  }, [processFile, warmingUp])
+  }, [processFile])
 
-  const handleDragOver  = useCallback((e) => { e.preventDefault(); if (!warmingUp) setIsDragging(true) }, [warmingUp])
+  const handleDragOver  = useCallback((e) => { e.preventDefault(); setIsDragging(true) }, [])
   const handleDragLeave = useCallback(() => setIsDragging(false), [])
   const handleFileChange = useCallback((e) => {
     processFile(e.target.files?.[0])
     e.target.value = ''
   }, [processFile])
 
-  const busy = isLoading || warmingUp
+  const busy = isLoading
 
   return (
     <div
@@ -46,7 +48,7 @@ function DropZone() {
         <div className="drop-zone__icon">🗺</div>
       )}
       <p className="drop-zone__title">
-        {warmingUp ? '初始化熱力圖引擎…' : isLoading ? loadingMsg : '拖曳平面圖至此'}
+        {isLoading ? loadingMsg : '拖曳平面圖至此'}
       </p>
       {!busy && (
         <>

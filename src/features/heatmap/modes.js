@@ -49,12 +49,19 @@ const CCI_ANCHORS = [
   [-100, 102, 217,  64, 0.80],
 ]
 
+// 52-D3: `plain` is a plain-language name for the acronym, and `plainHelp`
+// says what the metric answers in words a non-RF reader can act on. The
+// tester's words: "RSSI / SINR / SNR / CCI — I don't understand a single one,
+// and there's nowhere to ask." The acronym is kept as the primary label (it is
+// what the industry and every other tool uses) with the plain name alongside.
 export const HEATMAP_MODE_CONFIG = {
   rssi: {
     id: 'rssi',
     label: 'RSSI',
+    plain: '訊號強度',
     unit: 'dBm',
     description: '最強 AP 的接收功率',
+    plainHelp: '收得到多強的訊號。最常用的一項——先看這個。',
     field: 'rssi',
     anchors: RSSI_ANCHORS,
     signBetter: 'high',
@@ -62,8 +69,10 @@ export const HEATMAP_MODE_CONFIG = {
   sinr: {
     id: 'sinr',
     label: 'SINR',
+    plain: '訊號品質',
     unit: 'dB',
     description: '訊號 / (雜訊 + 同頻干擾)',
+    plainHelp: '扣掉雜訊與其他 AP 干擾後，訊號還剩多乾淨。訊號強不代表品質好。',
     field: 'sinr',
     anchors: SINR_ANCHORS,
     signBetter: 'high',
@@ -71,8 +80,10 @@ export const HEATMAP_MODE_CONFIG = {
   snr: {
     id: 'snr',
     label: 'SNR',
+    plain: '訊號雜訊比',
     unit: 'dB',
     description: '訊號 / 雜訊（忽略干擾）',
+    plainHelp: '只比訊號與背景雜訊，不算其他 AP 的干擾。',
     field: 'snr',
     anchors: SNR_ANCHORS,
     signBetter: 'high',
@@ -80,8 +91,10 @@ export const HEATMAP_MODE_CONFIG = {
   cci: {
     id: 'cci',
     label: 'CCI',
+    plain: '同頻干擾',
     unit: 'dBm',
     description: '同頻干擾功率總和',
+    plainHelp: '同頻道的其他 AP 互相干擾的強度。這項越低越好。',
     field: 'cci',
     anchors: CCI_ANCHORS,
     signBetter: 'low',
