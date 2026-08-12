@@ -239,8 +239,16 @@ function StatsDashboard() {
           <Icon name="chevronDown" size={11} />
         </span>
         <div className="stats-dash__title">網路統計</div>
+        {/* 52-D4: the mock disclosure used to be 10px grey at the very bottom
+            while "● 即時" was 11px green at the top — the claim of being live
+            outshouted the correction. Devices here are not deployed yet, so a
+            reader can mistake seeded telemetry (e.g. the "AP-03 離線" alert)
+            for a real outage. Badge it at the same level as the live dot. */}
+        <div className="stats-dash__mock-badge" title="示範資料，非實際設備連線；未來接 cloud 真實資料">
+          MOCK
+        </div>
         <div className={`stats-dash__live${atLive ? ' stats-dash__live--on' : ''}`}>
-          {atLive ? '● 即時' : fmtClock(playheadTs)}
+          {atLive ? '● 即時（mock）' : fmtClock(playheadTs)}
         </div>
       </div>
 
@@ -483,7 +491,10 @@ function StatsDashboard() {
         )}
       </Section>
 
-      <p className="stats-dash__note">即時聚合 — mock 資料（未來接 cloud 真實資料）</p>
+      <p className="stats-dash__note">
+        本頁所有數值（含告警與「規劃 VS 實測」落差）皆為示範用 mock 資料，
+        非實際設備連線 — 未來接 cloud 真實資料。
+      </p>
       </>
       )}
     </div>

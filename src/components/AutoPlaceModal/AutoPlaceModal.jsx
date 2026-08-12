@@ -37,8 +37,8 @@ const BAND_OPTIONS = [
 
 const fmtPct = (x) => x == null || !isFinite(x) ? '—' : `${(x * 100).toFixed(1)}%`
 
-// 連號命名基數：globalAPCounter 與「現有 AP-NN 名稱的最大 NN」取大者。
-// demo / 壓測用 setAPs 載入不推進 counter，只看 counter 會跟現有 AP 撞名。
+// 連號命名基數。52-A4 後 setAPs 會推進 globalAPCounter，故 counter 已涵蓋
+// demo / 壓測載入；仍掃一次現有名稱作為保險（手動改名可能高於 counter）。
 function apNameBase() {
   const st = useAPStore.getState()
   let maxNum = st.globalAPCounter

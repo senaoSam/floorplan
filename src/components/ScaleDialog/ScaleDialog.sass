@@ -54,6 +54,10 @@
   &__result
     font-size: 12px
     color: #f1c40f
+    // 52-A2: out-of-range px/m — the plan would be unusable, so warn in red.
+    &--invalid
+      color: #ef4444
+      line-height: 1.4
 
   &__actions
     display: flex

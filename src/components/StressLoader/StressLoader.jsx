@@ -2,6 +2,7 @@ import React from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { generateId } from '@/utils/id'
 import { getDefaultTxPower } from '@/constants/apModels'
 import './StressLoader.sass'
@@ -76,6 +77,8 @@ function StressLoader() {
     if (disabled) return
     const aps = buildGridAPs(activeFloor, count)
     setAPs(activeFloor.id, aps)
+    // 52-A1: same as DemoLoader — a bulk fill is a new baseline, not an edit.
+    useHistoryStore.getState().clearHistory()
   }
 
   return (

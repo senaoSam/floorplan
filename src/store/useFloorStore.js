@@ -6,6 +6,14 @@ import { DEFAULT_FLOOR_SLAB_MATERIAL_ID, DEFAULT_FLOOR_SLAB_DB } from '@/constan
 // a multi-storey 3D stack lines up.
 export const DEFAULT_FLOOR_HEIGHT_M = 3.0
 
+// 52-A2: typo guard for a floorplan's px/m scale — NOT a performance limit.
+// A 1000px image spans 20 km at 0.05 px/m and 20 cm at 5000 px/m; outside that
+// the user mistyped. Large-but-real sites (a 2 km campus is ~0.5 px/m) must
+// stay allowed, so heatmap cost is bounded separately by the grid-cell ceiling
+// in sampleField, which coarsens the step instead of refusing the scale.
+export const MIN_PX_PER_M = 0.05
+export const MAX_PX_PER_M = 5000
+
 // Effective align-anchor floor: the explicitly pinned one, else the bottom
 // floor (floors[0], the 3D ground level). The anchor is ADVISORY — it gates
 // nothing in the engine; SidebarLeft warns before aligning it so one floor
@@ -53,10 +61,21 @@ export const useFloorStore = create((set, get) => ({
       floors: state.floors.map((f) => (f.id === id ? { ...f, ...patch } : f)),
     })),
 
+  // 52-A2: every scale writer funnels through here (ScaleDialog + the AI
+  // auto-scale), so this is the one place that can stop an absurd value.
+  // Small scale is the dangerous direction: the heatmap opens its grid on
+  // imageSize/scale, so 0.004 px/m (measuring 20px and typing 5000 metres)
+  // asks for ~4.8e11 Float32Array elements and OOMs the tab. Reject
+  // non-finite / non-positive input outright rather than clamping it, since
+  // there is no sane value to guess.
   setFloorScale: (id, scale) =>
-    set((state) => ({
-      floors: state.floors.map((f) => (f.id === id ? { ...f, scale } : f)),
-    })),
+    set((state) => {
+      if (!Number.isFinite(scale) || scale <= 0) return state
+      const clamped = Math.min(Math.max(scale, MIN_PX_PER_M), MAX_PX_PER_M)
+      return {
+        floors: state.floors.map((f) => (f.id === id ? { ...f, scale: clamped } : f)),
+      }
+    }),
 
   // Inter-floor alignment transform — patch keys live on the floor record
   // (alignOffsetX/Y, alignScale, alignRotation). Applied as a Container

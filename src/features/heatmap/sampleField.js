@@ -18,6 +18,20 @@ import { rssiFromAp, aggregateApContributions } from './propagation'
 // array so the colormap / blur stay numerically well-behaved.
 const CCI_MIN_DBM = -120
 
+// 52-A2: hard ceiling on grid cells. Extent comes from imageSize/scale, so a
+// legitimately large site (a 2 km campus) at the default 0.5 m step asks for
+// tens of millions of cells and four Float32Arrays of them. Rather than
+// refusing, coarsen the step until the grid fits — a huge site still renders,
+// just at lower resolution. 4M cells ≈ 64 MB across the four arrays.
+const MAX_GRID_CELLS = 4_000_000
+
+// Smallest step (metres) that keeps `totalW × totalH` under the cell ceiling.
+export function fitGridStep(totalW, totalH, gridStepM) {
+  const cells = (Math.ceil(totalW / gridStepM) + 1) * (Math.ceil(totalH / gridStepM) + 1)
+  if (cells <= MAX_GRID_CELLS) return gridStepM
+  return gridStepM * Math.sqrt(cells / MAX_GRID_CELLS)
+}
+
 export function sampleField(scenario, gridStepM = 0.5, opts = {}) {
   const { w, h } = scenario.size
   const pad = opts.padding ?? { left: 0, right: 0, top: 0, bottom: 0 }
@@ -29,6 +43,7 @@ export function sampleField(scenario, gridStepM = 0.5, opts = {}) {
   const totalH = h + padT + padB
   const originX = -padL
   const originY = -padT
+  gridStepM = fitGridStep(totalW, totalH, gridStepM)
   const nx = Math.ceil(totalW / gridStepM) + 1
   const ny = Math.ceil(totalH / gridStepM) + 1
   const rssi = new Float32Array(nx * ny)

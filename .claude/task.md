@@ -38,10 +38,10 @@
 
 ## 還沒做的事
 
-### Phase 52 三角色稽核修復（2026-08-11 立項，**尚未開工**，詳見下方 Phase 52 專節）
+### Phase 52 三角色稽核修復（2026-08-11 立項，**批次 1 已完成**，詳見下方 Phase 52 專節）
 
 > 工程師／QA／普通使用者三個 subagent 平行稽核 + 兩輪交叉對質，共 30 條。
-> **修復順序：批次 1（全 S，打掉「不能上工」的理由）→ 批次 2（錯誤數字，比 crash 危險）→ 批次 3（資源洩漏）→ 批次 4（UX）。**
+> **修復順序：批次 1 ✅（2026-08-12 使用者驗收 ok）→ 批次 2（錯誤數字，比 crash 危險）→ 批次 3（資源洩漏）→ 批次 4（UX）。**
 > 使用者已剔除「零持久化／儲存鈕／beforeunload」（之後資料來自 API，目前只是 demo）。
 
 ### Phase 51 3D 視覺美化（2026-08-06 立項，逐項優化、每項瀏覽器驗收後再下一項）
@@ -327,23 +327,35 @@
 > 這符合 spec §十二.1 設計；整合後 `buildingData` 由 API 進、`onSave` 出，本地存檔在架構上多餘。連帶 `beforeunload` 警告一併不做。
 > 使用者那條抱怨（U-06）的本質是「不知道自己在看 demo」的認知落差 → 已收斂進 **52-D4（mock 標示）**。
 
-#### 批次 1 — 立即修（全 S，打掉「不能上工」的理由）
+#### 批次 1 — 立即修 ✅ 全部完成（2026-08-12 使用者驗收 ok）
 
-- [ ] **52-A1 Demo 載入後 Ctrl+Z 全毀**（Critical，一行）：載入 Demo 後不做任何操作按一次 Ctrl+Z → **45 牆 + 5 AP + 4 相機全消失**，且工具列「復原」鈕此時是 **enabled**，等於介面主動邀請使用者清空全場。
+> **收工小結**：四項全數 MCP 實測通過、0 console errors。實作中修正了兩處原計畫的錯誤，記在各條目內：
+> ① A1「一行 `clearHistory()`」**不夠** —— 還有 debounce 中的 pending 快照會在 300ms 後補推回去；
+> ② A2 的下限 0.5 px/m **訂錯層次**（拿記憶體成本當輸入驗證），使用者實測「量 147px 說是 300 公尺」被誤擋。
+
+- [x] **52-A1 Demo 載入後 Ctrl+Z 全毀**（✅ Critical）：載入 Demo 後不做任何操作按一次 Ctrl+Z → **45 牆 + 5 AP + 4 相機全消失**，且工具列「復原」鈕此時是 **enabled**，等於介面主動邀請使用者清空全場。
   **根因**（工程師定位，非 off-by-one）：`useHistoryStore.js:245-265` 存的確實是「變化前」狀態，邏輯正確；問題是 `DemoLoader.jsx:156-157` 的 `setWalls`/`setAPs` 被 `useHistoryStore.js:268-275` 的 subscribe 捕捉，把「載入前的空樓層」推進 stack（`undoStack.length === 1`，內容 `walls:[], aps:[]`）。**漏呼叫 `clearHistory()`**（該函式已存在，`:128`）。
-  **修法**：`DemoLoader` 載入後補 `useHistoryStore.getState().clearHistory()`。同理檢查 `StressLoader` 與 `AIWallsModal.jsx:213` 的整層取代。
+  **實作修法（比原計畫多一步）**：**光呼叫 `clearHistory()` 會失效** —— 它原本只清 stack，但 `_pendingRaw` 仍在 debounce 中，`DEBOUNCE_MS` 後 `commitPending()` 照樣把那筆空快照推回去，症狀完全不變。故 `clearHistory` 本身改成**同時取消 pending**（clearTimeout + cancelIdle + `_pendingRaw = null`，比照 `dropFloor:134-139` 既有寫法），再由 `DemoLoader`／`StressLoader` 於載入後呼叫。改動前全專案**無任何呼叫端**，故變更其語意零回歸風險。
+  **`AIWallsModal` 刻意不加**（原計畫寫「同理檢查」，檢查結論是不該加）：AI 偵測牆是使用者主動操作，undo 應該要能還原到偵測前 —— 加了反而變成 bug。
   **不影響 redo**（`:110-123` 對稱實作正確，與使用者實測「Redo 可救回」一致）。
+  **驗證**：載入 Demo 後等 1.2s（超過 debounce+idle）`undoStack === 0`、復原/重做鈕皆 disabled；Ctrl+Z 後 45 牆／5 AP／4 相機全數不動；真實編輯（addAP）→ undo → redo 仍完全正確；50 AP 壓測填充後 stack 亦為 0。
   **次症狀不修（設計取捨）**：畫 2 段牆只扣一格 stack —— `DEBOUNCE_MS = 300` + `:198` `if (!_pendingRaw)` 只保留最初那份，屬拖曳合併的**設計意圖**，對離散操作誤傷。要修需區分連續/離散來源（M），本批不做。
-- [ ] **52-A2 比例尺無上限 → 分頁 OOM**（Critical，一處 clamp 解三個問題）：量 20px 卻輸入 5000 公尺 → `scale = 0.004 px/m` → `sampleField.js:32-37` 以 `imageSize/scale` 開網格並配置**四個** Float32Array（`indoorMask.js:102-108` 同樣）→ 實測 4.8e11 元素 → 立即 OOM。
-  只驗 `> 0`（`min="0.01"` 只是瀏覽器提示，Enter 路徑繞過）；`heatmapAdapter.js:654` 只檢查 truthy，`0.004` 過關。
-  **修法**：`useFloorStore.js:56 setFloorScale` 夾到合理範圍（如 0.5–5000 px/m）。兩個寫入點（`ScaleDialog.jsx:19-23`、`AIWallsModal.jsx:214` 的 AI 自動比例尺）**都匯流到這一個 chokepoint**，一處修好三個問題。
-- [ ] **52-A4 AP 撞名（PDF 出現兩列同名 AP-01）**（Major，一處）：Demo 已有 AP-01~05，新放的也叫 AP-01。**匯出 PDF 的 AP CABLES 表出現兩列 `Demo AP-01`**，施工人員無法分辨哪條線走哪顆 AP。
-  **根因**：`useAPStore.js:67-70 setAPs` **不推進 `globalAPCounter`**（只有 `:14-21 addAP` 會）。Demo 用 `setAPs` 灌 5 顆 → counter 仍為 0。
-  **修法**：`setAPs` 依傳入清單同步推進 counter。這是真正的單一修復點，可根治撞名，並讓 `AutoPlaceModal.jsx:41-52 apNameBase()` 那個「counter 與現有 AP-NN 最大值取大者」的 workaround 得以簡化。
-- [ ] **52-D4 統計頁 mock 標示強度失衡**（使用者剔除 A5 後**升一級**）：「● 即時」綠點 11px、綠 `rgb(16,185,129)`、置於面板**頂端**；「即時聚合 — mock 資料」免責 10px、灰 `rgb(154,163,181)`、壓在面板**最底**。**聲稱即時的訊號比澄清是假資料的訊號更大更亮更靠上。**
+- [x] **52-A2 比例尺無上限 → 分頁 OOM**（✅ Critical）：量 20px 卻輸入 5000 公尺 → `scale = 0.004 px/m` → `sampleField.js` 以 `imageSize/scale` 開網格並配置**四個** Float32Array → 實測 2.94e11 格／**4385 GB** → 立即 OOM。只驗 `> 0`（`min="0.01"` 只是瀏覽器提示，Enter 路徑繞過）。
+  **原計畫錯在分層，已修正（防重做）**：初版照計畫把 `setFloorScale` 夾在 **0.5–5000 px/m**，使用者立刻實測踩雷 —— 「量 147px、輸入 300 公尺」得 0.49 px/m 被誤擋，但那是**完全合法的園區平面圖**（整張圖約 2.2 km）。0.5 這個數字是從「熱圖記憶體吃不消」反推的，**拿效能成本當輸入驗證是錯的分層**：使用者輸入合不合理，與熱圖算不算得動，是兩件事。
+  **正式修法＝兩層各司其職**：
+  ① `useFloorStore.js` `MIN_PX_PER_M` 放寬到 **0.05**（1000px 圖 ≈ 20 km），純粹當**打錯字防呆**；`MAX_PX_PER_M 5000` 不變；非有限值/≤0 直接拒收（回傳原 state）。兩個寫入點（`ScaleDialog`、`AIWallsModal.jsx:214` AI 自動比例尺）仍都匯流此處。
+  ② **`sampleField.js` 新增 `fitGridStep()`＋`MAX_GRID_CELLS = 4_000_000`**：格數超過上限就**自動放大取樣間距**（不是拒算），大場地照樣出圖只是變粗。`sampleFieldGL.js` 的 sync 與 async 兩條路徑同樣套用（import 同一個 helper，避免兩邊漂移）。`sampleField` 本來就回傳 `gridStepM`，故下游定位自動跟著走。
+  **實測**：任何合法比例尺（0.05→5000）記憶體都穩定在 **~61 MB**；**1 km 以下完全不受影響**（demo 48m、200m、1000m 皆維持 0.5m 全解析度），1 km 以上平滑降解析度無斷崖（1100m→0.55m、1500m→0.75m）；原 OOM 案例被雙重擋住。
+  **③ 錯誤訊息也修過一輪**（使用者第二次回報）：初版寫「比例尺 0.03 px/m 超出合理範圍（0.05–5000），請確認輸入的距離」—— **單位混用**（限制是 px/m、卻叫人確認公尺），且 5000 這個上限與使用者剛輸入的「5000 公尺」同數字純屬巧合、必然誤讀。改成用**輸入框的單位**講話並隨量測長度換算：「這個距離不合理 — 這段 241 px 最多只能是 4,820 公尺」。上下限會因 px/m 取倒數而**左右對調**，故顯示時 max 用 floor、min 用 ceil，確保講出來的數字使用者真的填得進去。
+- [x] **52-A4 AP 撞名（PDF 出現兩列同名 AP-01）**（✅ Major）：Demo 已有 AP-01~05，新放的也叫 AP-01。**匯出 PDF 的 AP CABLES 表出現兩列 `Demo AP-01`**，施工人員無法分辨哪條線走哪顆 AP。
+  **根因**：`useAPStore.js setAPs` **不推進 `globalAPCounter`**（只有 `addAP` 會）。Demo 用 `setAPs` 灌 5 顆 → counter 仍為 0。
+  **修法**：新增 module 級 `highestAPNumber(aps)`（掃 `^AP-(\d+)$` 取最大），`setAPs` 以 `Math.max(current, highest)` 推進 counter —— **只增不減**，故對「某層只有低號 AP、他層有高號」也安全。
+  **`AutoPlaceModal.apNameBase()` 保留但註解改寫**：原本是繞過此 bug 的 workaround，現改為「保險」（使用者手動改名仍可能高於 counter），不刪以免手改名情境回歸。
+  **驗證**：載入 Demo 後 `globalAPCounter === 5`、`nextAPName() === 'AP-06'`，實際放一顆確實得 AP-06；50 AP 壓測填充後 counter 跳到 50、下一顆 AP-51；未命名清單／`AP-01b` 之類近似名不誤判；空陣列與 null 安全。
+- [x] **52-D4 統計頁 mock 標示強度失衡**（✅ 使用者剔除 A5 後升一級）：「● 即時」綠點 11px、綠 `rgb(16,185,129)`、置於面板**頂端**；「即時聚合 — mock 資料」免責 10px、灰 `rgb(154,163,181)`、壓在面板**最底**。**聲稱即時的訊號比澄清是假資料的訊號更大更亮更靠上。**
   使用者差點截圖去跟老闆報告「有一台 AP 掛了」。QA 判定**功能邏輯正確**（`DemoLoader.jsx:104` 只有 demo AP-03 釘 `mockStatus:'offline'`，使用者自畫的 AP 一律無），純呈現誤導。
-  **修法**：mock 標示上移到標題列與「即時」同級，或直接把「即時」改成「即時（mock）」。同一類的還有「規劃 VS 實測 12 個落差點」（mock 對 mock 卻呈現得像實測驗證）。
-  **這條在 demo 階段是 D 組 CP 值最高的** —— 既然這階段本來就全是假資料，把假資料呈現得像真的就是最容易誤導的地方。
+  **修法（三處齊改，缺一都還是會被誤讀）**：① 標題列加琥珀 `MOCK` 徽章（`&__mock-badge`，9px/700/`#fbbf24`，`cursor: help` + title 說明），與 ● 即時同一列 ② 「● 即時」→「**● 即時（mock）**」，讓最醒目那行自己帶上限定詞 ③ 底部說明擴充為「本頁所有數值（含告警與『規劃 VS 實測』落差）皆為示範用 mock 資料」—— 把 PM 護城河那塊 mock 對 mock 的比較也一併涵蓋。
+  **驗證**：徽章與 live 文字 `getBoundingClientRect().top` 同為 75px（確認同級而非又被塞到底部）。
 
 #### 批次 2 — 會產出「看起來很權威的錯誤數字」（比 crash 更危險，因為沒人會發現）
 

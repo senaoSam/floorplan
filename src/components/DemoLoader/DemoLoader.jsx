@@ -6,6 +6,7 @@ import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useCableStore, DEFAULT_TRAY } from '@/store/useCableStore'
 import { useCameraStore } from '@/store/useCameraStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { floorplanFromLines } from '@/utils/floorplanFromLines'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
 import { generateId } from '@/utils/id'
@@ -242,6 +243,12 @@ function DemoLoader() {
       }
 
       setHeatmapEnabled(true)
+
+      // 52-A1: the seeding above is not a user edit — without this the store
+      // subscriptions leave one snapshot of the pre-load empty floor on the
+      // stack, so the very first Ctrl+Z (before the user does anything) wipes
+      // the whole demo. Clearing here makes the loaded scene the baseline.
+      useHistoryStore.getState().clearHistory()
     } catch (e) {
       console.error('[DemoLoader] load failed', e)
     } finally {

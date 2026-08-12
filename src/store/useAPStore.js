@@ -1,5 +1,17 @@
 import { create } from 'zustand'
 
+// Highest NN across `AP-NN` names in a list (0 when none match). Used to keep
+// globalAPCounter ahead of bulk-loaded APs so generated names never collide.
+const AP_NAME_RE = /^AP-(\d+)$/
+function highestAPNumber(aps) {
+  let max = 0
+  for (const ap of aps ?? []) {
+    const m = AP_NAME_RE.exec(ap?.name ?? '')
+    if (m) max = Math.max(max, parseInt(m[1], 10))
+  }
+  return max
+}
+
 export const useAPStore = create((set, get) => ({
   apsByFloor: {},
   globalAPCounter: 0,
@@ -64,9 +76,16 @@ export const useAPStore = create((set, get) => ({
       }
     }),
 
+  // 52-A4: bulk loads (demo / stress fill / auto-plan apply) come in with names
+  // already assigned, so the counter has to catch up to them. Without this it
+  // stays at 0 and the next hand-placed AP is named AP-01 again — a duplicate
+  // that reaches the exported PDF's cable table, where two identical rows can't
+  // be told apart on site. Only ever moves forward, so it is safe to call for a
+  // partial floor while other floors hold higher numbers.
   setAPs: (floorId, aps) =>
     set((state) => ({
       apsByFloor: { ...state.apsByFloor, [floorId]: aps },
+      globalAPCounter: Math.max(state.globalAPCounter, highestAPNumber(aps)),
     })),
 
   clearFloor: (floorId) =>

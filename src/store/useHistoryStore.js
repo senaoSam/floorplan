@@ -125,7 +125,16 @@ export const useHistoryStore = create((set, get) => ({
   canUndo: () => get().undoStack.length > 0,
   canRedo: () => get().redoStack.length > 0,
 
-  clearHistory: () => set({ undoStack: [], redoStack: [] }),
+  // 52-A1: must also drop the pending raw. Loaders replace a whole floor via
+  // setWalls/setAPs, which schedules a debounced snapshot of the state BEFORE
+  // the load (an empty floor). Clearing only the stacks lets that snapshot land
+  // DEBOUNCE_MS later, so the first Ctrl+Z wipes everything just loaded.
+  clearHistory: () => {
+    if (_debounceTimer) { clearTimeout(_debounceTimer); _debounceTimer = null }
+    if (_idleHandle !== null) { cancelIdle(_idleHandle); _idleHandle = null }
+    _pendingRaw = null
+    set({ undoStack: [], redoStack: [] })
+  },
 
   // 47-19: when a floor is deleted its snapshots become dead weight — undo hits
   // `prevSnap.floorId !== activeFloorId` and returns without popping, so the

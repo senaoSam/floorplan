@@ -22,6 +22,7 @@
 //      lobe sampling that hasn't been ported to GLSL.
 
 import { rssiFromAp, aggregateApContributions } from './propagation'
+import { fitGridStep } from './sampleField'
 import { createPropagationGL } from './propagationGL'
 import {
   AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, NOISE_FLOOR_DBM,
@@ -81,6 +82,9 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
   const totalH = h + padT + padB
   const originX = -padL
   const originY = -padT
+  // 52-A2: same cell ceiling as the JS path, so a very large site coarsens
+  // instead of allocating an unbounded grid.
+  gridStepM = fitGridStep(totalW, totalH, gridStepM)
   const nx = Math.ceil(totalW / gridStepM) + 1
   const ny = Math.ceil(totalH / gridStepM) + 1
   const mask = scenario.scopeMaskFn ?? (() => true)
@@ -338,6 +342,8 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
   const totalH = h + padT + padB
   const originX = -padL
   const originY = -padT
+  // 52-A2: cell ceiling, as in the sync path above.
+  gridStepM = fitGridStep(totalW, totalH, gridStepM)
   const nx = Math.ceil(totalW / gridStepM) + 1
   const ny = Math.ceil(totalH / gridStepM) + 1
   const mask = scenario.scopeMaskFn ?? (() => true)
