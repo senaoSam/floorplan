@@ -88,6 +88,26 @@ export const useAPStore = create((set, get) => ({
       globalAPCounter: Math.max(state.globalAPCounter, highestAPNumber(aps)),
     })),
 
+  // 53-G5 (T7): undo needs the opposite of setAPs' ratchet. The Math.max above
+  // is correct for its own purpose (bulk loads arrive pre-named and the counter
+  // must catch up), but it means undoing the placement of AP-07 leaves the
+  // counter at 7, so the next AP is AP-08 — the name AP-07 is silently burned.
+  // Rename an AP to AP-08 by hand afterwards and you get a duplicate in the
+  // exported cable table, the exact failure 52-A4 set out to prevent.
+  //
+  // Recomputes from the restored data across ALL floors instead of taking a
+  // number from the caller, so it cannot drift from what the names actually say.
+  // Undo/redo is the only legitimate caller: everywhere else the ratchet is what
+  // you want.
+  recountAPCounter: () =>
+    set((state) => {
+      let max = 0
+      for (const list of Object.values(state.apsByFloor)) {
+        max = Math.max(max, highestAPNumber(list))
+      }
+      return { globalAPCounter: max }
+    }),
+
   clearFloor: (floorId) =>
     set((state) => {
       const { [floorId]: _, ...rest } = state.apsByFloor

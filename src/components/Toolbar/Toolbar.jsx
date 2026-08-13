@@ -139,6 +139,10 @@ function Toolbar() {
   const setToolbarMenuOpen = useEditorStore((s) => s.setToolbarMenuOpen)
   const undoLen = useHistoryStore((s) => s.undoStack.length)
   const redoLen = useHistoryStore((s) => s.redoStack.length)
+  // 53-G5 (P3-17): the first edit lives only as a pending raw for the 300ms
+  // debounce window. undo() flushes before checking, so it works during that
+  // window — the button must not look disabled while it does.
+  const hasPending = useHistoryStore((s) => s.hasPending)
   const undo = useHistoryStore((s) => s.undo)
   const redo = useHistoryStore((s) => s.redo)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
@@ -188,7 +192,7 @@ function Toolbar() {
 
   const resolveAction = (action) => {
     switch (action) {
-      case 'undo':    return { enabled: undoLen > 0, onClick: undo }
+      case 'undo':    return { enabled: undoLen > 0 || hasPending, onClick: undo }
       case 'redo':    return { enabled: redoLen > 0, onClick: redo }
       case 'aiWalls': return { enabled: aiEnabled,   onClick: () => setAiOpen(true) }
       default:     return { enabled: false, onClick: () => {} }

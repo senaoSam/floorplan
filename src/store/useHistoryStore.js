@@ -1,9 +1,12 @@
 // Ported 1:1 from oldSrc/store/useHistoryStore.js — Phase 25 Bundle 18.
 //
-// Snapshot-based Undo/Redo. Subscribes to wall / AP / scope / floorHole
-// / cable stores and pushes a snapshot of the variable BEFORE the change
-// into undoStack. Continuous edits (drag, slider) collapse into a single
+// Snapshot-based Undo/Redo. Subscribes to floor / wall / AP / scope / floorHole
+// / cable / camera stores and pushes a snapshot of the variable BEFORE the
+// change into undoStack. Continuous edits (drag, slider) collapse into a single
 // snapshot via debounce + idle commit.
+//
+// The floor store is a partial subscription: only the FLOOR_SNAPSHOT_KEYS
+// fields are versioned (see the allow-list below for what's excluded and why).
 //
 // 【新增 store 時需要更新此檔案】
 //   1. import 新 store
@@ -28,10 +31,53 @@ const DEBOUNCE_MS = 300
 // onStoreChange skips recording while it's true.
 let _restoring = false
 
+// 53-G5 (T1): the floor-record fields that undo/redo restores.
+//
+// This is an ALLOW-LIST, not a whole-record clone, and the exclusions are the
+// point:
+//   - `id` / `name` — identity, not edit state. Renaming a floor is not
+//     something Ctrl+Z after a wall edit should silently revert.
+//   - `imageUrl` / `imageWidth` / `imageHeight` — the imported bitmap.
+//     SidebarLeft:226 calls URL.revokeObjectURL(floor.imageUrl) when a floor is
+//     deleted, so restoring an old blob URL can resurrect a dead reference and
+//     render a broken image. Image identity is handled by add/removeFloor
+//     (which history does not cover), never by field-level undo.
+//
+// Everything listed is a number/enum the user can get WRONG in a way that
+// silently corrupts downstream maths — which is exactly what undo is for. The
+// scale case is the motivating one: measuring a 10 m wall and typing 1 m makes
+// every cable length, coverage area and heatmap grid on the floor off by 10×.
+const FLOOR_SNAPSHOT_KEYS = [
+  'scale',
+  'floorHeight',
+  'floorSlabMaterialId',
+  'floorSlabAttenuationDb',
+  'opacity', 'rotation', 'offsetX', 'offsetY',
+  'cropX', 'cropY', 'cropWidth', 'cropHeight',
+  // ALIGN_FLOOR's four fields. FloorplanSystem:638 deliberately swallows the
+  // Delete key in ALIGN_FLOOR mode "so alignment work isn't lost", yet the same
+  // work had no Ctrl+Z at all until this fix.
+  'alignOffsetX', 'alignOffsetY', 'alignScale', 'alignRotation',
+]
+
+// Pick just the snapshot-relevant fields off one floor record. Returns null for
+// a missing floor so restore can tell "floor had no record" from "all defaults".
+function pickFloorFields(floor) {
+  if (!floor) return null
+  const out = {}
+  for (const k of FLOOR_SNAPSHOT_KEYS) out[k] = floor[k]
+  return out
+}
+
 function takeSnapshot(floorId) {
   if (!floorId) return null
   return {
     floorId,
+    // 53-G5 (T1): floor geometry/scale fields for THIS floor only. Unlike
+    // switches (building-wide because uplinkTo is rewritten across floors),
+    // every field above is strictly per-floor, so the active floor suffices.
+    floorFields: pickFloorFields(
+      useFloorStore.getState().floors.find((f) => f.id === floorId)),
     walls: structuredClone(useWallStore.getState().wallsByFloor[floorId] ?? []),
     aps: structuredClone(useAPStore.getState().apsByFloor[floorId] ?? []),
     scopes: structuredClone(useScopeStore.getState().scopesByFloor[floorId] ?? []),
@@ -55,8 +101,16 @@ function takeSnapshot(floorId) {
 
 function restoreSnapshot(snapshot) {
   if (!snapshot) return
-  const { floorId, walls, aps, scopes, floorHoles, switchesAll, trays, risers, cameras, tripwires, camZones, unplacedCameras } = snapshot
+  const { floorId, walls, aps, scopes, floorHoles, switchesAll, trays, risers, cameras, tripwires, camZones, unplacedCameras, floorFields } = snapshot
   _restoring = true
+  // 53-G5 (T1): restore floor fields by merging the allow-listed keys onto the
+  // live record, so fields deliberately excluded above (id/name/imageUrl/dims)
+  // keep their CURRENT values rather than being reverted or dropped.
+  if (floorFields) {
+    useFloorStore.setState((s) => ({
+      floors: s.floors.map((f) => (f.id === floorId ? { ...f, ...floorFields } : f)),
+    }))
+  }
   useWallStore.getState().setWalls(floorId, walls)
   useAPStore.getState().setAPs(floorId, aps)
   useScopeStore.setState((s) => ({
@@ -75,6 +129,11 @@ function restoreSnapshot(snapshot) {
   useCameraStore.getState().setZones(floorId, camZones ?? [])
   // 47-16: restore the org-level unplaced camera pool.
   useCameraStore.setState({ unplacedCameras: unplacedCameras ?? [] })
+  // 53-G5 (T7): setAPs only ratchets the AP-name counter upward, so after a
+  // rewind it still reflects APs that no longer exist and the next placement
+  // skips a number. Recount from the restored data (all floors) once every
+  // store above has been written.
+  useAPStore.getState().recountAPCounter()
   _restoring = false
 }
 
@@ -90,16 +149,29 @@ export const useHistoryStore = create((set, get) => ({
   redoStack: [],
 
   undo: () => {
-    const { undoStack } = get()
-    if (undoStack.length === 0) return
-    // Flush any pending raw snapshot first so the user's last batch of
-    // continuous edits is captured before we rewind.
+    // 53-G5 (P3-17): flush BEFORE the emptiness check. The first edit of a
+    // session only exists as _pendingRaw for DEBOUNCE_MS (300ms) + one idle
+    // callback, so an early `undoStack.length === 0` return made Ctrl+Z a no-op
+    // during that window — right when a user who just made a mistake presses it.
     flushPending()
+    if (get().undoStack.length === 0) return
     const floorId = useFloorStore.getState().activeFloorId
     if (!floorId) return
     const currentSnap = takeSnapshot(floorId)
     const prevSnap = get().undoStack[get().undoStack.length - 1]
-    if (prevSnap.floorId !== floorId) return
+    // 53-G5 (P1-12): a snapshot for another floor used to return silently while
+    // the toolbar button stayed lit. Jump to that floor and rewind it there —
+    // the stack stays in order and the user sees the edit being undone.
+    if (prevSnap.floorId !== floorId) {
+      useFloorStore.getState().setActiveFloor(prevSnap.floorId)
+      const jumped = takeSnapshot(prevSnap.floorId)
+      restoreSnapshot(prevSnap)
+      set((s) => ({
+        undoStack: s.undoStack.slice(0, -1),
+        redoStack: [...s.redoStack, jumped],
+      }))
+      return
+    }
     restoreSnapshot(prevSnap)
     set((s) => ({
       undoStack: s.undoStack.slice(0, -1),
@@ -108,12 +180,26 @@ export const useHistoryStore = create((set, get) => ({
   },
 
   redo: () => {
-    const { redoStack } = get()
-    if (redoStack.length === 0) return
+    // 53-G5 (P3-18): redo must flush too. Without it, a pending edit committed
+    // AFTER the redo landed pushed a snapshot of already-rewound state, so the
+    // redo silently overwrote the edit just made and the undo stack stopped
+    // being chronological.
+    flushPending()
+    if (get().redoStack.length === 0) return
     const floorId = useFloorStore.getState().activeFloorId
     if (!floorId) return
-    const nextSnap = redoStack[redoStack.length - 1]
-    if (nextSnap.floorId !== floorId) return
+    const nextSnap = get().redoStack[get().redoStack.length - 1]
+    // 53-G5 (P1-12): same cross-floor handling as undo.
+    if (nextSnap.floorId !== floorId) {
+      useFloorStore.getState().setActiveFloor(nextSnap.floorId)
+      const jumped = takeSnapshot(nextSnap.floorId)
+      restoreSnapshot(nextSnap)
+      set((s) => ({
+        redoStack: s.redoStack.slice(0, -1),
+        undoStack: [...s.undoStack, jumped],
+      }))
+      return
+    }
     const currentSnap = takeSnapshot(floorId)
     restoreSnapshot(nextSnap)
     set((s) => ({
@@ -122,7 +208,14 @@ export const useHistoryStore = create((set, get) => ({
     }))
   },
 
-  canUndo: () => get().undoStack.length > 0,
+  // 53-G5 (P3-17): `hasPending` mirrors the module-local _pendingRaw into store
+  // state so the toolbar can react to it. A pending raw IS undoable now that
+  // undo() flushes first, and the button must not sit greyed out for the 300ms
+  // debounce window right after the first edit. Kept as reactive state rather
+  // than a getter because Toolbar subscribes to fields, not functions.
+  hasPending: false,
+
+  canUndo: () => get().undoStack.length > 0 || get().hasPending,
   canRedo: () => get().redoStack.length > 0,
 
   // 52-A1: must also drop the pending raw. Loaders replace a whole floor via
@@ -132,8 +225,8 @@ export const useHistoryStore = create((set, get) => ({
   clearHistory: () => {
     if (_debounceTimer) { clearTimeout(_debounceTimer); _debounceTimer = null }
     if (_idleHandle !== null) { cancelIdle(_idleHandle); _idleHandle = null }
-    _pendingRaw = null
-    set({ undoStack: [], redoStack: [] })
+    setPendingRaw(null)
+    set({ undoStack: [], redoStack: [], hasPending: false })
   },
 
   // 47-19: when a floor is deleted its snapshots become dead weight — undo hits
@@ -144,7 +237,7 @@ export const useHistoryStore = create((set, get) => ({
     if (_pendingRaw && _pendingRaw.floorId === floorId) {
       if (_debounceTimer) { clearTimeout(_debounceTimer); _debounceTimer = null }
       if (_idleHandle !== null) { cancelIdle(_idleHandle); _idleHandle = null }
-      _pendingRaw = null
+      setPendingRaw(null)
     }
     set((s) => ({
       undoStack: s.undoStack.filter((snap) => snap.floorId !== floorId),
@@ -162,6 +255,16 @@ let _pendingRaw = null
 let _debounceTimer = null
 let _idleHandle = null
 
+// 53-G5 (P3-17): single writer for _pendingRaw so the store's `hasPending`
+// mirror can never drift from it. Every assignment goes through here.
+function setPendingRaw(raw) {
+  _pendingRaw = raw
+  const has = raw !== null
+  if (useHistoryStore.getState().hasPending !== has) {
+    useHistoryStore.setState({ hasPending: has })
+  }
+}
+
 const requestIdle =
   typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
     ? (cb) => window.requestIdleCallback(cb, { timeout: 500 })
@@ -174,7 +277,7 @@ const cancelIdle =
 function commitPending() {
   if (!_pendingRaw) return
   const raw = _pendingRaw
-  _pendingRaw = null
+  setPendingRaw(null)
   pushToUndo({
     floorId: raw.floorId,
     walls: structuredClone(raw.walls),
@@ -188,6 +291,9 @@ function commitPending() {
     tripwires: structuredClone(raw.tripwires ?? []),
     camZones:  structuredClone(raw.camZones ?? []),
     unplacedCameras: structuredClone(raw.unplacedCameras ?? []),
+    // 53-G5 (T1): plain numbers/strings, but clone for consistency with the
+    // rest of the snapshot (and so a later mutable field can't alias).
+    floorFields: raw.floorFields ? structuredClone(raw.floorFields) : null,
   })
 }
 
@@ -204,7 +310,7 @@ function flushPending() {
 }
 
 function schedulePushRaw(raw) {
-  if (!_pendingRaw) _pendingRaw = raw
+  if (!_pendingRaw) setPendingRaw(raw)
   if (_debounceTimer) clearTimeout(_debounceTimer)
   _debounceTimer = setTimeout(() => {
     _debounceTimer = null
@@ -216,6 +322,7 @@ function schedulePushRaw(raw) {
   }, DEBOUNCE_MS)
 }
 
+let _prevFloors   = useFloorStore.getState().floors
 let _prevWalls    = useWallStore.getState().wallsByFloor
 let _prevAPs      = useAPStore.getState().apsByFloor
 let _prevScopes   = useScopeStore.getState().scopesByFloor
@@ -235,6 +342,18 @@ function onStoreChange(storeName, prevRef, currentRef) {
   if (storeName === 'risers' || storeName === 'unplaced') {
     // Building-/org-level arrays (not keyed by floor): compare the ref directly.
     if (prevRef === currentRef) return
+  } else if (storeName === 'floor') {
+    // 53-G5 (T1): `floors` is an ARRAY, not a floor-keyed map, so any floor's
+    // edit produces a new array ref. Compare only the snapshot-relevant fields
+    // of the ACTIVE floor, or every unrelated change (renaming another floor,
+    // reordering, switching the align anchor) would push a redundant snapshot
+    // and push real undo steps off the 50-deep stack.
+    const before = pickFloorFields(prevRef.find((f) => f.id === floorId))
+    const after  = pickFloorFields(currentRef.find((f) => f.id === floorId))
+    // A floor that just appeared or disappeared is add/removeFloor's business,
+    // not a field edit — those aren't undoable, so ignore.
+    if (!before || !after) return
+    if (FLOOR_SNAPSHOT_KEYS.every((k) => before[k] === after[k])) return
   } else if (prevRef[floorId] === currentRef[floorId]) {
     return
   }
@@ -253,6 +372,12 @@ function onStoreChange(storeName, prevRef, currentRef) {
   }
   const raw = {
     floorId,
+    // 53-G5 (T1): on a floor-field edit the "before" comes from prevRef;
+    // otherwise capture the floor's current fields so an unrelated edit's
+    // snapshot still round-trips scale/floorHeight unchanged.
+    floorFields: pickFloorFields(
+      (storeName === 'floor' ? prevRef : useFloorStore.getState().floors)
+        .find((f) => f.id === floorId)),
     walls:      storeName === 'walls'    ? (prevRef[floorId] ?? []) : (useWallStore.getState().wallsByFloor[floorId] ?? []),
     aps:        storeName === 'aps'      ? (prevRef[floorId] ?? []) : (useAPStore.getState().apsByFloor[floorId] ?? []),
     scopes:     storeName === 'scopes'   ? (prevRef[floorId] ?? []) : (useScopeStore.getState().scopesByFloor[floorId] ?? []),
@@ -274,6 +399,13 @@ function onStoreChange(storeName, prevRef, currentRef) {
   schedulePushRaw(raw)
 }
 
+// 53-G5 (T1): the floor store was never subscribed at all, so scale,
+// floorHeight, slab attenuation, crop and the four ALIGN_FLOOR fields had no
+// undo whatsoever.
+useFloorStore.subscribe((state) => {
+  const cur = state.floors
+  if (cur !== _prevFloors) { onStoreChange('floor', _prevFloors, cur); _prevFloors = cur }
+})
 useWallStore.subscribe((state) => {
   const cur = state.wallsByFloor
   if (cur !== _prevWalls) { onStoreChange('walls', _prevWalls, cur); _prevWalls = cur }
