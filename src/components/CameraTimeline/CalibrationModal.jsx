@@ -106,6 +106,11 @@ function CalibrationModal() {
     })
   }, [camera])
 
+  // 53-G1: must sit above the early return below — a hook after a conditional
+  // return changes the hook count between renders and blanks the app. Same
+  // placement as LiveViewModal.jsx:59.
+  const dismiss = useOverlayDismiss(closeCalibrate)
+
   if (!camera || !floor) return null
 
   const planToImage = (px, py) => ({
@@ -175,8 +180,6 @@ function CalibrationModal() {
   const allDone = !onPlanStage && !onFrameStage
   const planStep = onPlanStage ? `① 在平面圖點第 ${floorPts.length + 1} 點` : null
   const frameStep = onFrameStage ? `② 在相機畫面點對應的第 ${framePts.length + 1} 點` : null
-
-  const dismiss = useOverlayDismiss(closeCalibrate)
 
   return (
     <div className="calib" {...dismiss}>

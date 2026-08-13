@@ -34,15 +34,15 @@
 **Camera 3D 目標擬真化完成（2026-08-10 使用者驗收 ok）：人車模型重造（轎車擠出輪廓/衣著輪廓人偶）＋trail 色帶＋選取相機高亮＋2D/3D 共用色彩抖動（trackColor.js）＋步態修復（r3f delta NaN、擺動軸 x→z）。門縫做過又依使用者要求移除（只留門把），細節見 git log。**
 **Backlog 清掉兩項：PDF 規劃報告輸出（含新增的 RF 涵蓋率/verdict 頁）、spec.md 全面同步。以上三項 2026-08-10 使用者驗收 ok。**
 
-**★ 2026-08-13：Phase 53 立項，尚未開工。** 三輪 bug 獵捕找出 93 條（含 4 條 critical，其中 2 條會白屏），
-已分成 10 組 × 5-10h。**下一步是等使用者給組號，一組一組修。** 詳見上方 Phase 53 專節與
-`.claude/bug-fix-groups.md`。程式碼目前尚未因此改動任何一行。
+**★ 2026-08-13：Phase 53 開工，G1 白屏與功能阻斷完成（使用者驗收 ok）。** 三輪 bug 獵捕找出 93 條
+（含 4 條 critical，其中 2 條會白屏），已分成 10 組 × 5-10h。**G1 ✅ 完成，剩 G2~G10。
+下一步是等使用者給組號，一組一組修。** 詳見上方 Phase 53 專節與 `.claude/bug-fix-groups.md`。
 
 ---
 
 ## 還沒做的事
 
-### Phase 53 三輪 bug 獵捕修復（2026-08-13 立項，**尚未開工**）★ 下一個要做的事
+### Phase 53 三輪 bug 獵捕修復（2026-08-13 立項，**G1 ✅ 完成，剩 G2~G10**）★ 下一個要做的事
 
 > **報告**：`.claude/bug-hunt-2026-08-12.md`（93 條，含每條的失效情境與檔案:行號）
 > **分組**：`.claude/bug-fix-groups.md`（10 組 × 5-10h，合計 61-78h）
@@ -50,20 +50,30 @@
 >
 > 使用者的執行方式：**一組一組來**，給組號才動手。修完一組要瀏覽器驗證再 commit。
 >
-> **兩條硬性依賴，不可亂跳**：
-> 1. **G2 必須早於 G3/G4** —— G2 修 `sampleFieldGL.js:171` 的快取簽章漏 `losEnabled`/`apGeoEnabled`，
->    而這兩個 flag 存在的目的**就是 JS/GL parity 驗證**。目前 diff harness 跑兩次拿到同一份快取，
->    **永遠回報「差異 0.000 dB」**。不先修它，G3 改完 GL 引擎無法驗證對錯。
-> 2. **G1 排最前** —— `CalibrationModal.jsx:109` 的 hooks 違規讓「🎯 校正熱圖」**必定白屏**，
->    QA 兩輪都被卡住，所以 4 點校正的完整流程**從未被真人操作驗證過**。修好後要補測。
+> **進度**：
+> - [x] **G1 白屏與功能阻斷 ✅**（2026-08-13，使用者驗收 ok，MCP 兩輪獨立驗證 0 error）
+> - [ ] G2 parity 工具 + 熱圖快取 ★ 必須早於 G3/G4
+> - [ ] G3 GL 引擎正確性（需 G2）／G4 GL 例外與資源回滾（需 G2）
+> - [ ] G5 undo/redo ／G6 切樓層殘留 ／G7 命名唯一性 ／G8 單位比例尺 ／G9 效能洩漏 ／G10 UI/匯出
+>
+> **G1 收工小結（防重做）**：三處 hooks 違規全數修正 ——
+> `CalibrationModal.jsx` 的 `useOverlayDismiss` 上移到 early return 之前（對照 `LiveViewModal.jsx:59`）；
+> `WallLayer3D.jsx` 的 3 個 `useEditorStore` + `useState` 上移到零長度 return 之前；
+> `TrayLayer3D.jsx` 改用 `degenerate` 旗標讓三個幾何 `useMemo` 回 `null`、return 落到 5 個 hook 之後
+> —— **後者刻意不照「早退移到最後」的字面修法**，因為那樣 `new BoxGeometry(0,…)` 仍會為退化線段配置 GPU buffer。
+> **4 點校正流程首次被完整驗證**（QA 兩輪都被白屏卡住）：四對點 → homography 重投影誤差 0.000000、
+> 交叉 Z 字序被擋下且儲存鈕變灰、背景點擊關閉／modal 內按住拖到背景放開不關閉皆正確。
+>
+> **★ G1 驗證時確認 T13 是真 bug，且症狀比報告更明顯**（已排在 G6 的 P4#7，G1 未動）：
+> 同一支相機「關掉再開」，**第一次開是空的（0 點）、第二次開才載入已存的 4 點**。
+> 因為 `closeCalibrate` 把 id 設 `null`、`openCalibrate` 又設回同一個 id，
+> `useEffect` 的 `[calibrateCameraId]` 在 render 之間看不出變化 → effect 不重跑。
 >
 > **建議起手**：G1 + G2 + G5（約 19-24h）覆蓋「會白屏」「讓驗證失效」「改錯無法回退」三類最傷的。
 >
-> **4 條 critical**：
-> - `CalibrationModal.jsx:109` vs `:179` —— `useOverlayDismiss` 在 early return 之後 → 白屏
->   （正確寫法可對照同資料夾的 `LiveViewModal.jsx:59`）
-> - `WallLayer3D.jsx:140-153`（+ `TrayLayer3D.jsx:24`）—— 零長度牆 → 白屏。端點吸附會產生完全相等座標，
->   且 Viewer3D 在 2D 模式也常駐掛載，純 2D 編輯就會從隱藏的 3D 樹炸掉
+> **4 條 critical**（前 2 條已由 G1 修掉）：
+> - ~~`CalibrationModal.jsx:109` vs `:179` —— `useOverlayDismiss` 在 early return 之後 → 白屏~~ **✅ G1 已修**
+> - ~~`WallLayer3D.jsx:140-153`（+ `TrayLayer3D.jsx:24`）—— 零長度牆 → 白屏~~ **✅ G1 已修**
 >   （**全庫已窮舉確認只有這 3 處 hooks 違規，不必重掃**）
 > - `propagationGL.js:2373` —— 加速格網夾在 256 格 × 4m = 只覆蓋 **1024m**，超出範圍的牆
 >   進了列表但 DDA 永遠讀不到 → 完全不衰減（而 `sampleField.js:21` 註解自稱支援 2km campus）

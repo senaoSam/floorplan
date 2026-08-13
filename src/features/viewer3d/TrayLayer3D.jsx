@@ -21,7 +21,12 @@ function TraySegment({ a, b, dimOpacity, pxToM, color }) {
   const dx = bx - ax
   const dz = bz - az
   const len = Math.hypot(dx, dz)
-  if (len < 1e-4) return null
+  // 53-G1: a degenerate segment must NOT early-return here — the five hooks
+  // below would then be skipped and the hook count would change between
+  // renders, throwing and blanking the app. Editing a tray polyline can drop
+  // two vertices onto the same point, so this path is reachable. Geometry is
+  // built as null instead, and the render bails after all hooks have run.
+  const degenerate = len < 1e-4
   const cx = (ax + bx) / 2
   const cz = (az + bz) / 2
   // Rotate the box around world Y so its X axis aligns with the segment.
@@ -29,14 +34,19 @@ function TraySegment({ a, b, dimOpacity, pxToM, color }) {
 
   // EdgesGeometry — outlines the box with crisp lines so the border reads
   // even when the body is translucent. Cached to one shared geom per segment.
-  const bodyGeom = useMemo(() => new THREE.BoxGeometry(len, TRAY_HEIGHT, TRAY_WIDTH), [len])
-  const edgesGeom = useMemo(() => new THREE.EdgesGeometry(bodyGeom), [bodyGeom])
-  useEffect(() => () => { bodyGeom.dispose(); edgesGeom.dispose() }, [bodyGeom, edgesGeom])
+  const bodyGeom = useMemo(
+    () => (degenerate ? null : new THREE.BoxGeometry(len, TRAY_HEIGHT, TRAY_WIDTH)),
+    [len, degenerate])
+  const edgesGeom = useMemo(
+    () => (bodyGeom ? new THREE.EdgesGeometry(bodyGeom) : null),
+    [bodyGeom])
+  useEffect(() => () => { bodyGeom?.dispose(); edgesGeom?.dispose() }, [bodyGeom, edgesGeom])
 
   // Dashed centerline along the top of the channel (matches 2D dashed
   // centreline). Sits half a height above the box centre + a tiny epsilon
   // so it doesn't z-fight with the top face.
   const centerLineGeom = useMemo(() => {
+    if (degenerate) return null
     const g = new THREE.BufferGeometry()
     const yTop = TRAY_HEIGHT / 2 + 0.002
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
@@ -44,10 +54,12 @@ function TraySegment({ a, b, dimOpacity, pxToM, color }) {
        len / 2, yTop, 0,
     ]), 3))
     return g
-  }, [len])
-  useEffect(() => () => centerLineGeom.dispose(), [centerLineGeom])
+  }, [len, degenerate])
+  useEffect(() => () => centerLineGeom?.dispose(), [centerLineGeom])
   const centerLineRef = useRef(null)
   useEffect(() => { centerLineRef.current?.computeLineDistances?.() }, [centerLineGeom])
+
+  if (degenerate || !bodyGeom || !edgesGeom || !centerLineGeom) return null
 
   return (
     <group position={[cx, 0, cz]} rotation={[0, -yaw, 0]}>

@@ -137,20 +137,26 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true })
     return () => { if (edges) edges.dispose() }
   }, [edges])
 
+  // Select/hover visuals. Only the active-floor wall layer is interactive —
+  // ghost floors ignore pointer events so the user doesn't accidentally
+  // select a dimmed wall from an upstairs/downstairs floor.
+  //
+  // 53-G1: these four hooks must stay ABOVE the zero-length early return.
+  // Endpoint snapping can make a wall's two endpoints exactly equal, and that
+  // render would then run fewer hooks than the previous one — React throws and
+  // the whole app blanks (Viewer3D stays mounted in 2D mode, so even pure 2D
+  // editing crashes from the hidden 3D tree).
+  const selectedId   = useEditorStore((s) => s.selectedId)
+  const selectedType = useEditorStore((s) => s.selectedType)
+  const setSelected  = useEditorStore((s) => s.setSelected)
+  const [hovered, setHovered] = useState(false)
+
   if (length === 0 || !geometry) return null
 
   const color = material?.color ?? DEFAULT_WALL_COLOR
   const transparent = dimOpacity < 1
   const hasOpenings = (wall.openings?.length ?? 0) > 0
   const isGlass = GLASS_MATERIAL_IDS.has(material?.id)
-
-  // Select/hover visuals. Only the active-floor wall layer is interactive —
-  // ghost floors ignore pointer events so the user doesn't accidentally
-  // select a dimmed wall from an upstairs/downstairs floor.
-  const selectedId   = useEditorStore((s) => s.selectedId)
-  const selectedType = useEditorStore((s) => s.selectedType)
-  const setSelected  = useEditorStore((s) => s.setSelected)
-  const [hovered, setHovered] = useState(false)
 
   // CAMERA mode passes selectable=false — walls are reference geometry there
   // (only cameras are editable), so clicks fall through and hover stays off.
