@@ -2073,6 +2073,8 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // the first call to run.
   let wallsSig = null
   let cornersSig = null
+  // 53-G2 (E2): same purpose for slabs / floor-hole polygons.
+  let slabsSig = null
 
   // HM-F5k: per-AP precomputed corner / wall geometry cache. Mirrors losCache
   // semantics — invalidated when walls change (uploadWalls bumps
@@ -2471,8 +2473,6 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       slabFlat[i * 4 + 3] = slabRecords[i][3]
     }
     const slabW = Math.max(1, slabRecords.length)
-    gl.bindTexture(gl.TEXTURE_2D, slabsTex)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, slabW, 1, 0, gl.RGBA, gl.FLOAT, slabFlat)
 
     // ---- hole polygon vertices ----
     const polyFlat = new Float32Array(Math.max(1, polyValues.length / 4) * 4)
@@ -2482,10 +2482,36 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     const polyH = Math.ceil(polyTexels / 4096)
     const padded = new Float32Array(polyW * polyH * 4)
     padded.set(polyFlat)
+
+    const meta = { slabCount: Math.max(1, slabRecords.length) === 1 && slabRecords.length === 0 ? 0 : slabRecords.length, polyLen: polyTexels }
+
+    // 53-G2 (E2): skip the re-upload AND clear the output-grid cache when the
+    // slab content changes — same shape as uploadWalls:2203 / uploadCorners:2304.
+    // Those two clear outGridCache; slabs did not, which was the SECOND of two
+    // independent holes that let a FloorHole edit leave the heatmap untouched
+    // (the first being the missing bypassHoles in sampleFieldGL's geomSig).
+    // Fixing only one of the two changes nothing — both gates had to open.
+    //
+    // Signature is fnv32 over the actual uploaded bytes plus the texture dims,
+    // which is the strongest form available here: it cannot miss a field,
+    // because a field that doesn't reach these arrays doesn't reach the shader
+    // either. Note the early return is AFTER `meta` is computed — callers use
+    // the return value every frame, so it must not depend on the cache state.
+    const sig = fnv32(slabFlat) + '|' + fnv32(padded) + '|' + slabW + '|' + polyW + 'x' + polyH
+    if (sig === slabsSig) return meta
+    slabsSig = sig
+
+    gl.bindTexture(gl.TEXTURE_2D, slabsTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, slabW, 1, 0, gl.RGBA, gl.FLOAT, slabFlat)
     gl.bindTexture(gl.TEXTURE_2D, holePolyTex)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, polyW, polyH, 0, gl.RGBA, gl.FLOAT, padded)
 
-    return { slabCount: Math.max(1, slabRecords.length) === 1 && slabRecords.length === 0 ? 0 : slabRecords.length, polyLen: polyTexels }
+    // Slabs feed the cross-floor leg and the hole bypass of every per-AP grid.
+    // wallsVersion is NOT bumped (that would wrongly flush losCache, which
+    // depends only on walls), so clear the output-grid cache directly.
+    outGridCache.clear()
+
+    return meta
   }
 
   function packPolyVerts(flatXY) {

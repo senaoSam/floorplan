@@ -58,6 +58,50 @@ function canUseAggregated(scenario, opts) {
   return true
 }
 
+// 53-G2: geometry/grid/opts signature shared by all APs in one recompute.
+// wallsVersion covers walls (and bumps on wall edits); corners + boundaries are
+// folded in explicitly because corner/slab edits clear the cache but don't bump
+// wallsVersion. Everything that changes a grid value without changing the AP
+// record itself must appear here, or a cache hit could serve a stale grid.
+//
+// This lives in ONE function called from both the aggregated and per-AP paths.
+// It used to be two hand-maintained copies, and they had drifted: both were
+// missing the same four inputs (below), which is exactly the failure mode a
+// duplicated signature invites.
+function buildGeomSig(gl, scenario, boundaries, opts, {
+  rxZM, gridStepM, nx, ny, originX, originY,
+}) {
+  return [
+    gl.getWallsVersion(),
+    scenario.corners?.length ?? 0,
+    boundaries.length,
+    // boundary elevations + slab dB (count alone is insufficient: same
+    // count, different elevation/attenuation changes the cross-floor leg).
+    boundaries.map((b) => `${b.elevationM ?? b.yM ?? 0}:${b.slabDb ?? b.slabAttenuationDb ?? 0}`).join(','),
+    // 53-G2 (P1-8): floor-slab hole polygons are a real physical input — a
+    // crossing inside a hole skips the slab loss entirely. Without them here,
+    // moving/adding/deleting a FloorHole left the heatmap completely
+    // unchanged. Vertex coords are folded in, not just the count, so dragging
+    // a hole invalidates too.
+    boundaries.map((b) => (b.bypassHoles ?? []).map((p) => p.join(',')).join(';')).join('|'),
+    rxZM, gridStepM, nx, ny, originX, originY,
+    opts.maxReflOrder ?? 0,
+    opts.enableDiffraction ? 1 : 0,
+    opts.freqOverrideN ?? 0,
+    opts.cullFloorDbm ?? '',
+    opts.losFastMode ? 1 : 0,
+    // 53-G2 (23c): the three debug flags below exist SO THAT the JS/GL parity
+    // harness can disable an acceleration and compare against the unaccelerated
+    // result. Omitting them from the key meant the second run hit the cache
+    // from the first and the harness reported "difference 0.000 dB" no matter
+    // what — i.e. the tool built to catch engine regressions was structurally
+    // incapable of failing. They change grid VALUES, so they belong in the key.
+    opts.losEnabled === false ? 0 : 1,
+    opts.apGeoEnabled === false ? 0 : 1,
+    opts.rssiOnly ? 1 : 0,
+  ].join('|')
+}
+
 export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
   // Any synchronous compute invalidates in-flight async computes (see
   // syncEpoch below): the solo-drag path bakes a 1-AP LOS/geo set, which
@@ -163,26 +207,9 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
     opts.gridCacheEnabled !== false &&
     typeof gl.getCachedGrid === 'function' &&
     typeof gl.setCachedGrid === 'function'
-  // Geometry/grid/opts signature shared by all APs this frame. wallsVersion
-  // covers walls (and bumps on wall edits); corners + boundaries are folded in
-  // explicitly because corner/slab edits clear the cache but don't bump
-  // wallsVersion. Everything that changes a grid value without changing the AP
-  // record itself must appear here, or a cache hit could serve a stale grid.
   const geomSig = gridCacheOn
-    ? [
-        gl.getWallsVersion(),
-        scenario.corners?.length ?? 0,
-        boundaries.length,
-        // boundary elevations + slab dB (count alone is insufficient: same
-        // count, different elevation/attenuation changes the cross-floor leg).
-        boundaries.map((b) => `${b.elevationM ?? b.yM ?? 0}:${b.slabDb ?? b.slabAttenuationDb ?? 0}`).join(','),
-        rxZM, gridStepM, nx, ny, originX, originY,
-        opts.maxReflOrder ?? 0,
-        opts.enableDiffraction ? 1 : 0,
-        opts.freqOverrideN ?? 0,
-        opts.cullFloorDbm ?? '',
-        opts.losFastMode ? 1 : 0,
-      ].join('|')
+    ? buildGeomSig(gl, scenario, boundaries, opts,
+        { rxZM, gridStepM, nx, ny, originX, originY })
     : null
 
   let cacheHits = 0, cacheMisses = 0
@@ -400,18 +427,8 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
     typeof gl.getCachedGrid === 'function' &&
     typeof gl.setCachedGrid === 'function'
   const geomSig = gridCacheOn
-    ? [
-        gl.getWallsVersion(),
-        scenario.corners?.length ?? 0,
-        boundaries.length,
-        boundaries.map((b) => `${b.elevationM ?? b.yM ?? 0}:${b.slabDb ?? b.slabAttenuationDb ?? 0}`).join(','),
-        rxZM, gridStepM, nx, ny, originX, originY,
-        opts.maxReflOrder ?? 0,
-        opts.enableDiffraction ? 1 : 0,
-        opts.freqOverrideN ?? 0,
-        opts.cullFloorDbm ?? '',
-        opts.losFastMode ? 1 : 0,
-      ].join('|')
+    ? buildGeomSig(gl, scenario, boundaries, opts,
+        { rxZM, gridStepM, nx, ny, originX, originY })
     : null
 
   // Submit cache-miss APs in small batches. Submitting ALL APs before the
