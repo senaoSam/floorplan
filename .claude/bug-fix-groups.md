@@ -12,14 +12,16 @@
 ## 建議執行順序
 
 ```
-G1 ✅ → G2 → G3 → G4 → G5 → G6 → G7 → G8 → G9 → G10
-         ↑                    ↑
-      必須在 G3/G4 之前     可與 G6 交換
+G1 ✅ → G2 ✅ → G3 → G4 → G5 ✅ → G6 → G7 → G8 → G9 → G10
+                 ↑                        ↑
+            前置 G2 已完成              可與 G6 交換
 ```
 
-**硬性依賴只有兩條**:
-1. **G2 必須早於 G3、G4** — G2 修好 parity 驗證工具(目前永久回報綠燈),否則 G3/G4 改完 GL 引擎無法驗證正確性
+**硬性依賴兩條都已解除**:
+1. ~~**G2 必須早於 G3、G4**~~ — **已完成**(2026-08-13)。parity 工具已可偵測真實差異(`losEnabled`/`apGeoEnabled`/`rssiOnly` 各自 hits:0/misses:1 已實測),**G3/G4 現在可以開工並驗證**
 2. ~~**G1 必須最早**~~ — **已完成**(2026-08-13),4 點校正的測試阻斷已解除
+
+**下一步建議 G3 或 G4**(前置已備齊),或無依賴的 G6/G7/G8/G9/G10 任一。
 
 ---
 
@@ -52,20 +54,26 @@ G1 ✅ → G2 → G3 → G4 → G5 → G6 → G7 → G8 → G9 → G10
 
 ---
 
-# G2 · 修好 parity 驗證工具 + 熱圖快取失效(6-8 小時)★ 必須在 G3/G4 之前
+# G2 · 修好 parity 驗證工具 + 熱圖快取失效 ✅ **已完成**(2026-08-13,使用者驗收 ok)
 
 **這組的價值不在直接修 bug,而在讓後續 GL 修改能被驗證。**
 
-| # | 位置 | 問題 |
-|---|---|---|
-| 23c | `heatmap/sampleFieldGL.js:171-186` + `:402-415` | `geomSig` 漏 `losEnabled`、`apGeoEnabled`、`rssiOnly` — 而這兩個 flag 存在的目的**就是 parity 驗證**。diff harness 跑兩次拿到同一份快取,永遠回報「差異 0.000 dB」 |
-| P1-8 | 同上 | `geomSig` 也漏 `bypassHoles`(樓板開孔多邊形,真實物理輸入) |
-| E2 | `heatmap/propagationGL.js:2435` | **第二道缺口**:`uploadSlabs()` 不清 `outGridCache`(`uploadWalls:2235`、`uploadCorners:2323` 都清,唯獨 slabs 沒有)→ 兩道防線同時失效 |
-| 23e | `viewer3d/heatmapStack.js:46-50` | ~~漏 `isSoftwareRender`~~ **第三輪確認是誤判,不必修**(該值 store 建立時求值一次、全庫無 setter,runtime 恆定) |
+| # | 位置 | 問題 | 實際修法 |
+|---|---|---|---|
+| 23c ✅ | `heatmap/sampleFieldGL.js:171-186` + `:402-415` | `geomSig` 漏 `losEnabled`、`apGeoEnabled`、`rssiOnly` — 而這兩個 flag 存在的目的**就是 parity 驗證**。diff harness 跑兩次拿到同一份快取,永遠回報「差異 0.000 dB」 | 三個 flag 都進 key |
+| P1-8 ✅ | 同上 | `geomSig` 也漏 `bypassHoles`(樓板開孔多邊形,真實物理輸入) | 折入**頂點座標**(非只數量) |
+| E2 ✅ | `heatmap/propagationGL.js:2435` | **第二道缺口**:`uploadSlabs()` 不清 `outGridCache`(`uploadWalls:2235`、`uploadCorners:2323` 都清,唯獨 slabs 沒有)→ 兩道防線同時失效 | 照 `fnv32` 範本補簽章 + `outGridCache.clear()` |
+| 23e | `viewer3d/heatmapStack.js:46-50` | ~~漏 `isSoftwareRender`~~ **第三輪確認是誤判,不必修** | 未動 |
 
-**注意**:`bypassHoles` 與 `uploadSlabs` **必須一起修**,只修一處無效。
+**兩份重複的 geomSig 已抽成單一 `buildGeomSig()`**:原本 aggregated 與 per-AP 兩條路徑各有一份手維護的副本,而**兩份漏的欄位完全一樣**——這正是重複簽章必然的失效模式。抽成一個函式後結構上不可能再分歧。
 
-**驗收**:移動/新增/刪除 FloorHole 後熱圖立即更新(目前完全不變);用 `{ apGeoEnabled: false }` 跑 parity 應該看到真實差異而非 0.000。
+**驗收結果(MCP 兩輪乾淨獨立驗證,全程 0 console error)**:
+- **FloorHole 真的會改熱圖了**:10×10m 單樓板加洞 → 121 格中 55 格變動、最大 40.62 dB;移除後回復
+- **移動洞**(數量相同、座標不同)→ 60 格變動。**這是 count-only 簽章會漏掉的關鍵案例**,證明折入頂點座標是必要的
+- **parity 工具復活**:用 `__gridCacheStats` 證明 `losEnabled:false` / `apGeoEnabled:false` / `rssiOnly:true` 三者各自都是 **hits:0 / misses:1**(真的重算),修好前它們與 baseline 共用同一筆快取
+- **無效能回退**:30 AP 場景 cold 30 misses → 之後每次都 **30/30 hits**;相同輸入兩次仍 bit-identical 0.000
+
+**已知的非問題(防誤判)**:`outGridCache` 是 `set(apKey, …)`,**每個 AP 只有一格**(hash 存在值裡),所以交替切換 opts 會互相淘汰 → harness 反覆切 flag 時每次都 miss。這是既有設計、非本次改動造成;正常使用 opts 固定,快取照常命中。
 
 **參考範本**:`propagationGL.js:2203/2304` 的 `fnv32(flat)` 是對實際上傳 bytes 做雜湊,**結構上不可能漏欄位**,是最強的一類簽章;`heatmapAdapter.js:981 idleInputs` 示範了把衍生旗標也折進指紋。
 
@@ -104,19 +112,34 @@ G1 ✅ → G2 → G3 → G4 → G5 → G6 → G7 → G8 → G9 → G10
 
 ---
 
-# G5 · undo/redo 與歷史完整性(8-10 小時)★ 影響最廣
+# G5 · undo/redo 與歷史完整性 ✅ **已完成**(2026-08-13,使用者驗收 ok)
 
-| # | 位置 | 問題 |
-|---|---|---|
-| T1 | `store/useHistoryStore.js:31-54` | **完全沒有 import `useFloorStore`** → `floor.scale`、`floorHeight`、`floorSlabAttenuationDb`、`cropX/Y/W/H`、以及 **ALIGN_FLOOR 的四個 align 欄位**全部無法 undo。量錯比例尺 → 全樓層線纜長度/覆蓋面積/熱圖網格錯十倍,**只能重新量** |
-| P3-17 | `useHistoryStore.js:92-97` | `undoStack.length === 0` 檢查在 `flushPending()` **之前** → 第一筆編輯後 300-800ms 內 Ctrl+Z 完全沒反應、按鈕還是灰的 |
-| P3-18 | `useHistoryStore.js:110-123` | `redo()` 不 flush → 300ms 內按 Ctrl+Y 會用舊快照覆寫剛做的編輯,且 undo 堆疊從此非時序 |
-| P1-12 | `useHistoryStore.js:100-102` | 跨樓層 undo 靜默 return(不提示、不跳樓層),而**工具列按鈕還亮著** |
-| T7 | `useAPStore.js:88` + `useHistoryStore.js:61` | `setAPs` 的 `Math.max` 永不回退 → undo 後 AP 名稱跳號,手動改名可造成撞名 |
+| # | 位置 | 問題 | 實際修法 |
+|---|---|---|---|
+| T1 ✅ | `store/useHistoryStore.js:31-54` | **完全沒有 import `useFloorStore`** → `floor.scale`、`floorHeight`、`floorSlabAttenuationDb`、`cropX/Y/W/H`、以及 **ALIGN_FLOOR 的四個 align 欄位**全部無法 undo | 新增 `FLOOR_SNAPSHOT_KEYS` allow-list + 訂閱 + restore 用 merge |
+| P3-17 ✅ | `useHistoryStore.js:92-97` | `undoStack.length === 0` 檢查在 `flushPending()` **之前** → 第一筆編輯後 300-800ms 內 Ctrl+Z 完全沒反應、按鈕還是灰的 | flush 移到檢查之前;另加 `hasPending` 反應式狀態餵工具列 |
+| P3-18 ✅ | `useHistoryStore.js:110-123` | `redo()` 不 flush → 300ms 內按 Ctrl+Y 會用舊快照覆寫剛做的編輯 | `redo()` 也先 flush |
+| P1-12 ✅ | `useHistoryStore.js:100-102` | 跨樓層 undo 靜默 return(不提示、不跳樓層),而**工具列按鈕還亮著** | 自動跳到該快照的樓層再 rewind(undo/redo 皆同) |
+| T7 ✅ | `useAPStore.js:88` + `useHistoryStore.js:61` | `setAPs` 的 `Math.max` 永不回退 → undo 後 AP 名稱跳號,手動改名可造成撞名 | 新增 `recountAPCounter()`,restore 後從全樓層資料重算 |
 
-**工時偏高的原因**:T1 不是加一行 import。需要決定哪些 floor 欄位進快照(全部?還是排除 `imageUrl` 這類不該回退的?)、新增 store 訂閱、以及處理 align 拖曳這個**連續滑鼠操作**如何接進既有的 300ms debounce 機制。
+**T1 的兩個設計決定(防重做)**:
+1. **採 allow-list 而非整筆 clone**。排除 `id`/`name`(識別性,改名不該被牆的 Ctrl+Z 連帶還原)與 `imageUrl`/`imageWidth`/`imageHeight`——因為 `SidebarLeft.jsx:226` 刪樓層時會 `URL.revokeObjectURL(floor.imageUrl)`,還原舊 blob URL 會復活死引用變成破圖。
+2. **restore 用 merge 而非取代**(`{ ...f, ...floorFields }`),所以刻意排除的欄位保留**當前值**,不會被還原也不會被清掉。
+3. `floors` 是**陣列不是 map**,任何樓層的改動都產生新 ref → 比對只看**當前樓層的 allow-list 欄位**,否則改別層名字/換排序都會塞一筆多餘快照,把真正的步驟擠出 50 格上限。
 
-**驗收**:量錯比例尺後 Ctrl+Z 能還原;ALIGN_FLOOR 拖歪後能 undo;第一筆編輯後立刻 Ctrl+Z 有效;跨樓層 Ctrl+Z 有明確提示或自動跳樓層。
+**align 拖曳不需額外處理**:`viewport.js:278` 每次 mousemove 都呼叫 `setAlignTransform`,而既有的 `schedulePushRaw` 只保留**最初**那份 raw、其餘 coalesce——實測 20 次連續呼叫確實只產生 **1 筆** undo 步驟。
+
+**P3-17 的額外一步**:`canUndo()` 其實是**死碼**(工具列直接讀 `undoStack.length`),所以光改它不會讓按鈕變亮。改成在 store 放反應式 `hasPending`(所有 `_pendingRaw` 寫入都走單一 `setPendingRaw()` 以免漂移),`Toolbar.jsx:195` 改讀 `undoLen > 0 || hasPending`。
+
+**驗收結果(MCP 兩輪乾淨獨立驗證,全程 0 console error)**:
+- 比例尺 22.83 → 2.283(量錯 10 倍)→ Ctrl+Z 精確還原;redo 也正確重做
+- floorHeight / 樓板衰減 / crop / align 四欄位(含 alignScale 1.35、alignRotation 0.42)全部可 undo,4 步逐一退回起始值
+- align 連續拖曳 20 次 → **1 筆** undo 步驟
+- 改樓層名字 → **0 筆**快照(allow-list 正確排除)
+- 第一筆編輯後**不等 debounce** 立刻 undo → 成功(牆與 floor 欄位各驗一次),`hasPending` 立即為 true
+- 交錯編輯(floor 欄位 + 牆)→ 2 筆獨立步驟,互不污染
+- T7:AP-06 → undo → counter 6 回到 5 → 再放仍是 **AP-06**(不跳號);連加兩顆再連退兩次亦正確
+- P1-12:在 2F 改樓高 → 切回 1F 按 Ctrl+Z → **自動跳回 2F** 並還原
 
 ---
 
@@ -247,19 +270,21 @@ G1 ✅ → G2 → G3 → G4 → G5 → G6 → G7 → G8 → G9 → G10
 | Group | 主題 | 工時 | 前置依賴 |
 |---|---|---|---|
 | ~~G1~~ ✅ | ~~白屏與功能阻斷~~ **已完成 2026-08-13** | ~~5-6 h~~ | — |
-| G2 | parity 工具 + 熱圖快取 | 6-8 h | — |
-| G3 | GL 引擎正確性 | 8-10 h | **G2** |
-| G4 | GL 例外與資源回滾 | 5-6 h | **G2** |
-| G5 | undo/redo 完整性 | 8-10 h | — |
+| ~~G2~~ ✅ | ~~parity 工具 + 熱圖快取~~ **已完成 2026-08-13** | ~~6-8 h~~ | — |
+| G3 | GL 引擎正確性 | 8-10 h | ~~G2~~ ✅ 已備齊 |
+| G4 | GL 例外與資源回滾 | 5-6 h | ~~G2~~ ✅ 已備齊 |
+| ~~G5~~ ✅ | ~~undo/redo 完整性~~ **已完成 2026-08-13** | ~~8-10 h~~ | — |
 | G6 | 切樓層/模式狀態殘留 | 6-8 h | — |
 | G7 | 命名唯一性與跨樓層參照 | 5-6 h | — |
 | G8 | 單位/比例尺/魔術數字 | 6-8 h | — |
 | G9 | 效能與資源洩漏 | 5-7 h | — |
 | G10 | UI/UX 與匯出 | 7-9 h | — |
-| | **合計** | **61-78 h**(剩 **56-72 h**) | |
+| | **合計** | **61-78 h**(剩 **42-56 h**) | |
 
 ## 分批建議
 
-若想更早看到成效,前三組(G1 + G2 + G5,約 19-24 小時)覆蓋了「會白屏」「讓驗證失效」「改錯無法回退」三類最傷的問題,做完系統的可信度會明顯提升。**G1 已完成,下一步建議 G2 + G5。**
+~~若想更早看到成效,前三組(G1 + G2 + G5,約 19-24 小時)覆蓋了「會白屏」「讓驗證失效」「改錯無法回退」三類最傷的問題。~~
+**G1 + G2 + G5 已於 2026-08-13 全部完成** —— 三類最傷的問題(會白屏 / 讓驗證失效 / 改錯無法回退)都已解除。
+**下一步建議 G3 或 G4**(G2 前置已備齊,parity 工具可用了),或無依賴的 G6~G10。
 
 G3/G4(GL 引擎)可以延後,因為它們的症狀是「熱圖數字不對」而非「操作壞掉」,且需要較專注的數值驗證時段。

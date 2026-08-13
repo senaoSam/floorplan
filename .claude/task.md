@@ -34,15 +34,16 @@
 **Camera 3D 目標擬真化完成（2026-08-10 使用者驗收 ok）：人車模型重造（轎車擠出輪廓/衣著輪廓人偶）＋trail 色帶＋選取相機高亮＋2D/3D 共用色彩抖動（trackColor.js）＋步態修復（r3f delta NaN、擺動軸 x→z）。門縫做過又依使用者要求移除（只留門把），細節見 git log。**
 **Backlog 清掉兩項：PDF 規劃報告輸出（含新增的 RF 涵蓋率/verdict 頁）、spec.md 全面同步。以上三項 2026-08-10 使用者驗收 ok。**
 
-**★ 2026-08-13：Phase 53 開工，G1 白屏與功能阻斷完成（使用者驗收 ok）。** 三輪 bug 獵捕找出 93 條
-（含 4 條 critical，其中 2 條會白屏），已分成 10 組 × 5-10h。**G1 ✅ 完成，剩 G2~G10。
+**★ 2026-08-13：Phase 53 進行中，G1 + G2 + G5 完成（使用者驗收 ok）。** 三輪 bug 獵捕找出 93 條
+（含 4 條 critical，其中 2 條會白屏），已分成 10 組 × 5-10h。**G1/G2/G5 ✅ 完成（三類最傷的：會白屏、
+讓驗證失效、改錯無法回退，全數解除），剩 G3/G4/G6~G10。兩條硬性依賴都已解除，G3/G4 可開工。
 下一步是等使用者給組號，一組一組修。** 詳見上方 Phase 53 專節與 `.claude/bug-fix-groups.md`。
 
 ---
 
 ## 還沒做的事
 
-### Phase 53 三輪 bug 獵捕修復（2026-08-13 立項，**G1 ✅ 完成，剩 G2~G10**）★ 下一個要做的事
+### Phase 53 三輪 bug 獵捕修復（2026-08-13 立項，**G1/G2/G5 ✅ 完成，剩 G3/G4/G6~G10**）★ 下一個要做的事
 
 > **報告**：`.claude/bug-hunt-2026-08-12.md`（93 條，含每條的失效情境與檔案:行號）
 > **分組**：`.claude/bug-fix-groups.md`（10 組 × 5-10h，合計 61-78h）
@@ -52,9 +53,10 @@
 >
 > **進度**：
 > - [x] **G1 白屏與功能阻斷 ✅**（2026-08-13，使用者驗收 ok，MCP 兩輪獨立驗證 0 error）
-> - [ ] G2 parity 工具 + 熱圖快取 ★ 必須早於 G3/G4
-> - [ ] G3 GL 引擎正確性（需 G2）／G4 GL 例外與資源回滾（需 G2）
-> - [ ] G5 undo/redo ／G6 切樓層殘留 ／G7 命名唯一性 ／G8 單位比例尺 ／G9 效能洩漏 ／G10 UI/匯出
+> - [x] **G2 parity 工具 + 熱圖快取 ✅**（2026-08-13，同上）→ **G3/G4 的前置已解除**
+> - [x] **G5 undo/redo 完整性 ✅**（2026-08-13，同上）
+> - [ ] G3 GL 引擎正確性 ／G4 GL 例外與資源回滾（前置 G2 已備齊，可開工）
+> - [ ] G6 切樓層殘留 ／G7 命名唯一性 ／G8 單位比例尺 ／G9 效能洩漏 ／G10 UI/匯出
 >
 > **G1 收工小結（防重做）**：三處 hooks 違規全數修正 ——
 > `CalibrationModal.jsx` 的 `useOverlayDismiss` 上移到 early return 之前（對照 `LiveViewModal.jsx:59`）；
@@ -69,6 +71,26 @@
 > 因為 `closeCalibrate` 把 id 設 `null`、`openCalibrate` 又設回同一個 id，
 > `useEffect` 的 `[calibrateCameraId]` 在 render 之間看不出變化 → effect 不重跑。
 >
+> **G2 收工小結（防重做）**：兩份手維護的 `geomSig` 抽成單一 `buildGeomSig()`
+> —— **兩份漏的欄位完全一樣**，正是重複簽章必然的失效模式。補進 key 的是
+> `losEnabled`/`apGeoEnabled`/`rssiOnly`（parity 三旗標）+ `bypassHoles` 的**頂點座標**。
+> `uploadSlabs` 照 `fnv32` 範本補簽章 + `outGridCache.clear()`。
+> **實測**：加洞 121 格中 55 格變動最大 40.62 dB；**移動洞**（數量相同座標不同）60 格變動
+> ——這是 count-only 簽章會漏掉的關鍵案例。parity 三旗標各自 hits:0/misses:1（真的重算）。
+> 30 AP 場景 cold 30 misses → 之後 30/30 hits，**無效能回退**。
+> **已知非問題**：`outGridCache` 每個 AP 只有一格（`set(apKey,…)`，hash 存值裡），
+> 所以交替切 opts 會互相淘汰、harness 反覆切旗標時每次都 miss —— 既有設計，正常使用不受影響。
+>
+> **G5 收工小結（防重做）**：`FLOOR_SNAPSHOT_KEYS` 採 **allow-list 而非整筆 clone**。
+> 排除 `imageUrl`/`imageWidth`/`imageHeight` 的理由很硬：`SidebarLeft.jsx:226` 刪樓層時會
+> `URL.revokeObjectURL(floor.imageUrl)`，還原舊 blob URL 會復活死引用變破圖；也排除 `id`/`name`
+> （改名不該被牆的 Ctrl+Z 連帶還原）。restore 用 **merge**（`{ ...f, ...floorFields }`）
+> 讓排除的欄位保留當前值。`floors` 是**陣列不是 map**，故比對只看當前樓層的 allow-list 欄位。
+> **align 拖曳不需額外處理** —— 既有 `schedulePushRaw` 的 coalesce 已足夠（實測 20 次呼叫 = 1 筆）。
+> **P3-17 的坑**：`canUndo()` 是**死碼**（Toolbar 直接讀 `undoStack.length`），
+> 所以加了反應式 `hasPending`（所有 `_pendingRaw` 寫入走單一 `setPendingRaw()`）並改 `Toolbar.jsx:195`。
+> T7 新增 `useAPStore.recountAPCounter()`（從全樓層資料重算，不由呼叫端傳數字）。
+>
 > **建議起手**：G1 + G2 + G5（約 19-24h）覆蓋「會白屏」「讓驗證失效」「改錯無法回退」三類最傷的。
 >
 > **4 條 critical**（前 2 條已由 G1 修掉）：
@@ -80,11 +102,8 @@
 > - `propagationGL.js:3135` —— `SCISSOR_TEST` 無 try/finally，fence timeout 後永久污染
 >   module-singleton context，**且 timeout 不算 context lost 所以永不自我復原，必須重載頁面**
 >
-> **最容易被忽略但影響最廣的一條**：`useHistoryStore.js` **完全沒有 import `useFloorStore`**
-> → `floor.scale`/`floorHeight`/`cropX-Y-W-H`/四個 align 欄位全部無法 undo。
-> 量錯比例尺（10m 的牆輸成 1m）→ 全樓層線纜長度/覆蓋面積/熱圖網格錯十倍，**只能重新量**。
-> 諷刺的是 `FloorplanSystem.jsx:638` 刻意吞掉 ALIGN_FLOOR 的 Delete 鍵、註解寫
-> 「so alignment work isn't lost」，但同一份工作連 Ctrl+Z 都沒有。
+> ~~**最容易被忽略但影響最廣的一條**：`useHistoryStore.js` **完全沒有 import `useFloorStore`**~~
+> **✅ G5 已修**（2026-08-13）。`floor.scale`/`floorHeight`/`cropX-Y-W-H`/四個 align 欄位現在都能 undo。
 >
 > **修 G7 前必看**：`nextSwitchName` 對 SW/IDF/MDF/RTR **四種前綴共用同一個 counter**，
 > demo 那次呼叫消耗了「編號 1」兩次（SW-01 與 IDF-01 都是 seq=1）。
