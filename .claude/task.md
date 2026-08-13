@@ -34,9 +34,67 @@
 **Camera 3D 目標擬真化完成（2026-08-10 使用者驗收 ok）：人車模型重造（轎車擠出輪廓/衣著輪廓人偶）＋trail 色帶＋選取相機高亮＋2D/3D 共用色彩抖動（trackColor.js）＋步態修復（r3f delta NaN、擺動軸 x→z）。門縫做過又依使用者要求移除（只留門把），細節見 git log。**
 **Backlog 清掉兩項：PDF 規劃報告輸出（含新增的 RF 涵蓋率/verdict 頁）、spec.md 全面同步。以上三項 2026-08-10 使用者驗收 ok。**
 
+**★ 2026-08-13：Phase 53 立項，尚未開工。** 三輪 bug 獵捕找出 93 條（含 4 條 critical，其中 2 條會白屏），
+已分成 10 組 × 5-10h。**下一步是等使用者給組號，一組一組修。** 詳見上方 Phase 53 專節與
+`.claude/bug-fix-groups.md`。程式碼目前尚未因此改動任何一行。
+
 ---
 
 ## 還沒做的事
+
+### Phase 53 三輪 bug 獵捕修復（2026-08-13 立項，**尚未開工**）★ 下一個要做的事
+
+> **報告**：`.claude/bug-hunt-2026-08-12.md`（93 條，含每條的失效情境與檔案:行號）
+> **分組**：`.claude/bug-fix-groups.md`（10 組 × 5-10h，合計 61-78h）
+> **commit**：`27c0887`（兩份文件，無程式碼變更）
+>
+> 使用者的執行方式：**一組一組來**，給組號才動手。修完一組要瀏覽器驗證再 commit。
+>
+> **兩條硬性依賴，不可亂跳**：
+> 1. **G2 必須早於 G3/G4** —— G2 修 `sampleFieldGL.js:171` 的快取簽章漏 `losEnabled`/`apGeoEnabled`，
+>    而這兩個 flag 存在的目的**就是 JS/GL parity 驗證**。目前 diff harness 跑兩次拿到同一份快取，
+>    **永遠回報「差異 0.000 dB」**。不先修它，G3 改完 GL 引擎無法驗證對錯。
+> 2. **G1 排最前** —— `CalibrationModal.jsx:109` 的 hooks 違規讓「🎯 校正熱圖」**必定白屏**，
+>    QA 兩輪都被卡住，所以 4 點校正的完整流程**從未被真人操作驗證過**。修好後要補測。
+>
+> **建議起手**：G1 + G2 + G5（約 19-24h）覆蓋「會白屏」「讓驗證失效」「改錯無法回退」三類最傷的。
+>
+> **4 條 critical**：
+> - `CalibrationModal.jsx:109` vs `:179` —— `useOverlayDismiss` 在 early return 之後 → 白屏
+>   （正確寫法可對照同資料夾的 `LiveViewModal.jsx:59`）
+> - `WallLayer3D.jsx:140-153`（+ `TrayLayer3D.jsx:24`）—— 零長度牆 → 白屏。端點吸附會產生完全相等座標，
+>   且 Viewer3D 在 2D 模式也常駐掛載，純 2D 編輯就會從隱藏的 3D 樹炸掉
+>   （**全庫已窮舉確認只有這 3 處 hooks 違規，不必重掃**）
+> - `propagationGL.js:2373` —— 加速格網夾在 256 格 × 4m = 只覆蓋 **1024m**，超出範圍的牆
+>   進了列表但 DDA 永遠讀不到 → 完全不衰減（而 `sampleField.js:21` 註解自稱支援 2km campus）
+> - `propagationGL.js:3135` —— `SCISSOR_TEST` 無 try/finally，fence timeout 後永久污染
+>   module-singleton context，**且 timeout 不算 context lost 所以永不自我復原，必須重載頁面**
+>
+> **最容易被忽略但影響最廣的一條**：`useHistoryStore.js` **完全沒有 import `useFloorStore`**
+> → `floor.scale`/`floorHeight`/`cropX-Y-W-H`/四個 align 欄位全部無法 undo。
+> 量錯比例尺（10m 的牆輸成 1m）→ 全樓層線纜長度/覆蓋面積/熱圖網格錯十倍，**只能重新量**。
+> 諷刺的是 `FloorplanSystem.jsx:638` 刻意吞掉 ALIGN_FLOOR 的 Delete 鍵、註解寫
+> 「so alignment work isn't lost」，但同一份工作連 Ctrl+Z 都沒有。
+>
+> **修 G7 前必看**：`nextSwitchName` 對 SW/IDF/MDF/RTR **四種前綴共用同一個 counter**，
+> demo 那次呼叫消耗了「編號 1」兩次（SW-01 與 IDF-01 都是 seq=1）。
+> **不能照抄 `setAPs` 的 `Math.max` 模板**，要先決定是否改成 per-prefix counter。
+>
+> **6 項未進 group，需使用者先決策或先驗證**（見 groups 檔末節），其中最重要：
+> `LayerToggle.jsx:83` 的修法要選 (a) 拆 12 個單欄位 selector 或 (b) 引入 `zustand/shallow`
+> —— 後者會是**全專案首例**，等於建立新慣例，不可自行決定。
+>
+> **三輪已修正的誤判（別照舊報告去修）**：`heatmapStack` 的 `isSoftwareRender` 漏簽章
+> 是**誤判**（store 建立時求值一次、全庫無 setter，runtime 恆定，無法 stale）；
+> `CoveragePanel.jsx` 在 `CameraTimeline/` 不在 `PanelRight/`；`SwitchLayer3D` 的
+> portTextureCache 應為低（key 有界 45 entry）。報告開頭已標注。
+>
+> **獵捕方法論（若要再開第四輪）**：三輪產量 32 → 29 → 42，**沒有下降，尚未收斂**。
+> 資料顯示「換切法」邊際產量遠高於「重讀同樣檔案」—— 第三輪的 15 條資料流問題，
+> 按檔案讀的前兩輪一條都沒找到。**已知的明確缺口**：pattern 窮舉那輪的欄位比對
+> 只做了 `floor` 一種物件型別，還有 wall/ap/camera/switch/tray/riser 等 11 種沒做
+> （`floor` 一種就挖出 3 個位置的 bug）；另外 `obj[key]`、解構重命名這類動態存取
+> 是所有 regex 的共同盲區，需換工具（AST）。
 
 ### Phase 52 三角色稽核修復（2026-08-11 立項，**四批全部完成**，詳見下方 Phase 52 專節）
 
