@@ -66,8 +66,24 @@ const buildFingerprint = () => {
   }
 }
 
+// 53-G4 (23y): outer guard. Everything below is best-effort background work for
+// a decorative stack, and the two call sites (`ensureStack()` on attach and
+// inside the 250 ms setTimeout) never attached a .catch — so any escaping throw
+// became an unhandled rejection AND left `fingerprint` stale, which is what
+// turned a single failure into a permanent 250 ms retry loop. Committing the
+// fingerprint on the way out breaks the loop; a real data edit changes the
+// fingerprint and retries naturally.
 const ensureStack = async () => {
   const fp = buildFingerprint()
+  try {
+    return await ensureStackInner(fp)
+  } catch (e) {
+    console.warn('[heatmapStack] ensureStack failed:', e?.message ?? e)
+    fingerprint = fp
+  }
+}
+
+const ensureStackInner = async (fp) => {
   if (fingerprint && fpEqual(fp, fingerprint)) return   // cache hit — no work
   const gen = ++generation
   const isStale = () => gen !== generation
@@ -119,12 +135,42 @@ const ensureStack = async () => {
         : sampleField(scenario, hm.gridStepM, opts)
     } catch (e) {
       console.warn('[heatmapStack] shader engine failed, falling back to JS:', e.message)
-      field = sampleField(scenario, hm.gridStepM, opts)
+      // 53-G4 (23y): the fallback needs its own guard. sampleField can throw on
+      // its own (a malformed scenario throws in BOTH engines), and an unhandled
+      // throw here escaped ensureStack entirely — leaving some floors holding a
+      // new field and the rest an old one, with `fingerprint` never updated, so
+      // the 250 ms driver retried the same failure forever.
+      try {
+        field = sampleField(scenario, hm.gridStepM, opts)
+      } catch (e2) {
+        console.warn('[heatmapStack] JS fallback also failed for floor', f.id, e2.message)
+        continue      // skip this floor, keep going; do NOT abort the whole stack
+      }
     }
-    if (!field || isStale()) return
+    // 53-G4 (23d): `null` here is the engine's STALE signal, not a failure —
+    // returning without touching `fingerprint` used to leave a mixed-generation
+    // stack that nothing ever corrected, because the next tick saw an unchanged
+    // fingerprint and did nothing. Ask isStale() directly: genuinely stale means
+    // a newer run owns the state, so bail silently; a null from a run that is
+    // still current is a real per-floor failure, so skip just this floor.
+    if (isStale()) return
+    if (!field) continue
 
     const grid = field[modeCfg.field] ?? field.rssi
-    if (!paintGL) paintGL = createHeatmapGL()
+    // 53-G4 (23y): createHeatmapGL was outside any try — a WebGL2 init failure
+    // (too many live contexts is the common one) threw out of ensureStack with
+    // the same never-recovers consequence as above.
+    if (!paintGL) {
+      try {
+        paintGL = createHeatmapGL()
+      } catch (e) {
+        console.warn('[heatmapStack] paint GL init failed, stack disabled:', e.message)
+        // Commit the fingerprint so the driver stops retrying every 250 ms;
+        // a data edit changes the fingerprint and will try again naturally.
+        fingerprint = fp
+        return
+      }
+    }
     const outW = f.imageWidth
     const outH = f.imageHeight
     // No `edgeFeather` here, deliberately (51-11): unlike the active floor, the

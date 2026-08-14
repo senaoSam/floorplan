@@ -34,10 +34,10 @@
 **Camera 3D 目標擬真化完成（2026-08-10 使用者驗收 ok）：人車模型重造（轎車擠出輪廓/衣著輪廓人偶）＋trail 色帶＋選取相機高亮＋2D/3D 共用色彩抖動（trackColor.js）＋步態修復（r3f delta NaN、擺動軸 x→z）。門縫做過又依使用者要求移除（只留門把），細節見 git log。**
 **Backlog 清掉兩項：PDF 規劃報告輸出（含新增的 RF 涵蓋率/verdict 頁）、spec.md 全面同步。以上三項 2026-08-10 使用者驗收 ok。**
 
-**★ 2026-08-14：Phase 53 進行中，G1 + G2 + G3 + G5 完成（使用者驗收 ok）。** 三輪 bug 獵捕找出 93 條
-（含 4 條 critical，其中 2 條會白屏），已分成 10 組 × 5-10h。**G1/G2/G3/G5 ✅ 完成，剩 G4/G6~G10。
-兩條硬性依賴都已解除。下一步建議 G4（同吃 parity 工具、同屬 GL）。
-一組一組來，等使用者給組號。** 詳見上方 Phase 53 專節與 `.claude/bug-fix-groups.md`。
+**★ 2026-08-14：Phase 53 進行中，G1 + G2 + G3 + G4 + G5 完成（使用者驗收 ok）。** 三輪 bug 獵捕找出 93 條
+（含 4 條 critical，其中 2 條會白屏），已分成 10 組 × 5-10h。**G1/G2/G3/G5 ✅、G4 ✅ 主體完成。
+剩：R1（反射 JS/GL 分歧，已有完整診斷）+ 23d 專門驗證 + G6~G10。
+4 條 critical 全部修完。一組一組來，等使用者給組號。** 詳見上方 Phase 53 專節與 `.claude/bug-fix-groups.md`。
 
 ---
 
@@ -55,8 +55,9 @@
 > - [x] **G1 白屏與功能阻斷 ✅**（2026-08-13，使用者驗收 ok，MCP 兩輪獨立驗證 0 error）
 > - [x] **G2 parity 工具 + 熱圖快取 ✅**（2026-08-13，同上）→ **G3/G4 的前置已解除**
 > - [x] **G5 undo/redo 完整性 ✅**（2026-08-13，同上）
-> - [x] **G3 GL 引擎正確性 ✅**（2026-08-14，三條 JS/GL 分歧全平，每條都 stash 反證過）
-> - [ ] G4 GL 例外與資源回滾 **+ R1 反射分歧**（前置 G2 已備齊，正在做）
+> - [x] **G3 GL 引擎正確性 ✅**（2026-08-14，三條 JS/GL 分歧全平,每條都 stash 反證過）
+> - [x] **G4 GL 例外與資源回滾 ✅ 主體完成**（2026-08-14，C4/E3/P3-22/23y + contextlost 監聽器）
+> - [ ] **R1 反射 JS/GL 分歧**（未修，已有 10 輪探針的完整診斷；剩 2-3h）
 > - [ ] G6 切樓層殘留 ／G7 命名唯一性 ／G8 單位比例尺 ／G9 效能洩漏 ／G10 UI/匯出
 >
 > **G1 收工小結（防重做）**：三處 hooks 違規全數修正 ——
@@ -118,9 +119,11 @@
 >   （**全庫已窮舉確認只有這 3 處 hooks 違規，不必重掃**）
 > - ~~`propagationGL.js:2373` —— 加速格網夾在 256 格 × 4m = 只覆蓋 **1024m**~~ **✅ G3 已修**
 >   （`cellM` 改成可超過 4m 偏好上限，讓 256 格永遠蓋滿全幅；實測牆幅 1200m 由 67.14 dB → 0.000）
-> - `propagationGL.js:3135` —— `SCISSOR_TEST` 無 try/finally，fence timeout 後永久污染
->   module-singleton context，**且 timeout 不算 context lost 所以永不自我復原，必須重載頁面**
->   ← **這是唯一剩下的 critical，屬 G4**
+> - ~~`propagationGL.js:3135` —— `SCISSOR_TEST` 無 try/finally，fence timeout 後永久污染~~ **✅ G4 已修**
+>   （三條 reject 路徑實測全乾淨；**同時修好 FBO 未解綁與 PBO 洩漏**，並補上全專案第一組
+>   `webglcontextlost` 監聽器 —— 這是「狀態被污染但 context 沒死」後果永久的根因）
+>
+> **★ 4 條 critical 全部修完（G1×2 + G3×1 + G4×1）。**
 >
 > ~~**最容易被忽略但影響最廣的一條**：`useHistoryStore.js` **完全沒有 import `useFloorStore`**~~
 > **✅ G5 已修**（2026-08-13）。`floor.scale`/`floorHeight`/`cropX-Y-W-H`/四個 align 欄位現在都能 undo。
@@ -143,6 +146,24 @@
 > **★ 第二個 parity 比對陷阱（G3 又踩一次）**：GL 有 `CULL_FLOOR_DBM = -120` 距離剔除，
 > JS 一路算到 −300 → 大場地遠處出現 GL=−120 / JS=−273 的**假分歧（看起來 79.9 dB）**。
 > G2 記的 −200 門檻**不夠**，要用 **−120**：只比兩邊都 > −120 dBm 的格。
+>
+> **G4 收工小結（2026-08-14，防重做）**：C4/E3/P3-22/23y 全修 + 補上全專案第一組
+> `webglcontextlost`/`webglcontextrestored` 監聽器與 `isDead()`（`getGL()` 改用它，
+> 可涵蓋「await 期間才丟 context」，舊的 `isContextLost()` 只在呼叫前輪詢）。
+> **★ 驗證抓到我自己的修法不完整，這是「寫完 + 語法通過」抓不到的**：第一版 C4 只包了
+> PBO 那段 try，但失敗發生在**分帶繪製迴圈**根本到不了 → scissor 有還原、**FBO 仍綁著**；
+> 修完又抓到第三條 —— `renderFieldPrep` 已綁 FBO 而下一行 `isContextLost()` 的拋錯
+> **在所有 try 之外**。漏掉的後果是**下一個不相關的繪製會畫進熱圖貼圖裡**。
+> **注入方法（可重用）**:hook `clientWaitSync` 回 `WAIT_FAILED`、hook `isContextLost` 回 true、
+> 傳假的 `isStale`;PBO 洩漏用 hook `createBuffer` 計數;要殺 singleton 的 context
+> 必須**在它建立之前**就 hook `HTMLCanvasElement.prototype.getContext`（否則抓不到那個 canvas）。
+> **仍未驗**:23d 的「回傳 null 但非 stale」分支、以及「資料編輯後真的會重試」。
+>
+> **R1（反射 JS/GL 分歧）未修，但有 10 輪探針的完整診斷** —— 見 `.claude/bug-fix-groups.md`
+> 的 R1 專節。最關鍵的事實:**NaN 只在 `Hpara`，`Hperp` 全程乾淨**，而直接路徑寫進兩者的是
+> 完全相同的 `vec2(ampDir, 0.0)`;金屬牆也死所以 `fresnelGamma`/`cdiv` 已排除。
+> 疑似 GLSL 對 `addPathHN` 的雙 `inout vec2[NMAX]` 陣列參數處理問題。
+> **探針備註**:per-AP target 是 R32F 只回讀 `.r`，多個探針會互相覆蓋（我最後一輪就讀到假值）。
 >
 > **修 G7 前必看**：`nextSwitchName` 對 SW/IDF/MDF/RTR **四種前綴共用同一個 counter**，
 > demo 那次呼叫消耗了「編號 1」兩次（SW-01 與 IDF-01 都是 seq=1）。

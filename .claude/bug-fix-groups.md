@@ -12,9 +12,9 @@
 ## 建議執行順序
 
 ```
-G1 ✅ → G2 ✅ → G3 ✅ → G4 → G5 ✅ → G6 → G7 → G8 → G9 → G10
-                          ↑                     ↑
-                     前置 G2 已完成          可與 G6 交換
+G1 ✅ → G2 ✅ → G3 ✅ → G4 ✅(R1 除外) → G5 ✅ → G6 → G7 → G8 → G9 → G10
+                                                      ↑
+                                                 可與 G6 交換
 ```
 
 **硬性依賴兩條都已解除**:
@@ -147,21 +147,74 @@ G1 ✅ → G2 ✅ → G3 ✅ → G4 → G5 ✅ → G6 → G7 → G8 → G9 → G
 
 ---
 
-# G4 · GL 例外路徑與資源回滾(6-8 小時,含併入的 R1)
+# G4 · GL 例外路徑與資源回滾 ✅ **主體完成**(2026-08-14;R1 未修,見下)
 
-| # | 位置 | 問題 |
-|---|---|---|
-| C4 + E3 | `propagationGL.js:3135-3164` | `SCISSOR_TEST` 無 try/finally,`waitFence` 三條 reject 路徑會讓 scissor 永久污染 module-singleton context → 熱圖只剩一條窄帶,**fence timeout 不算 context lost 所以永不自我復原,必須重載頁面**。**附帶兩個洩漏**:`bindFramebuffer(null)` 也不執行;PBO 每次失敗漏一顆(`PBO_POOL_MAX = 32` 永遠補不回) |
+| # | 位置 | 問題 | 狀態 |
+|---|---|---|---|
+| C4 + E3 ✅ | `propagationGL.js:3135-3164` | `SCISSOR_TEST` 無 try/finally,`waitFence` 三條 reject 路徑會讓 scissor 永久污染 module-singleton context → 熱圖只剩一條窄帶,**fence timeout 不算 context lost 所以永不自我復原,必須重載頁面**。**附帶兩個洩漏**:`bindFramebuffer(null)` 也不執行;PBO 每次失敗漏一顆(`PBO_POOL_MAX = 32` 永遠補不回) | 已修 |
 | **R1**(併入) | 反射路徑,`maxReflOrder ≥ 1` | **2026-08-14 用 G2 修好的 parity 工具掃出來的新分歧,原報告 93 條沒有**。開反射時 GL 與 JS 參考實作差 **10.07 dB / 197 格**;加繞射為 6.97 dB / 153 格。反射關閉時完全一致(0.000),所以問題確定在 image-source 反射那段。G3 已排除格網覆蓋(C3)、DDA 步數(P1-9)、樓板打包(P1-7)三個成因,**這條是獨立的第四個成因**。JS 參考實作在 `propagation.js`,GL 在 `renderAp` 的 refl 迴圈 |
-| P3-22 | `render/heatmapAdapter.js:259-273` | context loss 復原沒清 `snapSprite.mask`(`:569` 指派了同一個 `maskG`)→ PIXI 踩已釋放資源,整個畫布變黑且 `requestRender` 已死。修法還需重設 `soloActive = false` |
-| 23y | `viewer3d/heatmapStack.js:69-156` | `ensureStack` 是 async 但**完全沒有 try/catch/finally**。退回的同步 `sampleField` 若自己拋錯無第二層保護;`createHeatmapGL()` 也在 catch 之外 → 部分樓層留新場、其餘留舊場,且 fingerprint 沒更新形成每 250ms 一次的失敗迴圈 |
-| 23d | `viewer3d/heatmapStack.js:124` | 把正常的 `null`(stale 訊號)當失敗直接 return → 混世代堆疊且**不碰任何東西永不修正** |
+| P3-22 ✅ | `render/heatmapAdapter.js:259-273` | context loss 復原沒清 `snapSprite.mask`(`:569` 指派了同一個 `maskG`)→ PIXI 踩已釋放資源,整個畫布變黑且 `requestRender` 已死。修法還需重設 `soloActive = false` | 已修 |
+| 23y ✅ | `viewer3d/heatmapStack.js:69-156` | `ensureStack` 是 async 但**完全沒有 try/catch/finally**。退回的同步 `sampleField` 若自己拋錯無第二層保護;`createHeatmapGL()` 也在 catch 之外 → 部分樓層留新場、其餘留舊場,且 fingerprint 沒更新形成每 250ms 一次的失敗迴圈 | 已修 |
+| 23d ⚠️ | `viewer3d/heatmapStack.js:124` | 把正常的 `null`(stale 訊號)當失敗直接 return → 混世代堆疊且**不碰任何東西永不修正** | 已改,**但未專門驗證**(見下) |
 
-**架構層面建議**:全專案**沒有註冊 `webglcontextlost`/`webglcontextrestored` 監聽器**,全靠呼叫前輪詢 `isContextLost()`。這是「狀態被污染但 context 沒死」後果永久的根本原因,可考慮在此組一併加上監聽器。
+**架構層面**:✅ 已補上全專案第一組 `webglcontextlost`/`webglcontextrestored` 監聽器 + `isDead()`,`getGL()` 改用它(可涵蓋「await 期間才丟 context」,而舊的 `isContextLost()` 只在呼叫前輪詢)。
 
 **參考範本**:`heatmapAdapter.js:592-632 runDragLoop` 的 finally 不只重設旗標,還重新排程 await 縫隙中落地的新請求——正是 C4 該套用的形狀。
 
-**驗收**:軟體渲染 + 300 AP 反覆切換熱圖模式不會出現橫條紋或整片消失。**R1 另外要求**:開反射(`maxReflOrder:1`)時 GL/JS parity 回到 0.000 dB —— 用 G3 建立的 harness,記得濾掉 `<= -120 dBm` 的格(見上方兩個比對陷阱)。
+---
+
+## G4 驗證結果(2026-08-14,兩輪獨立,全程 0 console error)
+
+**★ 驗證抓到我自己的修法不完整 —— 這是「寫完 + 語法通過」絕對抓不到的**:
+第一版 C4 只包了 PBO 那段 try,但失敗發生在**分帶繪製迴圈**(第一個 try),根本到不了 → scissor 有還原、**framebuffer 仍綁著**。修完再測又抓到第三條:`renderFieldPrep` 已經綁 FBO,而下一行的 `isContextLost()` 拋錯**在所有 try 之外**。兩處都補才三條路徑全乾淨。
+**漏掉的後果**:失敗後 FBO 還綁在熱圖 output target,**下一個不相關的繪製(PIXI、3D stack 的 paintGL)會畫進熱圖貼圖裡**。
+
+| 項目 | 輪 A | 輪 B | 注入方法 |
+|---|---|---|---|
+| G3 回歸(12 項) | 全 **0.000 dB** | 4 項不同數值全 0.000 | 確認沒弄壞 G3 |
+| C4 scissor + FBO | 三條路徑全乾淨 | 15 次交錯失敗後乾淨 | 強制 `WAIT_FAILED` / stale / context-lost |
+| E3 PBO 洩漏 | 10 次 reject 漏 **0** 顆 | 15 次失敗漏 **0** 顆 | hook `createBuffer` 計數 |
+| E3 雙重釋放 | 24 次 submit 只建 4 顆、無 aliasing | — | 檢查同批 handle 是否共用 buffer |
+| contextlost 監聽器 | 熱圖**每次都復原**(441/441) | — | 在 singleton 建立**之前**裝 hook 才殺得到它 |
+| P3-22 | solo 拖曳中殺 context → 存活、熱圖重建不變黑 | — | 截圖確認 |
+| 23y | — | 失敗只 1 次、3 秒 **0 增長** | 注入 `createHeatmapGL` 失敗;未修會 ~12 次 |
+| 300 AP 反覆切換 | — | 8 次切換後熱圖完整無條紋 | **G4 正式驗收條件** |
+
+**仍未驗證(誠實記錄)**:
+1. **23d** 只驗到「stack 正常產出 2 張」,**沒有專門構造「回傳 null 但非 stale」**去打那條分支
+2. `heatmapStack` 失敗時 commit fingerprint 是刻意取捨(暫時失敗要等下次資料編輯才重試),但**沒驗「資料編輯後真的會重試」**
+3. **R1 未修**,見下方獨立段落
+
+---
+
+## R1 · 反射路徑 JS/GL 分歧 —— **未修,但已有完整診斷資產**
+
+**觸發條件(已精確縮到)**:AP 恰好落在「軸對齊牆的垂直軸」上,使**鏡像點、AP、rx 三點共線**。
+- 垂直牆 + AP 同列 → 11 格死掉(`-300`);水平牆 + AP 同行 → 11 格
+- **斜牆 → 0 格**;AP 偏 0.5m 離軸 → **0 格**
+- 與材質無關(**金屬也死**)、與 N 無關(N=1/5/auto 都死)、與加速結構無關(`losEnabled:false`/`apGeoEnabled:false` 都死)
+
+**10 輪 shader 探針的量測結果(每層輸入都證明是好的)**:
+
+| 量測項 | 失效列 | 正常列 | 判定 |
+|---|---|---|---|
+| 反射路徑數 / `dTot` | 1 / 15→5 | 1 / 15.13→5.39 | 正常 |
+| `rxDbRef` / `ampRef` | −42.96…−31.92 / 5.03e-3…1.79e-2 | 幾乎相同 | 正常 |
+| `rxDbDir` / `ampDir` | −32.90…−47.32 / 1.60e-2…3.05e-3 | 幾乎相同 | 正常 |
+| `Hperp[0]`(直接後 / 反射後) | 有限 | 有限 | **正常** |
+| **`Hpara[0]`** | **NaN** | 有限 | ❌ |
+| `powerSum` | NaN → `linToDb` 的 `max(lin,1e-30)` 夾成 −300 | 2.4e-3…9.6e-3 | ❌ |
+
+**關鍵發現:NaN 只在 `Hpara`,`Hperp` 全程乾淨。**
+這很反直覺 —— 直接路徑寫進去的是 `perpDir = paraDir = vec2(ampDir, 0.0)`(**完全相同的值**)、同一個 `addPathHN` 呼叫、同一組相位,結果一個好一個壞。
+
+**已排除**:`fresnelGamma`/`cdiv`(金屬走硬編碼 `vec4(-1,0,-1,0)` 也死)、幾何(fp32 重算 `segSegHit` 的 `den`/`t`/`u`/`cosI`/`d1`/`d2` 全有限良態)、物理抵銷(振幅比 0.21~1.12,差 2~5 倍不可能歸零)。
+
+**下一步方向**:`addPathHN` 收兩個 `inout vec2[NMAX]` 陣列參數而**只有第二個**壞 —— 疑似 GLSL 對雙 `inout` 陣列參數的處理,或 shader 內某處越界寫入污染了第二個陣列。可考慮把兩個陣列合併成單一 `vec4[NMAX]` 規避。
+
+**測試方法備註**:per-AP 的 output target 是 **R32F**(只有 `.r` 回讀得到),所以探針值必須編碼進單一 float;想同時看多個值要嘛換 RGBA32F target、要嘛一次只留一個探針(我最後一輪就是因為兩個探針互相覆蓋而讀到 `float(N)` 的假值)。
+
+**驗收條件**:開反射(`maxReflOrder:1`)時 GL/JS parity 回到 0.000 dB —— 用 G3 建立的 harness,記得濾掉 `<= -120 dBm` 的格(見上方兩個比對陷阱)。
 
 ---
 
@@ -343,20 +396,21 @@ align 拖曳每次 239ms 是**既有問題不是 G5 造成**,證據:① 改樓�
 | ~~G1~~ ✅ | ~~白屏與功能阻斷~~ **已完成 2026-08-13** | ~~5-6 h~~ | — |
 | ~~G2~~ ✅ | ~~parity 工具 + 熱圖快取~~ **已完成 2026-08-13** | ~~6-8 h~~ | — |
 | ~~G3~~ ✅ | ~~GL 引擎正確性~~ **已完成 2026-08-14** | ~~8-10 h~~ | ~~G2~~ ✅ |
-| G4 | GL 例外與資源回滾 **+ R1 反射分歧** | 6-8 h | ~~G2~~ ✅ 已備齊 |
+| ~~G4~~ ✅ | ~~GL 例外與資源回滾~~ **主體完成 2026-08-14**(R1 未修) | ~~6-8 h~~(R1 剩 2-3 h) | ~~G2~~ ✅ |
 | ~~G5~~ ✅ | ~~undo/redo 完整性~~ **已完成 2026-08-13** | ~~8-10 h~~ | — |
 | G6 | 切樓層/模式狀態殘留 | 6-8 h | — |
 | G7 | 命名唯一性與跨樓層參照 | 5-6 h | — |
 | G8 | 單位/比例尺/魔術數字 | 6-8 h | — |
 | G9 | 效能與資源洩漏 | 5-7 h | — |
 | G10 | UI/UX 與匯出 | 7-9 h | — |
-| | **合計** | **61-78 h**(剩 **35-48 h**,R1 併入後 G4 +1~2h) | |
+| | **合計** | **61-78 h**(剩 **29-40 h** + R1 的 2-3 h) | |
 
 ## 分批建議
 
 ~~若想更早看到成效,前三組(G1 + G2 + G5,約 19-24 小時)覆蓋了「會白屏」「讓驗證失效」「改錯無法回退」三類最傷的問題。~~
 **G1 + G2 + G5 已於 2026-08-13 全部完成** —— 三類最傷的問題(會白屏 / 讓驗證失效 / 改錯無法回退)都已解除。
 **G3 已於 2026-08-14 完成**(三條 JS/GL 分歧全平,每條都用 stash 反證)。
-**下一步建議 G4**(同吃 parity 工具、同屬 GL),或無依賴的 G6~G10。
+**G4 主體已於 2026-08-14 完成**(C4/E3/P3-22/23y + contextlost 監聽器,驗證時抓到自己修法不完整並補齊)。
+**剩下**:R1(反射分歧,已有完整診斷)、23d 的專門驗證、以及 G6~G10。
 
 G3/G4(GL 引擎)可以延後,因為它們的症狀是「熱圖數字不對」而非「操作壞掉」,且需要較專注的數值驗證時段。

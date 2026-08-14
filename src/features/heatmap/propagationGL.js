@@ -2051,6 +2051,43 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     throw new Error('EXT_color_buffer_float not supported')
   }
 
+  // 53-G4: register the loss/restore listeners the project never had. Until
+  // now every call site polled isContextLost() beforehand, which cannot catch a
+  // loss that happens DURING an await, and left the JS-side caches holding
+  // handles for a context that no longer exists. `contextDead` lets callers
+  // (sampleFieldGL's getGL) drop the singleton instead of dispatching against a
+  // dead context and silently getting zeroed grids.
+  //
+  // preventDefault on webglcontextlost is what makes a restore possible at all;
+  // without it the browser never fires webglcontextrestored. We do not attempt
+  // to rebuild programs here — the instance is designed to be thrown away and
+  // recreated, which is simpler than re-linking every program and re-uploading
+  // every texture in place.
+  let contextDead = false
+  const canvas = gl.canvas
+  if (canvas && typeof canvas.addEventListener === 'function') {
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault()
+      contextDead = true
+      // Drop cache bookkeeping: the textures/FBOs these entries name are gone
+      // with the context, so deleting them is neither possible nor needed, but
+      // keeping the entries would let a later lookup return a dead handle.
+      losCache.clear()
+      apGeoCache.clear()
+      outGridCache.clear()
+      pboPool.length = 0
+      wallsSig = null
+      cornersSig = null
+      slabsSig = null
+    }, false)
+    canvas.addEventListener('webglcontextrestored', () => {
+      // Stays dead on purpose: this instance's programs/textures were destroyed
+      // with the old context. getGL() builds a fresh instance on the next call.
+      contextDead = true
+    }, false)
+  }
+  const isDead = () => contextDead || gl.isContextLost()
+
   const prog = link(gl, VS, FS)
   const progField = link(gl, VS, FS_FIELD)
   // HM-F5h coarse-pass program. Lazily linked because most callers never
@@ -2990,15 +3027,29 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   }
   // Wait for the whole submitted batch (one fence covers every handle since
   // enqueue order is preserved), then copy each grid out.
+  //
+  // 53-G4 (E3): same leak shape as renderFieldAsync. When waitFence rejects
+  // (context lost / WAIT_FAILED / 10 s timeout) the handles' PBOs were never
+  // recycled, and the caller could not clean up either: sampleFieldGL's
+  // flushPending has already spliced the batch out of `pending`, so the only
+  // references are the local `batch`, which the throw unwinds past. Each
+  // failure permanently cost the pool one buffer. Release anything not handed
+  // to readPboInto.
   async function resolveApReads(handles) {
     if (handles.length === 0) return []
     const sync = fenceFlush()
-    await waitFence(sync)
-    return handles.map((h) => {
-      const out = new Float32Array(h.nx * h.ny)
-      readPboInto(h.pbo, out)
-      return out
-    })
+    const consumed = new Set()
+    try {
+      await waitFence(sync)
+      return handles.map((h) => {
+        const out = new Float32Array(h.nx * h.ny)
+        consumed.add(h)
+        readPboInto(h.pbo, out)
+        return out
+      })
+    } finally {
+      for (const h of handles) if (!consumed.has(h)) pboRelease(h.pbo)
+    }
   }
   // Stale-generation cleanup: recycle the buffers without reading them.
   function discardApReads(handles) {
@@ -3300,38 +3351,85 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // across the between-band awaits (sampleFieldGL serialises its callers).
   async function renderFieldAsync(scenario, gridStepM, originM, rxZM, slabMeta, opts = {}) {
     const { nx, ny } = renderFieldPrep(scenario, gridStepM, originM, rxZM, slabMeta, opts)
-    if (gl.isContextLost()) throw new Error('GL context lost during renderFieldAsync')
-    const bands = Math.max(1, Math.min(ny, Math.ceil(apCount / 24)))
-    if (bands > 1) {
-      gl.enable(gl.SCISSOR_TEST)
-      const rowsPer = Math.ceil(ny / bands)
-      for (let y0 = 0; y0 < ny; y0 += rowsPer) {
-        gl.scissor(0, y0, nx, Math.min(rowsPer, ny - y0))
-        gl.drawArrays(gl.TRIANGLES, 0, 6)
-        await waitFence(fenceFlush())
-        // Abort between bands when the caller's generation moved on — a
-        // synchronous drag-path render may have clobbered our GL state
-        // across the await, and the result is doomed to be dropped anyway.
-        if (opts.isStale && opts.isStale()) {
-          gl.disable(gl.SCISSOR_TEST)
-          gl.bindFramebuffer(gl.FRAMEBUFFER, null)
-          return null
-        }
-      }
-      gl.disable(gl.SCISSOR_TEST)
-    } else {
-      gl.drawArrays(gl.TRIANGLES, 0, 6)
+    // 53-G4 (C4): renderFieldPrep BINDS the sized output framebuffer, so this
+    // guard's throw has to unbind — it sits outside the try blocks below, and
+    // MCP verification caught it leaving the FBO bound on the context-lost path.
+    if (gl.isContextLost()) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+      throw new Error('GL context lost during renderFieldAsync')
     }
+    const bands = Math.max(1, Math.min(ny, Math.ceil(apCount / 24)))
+    // 53-G4 (C4): the scissor rect and the bound framebuffer are GL state on a
+    // MODULE-SINGLETON context (sampleFieldGL.js:38 glInstance). waitFence has
+    // three reject paths (context lost, WAIT_FAILED, 10 s timeout), and without
+    // try/finally an early exit left SCISSOR_TEST enabled with the last band's
+    // rect. Everything drawn afterwards — renderAp, bakeLos, progFieldCoarse —
+    // then only wrote those few rows and kept stale values elsewhere: heatmaps
+    // with horizontal ghost stripes, or nearly empty because the coarse mask
+    // marked 96% of cells dead. Worst of all, a fence timeout does NOT count as
+    // context lost, so getGL() never rebuilt the instance and the damage
+    // persisted until a page reload.
+    //
+    // Same shape as the reference in heatmapAdapter.js:592 runDragLoop: reset
+    // the state you touched in finally, unconditionally.
+    try {
+      if (bands > 1) {
+        gl.enable(gl.SCISSOR_TEST)
+        const rowsPer = Math.ceil(ny / bands)
+        for (let y0 = 0; y0 < ny; y0 += rowsPer) {
+          gl.scissor(0, y0, nx, Math.min(rowsPer, ny - y0))
+          gl.drawArrays(gl.TRIANGLES, 0, 6)
+          await waitFence(fenceFlush())
+          // Abort between bands when the caller's generation moved on — a
+          // synchronous drag-path render may have clobbered our GL state
+          // across the await, and the result is doomed to be dropped anyway.
+          // Unbind here as well: this early return also bypasses the PBO
+          // block's finally (the original code unbound explicitly for the same
+          // reason — keep that behaviour).
+          if (opts.isStale && opts.isStale()) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+            return null
+          }
+        }
+      } else {
+        gl.drawArrays(gl.TRIANGLES, 0, 6)
+      }
+    } catch (e) {
+      // The framebuffer must be released here too, not only in the PBO block
+      // below: a rejection in THIS loop never reaches that block, which is
+      // exactly the gap MCP verification caught — scissor was restored but the
+      // sized output FBO stayed bound, so the next unrelated draw (PIXI, the
+      // 3D stack's paintGL) rendered into our heatmap target.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+      throw e
+    } finally {
+      // Unconditional: covers the normal path, the stale-abort return, and
+      // every waitFence rejection.
+      gl.disable(gl.SCISSOR_TEST)
+    }
+
+    // 53-G4 (E3): the PBO is only recycled by readPboInto, so a waitFence
+    // rejection between acquire and read leaked one buffer per failure. With
+    // PBO_POOL_MAX = 32 the pool could never refill, so a scene that timed out
+    // repeatedly allocated a fresh buffer every render. Release it in finally
+    // when we did not hand it to readPboInto. bindFramebuffer(null) also has to
+    // be unconditional — it was skipped on the same reject paths.
     const pbo = pboAcquire(nx * ny * 16)
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo.buf)
-    gl.readPixels(0, 0, nx, ny, gl.RGBA, gl.FLOAT, 0)
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
-    const sync = fenceFlush()
-    await waitFence(sync)
-    const packed = new Float32Array(nx * ny * 4)
-    readPboInto(pbo, packed)
-    return deinterleaveField(packed, nx, ny)
+    let pboConsumed = false
+    try {
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo.buf)
+      gl.readPixels(0, 0, nx, ny, gl.RGBA, gl.FLOAT, 0)
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
+      const sync = fenceFlush()
+      await waitFence(sync)
+      const packed = new Float32Array(nx * ny * 4)
+      pboConsumed = true          // readPboInto owns the release from here
+      readPboInto(pbo, packed)
+      return deinterleaveField(packed, nx, ny)
+    } finally {
+      if (!pboConsumed) pboRelease(pbo)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    }
   }
 
   function dispose() {
@@ -3365,5 +3463,8 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     renderAp, renderField,
     renderFieldAsync, renderApSubmit, resolveApReads, discardApReads,
     getWallsVersion, getCachedGrid, setCachedGrid, setUseGrid, dispose, gl,
+    // 53-G4: true once the context is lost/restored (or reports itself lost).
+    // Callers should drop this instance rather than keep dispatching into it.
+    isDead,
   }
 }

@@ -40,7 +40,15 @@ function getGL() {
   // Drop a cached instance whose context died (e.g. Windows TDR after a heavy
   // brute-force pass on a large scenario). Without this, subsequent runs would
   // keep dispatching against a dead context and silently return zeroed grids.
-  if (glInstance && glInstance.gl.isContextLost()) {
+  //
+  // 53-G4: prefer the instance's own isDead(), which also covers a loss that
+  // arrived as a webglcontextlost EVENT while we were awaiting a fence.
+  // isContextLost() alone can read false in that window on some drivers, and
+  // the old check ran only before a call, never after an await.
+  const dead = glInstance && (
+    typeof glInstance.isDead === 'function' ? glInstance.isDead() : glInstance.gl.isContextLost()
+  )
+  if (dead) {
     try { glInstance.dispose() } catch (_) {}
     glInstance = null
   }

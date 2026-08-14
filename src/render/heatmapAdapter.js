@@ -268,6 +268,23 @@ export function attachHeatmapLayer({
       sprite = null
     }
     if (texture) { texture.destroy(true); texture = null }
+    // 53-G4 (P3-22): snapSprite is masked by the SAME maskG (see :569), so
+    // destroying maskG while snapSprite still referenced it left PIXI walking a
+    // freed Graphics every frame — the whole canvas went black and requestRender
+    // was already dead, so nothing recovered it. Tear the snapshot layer down
+    // together with the sprite it shadows.
+    if (snapSprite) {
+      snapSprite.mask = null
+      layer.removeChild(snapSprite)
+      snapSprite.destroy({ texture: false })
+      snapSprite = null
+    }
+    if (snapTexture) { snapTexture.destroy(true); snapTexture = null }
+    snapCanvas = null
+    // The frozen pre-drag snapshot is gone with the context; without clearing
+    // this the next render would take the "already in solo" branch and never
+    // re-take a snapshot, leaving solo drag with no dimmed backdrop.
+    soloActive = false
     if (maskG) { layer.removeChild(maskG); maskG.destroy(); maskG = null }
     return true
   }
