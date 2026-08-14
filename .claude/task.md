@@ -34,10 +34,10 @@
 **Camera 3D 目標擬真化完成（2026-08-10 使用者驗收 ok）：人車模型重造（轎車擠出輪廓/衣著輪廓人偶）＋trail 色帶＋選取相機高亮＋2D/3D 共用色彩抖動（trackColor.js）＋步態修復（r3f delta NaN、擺動軸 x→z）。門縫做過又依使用者要求移除（只留門把），細節見 git log。**
 **Backlog 清掉兩項：PDF 規劃報告輸出（含新增的 RF 涵蓋率/verdict 頁）、spec.md 全面同步。以上三項 2026-08-10 使用者驗收 ok。**
 
-**★ 2026-08-14：Phase 53 進行中，G1 + G2 + G3 + G4 + G5 完成（使用者驗收 ok）。** 三輪 bug 獵捕找出 93 條
-（含 4 條 critical，其中 2 條會白屏），已分成 10 組 × 5-10h。**G1/G2/G3/G5 ✅、G4 ✅ 主體完成。
-剩：R1（反射 JS/GL 分歧，已有完整診斷）+ 23d 專門驗證 + G6~G10。
-4 條 critical 全部修完。一組一組來，等使用者給組號。** 詳見上方 Phase 53 專節與 `.claude/bug-fix-groups.md`。
+**★ 2026-08-14：Phase 53 進行中，G1~G5 全部完成（使用者驗收 ok）。** 三輪 bug 獵捕找出 93 條
+（含 4 條 critical，其中 2 條會白屏），已分成 10 組 × 5-10h。**G1/G2/G3/G4/G5 ✅ 完成，4 條 critical 全修完。
+剩 G6~G10（彼此無依賴）。R1「反射分歧」查證為 harness 誤判、非 bug。
+一組一組來，等使用者給組號。** 詳見上方 Phase 53 專節與 `.claude/bug-fix-groups.md`。
 
 ---
 
@@ -57,7 +57,7 @@
 > - [x] **G5 undo/redo 完整性 ✅**（2026-08-13，同上）
 > - [x] **G3 GL 引擎正確性 ✅**（2026-08-14，三條 JS/GL 分歧全平,每條都 stash 反證過）
 > - [x] **G4 GL 例外與資源回滾 ✅ 主體完成**（2026-08-14，C4/E3/P3-22/23y + contextlost 監聽器）
-> - [ ] **R1 反射 JS/GL 分歧**（未修，已有 10 輪探針的完整診斷；剩 2-3h）
+> - [x] ~~**R1 反射 JS/GL 分歧**~~ **❌ 查證為誤判、非 bug**（2026-08-14；harness 傳了 `itu: 0`）
 > - [ ] G6 切樓層殘留 ／G7 命名唯一性 ／G8 單位比例尺 ／G9 效能洩漏 ／G10 UI/匯出
 >
 > **G1 收工小結（防重做）**：三處 hooks 違規全數修正 ——
@@ -141,7 +141,7 @@
 > - **P1-7 修法**：打包從「每個(boundary×洞)一筆」改成「**每 boundary 一筆**」，
 >   頂點多帶 `ringId` 通道;shader 換成 `pointInAnyPoly` 走訪多環（每環對自己的第一點閉合，
 >   否則環間會多一條假邊)。**這是唯一改到 uploadSlabs 打包格式的地方**。
-> - **未修**:反射路徑分歧(~10 dB)成因不同,**已併入 G4 成為 R1**（使用者決定）。
+> - ~~**未修**:反射路徑分歧(~10 dB)~~ **❌ 後來查證是誤判**（harness 傳了 `itu: 0`，見下方 R1 結案）。
 >
 > **★ 第二個 parity 比對陷阱（G3 又踩一次）**：GL 有 `CULL_FLOOR_DBM = -120` 距離剔除，
 > JS 一路算到 −300 → 大場地遠處出現 GL=−120 / JS=−273 的**假分歧（看起來 79.9 dB）**。
@@ -165,11 +165,19 @@
 > ES module namespace 是凍結的,外部無法 stub 引擎回 `null`,這條分支否則**結構上無法驗證**。
 > ⚠ 別再用「把 AP 清空」當替代:那走的是既有 `crossFloor` 守衛的 `continue`,**不是這一行**。
 >
-> **R1（反射 JS/GL 分歧）未修，但有 10 輪探針的完整診斷** —— 見 `.claude/bug-fix-groups.md`
-> 的 R1 專節。最關鍵的事實:**NaN 只在 `Hpara`，`Hperp` 全程乾淨**，而直接路徑寫進兩者的是
-> 完全相同的 `vec2(ampDir, 0.0)`;金屬牆也死所以 `fresnelGamma`/`cdiv` 已排除。
-> 疑似 GLSL 對 `addPathHN` 的雙 `inout vec2[NMAX]` 陣列參數處理問題。
-> **探針備註**:per-AP target 是 R32F 只回讀 `.r`，多個探針會互相覆蓋（我最後一輪就讀到假值）。
+> **★ R1「反射 JS/GL 分歧」查證為誤判 —— 不是 bug，程式碼沒動（2026-08-14 結案）**
+> **根因是我的測試 scenario 傳了 `itu: 0`,而 `itu` 是物件 `{a,b,c,d}` 不是數字。**
+> JS `materialEpsC` 是 `if (!itu || itu.metal) return {metal:true}` → `0` falsy → **JS 當金屬**;
+> GL 讀 `itu.x = 0` → 退化 `epsC` → **GL 當怪材質**。兩邊算不同材質,難怪差 10 dB。
+> 用真實 ITU 材質(`constants/materials.js`,例:混凝土 `{a:5.24,b:0,c:0.0462,d:0.7822}`)
+> 重測**原始碼**:混凝土/輕隔間/金屬、AP 在軸上或離軸,全部 **0 dead cells / 0.000 dB**。
+> 反射+繞射剩 1.569 dB 的**單一格**已查證是破壞性干涉深谷的 fp32 噪音(左右鄰完全一致)。
+> **`Hpara` NaN 的整套推論隨之作廢**(那是餵退化 `epsC` 的下游現象)。
+> **我試過的修法(把 `addPathHN` 雙 `inout vec2[NMAX]` 併成 `vec4[NMAX]`)已撤回** ——
+> stash 反證後數字完全不變,證明不是原因。
+> **教訓**:① 建 scenario 要照真實欄位型別,**優先用 `buildScenario`** 而非手寫;
+> ② 這是 Phase 53 第**三**次 harness 假陽性(前兩次:sentinel −300、cull floor −120)——
+> **看到大數字先懷疑 harness**;③ stash 反證是最快的判別法。
 >
 > **修 G7 前必看**：`nextSwitchName` 對 SW/IDF/MDF/RTR **四種前綴共用同一個 counter**，
 > demo 那次呼叫消耗了「編號 1」兩次（SW-01 與 IDF-01 都是 seq=1）。
