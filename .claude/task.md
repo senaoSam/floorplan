@@ -81,6 +81,14 @@
 > **已知非問題**：`outGridCache` 每個 AP 只有一格（`set(apKey,…)`，hash 存值裡），
 > 所以交替切 opts 會互相淘汰、harness 反覆切旗標時每次都 miss —— 既有設計，正常使用不受影響。
 >
+> **★ 2026-08-14：修好的工具已實際全面掃描引擎（15 情境），這才算 G2 真正完成。**
+> 11 個一致（0.000 dB）、**3 個真實分歧**：反射 **10.07 dB / 197 格**、反射+繞射 6.97 dB、
+> 同樓板兩洞 **61.24 dB / 44 格**（= P1-7；單洞時 0.000 完全一致 → 確定只在第二個以後的洞）。
+> **反射那條是原報告 93 條沒有的新發現**，已加進 G3 表格。
+> **比對陷阱（不知道會誤判）**：JS 的無訊號 sentinel 是 `-300`、GL 寫巨大負值（實測 `-453927`），
+> 直接相減會得到 677651 dB 這種假數字 —— 必須排除 `< -200 dBm` 的格；
+> 排除後 5GHz/6GHz 的真實差異是 **0.000 dB**。G3 寫 harness 前必看。
+>
 > **G5 收工小結（防重做）**：`FLOOR_SNAPSHOT_KEYS` 採 **allow-list 而非整筆 clone**。
 > 排除 `imageUrl`/`imageWidth`/`imageHeight` 的理由很硬：`SidebarLeft.jsx:226` 刪樓層時會
 > `URL.revokeObjectURL(floor.imageUrl)`，還原舊 blob URL 會復活死引用變破圖；也排除 `id`/`name`
@@ -90,6 +98,16 @@
 > **P3-17 的坑**：`canUndo()` 是**死碼**（Toolbar 直接讀 `undoStack.length`），
 > 所以加了反應式 `hasPending`（所有 `_pendingRaw` 寫入走單一 `setPendingRaw()`）並改 `Toolbar.jsx:195`。
 > T7 新增 `useAPStore.recountAPCounter()`（從全樓層資料重算，不由呼叫端傳數字）。
+>
+> **★ 2026-08-14 補驗（真實滑鼠 + 完整回歸 + 效能），這才算 G5 真正完成**：
+> ① **真的用滑鼠畫牆**（工具列點「牆/結構」→「畫牆」，在既有端點上點兩下、第二下偏 5px）
+> → 吸附真的產生 `startX===endX && startY===endY` 的零長度牆且不崩潰；
+> 真的畫 tray 兩點重合亦然 —— **證明報告描述的觸發路徑真的會發生，不只是模擬後果**。
+> ② **既有 undo 全面回歸**（都記錄中間狀態，避免 0→0 假通過）：tray / riser / switch 全棟 map /
+> tripwire / zone / unplacedCameras / placeCamera / dropFloor **全部正常**。
+> ③ **效能**：新訂閱本身 **0.71 微秒/次**（20000 次實測）。align 拖曳 239ms/次是**既有問題**，
+> 證據是改樓層名字（我的訂閱早退不做快照）同樣要 248ms，且 **AP 300→5 時成本 239ms→4.85ms**
+> （隨 AP 數 scale）→ 瓶頸在 AP 圖層重繪，屬 G9。走快照與早退只差 **1.6ms**。
 >
 > **建議起手**：G1 + G2 + G5（約 19-24h）覆蓋「會白屏」「讓驗證失效」「改錯無法回退」三類最傷的。
 >
