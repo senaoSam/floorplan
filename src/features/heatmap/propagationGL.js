@@ -457,7 +457,17 @@ float accumulateWallLossGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
   // and an early bounds check would skip the wall-bearing cells in between.
   // readGridCell returns an empty slice for out-of-range cells anyway.
   float tCur = 0.0;
-  int maxSteps = uGridDims.x + uGridDims.y + 4;
+  // 53-G3 (P1-9): bound the walk by the ACTUAL cell distance this ray travels,
+  // not by the grid diagonal. The walk starts at the AP cell, which may sit far
+  // outside the wall-AABB grid -- the comment above says the ray legitimately
+  // enters mid-walk -- so (nGx + nGy + 4) steps could burn out before reaching
+  // the wall-bearing cells at all. Measured case: 60 walls packed into a
+  // 21x21 m corner office (cellM 2.71, nGx=nGy=8, so maxSteps was 20) with the
+  // AP 60 m away, about 22 cells out: the ray was cut at i=20 and reported ZERO
+  // wall loss while the JS engine attenuated correctly. Manhattan span
+  // start->end is exactly how many x plus y cell boundaries a DDA crosses, so
+  // this bound is tight rather than merely larger.
+  int maxSteps = abs(cxEnd - cx) + abs(cyEnd - cy) + 4;
   for (int i = 0; i < 4096; i++) {
     if (i >= maxSteps) break;
     processCell(cx, cy, ap, apZ, rx, rxZ, rayDir, total, seenBuf, seenWritePos);
@@ -543,7 +553,17 @@ float accumulateWallLossExceptGrid(vec2 ap, float apZ, vec2 rx, float rxZ, int e
   for (int j = 0; j < SEEN_BUF; j++) seenBuf[j] = -1;
   int seenWritePos = 0;
   float tCur = 0.0;
-  int maxSteps = uGridDims.x + uGridDims.y + 4;
+  // 53-G3 (P1-9): bound the walk by the ACTUAL cell distance this ray travels,
+  // not by the grid diagonal. The walk starts at the AP cell, which may sit far
+  // outside the wall-AABB grid -- the comment above says the ray legitimately
+  // enters mid-walk -- so (nGx + nGy + 4) steps could burn out before reaching
+  // the wall-bearing cells at all. Measured case: 60 walls packed into a
+  // 21x21 m corner office (cellM 2.71, nGx=nGy=8, so maxSteps was 20) with the
+  // AP 60 m away, about 22 cells out: the ray was cut at i=20 and reported ZERO
+  // wall loss while the JS engine attenuated correctly. Manhattan span
+  // start->end is exactly how many x plus y cell boundaries a DDA crosses, so
+  // this bound is tight rather than merely larger.
+  int maxSteps = abs(cxEnd - cx) + abs(cyEnd - cy) + 4;
   for (int i = 0; i < 4096; i++) {
     if (i >= maxSteps) break;
     processCellExcept(cx, cy, ap, apZ, rx, rxZ, rayDir, excludeW, total, seenBuf, seenWritePos);
@@ -622,7 +642,17 @@ vec2 accumulateWallLossWithHitsGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
   for (int j = 0; j < SEEN_BUF; j++) seenBuf[j] = -1;
   int seenWritePos = 0;
   float tCur = 0.0;
-  int maxSteps = uGridDims.x + uGridDims.y + 4;
+  // 53-G3 (P1-9): bound the walk by the ACTUAL cell distance this ray travels,
+  // not by the grid diagonal. The walk starts at the AP cell, which may sit far
+  // outside the wall-AABB grid -- the comment above says the ray legitimately
+  // enters mid-walk -- so (nGx + nGy + 4) steps could burn out before reaching
+  // the wall-bearing cells at all. Measured case: 60 walls packed into a
+  // 21x21 m corner office (cellM 2.71, nGx=nGy=8, so maxSteps was 20) with the
+  // AP 60 m away, about 22 cells out: the ray was cut at i=20 and reported ZERO
+  // wall loss while the JS engine attenuated correctly. Manhattan span
+  // start->end is exactly how many x plus y cell boundaries a DDA crosses, so
+  // this bound is tight rather than merely larger.
+  int maxSteps = abs(cxEnd - cx) + abs(cyEnd - cy) + 4;
   for (int i = 0; i < 4096; i++) {
     if (i >= maxSteps) break;
     processCellWithHits(cx, cy, ap, apZ, rx, rxZ, rayDir, acc, seenBuf, seenWritePos);
@@ -638,13 +668,50 @@ vec2 accumulateWallLossWithHitsGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
 // uHolePoly[start .. start+count-1] (each texel = (x, y, _, _)). Mirrors the
 // JS reference exactly so a buggy edge case here doesn't appear as a "shader
 // drift" surprise during diff.
-bool pointInPoly(vec2 q, int start, int count) {
+// 53-G3 (P1-7): crossing-number test over a range that may hold SEVERAL
+// rings, matching the JS reference (propagation.js:298-302), which returns
+// true when the point is inside ANY of a boundary hole list.
+//
+// Each vertex texel carries (x, y, ringId). A ring is a maximal run of equal
+// ringId, and each ring must be closed against its OWN first vertex -- not
+// against the previous ring last vertex, which would add a bogus edge
+// between rings and corrupt the parity. We therefore track each ring first
+// vertex and fold in the closing edge when the run ends.
+bool pointInAnyPoly(vec2 q, int start, int count) {
+  if (count <= 0) return false;
   bool inside = false;
-  int prevIdx = start + count - 1;
-  vec2 prev = texelFetch(uHolePoly, ivec2(prevIdx % 4096, prevIdx / 4096), 0).xy;
-  for (int k = 0; k < count; k++) {
-    int idx = start + k;
-    vec2 cur = texelFetch(uHolePoly, ivec2(idx % 4096, idx / 4096), 0).xy;
+  vec4 first4 = texelFetch(uHolePoly, ivec2(start % 4096, start / 4096), 0);
+  vec2 ringFirst = first4.xy;
+  float ringId = first4.z;
+  vec2 prev = ringFirst;
+  for (int k = 1; k <= count; k++) {
+    bool atEnd = (k == count);
+    vec2 cur = vec2(0.0);
+    float curRing = -1.0;
+    if (!atEnd) {
+      int idx = start + k;
+      vec4 t4 = texelFetch(uHolePoly, ivec2(idx % 4096, idx / 4096), 0);
+      cur = t4.xy;
+      curRing = t4.z;
+    }
+    // Ring boundary (or end of range): close the current ring first.
+    if (atEnd || curRing != ringId) {
+      bool yc = (ringFirst.y > q.y) != (prev.y > q.y);
+      if (yc) {
+        float dy = prev.y - ringFirst.y;
+        if (abs(dy) < 1e-12) dy = 1e-12;
+        float xAt = (prev.x - ringFirst.x) * (q.y - ringFirst.y) / dy + ringFirst.x;
+        if (q.x < xAt) inside = !inside;
+      }
+      if (inside) return true;   // inside one ring is enough (JS breaks too)
+      if (atEnd) break;
+      // Start the next ring.
+      ringFirst = cur;
+      ringId = curRing;
+      prev = cur;
+      continue;
+    }
+    // Ordinary edge prev -> cur inside the same ring.
     bool yCross = (cur.y > q.y) != (prev.y > q.y);
     if (yCross) {
       float dy = prev.y - cur.y;
@@ -679,12 +746,11 @@ float accumulateSlabLoss(vec2 ap, float apZ, vec2 rx, float rxZ) {
     float t = abs(dz) > 1e-9 ? (yM - apZ) / dz : 0.0;
     vec2 cross = ap + d2 * t;
     bool bypassed = false;
-    // Hole polygons are concatenated; holeStart/holeCount give one entry. To
-    // express "this boundary has K bypass polygons" we re-pack as multiple
-    // boundaries upstream — same yM, same slabDb, different (start, count) —
-    // which the shader sums up trivially because the dz/cosI logic is
-    // boundary-local. Simpler than encoding a list-of-lists.
-    if (holeCount > 0 && pointInPoly(cross, holeStart, holeCount)) bypassed = true;
+    // 53-G3: holeStart/holeCount span ALL of this boundary hole vertices,
+    // possibly several rings distinguished by the ringId channel. One texel
+    // per boundary now, so a hit on any ring bypasses the whole slab -- the
+    // JS semantics the old multi-texel repack could not express.
+    if (holeCount > 0 && pointInAnyPoly(cross, holeStart, holeCount)) bypassed = true;
     if (!bypassed) loss += slabDb * sec;
   }
   return loss;
@@ -1352,7 +1418,17 @@ float accumulateWallLossGrid(vec2 ap, float apZ, vec2 rx, float rxZ, float fOver
   int seenWritePos = 0;
 
   float tCur = 0.0;
-  int maxSteps = uGridDims.x + uGridDims.y + 4;
+  // 53-G3 (P1-9): bound the walk by the ACTUAL cell distance this ray travels,
+  // not by the grid diagonal. The walk starts at the AP cell, which may sit far
+  // outside the wall-AABB grid -- the comment above says the ray legitimately
+  // enters mid-walk -- so (nGx + nGy + 4) steps could burn out before reaching
+  // the wall-bearing cells at all. Measured case: 60 walls packed into a
+  // 21x21 m corner office (cellM 2.71, nGx=nGy=8, so maxSteps was 20) with the
+  // AP 60 m away, about 22 cells out: the ray was cut at i=20 and reported ZERO
+  // wall loss while the JS engine attenuated correctly. Manhattan span
+  // start->end is exactly how many x plus y cell boundaries a DDA crosses, so
+  // this bound is tight rather than merely larger.
+  int maxSteps = abs(cxEnd - cx) + abs(cyEnd - cy) + 4;
   for (int i = 0; i < 4096; i++) {
     if (i >= maxSteps) break;
     int start, count;
@@ -1388,13 +1464,50 @@ float accumulateWallLossField(vec2 ap, float apZ, vec2 rx, float rxZ, float fOve
   return accumulateWallLossGrid(ap, apZ, rx, rxZ, fOver24);
 }
 
-bool pointInPoly(vec2 q, int start, int count) {
+// 53-G3 (P1-7): crossing-number test over a range that may hold SEVERAL
+// rings, matching the JS reference (propagation.js:298-302), which returns
+// true when the point is inside ANY of a boundary hole list.
+//
+// Each vertex texel carries (x, y, ringId). A ring is a maximal run of equal
+// ringId, and each ring must be closed against its OWN first vertex -- not
+// against the previous ring last vertex, which would add a bogus edge
+// between rings and corrupt the parity. We therefore track each ring first
+// vertex and fold in the closing edge when the run ends.
+bool pointInAnyPoly(vec2 q, int start, int count) {
+  if (count <= 0) return false;
   bool inside = false;
-  int prevIdx = start + count - 1;
-  vec2 prev = texelFetch(uHolePoly, ivec2(prevIdx % 4096, prevIdx / 4096), 0).xy;
-  for (int k = 0; k < count; k++) {
-    int idx = start + k;
-    vec2 cur = texelFetch(uHolePoly, ivec2(idx % 4096, idx / 4096), 0).xy;
+  vec4 first4 = texelFetch(uHolePoly, ivec2(start % 4096, start / 4096), 0);
+  vec2 ringFirst = first4.xy;
+  float ringId = first4.z;
+  vec2 prev = ringFirst;
+  for (int k = 1; k <= count; k++) {
+    bool atEnd = (k == count);
+    vec2 cur = vec2(0.0);
+    float curRing = -1.0;
+    if (!atEnd) {
+      int idx = start + k;
+      vec4 t4 = texelFetch(uHolePoly, ivec2(idx % 4096, idx / 4096), 0);
+      cur = t4.xy;
+      curRing = t4.z;
+    }
+    // Ring boundary (or end of range): close the current ring first.
+    if (atEnd || curRing != ringId) {
+      bool yc = (ringFirst.y > q.y) != (prev.y > q.y);
+      if (yc) {
+        float dy = prev.y - ringFirst.y;
+        if (abs(dy) < 1e-12) dy = 1e-12;
+        float xAt = (prev.x - ringFirst.x) * (q.y - ringFirst.y) / dy + ringFirst.x;
+        if (q.x < xAt) inside = !inside;
+      }
+      if (inside) return true;   // inside one ring is enough (JS breaks too)
+      if (atEnd) break;
+      // Start the next ring.
+      ringFirst = cur;
+      ringId = curRing;
+      prev = cur;
+      continue;
+    }
+    // Ordinary edge prev -> cur inside the same ring.
     bool yCross = (cur.y > q.y) != (prev.y > q.y);
     if (yCross) {
       float dy = prev.y - cur.y;
@@ -1428,7 +1541,7 @@ float accumulateSlabLossField(vec2 ap, float apZ, vec2 rx, float rxZ) {
     float t = abs(dz) > 1e-9 ? (yM - apZ) / dz : 0.0;
     vec2 cross = ap + d2 * t;
     bool bypassed = false;
-    if (holeCount > 0 && pointInPoly(cross, holeStart, holeCount)) bypassed = true;
+    if (holeCount > 0 && pointInAnyPoly(cross, holeStart, holeCount)) bypassed = true;
     if (!bypassed) loss += slabDb * sec;
   }
   return loss;
@@ -1837,7 +1950,17 @@ bool anyBlockGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
   int seenWritePos = 0;
 
   float tCur = 0.0;
-  int maxSteps = uGridDims.x + uGridDims.y + 4;
+  // 53-G3 (P1-9): bound the walk by the ACTUAL cell distance this ray travels,
+  // not by the grid diagonal. The walk starts at the AP cell, which may sit far
+  // outside the wall-AABB grid -- the comment above says the ray legitimately
+  // enters mid-walk -- so (nGx + nGy + 4) steps could burn out before reaching
+  // the wall-bearing cells at all. Measured case: 60 walls packed into a
+  // 21x21 m corner office (cellM 2.71, nGx=nGy=8, so maxSteps was 20) with the
+  // AP 60 m away, about 22 cells out: the ray was cut at i=20 and reported ZERO
+  // wall loss while the JS engine attenuated correctly. Manhattan span
+  // start->end is exactly how many x plus y cell boundaries a DDA crosses, so
+  // this bound is tight rather than merely larger.
+  int maxSteps = abs(cxEnd - cx) + abs(cyEnd - cy) + 4;
   for (int i = 0; i < 4096; i++) {
     if (i >= maxSteps) break;
     int start, count;
@@ -2371,9 +2494,31 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     // wall length scale and keeps DDA cost bounded.
     const targetCells = Math.max(walls.length, 16)
     const ideal = Math.sqrt((spanX * spanY) / targetCells)
-    const cellM = Math.max(0.5, Math.min(4, ideal))
-    const nGx = Math.min(256, Math.max(1, Math.ceil(spanX / cellM)))
-    const nGy = Math.min(256, Math.max(1, Math.ceil(spanY / cellM)))
+    // 53-G3 (C3): cellM must be allowed to exceed the 4 m preference when the
+    // extent demands it. With cellM hard-capped at 4 and nG* hard-capped at
+    // 256, the grid covered at most 256 × 4 = 1024 m — and buildGrid's own
+    // bucketing clamps (below) happily filed out-of-range walls into the edge
+    // cells, while the shader's readGridCell returns count=0 for any cx/cy
+    // outside uGridDims. So walls past 1024 m entered the list and could never
+    // be read back: they applied ZERO attenuation, with the DDA deliberately
+    // not bailing at the boundary. A 1500×800 m site silently lost a 476 m
+    // strip, contradicting sampleField.js:21's "2 km campus" claim and
+    // diverging from the JS reference, which brute-force scans every wall.
+    //
+    // GRID_DIM_MAX stays 256 (it bounds the idx texture and DDA step count);
+    // the cell size grows instead so 256 cells always span the full extent.
+    // Precision cost is real but bounded and strictly better than no
+    // attenuation at all: cells get coarser, never absent.
+    const GRID_DIM_MAX = 256
+    const CELL_M_PREFERRED_MAX = 4
+    const cellFloor = Math.max(0.5, Math.min(CELL_M_PREFERRED_MAX, ideal))
+    const cellM = Math.max(
+      cellFloor,
+      spanX / GRID_DIM_MAX,
+      spanY / GRID_DIM_MAX,
+    )
+    const nGx = Math.min(GRID_DIM_MAX, Math.max(1, Math.ceil(spanX / cellM)))
+    const nGy = Math.min(GRID_DIM_MAX, Math.max(1, Math.ceil(spanY / cellM)))
 
     // First pass: bucket walls into cells via segment AABB. We rasterise each
     // wall into the cells it could possibly intersect using its 2D AABB
@@ -2428,40 +2573,37 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   }
 
   // boundaries: [{ yM, slabDb, bypassHoles: [flatPolyArray, …] }]
-  // We expand each (boundary × hole) pair into its own slab texel so the
-  // shader's per-boundary loop can consult exactly one polygon per iteration.
-  // Same yM appears multiple times — that's fine: each pair either bypasses
-  // or contributes its slabDb*sec exactly once. Boundaries with no holes get
-  // a single texel with holeCount=0.
-  // We also flatten every polygon into uHolePoly back-to-back.
+  //
+  // ONE slab texel per boundary: [yM, slabDb, vertStart, vertCount], where
+  // (vertStart, vertCount) spans ALL of that boundary's hole vertices packed
+  // back-to-back in uHolePoly. Each vertex texel is (x, y, ringId, _) — the
+  // ringId lets the shader tell one polygon from the next inside a single
+  // contiguous range, so it can test "is the crossing inside ANY of them"
+  // exactly the way JS `accumulateSlabLoss` does.
+  //
+  // 53-G3 (P1-7): the previous packing expanded each (boundary × hole) pair
+  // into its OWN texel, giving the first the real slabDb and the rest 0. The
+  // old comment claimed that preserved JS semantics; it could not. The shader
+  // judges bypass per texel, so a hit on hole #2 zeroed only its own record
+  // (already 0) and left record #1 contributing the full slabDb. Result: with
+  // two stairwells on one slab, only the first bypassed — measured as a
+  // 61.24 dB divergence from JS across 44 cells, while a single hole matched
+  // at 0.000 dB.
   function uploadSlabs(boundaries) {
-    const slabRecords = []   // each: [yM, slabDb, polyStart, polyCount]
-    const polyValues = []    // RGBA32F payload
+    const slabRecords = []   // each: [yM, slabDb, vertStart, vertCount]
+    const polyValues = []    // RGBA32F payload: (x, y, ringId, 0)
 
     let cursor = 0
     for (const b of boundaries) {
       const polys = b.bypassHoles ?? []
-      if (polys.length === 0) {
-        slabRecords.push([b.yM, b.slabDb ?? 0, 0, 0])
-      } else {
-        // First entry carries all of slabDb (oblique sec is computed shader-
-        // side from geometry, not stored). Each polygon expansion bypasses
-        // independently — but if any polygon contains the crossing, JS
-        // `accumulateSlabLoss` skips the slab entirely. To preserve that
-        // semantics, we encode polygons across multiple texels but use a
-        // sentinel: the FIRST occurrence of yM contributes slabDb when not
-        // bypassed; subsequent duplicates contribute 0 but can still bypass
-        // by point-in-poly hit. To realise that, we mark only the first
-        // texel as the "main" record and the rest as bypass-only.
-        slabRecords.push([b.yM, b.slabDb ?? 0, cursor, polys[0].length / 2])
-        polyValues.push(...packPolyVerts(polys[0]))
-        cursor += polys[0].length / 2
-        for (let p = 1; p < polys.length; p++) {
-          slabRecords.push([b.yM, 0, cursor, polys[p].length / 2])
-          polyValues.push(...packPolyVerts(polys[p]))
-          cursor += polys[p].length / 2
-        }
+      let vertCount = 0
+      for (let p = 0; p < polys.length; p++) {
+        const verts = packPolyVerts(polys[p], p)
+        polyValues.push(...verts)
+        vertCount += polys[p].length / 2
       }
+      slabRecords.push([b.yM, b.slabDb ?? 0, cursor, vertCount])
+      cursor += vertCount
     }
 
     // ---- slabs texture ----
@@ -2514,11 +2656,13 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     return meta
   }
 
-  function packPolyVerts(flatXY) {
+  function packPolyVerts(flatXY, ringId = 0) {
     // flatXY = [x, y, x, y, …] in metres. Pack each vertex into one RGBA32F
-    // texel as (x, y, 0, 0).
+    // texel as (x, y, ringId, 0). 53-G3: ringId marks which polygon of the
+    // boundary this vertex belongs to, so several rings can share one
+    // contiguous range and the shader can still close each ring correctly.
     const out = []
-    for (let i = 0; i < flatXY.length; i += 2) out.push(flatXY[i], flatXY[i + 1], 0, 0)
+    for (let i = 0; i < flatXY.length; i += 2) out.push(flatXY[i], flatXY[i + 1], ringId, 0)
     return out
   }
 
