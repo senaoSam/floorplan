@@ -157,7 +157,13 @@
 > **注入方法（可重用）**:hook `clientWaitSync` 回 `WAIT_FAILED`、hook `isContextLost` 回 true、
 > 傳假的 `isStale`;PBO 洩漏用 hook `createBuffer` 計數;要殺 singleton 的 context
 > 必須**在它建立之前**就 hook `HTMLCanvasElement.prototype.getContext`（否則抓不到那個 canvas）。
-> **仍未驗**:23d 的「回傳 null 但非 stale」分支、以及「資料編輯後真的會重試」。
+> **補驗完成(同日第二輪)**:23d 的「回傳 null 但非 stale」分支 —— 輪 1 強制第一個 target
+> 回 null → 只跳過它、第二個仍建成;輪 2 用 4 樓層強制**中間**那層 → 前後都建成(舊碼會放棄整堆)。
+> 「失敗後資料編輯會重試」也驗了:強制 `createHeatmapGL` 失敗 → 0 張且 warning 不增長,
+> 改牆後 → 2 張建成。
+> **為此在 `heatmapStack.js` 加了 `__setNullFieldForFloor()` 測試接縫**(production 恆為 null)——
+> ES module namespace 是凍結的,外部無法 stub 引擎回 `null`,這條分支否則**結構上無法驗證**。
+> ⚠ 別再用「把 AP 清空」當替代:那走的是既有 `crossFloor` 守衛的 `continue`,**不是這一行**。
 >
 > **R1（反射 JS/GL 分歧）未修，但有 10 輪探針的完整診斷** —— 見 `.claude/bug-fix-groups.md`
 > 的 R1 專節。最關鍵的事實:**NaN 只在 `Hpara`，`Hperp` 全程乾淨**，而直接路徑寫進兩者的是

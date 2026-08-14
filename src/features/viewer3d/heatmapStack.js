@@ -43,6 +43,13 @@ let generation = 0
 let paintGL = null      // lazy colormap-render GL (separate from the adapter's)
 let ensureTimer = 0
 
+// 53-G4 (23d): test-only hook, see the call site in ensureStackInner. Returns
+// true for a floorId whose field should be forced to null so the "engine
+// returned null but the run is NOT stale" branch can be exercised. Left null in
+// production; the only writer is __setNullFieldForFloor below.
+let __nullFieldForFloor = null
+export function __setNullFieldForFloor(fn) { __nullFieldForFloor = fn }
+
 const FP_KEYS = [
   'activeFloorId', 'floors', 'wallsAll', 'apsAll', 'holes',
   'mode', 'engine', 'gridStepM', 'blur', 'contours',
@@ -133,6 +140,12 @@ const ensureStackInner = async (fp) => {
       field = hm.engine === 'shader'
         ? await sampleFieldGLAsync(scenario, hm.gridStepM, opts)
         : sampleField(scenario, hm.gridStepM, opts)
+      // 53-G4 (23d) test seam. The `!field` branch below cannot be reached from
+      // outside — an ES module namespace is frozen, so a test cannot stub the
+      // engine to return null, and the engines only return null when genuinely
+      // stale (which takes the other branch). This hook exists purely so the
+      // "null while NOT stale" path stays verifiable; production never sets it.
+      if (__nullFieldForFloor && __nullFieldForFloor(f.id)) field = null
     } catch (e) {
       console.warn('[heatmapStack] shader engine failed, falling back to JS:', e.message)
       // 53-G4 (23y): the fallback needs its own guard. sampleField can throw on

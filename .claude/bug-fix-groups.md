@@ -155,7 +155,7 @@ G1 ✅ → G2 ✅ → G3 ✅ → G4 ✅(R1 除外) → G5 ✅ → G6 → G7 → 
 | **R1**(併入) | 反射路徑,`maxReflOrder ≥ 1` | **2026-08-14 用 G2 修好的 parity 工具掃出來的新分歧,原報告 93 條沒有**。開反射時 GL 與 JS 參考實作差 **10.07 dB / 197 格**;加繞射為 6.97 dB / 153 格。反射關閉時完全一致(0.000),所以問題確定在 image-source 反射那段。G3 已排除格網覆蓋(C3)、DDA 步數(P1-9)、樓板打包(P1-7)三個成因,**這條是獨立的第四個成因**。JS 參考實作在 `propagation.js`,GL 在 `renderAp` 的 refl 迴圈 |
 | P3-22 ✅ | `render/heatmapAdapter.js:259-273` | context loss 復原沒清 `snapSprite.mask`(`:569` 指派了同一個 `maskG`)→ PIXI 踩已釋放資源,整個畫布變黑且 `requestRender` 已死。修法還需重設 `soloActive = false` | 已修 |
 | 23y ✅ | `viewer3d/heatmapStack.js:69-156` | `ensureStack` 是 async 但**完全沒有 try/catch/finally**。退回的同步 `sampleField` 若自己拋錯無第二層保護;`createHeatmapGL()` 也在 catch 之外 → 部分樓層留新場、其餘留舊場,且 fingerprint 沒更新形成每 250ms 一次的失敗迴圈 | 已修 |
-| 23d ⚠️ | `viewer3d/heatmapStack.js:124` | 把正常的 `null`(stale 訊號)當失敗直接 return → 混世代堆疊且**不碰任何東西永不修正** | 已改,**但未專門驗證**(見下) |
+| 23d ✅ | `viewer3d/heatmapStack.js:124` | 把正常的 `null`(stale 訊號)當失敗直接 return → 混世代堆疊且**不碰任何東西永不修正** | 已修**並已專門驗證** |
 
 **架構層面**:✅ 已補上全專案第一組 `webglcontextlost`/`webglcontextrestored` 監聽器 + `isDead()`,`getGL()` 改用它(可涵蓋「await 期間才丟 context」,而舊的 `isContextLost()` 只在呼叫前輪詢)。
 
@@ -180,10 +180,16 @@ G1 ✅ → G2 ✅ → G3 ✅ → G4 ✅(R1 除外) → G5 ✅ → G6 → G7 → 
 | 23y | — | 失敗只 1 次、3 秒 **0 增長** | 注入 `createHeatmapGL` 失敗;未修會 ~12 次 |
 | 300 AP 反覆切換 | — | 8 次切換後熱圖完整無條紋 | **G4 正式驗收條件** |
 
-**仍未驗證(誠實記錄)**:
-1. **23d** 只驗到「stack 正常產出 2 張」,**沒有專門構造「回傳 null 但非 stale」**去打那條分支
-2. `heatmapStack` 失敗時 commit fingerprint 是刻意取捨(暫時失敗要等下次資料編輯才重試),但**沒驗「資料編輯後真的會重試」**
-3. **R1 未修**,見下方獨立段落
+**補驗完成(2026-08-14 第二輪,兩輪獨立,0 error)**:
+
+| 項目 | 結果 |
+|---|---|
+| **23d**「回傳 null 但非 stale」 | 輪 1(3 樓層,強制**第一個** target 回 null)→ 只跳過它、**第二個仍建成**;輪 2(4 樓層,強制**中間**那層)→ 前後兩層都建成(3 張→2 張)。**舊碼會放棄整個堆疊** |
+| **失敗後資料編輯會重試** | 強制 `createHeatmapGL` 失敗 → 0 張、warning 1 次不再增長;接著改牆 → **2 張建成、warning 沒再增加**。證明「commit fingerprint 打斷重試」與「資料編輯會重試」兩者兼得 |
+
+**為什麼要加測試接縫**:ES module namespace 是**凍結**的,外部無法 stub 引擎回傳 `null`;而引擎只在真 stale 時回 `null`(那會走另一條分支)。所以在 `heatmapStack.js` 加了 `__setNullFieldForFloor()`(production 永遠是 `null`,只有測試會設),否則這條分支**結構上無法驗證**。第一次我試圖用「把 AP 清空」繞過,但那走的是既有的 `crossFloor` 守衛 `continue`,**根本不是我改的那一行** —— 記在這裡以免下次又誤判。
+
+**仍未修**:**R1**,見下方獨立段落。
 
 ---
 
