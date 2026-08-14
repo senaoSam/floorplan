@@ -166,7 +166,8 @@ function CoveragePanel() {
               })
             }
             // Flash a pulsing ring AT the gap so it's clear where to look.
-            flashGapMarker(stats.biggestGap.x, stats.biggestGap.y, performance.now())
+            // 53-G6: stamp the floor — the coords are this floor's image-px.
+            flashGapMarker(stats.biggestGap.x, stats.biggestGap.y, performance.now(), activeFloorId)
             // Briefly shade the blind area too, then revert to the user's
             // prior setting so the locate action doesn't leave the overlay
             // stuck on. (If it was already on, leave it on.)

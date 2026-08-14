@@ -60,5 +60,11 @@ export const useDraftStore = create((set) => ({
   setScalePreview: (p) => set({ scalePreview: p }),
   clearScalePreview: () => set({ scalePreview: null }),
   setShiftHeld: (held) => set({ _shiftHeld: !!held }),
-  clearDraft: () => set({ mode: null, points: [], cursor: null, snapHint: null }),
+  // 53-G6 (T6): doorWindowDraft belongs to the same in-progress drawing session
+  // as points/cursor/snapHint, but was left out — so the door's orange preview
+  // band survived into PLACE_AP mode with no way to dismiss it. Anything that
+  // ends a draft must end ALL of it.
+  clearDraft: () => set({
+    mode: null, points: [], cursor: null, snapHint: null, doorWindowDraft: null,
+  }),
 }))

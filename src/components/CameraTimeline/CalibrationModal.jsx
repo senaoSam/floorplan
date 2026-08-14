@@ -75,11 +75,22 @@ function CalibrationModal() {
   const frameCanvasRef = useRef(null)
 
   // Load any existing calibration when the modal opens for a camera.
+  //
+  // 53-G6 (T13): keyed on the camera OBJECT, not just its id, and it no longer
+  // bails on a null camera. Two bugs came out of the old `[calibrateCameraId]`
+  // form:
+  //   1. Closing sets the id to null and reopening the SAME camera sets it back.
+  //      React only compares deps between renders, so it saw the same id twice
+  //      and skipped the effect — the modal opened EMPTY (0 of 4 points) and
+  //      only showed the stored points on a second open. Measured during G1.
+  //   2. `if (!camera) return` left the previous camera's points in state while
+  //      closed, so they could bleed into the next open before the effect ran.
+  // Resetting on a null camera makes "closed" a clean state, and depending on
+  // `camera` means reopening after a close is a real dependency change.
   useEffect(() => {
-    if (!camera) return
-    setFloorPts(camera.calibration?.floorPts ?? [])
-    setFramePts(camera.calibration?.framePts ?? [])
-  }, [calibrateCameraId])   // eslint-disable-line react-hooks/exhaustive-deps
+    setFloorPts(camera?.calibration?.floorPts ?? [])
+    setFramePts(camera?.calibration?.framePts ?? [])
+  }, [camera])
 
   // The floorplan is letterboxed into PLAN_W×PLAN_H — compute the fit so we can
   // map clicks back to image px and place existing dots.

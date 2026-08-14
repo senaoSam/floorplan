@@ -77,7 +77,23 @@ export function createDraftModeController({
   // Wall ids committed during the CURRENT draw chain (since the last anchor was
   // dropped fresh). Backspace step-back removes only these — never a wall that
   // already existed on the floor before this draw session started (47-18).
+  //
+  // 53-G6 (P4#2): the list is meaningless outside the floor it was built on, so
+  // it carries that floor's id and every reader checks it. Previously the ids
+  // survived a floor switch: draw three segments on 1F, switch to 2F, click
+  // once, press Backspace — and the step-back popped all three of 1F's ids,
+  // deleting walls on a floor the user was no longer looking at while 1F's own
+  // step-back history was gone for good.
+  //
+  // Self-describing payload rather than a cleanup call, matching
+  // useAutoPlaceStore: even if nothing resets it, a stale list cannot act on
+  // the wrong floor.
   let sessionWallIds = []
+  let sessionFloorId = null
+  const resetWallSession = () => {
+    sessionWallIds = []
+    sessionFloorId = useFloorStore.getState().activeFloorId
+  }
 
   const commitWall = (a, b) => {
     const fid = useFloorStore.getState().activeFloorId
@@ -97,6 +113,9 @@ export function createDraftModeController({
       bottomHeight: 0,
       openings: [],
     })
+    // 53-G6: stamp ownership on first commit so the guard above has a floor to
+    // compare against even if the chain began before this controller was wired.
+    if (sessionFloorId !== fid) { sessionWallIds = []; sessionFloorId = fid }
     sessionWallIds.push(id)
   }
 
@@ -154,8 +173,10 @@ export function createDraftModeController({
 
     if (draft.mode !== mode || draft.points.length === 0) {
       // Fresh chain: reset the DRAW_WALL step-back session so Backspace can't
-      // reach back into walls drawn before this anchor (47-18).
-      if (mode === EDITOR_MODE.DRAW_WALL) sessionWallIds = []
+      // reach back into walls drawn before this anchor (47-18). 53-G6: also
+      // re-stamps the floor id, so a chain started after a floor switch owns
+      // its ids on the floor the user is actually on.
+      if (mode === EDITOR_MODE.DRAW_WALL) resetWallSession()
       useDraftStore.getState().beginDraft(mode, snapped)
       return
     }
@@ -326,6 +347,12 @@ export function createDraftModeController({
     if (mode === EDITOR_MODE.DRAW_WALL && draft.mode === mode && draft.points.length > 0) {
       const fid = useFloorStore.getState().activeFloorId
       const walls = fid ? (useWallStore.getState().wallsByFloor[fid] ?? []) : []
+      // 53-G6 (P4#2): the session list only means anything on the floor that
+      // built it. Reading it on another floor would pop ids that live elsewhere
+      // — the ids wouldn't be found in THIS floor's walls, so the loop would
+      // drain the whole list and silently destroy the original floor's
+      // step-back history. Drop the list instead.
+      if (sessionFloorId !== fid) resetWallSession()
       // Only step back into walls THIS draw chain committed — pop the newest
       // session id that still exists. Never walls[length-1], which could be a
       // wall that existed before the session (47-18).

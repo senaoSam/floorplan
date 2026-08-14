@@ -152,17 +152,30 @@ export function bindTracking({ useEditorStore }) {
   // (manual recalibrate). We snapshot each camera's H reference; on change we
   // ask the tracking store to recompute that camera's samples from its frame
   // source. Writes only to the tracking store → no feedback loop with cameras.
+  // 53-G6 (P4#3): the snapshot is per-floor, so it carries the floor it was
+  // taken on and is rebuilt (not compared) when that differs from the active
+  // floor. Without the stamp the map from floor B was compared against floor
+  // A's cameras on the way back: ids absent from the map read as `undefined`,
+  // which !== their real H, so EVERY camera on A looked freshly recalibrated.
+  // Any unrelated camera-store write — renaming one camera was enough — then
+  // re-projected all of A's tracks at once, visibly shifting the whole set.
   let prevHById = new Map()
+  let prevHFloorId = null
   const snapshotH = () => {
     const fid = useFloorStore.getState().activeFloorId
     const cams = useCameraStore.getState().camerasByFloor[fid] ?? []
     const m = new Map()
     for (const c of cams) m.set(c.id, c.calibration?.H ?? null)
+    prevHFloorId = fid
     return m
   }
   prevHById = snapshotH()
   const unsubCalib = useCameraStore.subscribe(() => {
     const fid = useFloorStore.getState().activeFloorId
+    // Floor changed since the snapshot: re-baseline instead of diffing against
+    // another floor's map. A real recalibration on the new floor produces its
+    // own store event and is caught on the next pass.
+    if (prevHFloorId !== fid) { prevHById = snapshotH(); return }
     const cams = useCameraStore.getState().camerasByFloor[fid] ?? []
     const tr = useTrackingStore.getState()
     for (const c of cams) {

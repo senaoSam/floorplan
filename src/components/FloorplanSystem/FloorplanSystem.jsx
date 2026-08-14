@@ -893,16 +893,63 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     useEditorStore.getState().setEditorMode(EDITOR_MODE.SELECT)
   }
 
-  // Floor switch invalidates any in-flight scale measurement — the pt1 /
-  // pt2 coords belong to the previous floor's image space. Mirrors oldSrc
-  // Editor2D's blanket "clear all drawing state on floor switch" reset.
+  // 53-G6: the ONE place floor-switch cleanup happens.
+  //
+  // Every piece of state below is "transient work in progress, expressed in the
+  // ACTIVE floor's image-pixel space". Carrying it across a floor switch does
+  // not just look wrong — the coordinates silently mean something else on the
+  // new floor, so the app writes plausible-looking garbage:
+  //   - a half-drawn scope committed with Enter takes the OLD floor's vertices
+  //     and stores them as the NEW floor's scope, which the heatmap then clips to
+  //   - an armed tripwire tool uses the old floor's anchor for its first point
+  //   - the live-view / calibration modals reopen by themselves on return,
+  //     because their id survived while the camera list under them changed
+  //
+  // Reset ALL of it in one edge-detected handler rather than scattering guards:
+  // `setActiveFloor` itself only does `set({ activeFloorId })` (deliberately —
+  // the store stays dumb), so this subscriber is the seam. Mirrors oldSrc
+  // Editor2D's blanket "clear all drawing state on floor switch".
+  //
+  // NOT here on purpose: useAutoPlaceStore's preview. It carries its own
+  // floorId and every reader compares it (heatmapAdapter:195, ghostAPsLayer),
+  // so a stale preview cannot render on the wrong floor even with no cleanup —
+  // that self-describing-payload shape is the pattern to prefer for new state.
   useEffect(() => {
     let prevFid = useFloorStore.getState().activeFloorId
     const unsub = useFloorStore.subscribe((s) => {
       if (s.activeFloorId !== prevFid) {
         prevFid = s.activeFloorId
         setScaleDialog(null)
-        useDraftStore.getState().clearScalePreview()
+        const draft = useDraftStore.getState()
+        draft.clearScalePreview()
+        // P4#1: the in-flight draft (scope/wall/tray vertices + the door-window
+        // band). This is also the PREREQUISITE for P4#2 — draftModeController
+        // resets sessionWallIds when the draft chain restarts, which only
+        // happens if the draft is actually cleared here.
+        draft.clearDraft()
+        const cam = useCameraStore.getState()
+        // T5/P4#4: an armed tripwire/zone tool plus its first anchor.
+        cam.setDrawTool(null)
+        // P1-13/P4#6 + P4#7: modal ids. Leaving these set made the popover
+        // reappear on its own when the user came back to the floor.
+        cam.closeLiveView()
+        cam.closeCalibrate()
+        // P4#5: the Client View probe. `pos` is canvas-px on the old floor and
+        // servingApId / reading / the association + single-AP outlines are all
+        // derived from that floor's APs, so carrying them over recomputed the
+        // OLD position against the NEW floor's APs and showed a panel full of
+        // numbers that looked entirely reasonable and were wrong.
+        // reset() already existed and did exactly this — it was simply never
+        // called from anywhere in the codebase.
+        useClientViewStore.getState().reset()
+        // P1-24 part 1: the selection. The selected object lives on the old
+        // floor, so the right panel neither closed nor showed anything — it sat
+        // there as a blank 300px column squeezing the canvas.
+        useEditorStore.getState().clearSelected()
+        // P1-24 part 2: the hover probe readout. It kept reporting the previous
+        // floor's numbers, so an empty floor with no scale and no APs still
+        // displayed something like "AP-04 -36.6 dBm (17.01, 17.49) m".
+        useHoverReadoutStore.getState().setReading(null)
       }
     })
     return unsub

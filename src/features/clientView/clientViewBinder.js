@@ -77,8 +77,25 @@ export function bindClientView({
     const cv = useClientViewStore.getState()
     if (cv.pos == null) return
     const { scenario, floor } = getScenario()
+    // 53-G6 (23n): clearing only `reading` left the cached overlay polygons
+    // behind, so the big translucent association region stayed painted over the
+    // whole plan after the last AP was deleted and the heatmap was switched off
+    // — the toggle looked off, the legend was gone, and the wash was still
+    // there. Only leaving Client View mode cleared it. The areas are derived
+    // from the same scenario as `reading`, so they have to die together.
     if (!scenario || !floor?.scale) {
       cv.setReading(null)
+      cv.setAssociationArea(null)
+      cv.setSingleApArea(null)
+      return
+    }
+    // Same reasoning with a live scenario but nothing to associate to: an empty
+    // AP list cannot produce a coverage union, and a stale one must not survive.
+    if ((scenario.aps?.length ?? 0) === 0) {
+      cv.setReading(null)
+      cv.setServingApId(null)
+      cv.setAssociationArea(null)
+      cv.setSingleApArea(null)
       return
     }
     const rx = { x: cv.pos.x / floor.scale, y: cv.pos.y / floor.scale }

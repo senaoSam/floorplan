@@ -1,6 +1,7 @@
 import { Container, Graphics } from 'pixi.js'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
+import { useFloorStore } from '@/store/useFloorStore'
 import { getGapMarker, clearGapMarker, subscribeGapMarker } from './gapMarkerBus'
 
 // Biggest-blind-spot marker layer. When the coverage panel flashes a marker
@@ -26,11 +27,19 @@ export function attachGapMarkerLayer({ scene }) {
   root.addChild(g)
 
   const isCameraMode = () => useEditorStore.getState().editorMode === EDITOR_MODE.CAMERA
+  // 53-G6 (23t/P4#8): the marker's (x, y) is image-px on the floor that flashed
+  // it. Draw only on that floor — otherwise the amber ring appeared on another
+  // floor at coordinates that mean nothing there, pointing at a blind spot that
+  // doesn't exist. Reading the guard here (rather than clearing on switch) means
+  // the marker survives a there-and-back switch within its lifetime, which is
+  // the friendlier behaviour.
+  const isMarkerFloor = (m) =>
+    !m.floorId || m.floorId === useFloorStore.getState().activeFloorId
 
   let raf = 0
   const draw = () => {
     const m = getGapMarker()
-    if (!m || !isCameraMode()) { root.visible = false; g.clear(); raf = 0; scene.requestRender(); return }
+    if (!m || !isCameraMode() || !isMarkerFloor(m)) { root.visible = false; g.clear(); raf = 0; scene.requestRender(); return }
     const age = performance.now() - m.bornMs
     if (age >= LIFETIME_MS) { clearGapMarker(); root.visible = false; g.clear(); raf = 0; scene.requestRender(); return }
 
