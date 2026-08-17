@@ -14,6 +14,16 @@ const FULL_CIRCLE_DEG = 360
 // Vertical FOV ≈ horizontal FOV × sensor aspect (16:9-ish) — one parameter
 // fewer for the user, close enough for planning.
 const VFOV_RATIO = 0.56
+// 53-G8: horizontal sweeps at or above this are panoramic/fisheye optics —
+// the sweep no longer implies a vertical extent (see cameraCoverageRadii).
+const PANORAMIC_MIN_DEG = 180
+// Effective vertical FOV of a ceiling fisheye. Real 360° fisheyes are
+// ~180° hemispherical; 160 keeps a sliver of falloff at the horizon rather
+// than claiming perfect coverage to the walls.
+const FISHEYE_VFOV_DEG = 160
+// Ordinary lenses wider than this are already ultra-wide; the linear
+// aspect-ratio approximation stops holding, so cap the input it consumes.
+const MAX_DERIVED_HFOV_DEG = 120
 export const DEFAULT_TILT_DEG = 30
 // Targets aren't points on the floor: a person 2 m from a level-mounted
 // camera is below its lowest ray at FLOOR level but their torso/head are
@@ -34,7 +44,21 @@ export const TARGET_HEIGHT_M = 1.4
 export function cameraCoverageRadii(camera, pxPerM) {
   const h = Math.max(0.1, camera.z ?? 2.5)
   const tiltRad = (camera.tiltDeg ?? DEFAULT_TILT_DEG) * Math.PI / 180
-  const vHalf = (Math.min(camera.fovDeg ?? 90, 120) * VFOV_RATIO / 2) * Math.PI / 180
+  // 53-G8: vertical FOV derives from the HORIZONTAL one via the sensor
+  // aspect, but a panoramic camera's horizontal sweep says nothing about its
+  // vertical extent — a ceiling fisheye sweeps 360° around while looking
+  // straight down. Feeding 360 through the old `min(fovDeg, 120) * 0.56`
+  // gave a 33.6° half-angle, capping the FISHEYE preset's 9 m range at
+  // 2.395 m and under-counting its coverage area by 93%.
+  //
+  // Past a panoramic sweep the lens is fisheye-like, so its vertical extent
+  // is governed by the optics (near-hemispherical), not by the sweep. Clamp
+  // the DERIVED vertical angle instead of the horizontal input.
+  const fovDeg = camera.fovDeg ?? 90
+  const vDeg = fovDeg >= PANORAMIC_MIN_DEG
+    ? FISHEYE_VFOV_DEG
+    : Math.min(fovDeg, MAX_DERIVED_HFOV_DEG) * VFOV_RATIO
+  const vHalf = (vDeg / 2) * Math.PI / 180
   const rangeM = camera.rangeM ?? 12
   const steep = tiltRad + vHalf            // lowest-looking ray
   const shallow = tiltRad - vHalf          // highest-looking ray

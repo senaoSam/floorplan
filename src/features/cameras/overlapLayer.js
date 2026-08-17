@@ -85,19 +85,27 @@ export function attachOverlapLayer({
   let prev = snapshot()
   function snapshot() {
     const cs = useCameraStore.getState()
-    const fid = useFloorStore.getState().activeFloorId
+    const fs = useFloorStore.getState()
+    const fid = fs.activeFloorId
+    const floor = fs.floors.find((f) => f.id === fid)
     return {
       cams: cs.camerasByFloor[fid],
       walls: useWallStore.getState().wallsByFloor[fid],
       show: cs.showOverlap,
       fid,
       inCamera: isCameraMode(),
+      // 53-G8: see blindSpotLayer — cone radii come from floor.scale and the
+      // sprite is sized to the image, so both must invalidate the mask.
+      scale: floor?.scale,
+      imgW: floor?.imageWidth,
+      imgH: floor?.imageHeight,
     }
   }
   const onChange = () => {
     const cur = snapshot()
     if (cur.cams === prev.cams && cur.walls === prev.walls && cur.show === prev.show
-      && cur.fid === prev.fid && cur.inCamera === prev.inCamera) return
+      && cur.fid === prev.fid && cur.inCamera === prev.inCamera
+      && cur.scale === prev.scale && cur.imgW === prev.imgW && cur.imgH === prev.imgH) return
     prev = cur
     rebuild()
   }

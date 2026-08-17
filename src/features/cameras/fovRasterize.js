@@ -1,5 +1,6 @@
 import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from './fovPolygon'
 import { deviceStatus, DEVICE_STATUS } from './deviceStatus'
+import { getPxPerM } from '@/store/useFloorStore'
 
 // Shared FOV → per-pixel coverage-count rasteriser. Both the coverage-stats
 // report and the overlap overlay need the same thing: take every online
@@ -17,7 +18,12 @@ export function rasterizeCoverageCounts({ cameras, walls, floor, maxCanvasPx }) 
   if (!floor?.imageWidth || !floor?.imageHeight) return null
   const W = floor.imageWidth
   const H = floor.imageHeight
-  const scale = floor.scale ?? 40   // px per metre (FALLBACK_PX_PER_M)
+  // 53-G8: was an inlined `?? 40`. computeCoverageStats refuses to report on
+  // an uncalibrated floor (52-A3), but overlapLayer draws this raster directly,
+  // so the overlay used to paint coverage the report called unmeasurable.
+  // The literal now lives in one place; the refuse-vs-draw policy stays with
+  // each caller.
+  const scale = getPxPerM(floor)
 
   const online = (cameras ?? []).filter((c) => deviceStatus(c) !== DEVICE_STATUS.OFFLINE)
   const segs = buildBlockingSegments(walls)
@@ -69,7 +75,12 @@ export function rasterizeCoverageCounts({ cameras, walls, floor, maxCanvasPx }) 
 // Returns null when there's nothing to mask (no online cameras / no floor).
 export function buildFovMaskGrid({ cameras, walls, floor, cols, rows, cellPx }) {
   if (!floor?.imageWidth || !floor?.imageHeight || !cols || !rows) return null
-  const scale = floor.scale ?? 40   // px per metre (FALLBACK_PX_PER_M)
+  // 53-G8: was an inlined `?? 40`. computeCoverageStats refuses to report on
+  // an uncalibrated floor (52-A3), but overlapLayer draws this raster directly,
+  // so the overlay used to paint coverage the report called unmeasurable.
+  // The literal now lives in one place; the refuse-vs-draw policy stays with
+  // each caller.
+  const scale = getPxPerM(floor)
   const online = (cameras ?? []).filter((c) => deviceStatus(c) !== DEVICE_STATUS.OFFLINE)
   if (online.length === 0) return null
   const segs = buildBlockingSegments(walls)

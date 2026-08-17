@@ -1,3 +1,5 @@
+import { getPxPerM } from '@/store/useFloorStore'
+
 // Mock people/vehicle tracks for Camera mode (Phase 34-2).
 //
 // Simulates one business day (08:00–22:00) of person/car movement on the
@@ -147,7 +149,8 @@ export function generateDayTracks(floor, walls, opts = {}) {
   const dayStart = DAY_START_SEC + dayOffsetSec
   const dayEnd = DAY_END_SEC + dayOffsetSec
   const rng = mulberry32(seed)
-  const pxPerM = floor.scale || 40
+  // 53-G8: was `|| 40` — a scale of exactly 0 also fell through to it.
+  const pxPerM = getPxPerM(floor)
   const W = floor.imageWidth
   const H = floor.imageHeight
   const margin = 0.04

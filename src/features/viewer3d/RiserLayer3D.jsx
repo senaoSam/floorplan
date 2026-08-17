@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react'
 import * as THREE from 'three'
-import { useFloorStore, DEFAULT_FLOOR_HEIGHT_M } from '@/store/useFloorStore'
+import { useFloorStore, DEFAULT_FLOOR_HEIGHT_M, getPxPerM } from '@/store/useFloorStore'
 import { useCableStore } from '@/store/useCableStore'
 import { computeFloorElevations } from '@/utils/floorStacking'
 import { makeAlignMatrixM, applyAlignMatrix, isIdentityAlign } from '@/utils/floorAlign'
@@ -76,7 +76,7 @@ export default function RiserLayer3D({ activeFloorId }) {
         .sort((a, b) => (elevations[a.id] ?? 0) - (elevations[b.id] ?? 0))
       if (fs.length === 0) continue
       const anchor = fs[0]
-      const pxToM = 1 / (anchor.scale || 100)
+      const pxToM = 1 / getPxPerM(anchor)   // 53-G8: was `|| 100` (2D used 40)
       let x = r.x * pxToM
       let z = r.y * pxToM
       // Scene-root layer — apply the anchor floor's meter-space align so the

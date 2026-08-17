@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { getFloorHeight } from '@/store/useFloorStore'
 
 // Switch / IDF / MDF / Router endpoints (per-floor) — the base layer the cable
 // system snaps cables onto. Future: traysByFloor, risers, slack parameters
@@ -171,7 +172,9 @@ export function getTraySystemFill(system) {
 // ceiling-mounted trays). `wall` / `under_raised_floor` are absolute
 // conventions. `custom` uses the user-entered mountHeight directly.
 export const TRAY_MOUNT_PRESETS = [
-  { value: 'ceiling',            label: '天花 (ceiling)',         resolve: (floor) => Math.max(0, (floor?.floorHeight ?? 3) - 0.05) },
+  // 53-G8: `?? 3` was this store re-declaring a default useFloorStore already
+  // exports; it now calls the canonical accessor.
+  { value: 'ceiling',            label: '天花 (ceiling)',         resolve: (floor) => Math.max(0, getFloorHeight(floor) - 0.05) },
   { value: 'wall',               label: '牆面 2.4 m',             resolve: () => 2.4 },
   { value: 'under_raised_floor', label: '架高地板下 0.1 m',       resolve: () => 0.1 },
   { value: 'custom',             label: '自訂',                   resolve: (_floor, tray) => tray?.mountHeight ?? 2.5 },

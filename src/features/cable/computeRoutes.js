@@ -14,6 +14,7 @@
 
 import { buildBuildingGraph, SLACK_DIRECT } from './buildGraph'
 import { unionFind, dijkstra, reconstructPath } from './routing'
+import { getFloorHeight } from '@/store/useFloorStore'
 
 // 14-3: Cat 6 spec — beyond ~90 m copper is impractical and the run jumps
 // to fiber. Duplicated from useCableStore.COPPER_MAX_LENGTH_M to keep this
@@ -138,7 +139,7 @@ export function buildRoutingContext({ floors = [], apsByFloor = {}, switchesByFl
 export function routeOneAP(ctx, ap, floorId) {
   const { g, uf, floorById, accessSwitches, switchesByFloor } = ctx
   const floor = floorById.get(floorId)
-  const ceilingHeight = floor?.floorHeight ?? 3.0
+  const ceilingHeight = getFloorHeight(floor)   // 53-G8: was an inlined 3.0
   const pxPerM        = floor?.scale
   const zDropM = Math.max(0, ceilingHeight - (ap.z ?? 0))
 

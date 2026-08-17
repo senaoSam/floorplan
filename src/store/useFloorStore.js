@@ -24,6 +24,28 @@ export const MIN_FLOOR_HEIGHT_M = 0.5
 export const MAX_FLOOR_HEIGHT_M = 20
 export const MAX_SLAB_ATTEN_DB = 100
 
+// 53-G8: canonical unit accessors. Before these, `floor.scale ?? 40` and
+// `floor.floorHeight ?? 3.0` were re-spelled at a dozen call sites, and the
+// copies had drifted: 2D fell back to 40 px/m while 3D used 100, so the same
+// camera covered 2.5x more ground in 3D than in 2D. Four sites also wrote
+// `|| 40`, which sends a legitimately-tiny scale AND a scale of exactly 0 down
+// the fallback path. Every consumer must call these instead of inlining a
+// literal — a fallback that lives in one place can't disagree with itself.
+//
+// FALLBACK_PX_PER_M is a pre-calibration placeholder so layers aren't blank
+// before the user draws a scale line; it is not a meaningful measurement.
+export const FALLBACK_PX_PER_M = 40
+
+export const getPxPerM = (floor) => {
+  const s = floor?.scale
+  return typeof s === 'number' && Number.isFinite(s) && s > 0 ? s : FALLBACK_PX_PER_M
+}
+
+export const getFloorHeight = (floor) => {
+  const h = floor?.floorHeight
+  return typeof h === 'number' && Number.isFinite(h) && h > 0 ? h : DEFAULT_FLOOR_HEIGHT_M
+}
+
 // 52-A2: typo guard for a floorplan's px/m scale — NOT a performance limit.
 // A 1000px image spans 20 km at 0.05 px/m and 20 cm at 5000 px/m; outside that
 // the user mistyped. Large-but-real sites (a 2 km campus is ~0.5 px/m) must

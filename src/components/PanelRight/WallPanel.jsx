@@ -1,6 +1,7 @@
 import React, { useCallback } from 'react'
 import { useWallStore } from '@/store/useWallStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { useFloorStore } from '@/store/useFloorStore'
 import { MATERIAL_LIST, OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { NumberInput, Select, Button } from './_shared/PanelControls'
@@ -18,6 +19,9 @@ function WallPanel({ floorId, wallId }) {
   const updateOpening = useWallStore((s) => s.updateOpening)
   const removeOpening = useWallStore((s) => s.removeOpening)
   const clearSelected = useEditorStore((s) => s.clearSelected)
+  // Subscribe to the floor itself so recalibrating the scale re-renders the
+  // length readout.
+  const floor = useFloorStore((s) => s.floors.find((f) => f.id === floorId))
 
   const handleMaterial = useCallback((mat) => {
     updateWall(floorId, wallId, { material: mat })
@@ -41,13 +45,21 @@ function WallPanel({ floorId, wallId }) {
 
   if (!wall) return null
 
-  const len = Math.hypot(wall.endX - wall.startX, wall.endY - wall.startY).toFixed(1)
+  // 53-G8: this was the only place in the app that reported a length in raw
+  // image pixels ("長度 98.8 px"), a number that means nothing to a planner and
+  // changes with the source image's resolution. Report metres like every other
+  // panel, and say so plainly when there's no scale to convert with.
+  const lenPx = Math.hypot(wall.endX - wall.startX, wall.endY - wall.startY)
+  const pxPerM = floor?.scale
+  const lenLabel = pxPerM > 0
+    ? `長度 ${(lenPx / pxPerM).toFixed(2)} m`
+    : '長度 需先校正比例尺'
 
   return (
     <PanelShell accent="wall">
       <PanelHeader
         title={wall.name ?? '牆體屬性'}
-        meta={`長度 ${len} px`}
+        meta={lenLabel}
         onDelete={handleDelete}
       />
 

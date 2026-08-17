@@ -402,7 +402,7 @@ const samples = project(frameSamples, H)
 
 ---
 
-# G8 · 單位、比例尺與魔術數字(6-8 小時)
+# G8 · 單位、比例尺與魔術數字 ✅ **已完成**(2026-08-17,使用者驗收 ok)
 
 `floor.scale` 與樓高的傳播問題,一次統一。
 
@@ -418,6 +418,27 @@ const samples = project(frameSamples, H)
 | P2-28 | `PanelRight/WallPanel.jsx:50` | 全站唯一用像素顯示長度(`長度 98.8 px`) | |
 
 **建議**:先抽出 canonical helper(例如 `getPxPerM(floor)` 與 `getFloorHeight(floor)`),再把所有站點改成呼叫它。這樣同時解掉現有 bug 與未來的分歧。
+
+**✅ 完成(2026-08-17)** — 照建議做:`useFloorStore` 新增 `getPxPerM` / `getFloorHeight` /
+`FALLBACK_PX_PER_M`,13 個檔案改成呼叫它。逐項結果:
+
+| # | 修法 | 實測反證 |
+|---|---|---|
+| 23f ✅ | 三個 snapshot 補 `scale` + `imgW/imgH`,比較式同步加條件 | 改碼前:比例尺減半遮罩**完全沒重建**(61529 px 不動),強制重建才知真值 **113991**;改碼後自動重建正是 113991 |
+| T10 ✅ | 共用 rasteriser 兩處 `?? 40` 改 `getPxPerM`;**`coverageStats` 的拒答行為保留不動**(52-A3) | 未校正時報表仍拒答,rasteriser 與 40 px/m 結果一致(204271 px) |
+| T9 ✅ | `Viewer3D` 兩處 `\|\| 100`、`CameraOverlay3D` 自帶的 `= 40` 副本全改 helper | 未校正時 2D/3D 都是 40(3D 原本 100,樓板寬 6.85 → 17.13 m) |
+| T3 ✅ | `topHeight: 3.0` → `getFloorHeight(floor)`(該處早已有 `floor` 變數) | 真滑鼠畫牆:6 m 樓層得 6、4.5 m 得 4.5 |
+| E5 ✅ | 兩處改 helper | 真跑 `routeOneAP`:5 顆 AP 落線 0.60 → 3.60 m(差**剛好 3.00**,線長差也剛好 3.00) |
+| E5b ✅ | 前兩處改 helper;後兩處收 `pxPerM` 參數、**不再包一層 fallback**,只把 `\|\|` 換成 `> 0 ? :` | `pxPerM: 0` 落 40;**`scale: 0.5`(合法大場區)保留不被替換** |
+| 23g ✅ | **報告位置寫錯**:實際在 `fovPolygon.js:37`。改成 clamp**推導出的垂直角**(≥180° 視為魚眼給 160°),而非 clamp 輸入的水平角 | 魚眼 2.395 → 9 m(宣告值),覆蓋率 7% → 100%;dome/bullet/120° **數值完全不變** |
+| P2-28 ✅ | 改顯示公尺;**刻意用原始 `floor.scale` 不是 `getPxPerM`** — 給人看的測量值不該用 placeholder 編 | `長度 4.78 m`,改比例尺跟著變,未校正顯示「需先校正比例尺」 |
+
+**額外修了 4 處報告沒列的同類 bug**(同屬「一次統一」範圍):`FloorHoleVolume3D.jsx:191`、
+`RiserLayer3D.jsx:79` 另有兩個 `|| 100`;`CableLayer3D.jsx:52`、`Viewer3D.jsx:991` 另有兩個 `?? 3`。
+
+**防重做**:`camerasLayer.js` 的 `FALLBACK_PX_PER_M` 現在是 **re-export**(保留既有 import 路徑),
+值的定義只在 `useFloorStore`。`CameraOverlay3D` 原本註解說「為了不把 PIXI 端拉進 Three bundle
+才 inline 一份 40」—— helper 移到 store 後這理由消失(3D 本來就 import store),副本已刪。
 
 ---
 
@@ -494,10 +515,10 @@ const samples = project(frameSamples, H)
 | ~~G5~~ ✅ | ~~undo/redo 完整性~~ **已完成 2026-08-13** | ~~8-10 h~~ | — |
 | ~~G6~~ ✅ | ~~切樓層/模式狀態殘留~~ **已完成 2026-08-14** | ~~6-8 h~~ | — |
 | ~~G7~~ ✅ | ~~命名唯一性與跨樓層參照~~ **已完成 2026-08-17** | ~~5-6 h~~ | — |
-| G8 | 單位/比例尺/魔術數字 | 6-8 h | — |
+| ~~G8~~ ✅ | ~~單位/比例尺/魔術數字~~ **已完成 2026-08-17** | ~~6-8 h~~ | — |
 | G9 | 效能與資源洩漏 | 5-7 h | — |
 | G10 | UI/UX 與匯出 | 7-9 h | — |
-| | **合計** | **61-78 h**(剩 **29-40 h**) | |
+| | **合計** | **61-78 h**(剩 **12-16 h**) | |
 
 ## 分批建議
 

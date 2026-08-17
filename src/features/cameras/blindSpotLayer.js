@@ -1,7 +1,7 @@
 import { Sprite, Texture } from 'pixi.js'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from './fovPolygon'
-import { FALLBACK_PX_PER_M } from './camerasLayer'
+import { getPxPerM } from '@/store/useFloorStore'
 import { deviceStatus, DEVICE_STATUS } from './deviceStatus'
 
 // Blind-spot overlay (Phase 34-5 ①): shades every part of the floor that NO
@@ -44,7 +44,7 @@ export function attachBlindSpotLayer({
     }
     const cameras = cs.camerasByFloor[activeFloorId] ?? []
     const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
-    const scale = floor.scale ?? FALLBACK_PX_PER_M
+    const scale = getPxPerM(floor)
     const segs = buildBlockingSegments(walls)
 
     const k = Math.min(1, MAX_CANVAS_PX / Math.max(floor.imageWidth, floor.imageHeight))
@@ -91,19 +91,29 @@ export function attachBlindSpotLayer({
   let prev = snapshot()
   function snapshot() {
     const cs = useCameraStore.getState()
-    const fid = useFloorStore.getState().activeFloorId
+    const fs = useFloorStore.getState()
+    const fid = fs.activeFloorId
+    const floor = fs.floors.find((f) => f.id === fid)
     return {
       cams: cs.camerasByFloor[fid],
       walls: useWallStore.getState().wallsByFloor[fid],
       show: cs.showBlindSpots,
       fid,
       inCamera: isCameraMode(),
+      // 53-G8: the mask is built in metres via floor.scale and sized to the
+      // image, but neither was tracked — recalibrating the scale left the
+      // mask frozen at the old one (verified: halving px/m left the covered
+      // area byte-identical at 61529 px when the true value was 113991).
+      scale: floor?.scale,
+      imgW: floor?.imageWidth,
+      imgH: floor?.imageHeight,
     }
   }
   const onChange = () => {
     const cur = snapshot()
     if (cur.cams === prev.cams && cur.walls === prev.walls && cur.show === prev.show
-      && cur.fid === prev.fid && cur.inCamera === prev.inCamera) return
+      && cur.fid === prev.fid && cur.inCamera === prev.inCamera
+      && cur.scale === prev.scale && cur.imgW === prev.imgW && cur.imgH === prev.imgH) return
     prev = cur
     rebuild()
   }

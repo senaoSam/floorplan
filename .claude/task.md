@@ -34,9 +34,9 @@
 **Camera 3D 目標擬真化完成（2026-08-10 使用者驗收 ok）：人車模型重造（轎車擠出輪廓/衣著輪廓人偶）＋trail 色帶＋選取相機高亮＋2D/3D 共用色彩抖動（trackColor.js）＋步態修復（r3f delta NaN、擺動軸 x→z）。門縫做過又依使用者要求移除（只留門把），細節見 git log。**
 **Backlog 清掉兩項：PDF 規劃報告輸出（含新增的 RF 涵蓋率/verdict 頁）、spec.md 全面同步。以上三項 2026-08-10 使用者驗收 ok。**
 
-**★ 2026-08-17：Phase 53 進行中，G1~G7 全部完成（使用者驗收 ok）。** 三輪 bug 獵捕找出 93 條
-（含 4 條 critical，其中 2 條會白屏），已分成 10 組 × 5-10h。**G1~G7 ✅ 完成，4 條 critical 全修完。
-剩 G8~G10（彼此無依賴）。R1「反射分歧」查證為 harness 誤判、非 bug。
+**★ 2026-08-17：Phase 53 進行中，G1~G8 全部完成（使用者驗收 ok）。** 三輪 bug 獵捕找出 93 條
+（含 4 條 critical，其中 2 條會白屏），已分成 10 組 × 5-10h。**G1~G8 ✅ 完成，4 條 critical 全修完。
+剩 G9~G10（彼此無依賴）。R1「反射分歧」查證為 harness 誤判、非 bug。
 一組一組來，等使用者給組號。** 詳見上方 Phase 53 專節與 `.claude/bug-fix-groups.md`。
 
 ---
@@ -60,7 +60,8 @@
 > - [x] ~~**R1 反射 JS/GL 分歧**~~ **❌ 查證為誤判、非 bug**（2026-08-14；harness 傳了 `itu: 0`）
 > - [x] **G6 切樓層/切模式狀態殘留 ✅**（2026-08-14，12 條;其中 23n 有 stash 反證 + 截圖）
 > - [x] **G7 命名唯一性與跨樓層參照 ✅**（2026-08-17，名稱改由內容推導，undo 自動正確）
-> - [ ] G8 單位比例尺 ／G9 效能洩漏 ／G10 UI/匯出
+> - [x] **G8 單位、比例尺與魔術數字 ✅**（2026-08-17，抽出 canonical helper，13 處呼叫端統一）
+> - [ ] G9 效能洩漏 ／G10 UI/匯出
 >
 > **G1 收工小結（防重做）**：三處 hooks 違規全數修正 ——
 > `CalibrationModal.jsx` 的 `useOverlayDismiss` 上移到 early return 之前（對照 `LiveViewModal.jsx:59`）；
@@ -195,6 +196,40 @@
 > **兩個實作細節**:① 4 個 `global*Counter` 留著沒刪（命名不再讀它們，全庫 grep 無外部讀取，
 > 但直接刪會影響持久化/外部整合）② camera 命名**必須多掃 `unplacedCameras`** ——
 > 未放置池裡的相機持有真實 `CAM-NN`，不掃會把同名發給已放置的相機。
+>
+> **G8 收工小結（2026-08-17，防重做）**：照建議先抽 canonical helper 再改呼叫端 ——
+> `useFloorStore` 新增 `getPxPerM(floor)` / `getFloorHeight(floor)` / `FALLBACK_PX_PER_M`，
+> 13 個檔案改成呼叫它。`camerasLayer.js` 的 `FALLBACK_PX_PER_M` 改成 re-export（保留既有
+> import 路徑），`CameraOverlay3D` 自帶的那份副本刪掉 —— 它原本註解說「為了不把 PIXI 端
+> 拉進 Three bundle 才 inline」，helper 移到 store 後這個理由消失（3D 本來就 import store）。
+> **報告有一處位置寫錯**：23g 標 `cameraModels.js:48`，實際 clamp 在
+> `fovPolygon.js:37`（`cameraModels` 的 `fovDeg: 360` 本身是對的）。
+> **23g 的修法要點**：`fovDeg` 是**水平**視角，`VFOV_RATIO` 由它推垂直，但環景鏡頭的
+> 水平掃角推不出垂直 —— 改成 **clamp 推導出來的垂直角**（≥180° 視為魚眼，直接給
+> `FISHEYE_VFOV_DEG = 160`），而不是 clamp 輸入的水平角。已驗 dome/bullet/120° 數值
+> **完全不變**，只有魚眼從 2.395 m 回到宣告的 9 m。
+> **多修了 4 處報告沒列的同類 bug**（同屬「一次統一」範圍）：`FloorHoleVolume3D.jsx:191`、
+> `RiserLayer3D.jsx:79` 另有兩個 `|| 100`；`CableLayer3D.jsx:52`、`Viewer3D.jsx:991`
+> 另有兩個 `?? 3`。
+> **一個刻意的例外**：`WallPanel` 顯示牆長用**原始 `floor.scale`、不是 `getPxPerM`** ——
+> 給人看的測量值不該用 placeholder 編出來（這正是 52-A3 的教訓），未校正時顯示
+> 「需先校正比例尺」。同理 `coverageStats` 的拒答行為保留不動，只有它呼叫的共用
+> rasteriser 改用 helper（T10 的分歧點就在這裡：報表拒答、overlay 卻自己假設 40）。
+> **`analyticsStats` / `occupancyGrid` 沒有再包一層 fallback**：呼叫端已經用 helper 解過，
+> 這兩支只把 `|| 40` 換成 `> 0 ? : `（原本 `scale = 0` 會落 fallback），再加一層只會
+> 掩蓋呼叫端的 bug。
+>
+> **驗證數字（防重做，都是實測）**：改碼**前**先反證 —— 比例尺 22.83 → 11.42 px/m，
+> 盲區遮罩**完全沒重建**（61529 px 不動），用「移動相機」強制重建才跳到 **113991**；
+> 改碼後自動重建量到的正是 **113991**（兩條獨立路徑對上同一個數字）。
+> 三個 snapshot 各自獨立驗過：盲區 61529↔113991、重疊有 83783 px 由琥珀轉青
+> （尺度加倍後開始出現備援）、人流 raster 60×45→180×135（cell 是公尺推導）。
+> T3 真滑鼠畫牆：6 m 樓層得 `topHeight: 6`、4.5 m 得 4.5。
+> E5 真跑 `routeOneAP`：5 顆 AP 落線 0.60 → 3.60 m（差**剛好 3.00**，線長差也剛好 3.00，
+> 沒重複計算），AP 面板同步顯示、樓層總線材 43.4 → 58.4 m。
+> E5b：`pxPerM: 0` 現在落 40（原本 `||` 會讓它落 fallback 但 `scale: 0.5` 這種
+> **合法的大場區尺度**要保留 —— 已驗 0.5 不被替換）。
+> mockTracks 尺度加倍後像素步長 322 → 664 px，但**實際步行距離維持 14.12 → 14.54 m**。
 >
 > **6 項未進 group，需使用者先決策或先驗證**（見 groups 檔末節），其中最重要：
 > `LayerToggle.jsx:83` 的修法要選 (a) 拆 12 個單欄位 selector 或 (b) 引入 `zustand/shallow`

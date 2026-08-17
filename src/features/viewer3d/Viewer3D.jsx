@@ -3,7 +3,7 @@ import { Canvas, extend, useFrame, useLoader, useThree } from '@react-three/fibe
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment'
-import { useFloorStore } from '@/store/useFloorStore'
+import { useFloorStore, getPxPerM, getFloorHeight } from '@/store/useFloorStore'
 import { useEditorStore, VIEW_MODE, EDITOR_MODE } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { getSceneRefs } from '@/render/sceneRegistry'
@@ -35,10 +35,14 @@ import './Viewer3D.sass'
 extend({ OrbitControls })
 
 // Map canvas pixels to meters using the floor's calibrated scale. If scale is
-// missing we fall back to a pseudo-scale (100 px/m) just so 3D isn't blank
-// before calibration.
+// missing we fall back to the shared pre-calibration placeholder just so 3D
+// isn't blank.
+//
+// 53-G8: this used to be its own `|| 100` while every 2D layer fell back to 40,
+// so on an uncalibrated floor the same camera's coverage came out 2.5x larger
+// relative to the floor slab in 3D than in 2D. Both now read the one value.
 function pxToMeters(floor) {
-  const scale = floor?.scale || 100
+  const scale = getPxPerM(floor)
   return {
     w: (floor?.imageWidth  ?? 0) / scale,
     h: (floor?.imageHeight ?? 0) / scale,
@@ -248,7 +252,7 @@ function KeyLight({ center, radius }) {
 // every RF/cable layer is unmounted and the surveillance layers (camera
 // bodies + FOV ground polygons + live tracking targets) mount instead.
 function FloorStack({ floor, elevation, isActive, onAPHover, onSwitchHover, onCameraHover, inCameraMode }) {
-  const pxToM = 1 / (floor.scale || 100)
+  const pxToM = 1 / getPxPerM(floor)   // 53-G8: was `|| 100`; see pxToMeters
   const dimOpacity = isActive ? 1 : 0.28
 
   // Floor-align transform (mirrors the 2D ALIGN_FLOOR rule). The 2D editor
@@ -984,7 +988,7 @@ function Viewer3D() {
       // spans the floor's own elevation up to its ceiling.
       const dx = Math.max(Math.abs(0 - center[0]), Math.abs(fw - center[0]))
       const dz = Math.max(Math.abs(0 - center[2]), Math.abs(fh - center[2]))
-      const top = elev + (f.floorHeight ?? 3)
+      const top = elev + getFloorHeight(f)   // 53-G8
       const dy = Math.max(Math.abs(elev - center[1]), Math.abs(top - center[1]))
       maxR = Math.max(maxR, Math.sqrt(dx * dx + dy * dy + dz * dz))
     }

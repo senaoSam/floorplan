@@ -4,7 +4,7 @@ import { useThree } from '@react-three/fiber'
 import { Line2 } from 'three/examples/jsm/lines/Line2'
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial'
-import { useFloorStore, DEFAULT_FLOOR_HEIGHT_M } from '@/store/useFloorStore'
+import { useFloorStore, DEFAULT_FLOOR_HEIGHT_M, getPxPerM } from '@/store/useFloorStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { computeFloorElevations } from '@/utils/floorStacking'
 import { makeAlignMatrixM, applyAlignMatrix, isIdentityAlign } from '@/utils/floorAlign'
@@ -188,7 +188,7 @@ export default function FloorHoleVolume3D({ activeFloorId }) {
     for (const f of floors) {
       const list = holesByFloor[f.id] ?? []
       if (!list.length) continue
-      const pxToM = 1 / (f.scale || 100)
+      const pxToM = 1 / getPxPerM(f)   // 53-G8: was `|| 100` (2D used 40)
       for (const h of list) {
         const bottomId = h.bottomFloorId ?? f.id
         const topId    = h.topFloorId    ?? f.id

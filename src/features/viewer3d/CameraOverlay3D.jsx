@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { useFloorStore } from '@/store/useFloorStore'
+import { useFloorStore, getPxPerM } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useCameraStore } from '@/store/useCameraStore'
 import { useTrackingStore } from '@/store/useTrackingStore'
@@ -11,10 +11,10 @@ import { computeFlowGrid, computeStreamlines } from '@/features/cameras/analytic
 
 const EMPTY = Object.freeze([])
 
-// px/m fallback when a floor has no calibrated scale — mirrors
-// camerasLayer.FALLBACK_PX_PER_M (and fovRasterize's literal 40). Inlined to
-// avoid pulling the PIXI-side camerasLayer module into the Three.js bundle.
-const FALLBACK_PX_PER_M = 40
+// 53-G8: this file used to inline its own `const FALLBACK_PX_PER_M = 40` to
+// avoid importing the PIXI-side camerasLayer into the Three.js bundle. The
+// canonical accessor now lives in useFloorStore, which 3D already imports, so
+// the copy is gone along with the risk of it drifting from the 2D value.
 
 // 3D projections of the 2D Camera-mode planning overlays. Each plane reuses the
 // SAME rasteriser / colouriser the 2D PIXI layer uses so the 3D image is
@@ -225,7 +225,7 @@ function OccupancyPlane3D({ floorId, pxToM }) {
       tToSec: occupancyToSec,
       imageWidth: floor.imageWidth,
       imageHeight: floor.imageHeight,
-      pxPerM: floor.scale ?? FALLBACK_PX_PER_M,
+      pxPerM: getPxPerM(floor),
       mode: occupancyMode,
       maskFn,
     })
@@ -363,7 +363,7 @@ function FlowPlane3D({ floorId, pxToM }) {
       tToSec: occupancyToSec,
       imageWidth: floor.imageWidth,
       imageHeight: floor.imageHeight,
-      pxPerM: floor.scale ?? FALLBACK_PX_PER_M,
+      pxPerM: getPxPerM(floor),
       cellM: 1.5,          // same coarse pitch as the 2D flow field
       maskFn,
     })

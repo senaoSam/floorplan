@@ -39,7 +39,10 @@ const FOV_EDGE_ALPHA = 0.55
 
 // No scale (px/m) set yet → assume this so cameras still show a usable cone.
 // CameraPanel surfaces a hint when the fallback is in effect.
-export const FALLBACK_PX_PER_M = 40
+// 53-G8: the value itself now lives in useFloorStore alongside getPxPerM;
+// re-exported here so existing importers keep their import path.
+export { FALLBACK_PX_PER_M } from '@/store/useFloorStore'
+import { getPxPerM } from '@/store/useFloorStore'
 
 // White fill + black outline — the map-label classic: the white core reads on
 // dark floors, the dark rim keeps it legible on white plans. Camera mode has
@@ -77,7 +80,7 @@ export function attachCamerasLayer({
     return floors.find((f) => f.id === activeFloorId) ?? null
   }
 
-  const pxPerM = () => activeFloor()?.scale ?? FALLBACK_PX_PER_M
+  const pxPerM = () => getPxPerM(activeFloor())
 
   // ── FOV cones — one Graphics pass for all cameras ──────────────────────
   // Blocking segments are cached on a reference signature (walls array

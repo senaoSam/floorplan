@@ -3,7 +3,7 @@ import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { computeOccupancyGrid, renderOccupancyCanvas } from './occupancyGrid'
 import { computeFlowGrid, computeStreamlines } from './analyticsStats'
 import { buildFovMaskGrid } from './fovRasterize'
-import { FALLBACK_PX_PER_M } from './camerasLayer'
+import { getPxPerM } from '@/store/useFloorStore'
 
 // Occupancy heatmap sprite for Camera mode (Phase 34-3). Sits at the BOTTOM
 // of the cameraFov layer — above the floor image, below the FOV cones and
@@ -182,7 +182,7 @@ export function attachOccupancyLayer({
       tToSec: tr.occupancyToSec,
       imageWidth: floor.imageWidth,
       imageHeight: floor.imageHeight,
-      pxPerM: floor.scale ?? FALLBACK_PX_PER_M,
+      pxPerM: getPxPerM(floor),
       maskFn,
     }
     if (tr.occupancyMode === 'flow') {
@@ -238,7 +238,9 @@ export function attachOccupancyLayer({
   let prev = snapshot()
   function snapshot() {
     const tr = useTrackingStore.getState()
-    const fid = useFloorStore.getState().activeFloorId
+    const fs = useFloorStore.getState()
+    const fid = fs.activeFloorId
+    const floor = fs.floors.find((f) => f.id === fid)
     const cam = useCameraStore?.getState()
     return {
       mode: tr.occupancyMode,
@@ -252,13 +254,20 @@ export function attachOccupancyLayer({
       clip: cam?.clipHeatmapToFov,
       cameras: cam?.camerasByFloor[fid],
       walls: useWallStore?.getState().wallsByFloor[fid],
+      // 53-G8: grid cell size is metre-derived (pxPerM) and the raster is
+      // sized to the image — recalibrating either left the heatmap at the
+      // old scale.
+      scale: floor?.scale,
+      imgW: floor?.imageWidth,
+      imgH: floor?.imageHeight,
     }
   }
   const onChange = () => {
     const cur = snapshot()
     if (cur.mode === prev.mode && cur.from === prev.from && cur.to === prev.to
       && cur.tracks === prev.tracks && cur.fid === prev.fid && cur.inCamera === prev.inCamera
-      && cur.clip === prev.clip && cur.cameras === prev.cameras && cur.walls === prev.walls) return
+      && cur.clip === prev.clip && cur.cameras === prev.cameras && cur.walls === prev.walls
+      && cur.scale === prev.scale && cur.imgW === prev.imgW && cur.imgH === prev.imgH) return
     prev = cur
     scheduleRebuild()
   }

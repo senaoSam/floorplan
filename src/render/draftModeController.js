@@ -4,6 +4,7 @@ import { DEFAULT_TRAY } from '@/store/useCableStore'
 import { generateId } from '@/utils/id'
 import { snapTrayPoint } from '@/features/draft/traySnap'
 import { isAnyBodyDragging } from '@/store/useDragOverlayStore'
+import { getFloorHeight } from '@/store/useFloorStore'
 
 // Owns the draft-mode click / move / commit / cancel flow.
 // Returns the callback set viewport.bindViewport reads, plus a separate
@@ -109,7 +110,10 @@ export function createDraftModeController({
       startX: a.x, startY: a.y,
       endX:   b.x, endY:   b.y,
       material,
-      topHeight: 3.0,
+      // 53-G8: was a hardcoded 3.0. A wall drawn on a 6 m floor stopped at
+      // 3 m, so the RF engine's Z filter judged rays to pass over its top and
+      // applied ZERO wall loss — the heatmap showed the wall but ignored it.
+      topHeight: getFloorHeight(floor),
       bottomHeight: 0,
       openings: [],
     })

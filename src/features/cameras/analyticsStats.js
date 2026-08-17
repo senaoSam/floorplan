@@ -5,6 +5,8 @@
 // All use the same analysis window [tFromSec, tToSec] as the occupancy
 // heatmap, and the same sparse waypoint Track shape from mockTracks.
 
+import { FALLBACK_PX_PER_M } from '@/store/useFloorStore'
+
 const SAMPLE_DT_SEC = 1
 
 // ── Tripwire ──────────────────────────────────────────────────────────────
@@ -250,7 +252,11 @@ export function computeFlowGrid({
   tracks, tFromSec, tToSec, imageWidth, imageHeight, pxPerM, cellM = 1, maskFn,
 }) {
   if (!tracks || tracks.length === 0 || !imageWidth || !imageHeight) return null
-  const cellPx = Math.max(4, cellM * (pxPerM || 40))
+  // 53-G8: was `pxPerM || 40`, which also swallowed a scale of exactly 0.
+  // Callers resolve the fallback via getPxPerM before calling in, so a
+  // non-positive value here means a caller bug — guard without re-deciding
+  // the fallback (a second one would just hide it).
+  const cellPx = Math.max(4, cellM * (pxPerM > 0 ? pxPerM : FALLBACK_PX_PER_M))
   const cols = Math.max(1, Math.ceil(imageWidth / cellPx))
   const rows = Math.max(1, Math.ceil(imageHeight / cellPx))
   const n = cols * rows

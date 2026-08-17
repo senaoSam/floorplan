@@ -1,5 +1,5 @@
 import { EDITOR_MODE } from '@/store/useEditorStore'
-import { useFloorStore } from '@/store/useFloorStore'
+import { useFloorStore, getPxPerM } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useTrackingStore } from '@/store/useTrackingStore'
 import { useCameraStore } from '@/store/useCameraStore'
@@ -37,7 +37,7 @@ export function ensureTracksForActiveFloor(seedOverride) {
   // manual calibration can later re-project it. samples stay in floor px —
   // uncalibrated cameras display tracks as generated.
   const cameras = useCameraStore.getState().camerasByFloor[activeFloorId] ?? []
-  const scale = floor.scale ?? 40
+  const scale = getPxPerM(floor)   // 53-G8: was an inlined `?? 40`
   const bound = bindTracksToCameras(tracks, cameras, walls, scale)
   tr.setTracks(activeFloorId, bound, seed)
   // Re-project any cameras already manually calibrated (e.g. returning to a

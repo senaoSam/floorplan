@@ -4,7 +4,7 @@ import { useViewportStore } from '@/store/useViewportStore'
 import { sampleTrackAt, trackSpeedAt, trackHeadingAt } from './mockTracks'
 import { trackTint } from './trackColor'
 import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from './fovPolygon'
-import { FALLBACK_PX_PER_M } from './camerasLayer'
+import { getPxPerM } from '@/store/useFloorStore'
 import { setDetectingCameras, resetDetection } from './detectionBus'
 import { deviceStatus, DEVICE_STATUS } from './deviceStatus'
 
@@ -78,7 +78,7 @@ export function attachTracksLayer({
     const floor = activeFloor()
     const cameras = useCameraStore.getState().camerasByFloor[fid] ?? []
     const walls = useWallStore.getState().wallsByFloor[fid] ?? []
-    const scale = floor?.scale ?? FALLBACK_PX_PER_M
+    const scale = getPxPerM(floor)
     const key = `${fid}::${scale}`
     const sameRefs = fovPolys._cams === cameras && fovPolys._walls === walls && fovCacheKey === key
     if (sameRefs) return fovPolys
@@ -268,7 +268,7 @@ export function attachTracksLayer({
     }
     if (!best) { label.visible = false; return }
     const floor = activeFloor()
-    const pxPerM = floor?.scale ?? FALLBACK_PX_PER_M
+    const pxPerM = getPxPerM(floor)
     const speedM = trackSpeedAt(best.track, useTrackingStore.getState().clockSec) / pxPerM
     const who = TYPE_LABEL[best.track.type] ?? best.track.type
     const detTxt = best.detected ? `📹 ${best.detected.name}` : '未偵測'

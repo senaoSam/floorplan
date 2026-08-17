@@ -6,6 +6,8 @@
 // Tracks are integrated at a fixed time step so a person lingering at a shelf
 // piles seconds onto the same cell, while a passer-by leaves a thin line.
 
+import { FALLBACK_PX_PER_M } from '@/store/useFloorStore'
+
 const SAMPLE_DT_SEC = 1
 export const OCCUPANCY_CELL_M = 0.5
 
@@ -28,7 +30,9 @@ export function computeOccupancyGrid({
   maskFn,
 }) {
   if (!tracks || tracks.length === 0 || !imageWidth || !imageHeight) return null
-  const cellPx = Math.max(2, OCCUPANCY_CELL_M * (pxPerM || 40))
+  // 53-G8: was `pxPerM || 40` — see computeFlowGrid. Callers resolve the
+  // fallback; a scale of exactly 0 must not silently land on it here.
+  const cellPx = Math.max(2, OCCUPANCY_CELL_M * (pxPerM > 0 ? pxPerM : FALLBACK_PX_PER_M))
   const cols = Math.max(1, Math.ceil(imageWidth / cellPx))
   const rows = Math.max(1, Math.ceil(imageHeight / cellPx))
   const grid = new Float32Array(cols * rows)

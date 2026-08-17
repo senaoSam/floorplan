@@ -6,7 +6,7 @@ import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial'
 import { useAPStore } from '@/store/useAPStore'
 import { useCableStore, resolveTrayMountHeight } from '@/store/useCableStore'
-import { useFloorStore } from '@/store/useFloorStore'
+import { useFloorStore, getFloorHeight } from '@/store/useFloorStore'
 import { useEditorStore, VIEW_MODE } from '@/store/useEditorStore'
 import { computeRoutes } from '@/features/cable/computeRoutes'
 
@@ -49,7 +49,7 @@ function plenumYForFloor(floor, traysOnFloor) {
     for (const t of traysOnFloor) sum += resolveTrayMountHeight(t, floor)
     return sum / traysOnFloor.length
   }
-  return Math.max(0, (floor?.floorHeight ?? 3) - 0.05)
+  return Math.max(0, getFloorHeight(floor) - 0.05)   // 53-G8
 }
 
 // Lift a route point to 3D. Route points carry only { x, y, kind, floorId }
