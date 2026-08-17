@@ -808,7 +808,21 @@ export function attachCablesLayer({
   // geometry is unchanged, so DON'T mark routingDirty (reuse the routing
   // cache). But the frozen static layer holds scale-baked geometry, so force
   // it to redraw at the new scale.
-  const unsubViewport = useViewportStore.subscribe(() => { invalidateStatic(); probeEvent('viewport'); rebuild() })
+  //
+  // 53-G9b: gate that redraw on `scale` ALONE. rebuildImpl reads exactly one
+  // viewport field — `scale`, as `s = 1/vpScale` (see the vpScale line) — while
+  // pan is applied by the parent container's transform and never reaches this
+  // geometry. Panning therefore rebuilt all 300 routes for a result identical
+  // to what was already on screen: measured at 51 ms per pan event vs 53 ms per
+  // zoom event (300 APs), i.e. the entire cost was wasted. Zoom still redraws,
+  // unchanged — the scale-baked widths genuinely do need it.
+  let lastVpScale = useViewportStore.getState().scale
+  const unsubViewport = useViewportStore.subscribe(() => {
+    const scale = useViewportStore.getState().scale
+    if (scale === lastVpScale) return
+    lastVpScale = scale
+    invalidateStatic(); probeEvent('viewport'); rebuild()
+  })
   // Live cable redraw during AP/SW/tray drag. Subscribe gated by checking
   // whether any relevant override key changed so unrelated dragOverlay
   // mutations (e.g. wall drag dx/dy) don't trigger a route recompute.

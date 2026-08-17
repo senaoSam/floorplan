@@ -485,10 +485,34 @@ const samples = project(frameSamples, H)
 | **5 AP**,熱圖開 | **60.2**(0 long task) |
 
 關掉熱圖只差 0.8 FPS,而 `heatmapAdapter` **根本沒有訂閱 viewport**(縮放不觸發重算),
-所以「縮放中 debounce 熱圖重算」修不到東西。真正瓶頸是**300 顆 AP 的向量圖層在每次
-viewport 變動時重繪**(5 AP 時 60 FPS、零 long task 即為反證)。真修要做 AP 圖層
-批次化/視錐裁剪 —— 屬**重新設計**,且與既有決策一致(1000 AP 效能家族暫緩,
-重啟扳機=單層 >500 AP 且卡)。**未實作,留待該扳機觸發**。
+所以「縮放中 debounce 熱圖重算」修不到東西。
+
+**後續圖層隔離量測(2026-08-17)推翻了第二個推測** —— 不是 AP 圖層:
+
+| 關掉的圖層(300 AP,同一段縮放) | FPS | long task |
+|---|---|---|
+| baseline 全開 | 13.0 | 2568 ms |
+| `showAPs` OFF | 12.9 | 2540 ms |
+| `showAPInfo` OFF | 13.4 | 2581 ms |
+| **`showCables` OFF** | **50.1** | **305 ms** |
+
+**真兇是 `cablesLayer.js:811` 的 viewport 訂閱**(`invalidateStatic()` + `rebuild()`,
+重畫全部 300 條)。單次成本:50 AP **2.0ms** / 150 AP **13.4ms** / 300 AP **54ms**
+(超線性,AP ×6 → 成本 ×27)。該檔註解自己就寫著「Rebuilding all 300 costs ~0.5–0.9 s」
+—— 32-E 已為 **dragend** 做 fast path 避開,**viewport 沒有**。
+perf probe `routesCache: 0 hit / 0 miss` → routing 快取正確,純幾何重繪。
+
+**✅ pan 已修(53-G9b)**:`rebuildImpl` 讀 viewport **只讀 `scale`**(:604 `s = 1/vpScale`,
+線寬反向縮放),pan 由父層 container transform 處理、不進這段幾何 → pan 觸發的重建結果
+**逐位元相同**(instruction count pan 前後皆 60418;zoom 則 60418→60725)。
+加一行 `scale` 未變就 return:**pan 51ms → 0.1ms、真滑鼠平移 13 → 56.9 FPS 零 long task**。
+風險已驗:zoom 仍重畫、拖曳即時重畫(19→22→25)、**拖曳中 pan** 不卡狀態、0 error。
+
+**❌ zoom 那半未做,需使用者先拍板**(zoom 仍 53ms/次):
+(a) 線寬改**世界單位** —— 最徹底,viewport 訂閱可整個拿掉,但放大時線變粗
+**屬視覺取捨,不可自行決定**;(b) 縮放中節流 —— 改動小,縮放中線寬暫時失真;
+(c) 只降級標籤/dash。**三條都不需要把 pan 修正改回去**,可獨立進行。
+現況體驗落差:**平移順、縮放卡**。
 
 ---
 

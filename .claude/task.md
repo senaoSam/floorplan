@@ -254,13 +254,33 @@
 > **T-F6 / 23i 不必修** —— `trackingBinder` 的 `prevHFloorId` 戳記是 **G6 的 commit
 > `5495bda`** 加的，報告寫在 G6 之前。
 >
-> **P1-14 現象為真（實測 10 FPS）但歸因錯誤，建議的修法實測無效**：熱圖**關**掉只從
-> 12.4 → 13.2 FPS（差 0.8），而 `heatmapAdapter` **根本沒訂閱 viewport**（縮放不觸發
-> 重算）。真正瓶頸是 **300 顆 AP 的向量圖層在每次 viewport 變動時重繪** —— 反證是
-> **5 AP 時 60.2 FPS、零 long task**。真修要做 AP 圖層批次化/視錐裁剪，屬重新設計，
-> 且與既有決策一致（1000 AP 效能家族暫緩，重啟扳機=單層 >500 AP 且卡）。**未實作。**
-> 這是 Phase 53 第 8 個「看起來嚴重但歸因/重現不成立」的案例 —— 再次印證
-> **報告的「位置」欄可信、「後果／建議修法」欄不可信**。
+> **P1-14 現象為真（實測 10 FPS）但歸因錯誤 —— 兩層誤判，pan 已解、zoom 待決策**：
+>
+> ① 報告說「debounce 熱圖重算」：熱圖**關**掉只從 12.4 → 13.2 FPS（差 0.8），而
+> `heatmapAdapter` **根本沒訂閱 viewport**（縮放不觸發重算）→ 修法無效。
+> ② 我第一輪推測「AP 圖層」：**也錯**。圖層逐一關閉實測 —— 關 `showAPs` 12.9 FPS、
+> 關 `showAPInfo` 13.4 FPS（都沒差），**關 `showCables` → 50.1 FPS**。
+>
+> **真兇是 `cablesLayer.js:811` 的 viewport 訂閱**：它 `invalidateStatic()` + `rebuild()`
+> 重畫全部 300 條路由。單次成本 50 AP **2.0ms** / 150 AP **13.4ms** / 300 AP **54ms**
+> （超線性：AP ×6 → 成本 ×27）。程式碼自己的註解就寫著「Rebuilding all 300 costs
+> ~0.5–0.9 s」——32-E 已為 **dragend** 做了 fast path 避開它，但 **viewport 沒有**。
+> perf probe 顯示 `routesCache: 0 hit / 0 miss`，即 routing 快取是對的，純幾何重繪。
+>
+> **✅ 已修一半（commit 見下）**：`rebuildImpl` 讀 viewport **只讀 `scale`**（:604 的
+> `s = 1/vpScale`，線寬反向縮放用），pan 由父層 container transform 處理、**不進這段幾何**
+> → pan 觸發的重建畫出來的東西**逐位元相同**（instruction count pan 前後皆 60418、
+> zoom 則 60418→60725）。加一行 `scale` 相同就 return：**pan 51ms → 0.1ms、
+> 真滑鼠平移 13 → 56.9 FPS 零 long task**。
+>
+> **❌ zoom 那半未做，需使用者先拍板**：zoom 仍 53ms/次（300 AP 滾輪仍卡）。三條路——
+> (a) 線寬改**世界單位**（最徹底，viewport 訂閱可整個拿掉，但放大時線會變粗 →
+> **視覺取捨，不可自行決定**）、(b) 縮放中節流（改動小，縮放中線寬暫時失真）、
+> (c) 只降級標籤/dash。三條都**不需要把 pan 修正改回去**，可獨立進行。
+> 現況會有體驗落差：**平移順、縮放卡**。
+>
+> 這是 Phase 53 第 8 個「看起來嚴重但歸因不成立」的案例，而且**我自己的第一次推測也錯了**
+> —— 教訓不只是「別信報告的後果欄」，而是**任何歸因都要先做圖層/變因隔離量測再動手**。
 >
 > **6 項未進 group，需使用者先決策或先驗證**（見 groups 檔末節），其中最重要：
 > `LayerToggle.jsx:83` 的修法要選 (a) 拆 12 個單欄位 selector 或 (b) 引入 `zustand/shallow`
