@@ -34,16 +34,16 @@
 **Camera 3D 目標擬真化完成（2026-08-10 使用者驗收 ok）：人車模型重造（轎車擠出輪廓/衣著輪廓人偶）＋trail 色帶＋選取相機高亮＋2D/3D 共用色彩抖動（trackColor.js）＋步態修復（r3f delta NaN、擺動軸 x→z）。門縫做過又依使用者要求移除（只留門把），細節見 git log。**
 **Backlog 清掉兩項：PDF 規劃報告輸出（含新增的 RF 涵蓋率/verdict 頁）、spec.md 全面同步。以上三項 2026-08-10 使用者驗收 ok。**
 
-**★ 2026-08-14：Phase 53 進行中，G1~G6 全部完成（使用者驗收 ok）。** 三輪 bug 獵捕找出 93 條
-（含 4 條 critical，其中 2 條會白屏），已分成 10 組 × 5-10h。**G1~G6 ✅ 完成，4 條 critical 全修完。
-剩 G7~G10（彼此無依賴）。R1「反射分歧」查證為 harness 誤判、非 bug。
+**★ 2026-08-17：Phase 53 進行中，G1~G7 全部完成（使用者驗收 ok）。** 三輪 bug 獵捕找出 93 條
+（含 4 條 critical，其中 2 條會白屏），已分成 10 組 × 5-10h。**G1~G7 ✅ 完成，4 條 critical 全修完。
+剩 G8~G10（彼此無依賴）。R1「反射分歧」查證為 harness 誤判、非 bug。
 一組一組來，等使用者給組號。** 詳見上方 Phase 53 專節與 `.claude/bug-fix-groups.md`。
 
 ---
 
 ## 還沒做的事
 
-### Phase 53 三輪 bug 獵捕修復（2026-08-13 立項，**G1~G6 ✅ 完成，剩 G7~G10**）★ 下一個要做的事
+### Phase 53 三輪 bug 獵捕修復（2026-08-13 立項，**G1~G7 ✅ 完成，剩 G8~G10**）★ 下一個要做的事
 
 > **報告**：`.claude/bug-hunt-2026-08-12.md`（93 條，含每條的失效情境與檔案:行號）
 > **分組**：`.claude/bug-fix-groups.md`（10 組 × 5-10h，合計 61-78h）
@@ -59,7 +59,8 @@
 > - [x] **G4 GL 例外與資源回滾 ✅ 主體完成**（2026-08-14，C4/E3/P3-22/23y + contextlost 監聽器）
 > - [x] ~~**R1 反射 JS/GL 分歧**~~ **❌ 查證為誤判、非 bug**（2026-08-14；harness 傳了 `itu: 0`）
 > - [x] **G6 切樓層/切模式狀態殘留 ✅**（2026-08-14，12 條;其中 23n 有 stash 反證 + 截圖）
-> - [ ] G7 命名唯一性 ／G8 單位比例尺 ／G9 效能洩漏 ／G10 UI/匯出
+> - [x] **G7 命名唯一性與跨樓層參照 ✅**（2026-08-17，名稱改由內容推導，undo 自動正確）
+> - [ ] G8 單位比例尺 ／G9 效能洩漏 ／G10 UI/匯出
 >
 > **G1 收工小結（防重做）**：三處 hooks 違規全數修正 ——
 > `CalibrationModal.jsx` 的 `useOverlayDismiss` 上移到 early return 之前（對照 `LiveViewModal.jsx:59`）；
@@ -182,9 +183,18 @@
 > ② 這是 Phase 53 第**三**次 harness 假陽性(前兩次:sentinel −300、cull floor −120)——
 > **看到大數字先懷疑 harness**;③ stash 反證是最快的判別法。
 >
-> **修 G7 前必看**：`nextSwitchName` 對 SW/IDF/MDF/RTR **四種前綴共用同一個 counter**，
-> demo 那次呼叫消耗了「編號 1」兩次（SW-01 與 IDF-01 都是 seq=1）。
-> **不能照抄 `setAPs` 的 `Math.max` 模板**，要先決定是否改成 per-prefix counter。
+> **G7 收工小結（2026-08-17，防重做）**：原本標註「需先決策是否改成 per-prefix counter」——
+> **不需要問，demo 資料本身就是答案**:它同時有 `SW-01` 與 `IDF-01`，即兩者各自是自己類型的
+> 「1 號」，所以 per-prefix 才是原本語意、共用 counter 是 bug。
+> **最終修法比 per-prefix counter 更徹底**:`nextSwitchName` / `nextCameraName` /
+> `nextTripwireName` / `nextZoneName` 全改成**掃描現有名稱取最大 NN + 1**（building-wide、
+> per-prefix），不再讀任何儲存的 counter。這樣任何 bulk setter（現有的 `setSwitches`、
+> 未來新增的）都不必記得推進計數器 —— **名稱寫什麼就是什麼狀態**。
+> **額外收穫（實測）**:undo 也自動正確 —— 刪掉 `SW-02` 再放會**重用 `SW-02`** 而非跳號，
+> 而 G5 的 T7 為了 AP 得另外寫 `recountAPCounter()` 才做到同一件事。
+> **兩個實作細節**:① 4 個 `global*Counter` 留著沒刪（命名不再讀它們，全庫 grep 無外部讀取，
+> 但直接刪會影響持久化/外部整合）② camera 命名**必須多掃 `unplacedCameras`** ——
+> 未放置池裡的相機持有真實 `CAM-NN`，不掃會把同名發給已放置的相機。
 >
 > **6 項未進 group，需使用者先決策或先驗證**（見 groups 檔末節），其中最重要：
 > `LayerToggle.jsx:83` 的修法要選 (a) 拆 12 個單欄位 selector 或 (b) 引入 `zustand/shallow`

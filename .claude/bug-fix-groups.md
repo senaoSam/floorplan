@@ -12,14 +12,14 @@
 ## 建議執行順序
 
 ```
-G1 ✅ → G2 ✅ → G3 ✅ → G4 ✅ → G5 ✅ → G6 ✅ → G7 → G8 → G9 → G10
+G1 ✅ → G2 ✅ → G3 ✅ → G4 ✅ → G5 ✅ → G6 ✅ → G7 ✅ → G8 → G9 → G10
 ```
 
 **硬性依賴兩條都已解除**:
 1. ~~**G2 必須早於 G3、G4**~~ — **已完成**(2026-08-13)。parity 工具已可偵測真實差異,**G3 已用它完成並反證**
 2. ~~**G1 必須最早**~~ — **已完成**(2026-08-13),4 點校正的測試阻斷已解除
 
-**下一步**:G7~G10 任一(彼此無依賴)。G1~G6 全部完成。
+**下一步**:G8~G10 任一(彼此無依賴)。G1~G7 全部完成。
 
 ---
 
@@ -351,17 +351,52 @@ const samples = project(frameSamples, H)
 
 ---
 
-# G7 · 命名唯一性與跨樓層參照(5-6 小時)
+# G7 · 命名唯一性與跨樓層參照 ✅ **已完成**(2026-08-17,使用者驗收 ok)
 
-| # | 位置 | 問題 |
+| # | 位置 | 問題 | 修法 |
+|---|---|---|---|
+| E1 / P1-10 ✅ | `useCableStore.js:453` + `DemoLoader.jsx:170-196` | `setSwitches` 不推進 counter,而 **DemoLoader 是唯一呼叫端且正在踩**:載入 demo 後手放第一台 switch 就叫 `SW-01` 撞名,進 PDF 線材表無法區分 | 名稱改由**現有內容推導** |
+| 23j ✅ | `useCameraStore.js:99` / `:166` / `:197` | `setCameras`/`setTripwires`/`setZones` 同型,目前無呼叫端 → **待爆地雷** | 同上(三個都改) |
+| T2 ✅ | `useCableStore.js:515-527` | `clearFloor` 不清跨樓層 `uplinkTo` → 刪掉放 MDF 的樓層後,`statsSource.js:234` 算成已用埠(虛高)但 `computeRoutes` 靜默跳過(BOM 消失)→ **兩份報表互相矛盾** | 照 `removeSwitches` 範本補全棟掃描 |
+| 23o ✅ | 命名 | 跨樓層 switch 同名,PDF 只印名稱無法分辨 | 推導範圍是 **building-wide** |
+| F5-4 ✅ | `useCameraStore.js:46/51` + `useAutoPlaceStore.js:12-18` | 四個懸空 id 刪樓層時未清 | camera `clearFloor` 清兩個 modal id;`SidebarLeft.confirmRemove` 清 autoPlace preview |
+
+## 核心修法:名稱從內容推導,不再信任 counter
+
+`nextSwitchName` / `nextCameraName` / `nextTripwireName` / `nextZoneName` 都改成**掃描現有名稱取最大 NN + 1**(building-wide、per-prefix),而不是讀一個儲存的計數器。
+
+**這樣一次解掉整類問題**:任何 bulk setter(現在的 `setSwitches`、未來新增的)都不必記得推進 counter —— **名稱寫什麼就是什麼狀態**。
+
+**額外收穫(實測)**:**undo 也自動正確**。輪 2 驗證刪掉 `SW-02` 後再放,名字**重用 `SW-02`** 而非跳號到 `SW-03`。G5 的 T7 為了 AP 額外寫了 `recountAPCounter()` 才做到這件事,switch/camera 這邊結構上就不會有那個問題。
+
+## 「需先決策」的問題:demo 資料本身就是答案
+
+原文件標註「修之前先確認命名語意是否該改成 per-prefix counter」。**不需要問** —— demo 同時存在 `SW-01` 與 `IDF-01`,即兩者各自是自己類型的「1 號」。所以 **per-prefix 才是原本的語意**,共用 counter 是 bug 而非設計。
+
+## 先反證再修(G6 的教訓,這次照做)
+
+動手前先在瀏覽器確認兩條真的會發生:
+
+| 條目 | 反證結果 |
+|---|---|
+| **E1** | demo 有 `SW-01`+`IDF-01`、counter=0 → `nextSwitchName('switch')` 回 **`SW-01`(撞名)** ✅ 重現 |
+| **T2** | 刪掉放 MDF 的樓層 → 1F 兩台 switch **仍指向死掉的 id** ✅ 重現 |
+
+## 驗收結果(兩輪獨立,全程 0 console error)
+
+| 條目 | 輪 1 | 輪 2 |
 |---|---|---|
-| E1 / P1-10 | `useCableStore.js:453` + `DemoLoader.jsx:170-196` | `setSwitches` 不推進 counter,而 **DemoLoader 是唯一呼叫端且正在踩**:載入 demo 後手放第一台 switch 就叫 `SW-01` 撞名,進 PDF 線材表無法區分 |
-| 23j | `useCameraStore.js:99` / `:166` / `:197` | `setCameras`/`setTripwires`/`setZones` 同型,目前無呼叫端 → **待爆地雷** |
-| T2 | `useCableStore.js:515-527` | `clearFloor` 不清跨樓層 `uplinkTo` → 刪掉放 MDF 的樓層後,`statsSource.js:234` 算成已用埠(虛高)但 `computeRoutes` 靜默跳過(BOM 消失)→ **兩份報表互相矛盾** |
-| 23o | 命名 | 跨樓層 switch 同名,PDF 只印名稱無法分辨 |
-| F5-4 | `useCameraStore.js:46/51` + `useAutoPlaceStore.js:12-18` | 四個懸空 id 刪樓層時未清 |
+| E1 | 真實工具列放 switch/IDF → `SW-02`/`IDF-02`,0 撞名 | **四種類型全放一輪**(RTR/MDF/IDF/SW),0 撞名 |
+| T2 | `clearFloor` 後 dangling 2→0 | **真實右鍵→刪除→確認**,`SW-77` 的 dangling 清除 |
+| 23o | 2F 拿到 `SW-03`(不重用 1F 的名) | 全棟 6 個名稱皆唯一 |
+| 23j | 三個 bulk setter 後 → `CAM-09`/`LINE-06`/`ZONE-05` | — |
+| F5-4 | modal ids `c1`/`c2` → null | **真實右鍵刪樓層**,autoPlace preview 清除 |
+| undo | — | 刪 `SW-02` 再放 → **重用 `SW-02`** 不跳號 |
 
-**修法比 `setAPs` 模板複雜**:`nextSwitchName` 對 SW/IDF/MDF/RTR **四種前綴共用同一個 counter**,demo 那次呼叫消耗了「編號 1」兩次(SW-01 與 IDF-01 都是 seq=1)。補 `Math.max` 需要 per-prefix 掃描 → **修之前先確認命名語意是否該改成 per-prefix counter**。
+## 兩點實作說明(防重做)
+
+1. **4 個 `global*Counter` 留著沒刪**,只是命名不再讀它們。全庫 grep 確認無外部讀取,但直接刪會影響任何持久化/外部整合,留著零成本。
+2. **camera 命名必須多掃 `unplacedCameras`** —— 未放置池裡的相機持有真實 `CAM-NN`,不掃會把同名發給已放置的相機。`highestNameNumber` 的 `extraLists` 參數就是為此。
 
 **參考範本**:`useAPStore.js:78-89` 的 `setAPs` + `highestAPNumber`;`removeSwitch:425-438` 的整棟樓 uplink 掃描。
 
@@ -458,7 +493,7 @@ const samples = project(frameSamples, H)
 | ~~G4~~ ✅ | ~~GL 例外與資源回滾~~ **已完成 2026-08-14** | ~~6-8 h~~ | ~~G2~~ ✅ |
 | ~~G5~~ ✅ | ~~undo/redo 完整性~~ **已完成 2026-08-13** | ~~8-10 h~~ | — |
 | ~~G6~~ ✅ | ~~切樓層/模式狀態殘留~~ **已完成 2026-08-14** | ~~6-8 h~~ | — |
-| G7 | 命名唯一性與跨樓層參照 | 5-6 h | — |
+| ~~G7~~ ✅ | ~~命名唯一性與跨樓層參照~~ **已完成 2026-08-17** | ~~5-6 h~~ | — |
 | G8 | 單位/比例尺/魔術數字 | 6-8 h | — |
 | G9 | 效能與資源洩漏 | 5-7 h | — |
 | G10 | UI/UX 與匯出 | 7-9 h | — |
@@ -470,6 +505,6 @@ const samples = project(frameSamples, H)
 **G1 + G2 + G5 已於 2026-08-13 全部完成** —— 三類最傷的問題(會白屏 / 讓驗證失效 / 改錯無法回退)都已解除。
 **G3 已於 2026-08-14 完成**(三條 JS/GL 分歧全平,每條都用 stash 反證)。
 **G4 主體已於 2026-08-14 完成**(C4/E3/P3-22/23y + contextlost 監聽器,驗證時抓到自己修法不完整並補齊)。
-**剩下**:G7~G10。(R1 查證為誤判;23d 已補驗完成。)
+**剩下**:G8~G10。(R1 查證為誤判;23d 已補驗完成。)
 
 G3/G4(GL 引擎)可以延後,因為它們的症狀是「熱圖數字不對」而非「操作壞掉」,且需要較專注的數值驗證時段。

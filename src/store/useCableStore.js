@@ -250,9 +250,42 @@ export function classifyFillRatio(ratio, profile) {
 // xy is shared across every floor the riser passes through.
 export const DEFAULT_RISER_MAGNET_PX = 100
 
+// 53-G7 (E1 / 23o): switch naming is PER PREFIX, not one shared counter.
+//
+// The old `globalSwitchCounter` was a single number for all four kinds, so
+// SW / IDF / MDF / RTR competed for the same sequence. The demo data is the
+// proof that per-prefix is the intended semantics: it ships `SW-01` AND
+// `IDF-01`, i.e. both are "number 1" of their own kind. With one counter that
+// pair consumed sequence 1 twice, and since `setSwitches` never advanced the
+// counter at all (unlike `setAPs`, which was fixed for exactly this in 52-A4),
+// the first hand-placed switch after loading demo was named `SW-01` again —
+// a duplicate that reaches the exported PDF cable table, where two identical
+// rows cannot be told apart on site.
+//
+// Counting from the CONTENTS building-wide (rather than trusting a stored
+// number) also means the name can never collide after undo, floor deletion, or
+// any bulk load, present or future: whatever the names say IS the state.
+const SWITCH_PREFIX = { idf: 'IDF', mdf: 'MDF', router: 'RTR' }
+const switchPrefixFor = (kind) => SWITCH_PREFIX[kind] ?? 'SW'
+
+// Highest NN across `PREFIX-NN` names for one prefix, building-wide (0 if none).
+function highestSwitchNumber(switchesByFloor, prefix) {
+  const re = new RegExp(`^${prefix}-(\\d+)$`)
+  let max = 0
+  for (const list of Object.values(switchesByFloor ?? {})) {
+    for (const sw of (list ?? [])) {
+      const m = re.exec(sw?.name ?? '')
+      if (m) max = Math.max(max, parseInt(m[1], 10))
+    }
+  }
+  return max
+}
+
 export const useCableStore = create((set, get) => ({
   // { [floorId]: Switch[] }
   switchesByFloor: {},
+  // 53-G7: kept only so any external reader/persisted state doesn't break.
+  // Naming no longer consults it — see nextSwitchName.
   globalSwitchCounter: 0,
 
   // { [floorId]: Tray[] }
@@ -289,9 +322,13 @@ export const useCableStore = create((set, get) => ({
 
   getSwitches: (floorId) => get().switchesByFloor[floorId] ?? [],
 
+  // 53-G7: derive the next number from the names actually present for THIS
+  // prefix, building-wide. Building-wide (not per-floor) because the PDF cable
+  // table prints the name alone — two floors each owning an `SW-01` is
+  // indistinguishable on site (23o).
   nextSwitchName: (kind = 'switch') => {
-    const prefix = kind === 'idf' ? 'IDF' : kind === 'mdf' ? 'MDF' : kind === 'router' ? 'RTR' : 'SW'
-    const next = get().globalSwitchCounter + 1
+    const prefix = switchPrefixFor(kind)
+    const next = highestSwitchNumber(get().switchesByFloor, prefix) + 1
     return `${prefix}-${String(next).padStart(2, '0')}`
   },
 
@@ -514,8 +551,23 @@ export const useCableStore = create((set, get) => ({
 
   clearFloor: (floorId) =>
     set((state) => {
-      const { [floorId]: _s, ...restS } = state.switchesByFloor
+      const { [floorId]: goneSwitches, ...restS } = state.switchesByFloor
       const { [floorId]: _t, ...restT } = state.traysByFloor
+      // 53-G7 (T2): drop uplinkTo pointing at anything on the removed floor.
+      // removeSwitch/removeSwitches already do this building-wide scan;
+      // clearFloor deleted the same switches without it, so a switch that
+      // uplinked to an MDF on the deleted floor kept the dead id. The two
+      // consumers then disagreed and BOTH looked plausible:
+      // statsSource.js:234 counted the link as a used port (inflated), while
+      // computeRoutes silently skipped the unresolvable target (the run
+      // vanished from the BOM) — two reports contradicting each other with no
+      // error anywhere.
+      const goneIds = new Set((goneSwitches ?? []).map((s) => s.id))
+      const clearedS = {}
+      for (const [fId, list] of Object.entries(restS)) {
+        clearedS[fId] = (list ?? []).map((s) =>
+          (goneIds.has(s.uplinkTo) ? { ...s, uplinkTo: null } : s))
+      }
       // Risers are global — only drop this floor from their floorIds.
       // Risers that end up with zero floors are kept (user can re-add floors)
       // since removing them silently would surprise users mid-edit.
@@ -523,7 +575,7 @@ export const useCableStore = create((set, get) => ({
         ...r,
         floorIds: (r.floorIds ?? []).filter((id) => id !== floorId),
       }))
-      return { switchesByFloor: restS, traysByFloor: restT, risers }
+      return { switchesByFloor: clearedS, traysByFloor: restT, risers }
     }),
 
   // ── Riser actions ─────────────────────────────────────────────────────

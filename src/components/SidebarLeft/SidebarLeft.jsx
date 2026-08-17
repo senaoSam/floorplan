@@ -17,6 +17,7 @@ import { useCableStore } from '@/store/useCableStore'
 import { useCameraStore } from '@/store/useCameraStore'
 import { useTrackingStore } from '@/store/useTrackingStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
+import { useAutoPlaceStore } from '@/store/useAutoPlaceStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorImport } from '@/features/importer/useFloorImport'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
@@ -238,6 +239,14 @@ function SidebarLeft() {
     // 47-19: drop this floor's undo/redo snapshots so a dead snapshot can't jam
     // the stack (undo returns early on floorId mismatch and never pops).
     useHistoryStore.getState().dropFloor(floor.id)
+    // 53-G7 (F5-4): an auto-place preview belonging to this floor. Its readers
+    // compare floorId, so it could never DRAW on the wrong floor — but nothing
+    // ever cleared it either, so a preview for a floor that no longer exists sat
+    // in the store for the rest of the session, keeping its ghost AP objects
+    // alive and leaving `removeApIds` pointing at deleted APs.
+    if (useAutoPlaceStore.getState().floorId === floor.id) {
+      useAutoPlaceStore.getState().clearPreview()
+    }
     removeFloor(floor.id)
     if (isAlignMode && floor.id === activeFloorId) {
       setEditorMode(EDITOR_MODE.SELECT)

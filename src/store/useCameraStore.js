@@ -1,5 +1,33 @@
 import { create } from 'zustand'
 
+// 53-G7 (23j): derive the next NN for `PREFIX-NN` names from the names actually
+// present, building-wide, instead of a stored counter.
+//
+// `setCameras` / `setTripwires` / `setZones` all replace a floor's list without
+// advancing their counter — the same hole `setAPs` had (fixed in 52-A4) and
+// `setSwitches` had (fixed alongside this as E1). These three have no caller
+// yet, so nothing is broken today; they are a loaded gun aimed at whoever adds
+// the first bulk import. Counting from the contents removes the class of bug
+// rather than patching the three call sites: whatever the names say IS the
+// state, so a name can never collide after a bulk load, an undo, or a floor
+// deletion.
+//
+// Building-wide (not per-floor) because these names are printed and referenced
+// on their own; two floors each owning a `CAM-01` cannot be told apart.
+function highestNameNumber(byFloor, prefix, extraLists = []) {
+  const re = new RegExp(`^${prefix}-(\\d+)$`)
+  let max = 0
+  const scan = (list) => {
+    for (const item of (list ?? [])) {
+      const m = re.exec(item?.name ?? '')
+      if (m) max = Math.max(max, parseInt(m[1], 10))
+    }
+  }
+  for (const list of Object.values(byFloor ?? {})) scan(list)
+  for (const list of extraLists) scan(list)
+  return max
+}
+
 // Surveillance cameras (Phase 34). Same per-floor keyed shape as useAPStore.
 // Camera = { id, name, x, y, z, azimuth, fovDeg, rangeM }
 //   x/y      — canvas px (image space), same convention as APs
@@ -57,8 +85,11 @@ export const useCameraStore = create((set, get) => ({
 
   getCameras: (floorId) => get().camerasByFloor[floorId] ?? [],
 
+  // 53-G7: unplacedCameras must be scanned too — a pooled camera holds a real
+  // CAM-NN name, so ignoring the pool would hand the same name to a placed one.
   nextCameraName: () => {
-    const next = get().globalCameraCounter + 1
+    const s = get()
+    const next = highestNameNumber(s.camerasByFloor, 'CAM', [s.unplacedCameras]) + 1
     return `CAM-${String(next).padStart(2, '0')}`
   },
 
@@ -131,14 +162,28 @@ export const useCameraStore = create((set, get) => ({
 
   clearFloor: (floorId) =>
     set((state) => {
-      const { [floorId]: _, ...rest } = state.camerasByFloor
+      const { [floorId]: goneCams, ...rest } = state.camerasByFloor
       const { [floorId]: __, ...restT } = state.tripwiresByFloor
       const { [floorId]: ___, ...restZ } = state.zonesByFloor
-      return { camerasByFloor: rest, tripwiresByFloor: restT, zonesByFloor: restZ }
+      // 53-G7 (F5-4): the two modal ids referenced cameras that just ceased to
+      // exist. Deleting the floor while a live-view popover or the calibration
+      // modal was open on one of its cameras left the id pointing at nothing —
+      // a dangling reference the modals resolve with `.find()`, so they render
+      // as an empty shell rather than closing.
+      const goneIds = new Set((goneCams ?? []).map((c) => c.id))
+      return {
+        camerasByFloor: rest,
+        tripwiresByFloor: restT,
+        zonesByFloor: restZ,
+        liveViewCameraId: goneIds.has(state.liveViewCameraId) ? null : state.liveViewCameraId,
+        calibrateCameraId: goneIds.has(state.calibrateCameraId) ? null : state.calibrateCameraId,
+      }
     }),
 
   // ── Tripwires ───────────────────────────────────────────────────────────
-  nextTripwireName: () => `LINE-${String(get().globalTripwireCounter + 1).padStart(2, '0')}`,
+  // 53-G7: see highestNameNumber — derived from contents, not the counter.
+  nextTripwireName: () =>
+    `LINE-${String(highestNameNumber(get().tripwiresByFloor, 'LINE') + 1).padStart(2, '0')}`,
   addTripwire: (floorId, tripwire) =>
     set((state) => ({
       globalTripwireCounter: state.globalTripwireCounter + 1,
@@ -169,7 +214,9 @@ export const useCameraStore = create((set, get) => ({
     })),
 
   // ── Zones ───────────────────────────────────────────────────────────────
-  nextZoneName: () => `ZONE-${String(get().globalZoneCounter + 1).padStart(2, '0')}`,
+  // 53-G7: see highestNameNumber — derived from contents, not the counter.
+  nextZoneName: () =>
+    `ZONE-${String(highestNameNumber(get().zonesByFloor, 'ZONE') + 1).padStart(2, '0')}`,
   addZone: (floorId, zone) =>
     set((state) => ({
       globalZoneCounter: state.globalZoneCounter + 1,
