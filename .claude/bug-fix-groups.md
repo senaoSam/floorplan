@@ -442,7 +442,7 @@ const samples = project(frameSamples, H)
 
 ---
 
-# G9 · 效能與資源洩漏(5-7 小時)
+# G9 · 效能與資源洩漏 ✅ **已完成**(2026-08-17,使用者驗收 ok)
 
 | # | 位置 | 問題 | 數字 |
 |---|---|---|---|
@@ -459,6 +459,36 @@ const samples = project(frameSamples, H)
 | 23v | `cameras/analyticsLayer.js:401` | `detach()` 少了 `removeChild`(僅 StrictMode/HMR 影響) | |
 
 **參考範本**:`WallLayer3D.jsx:115-138`(useMemo + 獨立 cleanup effect + null guard)是最標準寫法;`CameraLayer3D.jsx:231-262` 的 ShapeGeometry 與 ScopeLayer3D:88 **幾乎逐字相同但有 dispose**,是最直接的修法參照。
+
+**✅ 完成(2026-08-17)** — 9 項修好、1 項 G6 已修、1 項查證為誤判。逐項:
+
+| # | 修法 | 實測 |
+|---|---|---|
+| 23h ✅ | 抽 `visible` 旗標同時擋住兩個 memo(hook 不能移到 early return 之後),`daily` 再多吃 `view` | **stash 反證**:面板**關著**重產人流凍結 **1121ms** → 修後 **148ms**(7.6×) |
+| P2-15 ✅ | 補 ShapeGeometry 的 dispose effect;`pointsToMeters` 從 JSX prop 移進 `PolygonFill` 內 memo | 見下 |
+| P2-16 ✅ | 補 ExtrudeGeometry dispose;`items` memo 拿掉 `activeFloorId`(它只選 dimOpacity,改在 render 時算) | **stash 反證**:切樓層 8 次 **+8** geometry、繞行相機一次 **+42**(787→837 只增不減)→ 修後 **786 完全不動** |
+| 23r ✅ | `visibleFloors` 改 `useMemo` | `shadowRadius` memo 恢復命中 |
+| E4 ✅ | 18 個 selector 改指向 module 級凍結 `EMPTY`(照 `CameraOverlay3D.jsx:12` 既有寫法,不新增共用 util) | auto-place 實跑仍算出 7 顆預覽 AP、modal 正確讀到「本層現有 2 顆此頻段 AP」 |
+| 23w ✅ | 上限 8192 + insertion-order 淘汰(照 `Label3D.jsx` LRU 規範);值是純字串,淘汰無需 dispose | 灌 3 萬筆 unique id 後顏色仍正確且可重現 |
+| T11 ✅ | 新增 `pruneFrames(liveIds)` + `useFloorStore` 訂閱,刪樓層即釋放(不必等整包 recompute) | 刪樓層後 plane 12→8、無殘留 685×511 貼圖;reducer 單測含 **no-op 保持 identity**(避免多餘 re-render) |
+| 23v ✅ | `detach()` 補 `layer.removeChild(root)` | |
+| 23x ✅ | **刻意不改**,只補註解 | key 被 clamp 在 4–48 → 天生有界 45 筆。Label3D 需要淘汰是因為它的 key 是使用者可改的裝置名(無界);**pattern 不同是因為 key 不同,不是漏做** |
+
+**T-F6 / 23i — 不需修,G6 已經修過**:`trackingBinder` 的 `prevHFloorId` 戳記與 re-baseline 是
+**commit `5495bda`(G6 P4#3)** 加的,報告寫在 G6 之前。
+
+**P1-14 — 現象為真但歸因錯誤,建議的修法實測無效**:
+| 情境 | FPS |
+|---|---|
+| 300 AP,熱圖**開** | 12.4 |
+| 300 AP,熱圖**關** | **13.2** |
+| **5 AP**,熱圖開 | **60.2**(0 long task) |
+
+關掉熱圖只差 0.8 FPS,而 `heatmapAdapter` **根本沒有訂閱 viewport**(縮放不觸發重算),
+所以「縮放中 debounce 熱圖重算」修不到東西。真正瓶頸是**300 顆 AP 的向量圖層在每次
+viewport 變動時重繪**(5 AP 時 60 FPS、零 long task 即為反證)。真修要做 AP 圖層
+批次化/視錐裁剪 —— 屬**重新設計**,且與既有決策一致(1000 AP 效能家族暫緩,
+重啟扳機=單層 >500 AP 且卡)。**未實作,留待該扳機觸發**。
 
 ---
 
@@ -516,9 +546,9 @@ const samples = project(frameSamples, H)
 | ~~G6~~ ✅ | ~~切樓層/模式狀態殘留~~ **已完成 2026-08-14** | ~~6-8 h~~ | — |
 | ~~G7~~ ✅ | ~~命名唯一性與跨樓層參照~~ **已完成 2026-08-17** | ~~5-6 h~~ | — |
 | ~~G8~~ ✅ | ~~單位/比例尺/魔術數字~~ **已完成 2026-08-17** | ~~6-8 h~~ | — |
-| G9 | 效能與資源洩漏 | 5-7 h | — |
+| ~~G9~~ ✅ | ~~效能與資源洩漏~~ **已完成 2026-08-17** | ~~5-7 h~~ | — |
 | G10 | UI/UX 與匯出 | 7-9 h | — |
-| | **合計** | **61-78 h**(剩 **12-16 h**) | |
+| | **合計** | **61-78 h**(剩 **7-9 h**) | |
 
 ## 分批建議
 

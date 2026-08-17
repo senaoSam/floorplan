@@ -4,6 +4,11 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { useCableStore, getSwitchKindColor } from '@/store/useCableStore'
 import { useEditorStore } from '@/store/useEditorStore'
 
+// 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
+// `?? []` returns a new reference whenever the floor's key is absent, so
+// zustand saw a changed slice on EVERY store write and re-rendered.
+const EMPTY = Object.freeze([])
+
 // 3D switch / IDF / MDF / router chassis. Each device renders as a small
 // rack-shaped box at its `mountHeight` so the user sees the same position
 // as the 2D SwitchLayer, plus a thin pole down to the floor for grounding
@@ -37,6 +42,12 @@ const CHASSIS_SEGMENTS = 2
 // the same information for one draw call.
 //
 // Cached per port count: every 24-port switch in the scene shares one texture.
+//
+// 53-G9 (23x): deliberately NOT given the Label3D LRU. The key is clamped to
+// 4–48 on the next line, so this tops out at 45 entries for the lifetime of the
+// page — bounded by construction. Label3D needed eviction because its key is a
+// user-editable device name (unbounded); the pattern differs because the keys
+// do, not by oversight.
 const portTextureCache = new Map()
 function getPortTexture(portCount) {
   const n = Math.max(4, Math.min(portCount || 24, 48))
@@ -207,7 +218,7 @@ function SwitchMarker({ sw, pxToM, dimOpacity, isActiveFloor, onHover }) {
 }
 
 export default function SwitchLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true, onSwitchHover }) {
-  const allSwitches = useCableStore((s) => s.switchesByFloor[floorId] ?? [])
+  const allSwitches = useCableStore((s) => s.switchesByFloor[floorId] ?? EMPTY)
   // Keep 2D and 3D visibility in sync — same per-kind filter.
   const showSwitchKind = useEditorStore((s) => s.showSwitchKind)
   const switches = allSwitches.filter((sw) => showSwitchKind[sw.kind] !== false)

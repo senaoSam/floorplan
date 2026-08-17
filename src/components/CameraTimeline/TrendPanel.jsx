@@ -29,6 +29,13 @@ import './TrendPanel.sass'
 
 const WEEKDAY_LABELS = ['週一', '週二', '週三', '週四', '週五', '週六', '週日']
 
+// 53-G9: stable placeholders for the gated memos below. EMPTY_TREND is derived
+// by running the real function over zero tracks rather than hand-written, so it
+// can't drift from computeFloorTrend's shape. Both are frozen module constants
+// — a fresh literal each render would defeat the memo it's standing in for.
+const EMPTY_ARRAY = Object.freeze([])
+const EMPTY_TREND = Object.freeze(computeFloorTrend([], DAY_START_SEC, DAY_END_SEC))
+
 const METRICS = [
   { value: 'people',     label: '人數',   field: 'people' },
   { value: 'presentSec', label: '人·秒',  field: 'presentSec' },
@@ -55,7 +62,7 @@ function TrendPanel() {
   const show = useCameraStore((s) => s.showTrendPanel)
   const toggle = useCameraStore((s) => s.toggleShowTrendPanel)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
-  const tracks = useTrackingStore((s) => s.tracksByFloor[activeFloorId] ?? [])
+  const tracks = useTrackingStore((s) => s.tracksByFloor[activeFloorId] ?? EMPTY_ARRAY)
   const seed = useTrackingStore((s) => s.seedByFloor[activeFloorId])
   const clockSec = useTrackingStore((s) => s.clockSec)
   const setClockSec = useTrackingStore((s) => s.setClockSec)
@@ -93,9 +100,14 @@ function TrendPanel() {
     window.addEventListener('pointerup', onUp)
   }, [])
 
+  // 53-G9: `visible` gates BOTH memos below. Hooks can't move after the early
+  // return (that would change hook order), so the guard has to live in the
+  // deps + body instead — same reason WallLayer3D uses a `degenerate` flag.
+  const visible = inCameraMode && !!activeFloorId && show
+
   const trend = useMemo(
-    () => computeFloorTrend(tracks, DAY_START_SEC, DAY_END_SEC),
-    [tracks],
+    () => (visible ? computeFloorTrend(tracks, DAY_START_SEC, DAY_END_SEC) : EMPTY_TREND),
+    [visible, tracks],
   )
 
   // §K: the daily rollup needs a full simulated week, which is expensive to
@@ -103,15 +115,21 @@ function TrendPanel() {
   // when the crowd is regenerated / the floor switches, NEVER on a clockSec
   // tick. (tracks is day 0; it shares its seed with day 0 of the week, so the
   // two stay consistent.)
+  //
+  // 53-G9: this used to run above the `!show` early return with `show`/`view`
+  // missing from deps, so a full week of crowd simulation was generated even
+  // with the panel CLOSED — measured as a single 1121 ms main-thread freeze on
+  // every crowd regeneration (45 walls). It's only ever read by the 'daily'
+  // view, so gate on that too: opening the panel on 'hourly' costs nothing.
   const daily = useMemo(() => {
-    if (!activeFloorId) return []
+    if (!visible || view !== 'daily') return EMPTY_ARRAY
     const floor = useFloorStore.getState().floors.find((f) => f.id === activeFloorId)
-    if (!floor || !floor.imageWidth) return []
+    if (!floor || !floor.imageWidth) return EMPTY_ARRAY
     const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
     const week = generateWeekTracks(floor, walls, { seed: seed ?? undefined })
     return computeDayRollup(week)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFloorId, tracks, seed])
+  }, [visible, view, activeFloorId, tracks, seed])
 
   if (!inCameraMode || !activeFloorId || !show) return null
 

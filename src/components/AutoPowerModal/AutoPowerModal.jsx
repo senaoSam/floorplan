@@ -13,6 +13,11 @@ import './AutoPowerModal.sass'
 // Vite resolves `?worker` imports to a Worker constructor.
 import AutoPowerWorker from '@/workers/autoPowerPlan.worker.js?worker'
 
+// 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
+// `?? []` returns a new reference whenever the floor's key is absent, so
+// zustand saw a changed slice on EVERY store write and re-rendered.
+const EMPTY = Object.freeze([])
+
 // HM-F4 — Auto power plan modal.
 // Lets the user pick a target RSSI / scope, runs greedy multi-start search,
 // previews resulting txPower per AP, then commits via updateAPs.
@@ -46,9 +51,9 @@ function AutoPowerModal({ open, apIds, onClose }) {
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
   const floors = useFloorStore((s) => s.floors)
   const floor = floors.find((f) => f.id === activeFloorId)
-  const walls = useWallStore((s) => s.wallsByFloor[activeFloorId] ?? [])
-  const aps = useAPStore((s) => s.apsByFloor[activeFloorId] ?? [])
-  const scopes = useScopeStore((s) => s.scopesByFloor[activeFloorId] ?? [])
+  const walls = useWallStore((s) => s.wallsByFloor[activeFloorId] ?? EMPTY)
+  const aps = useAPStore((s) => s.apsByFloor[activeFloorId] ?? EMPTY)
+  const scopes = useScopeStore((s) => s.scopesByFloor[activeFloorId] ?? EMPTY)
   const updateAPs = useAPStore((s) => s.updateAPs)
 
   const [targetRssi, setTargetRssi] = useState(-65)

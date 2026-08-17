@@ -60,6 +60,14 @@ function hslToHex(h, s, l) {
 }
 
 // Memoised: called per target per frame from both render layers.
+//
+// 53-G9: bounded, following the Label3D.jsx LRU convention. Track ids are
+// minted fresh on every crowd regeneration, so the old unbounded Map grew by
+// ~3000 entries per "重新產生" click and never shrank — ~150k entries after
+// 20 clicks. Values are plain colour strings (nothing to dispose on eviction,
+// unlike Label3D's textures); 8192 covers several floors' worth of targets on
+// screen at once, so eviction only touches ids from discarded crowds.
+const TINT_CACHE_MAX = 8192
 const cache = new Map()
 export function trackTint(baseHex, id) {
   const key = `${baseHex}|${id}`
@@ -67,6 +75,10 @@ export function trackTint(baseHex, id) {
   if (out) return out
   const { h, s, l } = hexToHsl(baseHex)
   out = hslToHex(h, s, Math.min(0.9, Math.max(0.1, l + lightnessJitter(id))))
+  // Map preserves insertion order, so the first key is the oldest.
+  while (cache.size >= TINT_CACHE_MAX) {
+    cache.delete(cache.keys().next().value)
+  }
   cache.set(key, out)
   return out
 }

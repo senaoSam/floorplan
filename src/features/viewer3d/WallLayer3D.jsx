@@ -4,6 +4,11 @@ import { useWallStore } from '@/store/useWallStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import OpeningsDetail from './OpeningDetail3D'
 
+// 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
+// `?? []` returns a new reference whenever the floor's key is absent, so
+// zustand saw a changed slice on EVERY store write and re-rendered.
+const EMPTY = Object.freeze([])
+
 // Fixed visual thickness for wall boxes (meters). Walls are semantically 2D
 // line segments in the rest of the app, so we pick a small value that still
 // renders clearly in 3D without distorting the floorplan's geometry.
@@ -245,7 +250,7 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true })
 }
 
 export default function WallLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true, selectable = true }) {
-  const walls = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
+  const walls = useWallStore((s) => s.wallsByFloor[floorId] ?? EMPTY)
   if (!walls.length || !pxToM) return null
   return (
     <group>

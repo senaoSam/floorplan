@@ -11,6 +11,11 @@ import './AutoPlaceModal.sass'
 
 import AutoPlaceWorker from '@/workers/autoPlacePlan.worker.js?worker'
 
+// 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
+// `?? []` returns a new reference whenever the floor's key is absent, so
+// zustand saw a changed slice on EVERY store write and re-rendered.
+const EMPTY = Object.freeze([])
+
 // Phase 49 — 自動規劃 AP 放置 modal。
 // 三態：設定（模式/頻段/目標）→ 執行中（determinate 進度）→ 預覽。
 // 預覽態 modal 退成右下角 docked 小卡、背板不擋畫布 —— ghost marker
@@ -55,9 +60,9 @@ function AutoPlaceModal({ open, onClose }) {
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
   const floors = useFloorStore((s) => s.floors)
   const floor = floors.find((f) => f.id === activeFloorId)
-  const walls = useWallStore((s) => s.wallsByFloor[activeFloorId] ?? [])
-  const aps = useAPStore((s) => s.apsByFloor[activeFloorId] ?? [])
-  const scopes = useScopeStore((s) => s.scopesByFloor[activeFloorId] ?? [])
+  const walls = useWallStore((s) => s.wallsByFloor[activeFloorId] ?? EMPTY)
+  const aps = useAPStore((s) => s.apsByFloor[activeFloorId] ?? EMPTY)
+  const scopes = useScopeStore((s) => s.scopesByFloor[activeFloorId] ?? EMPTY)
   const regulatoryDomain = useEditorStore((s) => s.regulatoryDomain)
   const setPreview = useAutoPlaceStore((s) => s.setPreview)
   const clearPreview = useAutoPlaceStore((s) => s.clearPreview)

@@ -36,7 +36,33 @@ export const useHeatmapStackStore = create((set) => ({
   setFrame: (floorId, frame) =>
     set((s) => ({ frames: { ...s.frames, [floorId]: frame } })),
   setFrames: (frames) => set({ frames }),
+  // 53-G9 (T11): drop frames whose floor no longer exists. Each frame holds a
+  // full-resolution canvas (a 4000x3000 import is ~48 MB of backing store), and
+  // nothing pruned them when a floor was deleted — only a full stack recompute
+  // replaced the map wholesale, so import/delete cycles accumulated hundreds of
+  // MB. Called from the floor-store subscription below.
+  pruneFrames: (liveIds) =>
+    set((s) => {
+      const kept = {}
+      let dropped = 0
+      for (const [id, frame] of Object.entries(s.frames)) {
+        if (liveIds.has(id)) kept[id] = frame
+        else dropped++
+      }
+      return dropped ? { frames: kept } : s
+    }),
 }))
+
+// Prune as soon as a floor disappears, independent of whether the 3D stack is
+// mounted or a recompute is scheduled — deleting a floor is exactly when the
+// memory should be released.
+useFloorStore.subscribe((s) => {
+  const live = new Set(s.floors.map((f) => f.id))
+  const { frames, pruneFrames } = useHeatmapStackStore.getState()
+  for (const id of Object.keys(frames)) {
+    if (!live.has(id)) { pruneFrames(live); return }
+  }
+})
 
 let fingerprint = null
 let generation = 0

@@ -3,6 +3,11 @@ import * as THREE from 'three'
 import { useCableStore, resolveTrayMountHeight, getTraySystem } from '@/store/useCableStore'
 import { useFloorStore } from '@/store/useFloorStore'
 
+// 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
+// `?? []` returns a new reference whenever the floor's key is absent, so
+// zustand saw a changed slice on EVERY store write and re-rendered.
+const EMPTY = Object.freeze([])
+
 // 3D cable tray rendering — each tray segment is a translucent "channel"
 // box matching the 2D channel visual: body fill + visible border edges + a
 // dashed centerline along the top. Colors come from the tray's system
@@ -109,7 +114,7 @@ function TraySegment({ a, b, dimOpacity, pxToM, color }) {
 // supplies pxToM; we read the floor from the store ourselves so the
 // `ceiling` preset can resolve against floor.floorHeight dynamically.
 export default function TrayLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
-  const trays = useCableStore((s) => s.traysByFloor[floorId] ?? [])
+  const trays = useCableStore((s) => s.traysByFloor[floorId] ?? EMPTY)
   const floor = useFloorStore((s) => s.floors.find((f) => f.id === floorId))
 
   // Bucket trays by their resolved mountHeight so each Y plane gets one

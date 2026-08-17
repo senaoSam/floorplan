@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useEffect } from 'react'
 import * as THREE from 'three'
 import { useThree } from '@react-three/fiber'
 import { Line2 } from 'three/examples/jsm/lines/Line2'
@@ -111,6 +111,10 @@ function HoleVolume({ pointsM, yBottom, yTop, dimOpacity }) {
     return g
   }, [shape, yBottom, yTop])
 
+  // 53-G9: ExtrudeGeometry is the heaviest buffer in this file and was never
+  // disposed — switching floors leaked one per hole, every time.
+  useEffect(() => () => { if (geom) geom.dispose() }, [geom])
+
   const outlinePositions = useMemo(() => buildOutlinePositions(pointsM), [pointsM])
 
   // One vertical per polygon corner, joining the two rings. Each is its own
@@ -221,18 +225,22 @@ export default function FloorHoleVolume3D({ activeFloorId }) {
             pointsM[i + 1] = p.y
           }
         }
-        const isActiveOwn = f.id === activeFloorId
         acc.push({
           key: `${f.id}::${h.id}`,
+          floorId: f.id,
           pointsM,
           yBottom,
           yTop,
-          dimOpacity: isActiveOwn ? 1 : 0.6,
         })
       }
     }
     return acc
-  }, [floors, holesByFloor, elevations, activeFloorId])
+    // 53-G9: `activeFloorId` deliberately NOT a dep. It only selects a dim
+    // opacity, but including it rebuilt every pointsM array on a floor switch,
+    // which remounted all the extruded geometry (and, before the dispose above,
+    // leaked it). The highlight is applied at render time instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floors, holesByFloor, elevations])
 
   if (!items.length) return null
 
@@ -244,7 +252,8 @@ export default function FloorHoleVolume3D({ activeFloorId }) {
           pointsM={it.pointsM}
           yBottom={it.yBottom}
           yTop={it.yTop}
-          dimOpacity={it.dimOpacity}
+          // 53-G9: computed here, not baked into the memo (see above).
+          dimOpacity={it.floorId === activeFloorId ? 1 : 0.6}
         />
       ))}
     </group>

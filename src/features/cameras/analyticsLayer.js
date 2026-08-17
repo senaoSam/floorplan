@@ -398,6 +398,11 @@ export function attachAnalyticsLayer({
       unsubEditor()
       unsubViewport()
       for (const id of Array.from(containers.keys())) remove(id)
+      // 53-G9: detach the root from its parent layer before destroying it.
+      // Without this the layer kept a reference to a destroyed container
+      // (only observable under StrictMode / HMR double-invocation, but every
+      // other layer in this folder removes before destroying).
+      layer.removeChild(root)
       root.destroy({ children: true })
     },
   }

@@ -10,6 +10,11 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii, DEFAULT_TILT_DEG } from '@/features/cameras/fovPolygon'
 import Label3D from './Label3D'
 
+// 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
+// `?? []` returns a new reference whenever the floor's key is absent, so
+// zustand saw a changed slice on EVERY store write and re-rendered.
+const EMPTY = Object.freeze([])
+
 // Surveillance cameras in 3D (Phase 34): a small CCTV body at mount height
 // aimed along its azimuth, plus the wall-clipped FOV visibility polygon laid
 // flat on the floor (same fovPolygon engine as 2D, so glass/window
@@ -287,8 +292,8 @@ function FovGround({ poly, pxToM, dimOpacity, selected = false, dimmed = false }
 }
 
 export default function CameraLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true, onCameraHover }) {
-  const cameras = useCameraStore((s) => s.camerasByFloor[floorId] ?? [])
-  const walls = useWallStore((s) => s.wallsByFloor[floorId] ?? [])
+  const cameras = useCameraStore((s) => s.camerasByFloor[floorId] ?? EMPTY)
+  const walls = useWallStore((s) => s.wallsByFloor[floorId] ?? EMPTY)
   const selectedId = useEditorStore((s) => s.selectedId)
   const selectedType = useEditorStore((s) => s.selectedType)
 

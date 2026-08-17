@@ -947,9 +947,14 @@ function Viewer3D() {
   const isVisible       = viewMode === VIEW_MODE.THREE_D
   const inCameraMode    = useEditorStore((s) => s.editorMode === EDITOR_MODE.CAMERA)
 
-  const visibleFloors = show3DAllFloors
-    ? floors
-    : floors.filter((f) => f.id === activeFloorId)
+  // 53-G9: memoized. This was a bare expression, so single-floor view built a
+  // fresh array on every render and the `shadowRadius` memo below (keyed on
+  // it) could never hit — hovering an AP re-ran the whole per-floor bounds
+  // loop. All-floors mode returns `floors` by identity, so it was already fine.
+  const visibleFloors = useMemo(
+    () => (show3DAllFloors ? floors : floors.filter((f) => f.id === activeFloorId)),
+    [show3DAllFloors, floors, activeFloorId],
+  )
 
   // 全樓層熱圖 driver — compute per-floor fields ONLY while 3D is visible
   // with the toggle on (strategy A). Detach keeps the canvases cached; the

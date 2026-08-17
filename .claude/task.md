@@ -34,16 +34,16 @@
 **Camera 3D 目標擬真化完成（2026-08-10 使用者驗收 ok）：人車模型重造（轎車擠出輪廓/衣著輪廓人偶）＋trail 色帶＋選取相機高亮＋2D/3D 共用色彩抖動（trackColor.js）＋步態修復（r3f delta NaN、擺動軸 x→z）。門縫做過又依使用者要求移除（只留門把），細節見 git log。**
 **Backlog 清掉兩項：PDF 規劃報告輸出（含新增的 RF 涵蓋率/verdict 頁）、spec.md 全面同步。以上三項 2026-08-10 使用者驗收 ok。**
 
-**★ 2026-08-17：Phase 53 進行中，G1~G8 全部完成（使用者驗收 ok）。** 三輪 bug 獵捕找出 93 條
-（含 4 條 critical，其中 2 條會白屏），已分成 10 組 × 5-10h。**G1~G8 ✅ 完成，4 條 critical 全修完。
-剩 G9~G10（彼此無依賴）。R1「反射分歧」查證為 harness 誤判、非 bug。
+**★ 2026-08-17：Phase 53 進行中，G1~G9 全部完成（使用者驗收 ok）。** 三輪 bug 獵捕找出 93 條
+（含 4 條 critical，其中 2 條會白屏），已分成 10 組 × 5-10h。**G1~G9 ✅ 完成，4 條 critical 全修完。
+剩 G10。R1「反射分歧」查證為 harness 誤判、非 bug。
 一組一組來，等使用者給組號。** 詳見上方 Phase 53 專節與 `.claude/bug-fix-groups.md`。
 
 ---
 
 ## 還沒做的事
 
-### Phase 53 三輪 bug 獵捕修復（2026-08-13 立項，**G1~G7 ✅ 完成，剩 G8~G10**）★ 下一個要做的事
+### Phase 53 三輪 bug 獵捕修復（2026-08-13 立項，**G1~G9 ✅ 完成，剩 G10**）★ 下一個要做的事
 
 > **報告**：`.claude/bug-hunt-2026-08-12.md`（93 條，含每條的失效情境與檔案:行號）
 > **分組**：`.claude/bug-fix-groups.md`（10 組 × 5-10h，合計 61-78h）
@@ -61,7 +61,8 @@
 > - [x] **G6 切樓層/切模式狀態殘留 ✅**（2026-08-14，12 條;其中 23n 有 stash 反證 + 截圖）
 > - [x] **G7 命名唯一性與跨樓層參照 ✅**（2026-08-17，名稱改由內容推導，undo 自動正確）
 > - [x] **G8 單位、比例尺與魔術數字 ✅**（2026-08-17，抽出 canonical helper，13 處呼叫端統一）
-> - [ ] G9 效能洩漏 ／G10 UI/匯出
+> - [x] **G9 效能與資源洩漏 ✅**（2026-08-17，9 修 / 1 已於 G6 修 / P1-14 歸因錯誤未實作）
+> - [ ] G10 UI/匯出
 >
 > **G1 收工小結（防重做）**：三處 hooks 違規全數修正 ——
 > `CalibrationModal.jsx` 的 `useOverlayDismiss` 上移到 early return 之前（對照 `LiveViewModal.jsx:59`）；
@@ -230,6 +231,36 @@
 > E5b：`pxPerM: 0` 現在落 40（原本 `||` 會讓它落 fallback 但 `scale: 0.5` 這種
 > **合法的大場區尺度**要保留 —— 已驗 0.5 不被替換）。
 > mockTracks 尺度加倍後像素步長 322 → 664 px，但**實際步行距離維持 14.12 → 14.54 m**。
+>
+> **G9 收工小結（2026-08-17，防重做）**：9 項修好，**2 項不必修**（下面兩段是重點，
+> 別再照舊報告去做）。有 stash 反證的兩項：23h 面板**關著**時重產人流凍結 **1121ms →
+> 148ms**；P2-15/P2-16 的 3D geometry 洩漏，原始碼繞行相機一次 **+42 個**（787→837
+> 只增不減）、切樓層 8 次 +8 個，修後 **786 完全不動**。
+> **23h 的修法要點**：hook 不能移到 early return 之後（會改變 hook 順序），所以改成抽
+> `visible` 旗標同時擋住兩個 memo；`daily` 再多吃 `view`，一週模擬變成**點「逐日」才算**，
+> 開面板停在「逐時」不花成本。`EMPTY_TREND` 用 `computeFloorTrend([], …)` 現算而非手寫，
+> 避免佔位物件與真實回傳結構脫鉤。
+> **P2-15 有兩個成因，只修 dispose 不夠**：`pointsToMeters()` 寫在 JSX prop 裡，每次
+> render 都產生新陣列 → `PolygonFill` 的 `[pointsM]` memo **永遠不命中**。改成傳原始
+> `points` + `pxToM`，在元件內 memo 轉換。
+> **P2-16 的 `items` memo 拿掉了 `activeFloorId`**：它只用來選 `dimOpacity`，留在 deps
+> 會讓切樓層重建每一個 `pointsM` 陣列、連帶重掛所有 extrude geometry；改成 render 時算。
+> **E4 用 module 級凍結 `EMPTY`**（照 `CameraOverlay3D.jsx:12` 既有寫法），沒有新增
+> 共用 util —— 18 個 selector，避免建立新慣例。
+> **23x 刻意不改**：`portTextureCache` 的 key 被 clamp 在 4–48，天生有界 45 筆；
+> Label3D 需要 LRU 是因為它的 key 是使用者可改的裝置名（無界）。**pattern 不同是因為
+> key 不同，不是漏做** —— 已在原始碼補註解，別再「修正一致性」。
+>
+> **T-F6 / 23i 不必修** —— `trackingBinder` 的 `prevHFloorId` 戳記是 **G6 的 commit
+> `5495bda`** 加的，報告寫在 G6 之前。
+>
+> **P1-14 現象為真（實測 10 FPS）但歸因錯誤，建議的修法實測無效**：熱圖**關**掉只從
+> 12.4 → 13.2 FPS（差 0.8），而 `heatmapAdapter` **根本沒訂閱 viewport**（縮放不觸發
+> 重算）。真正瓶頸是 **300 顆 AP 的向量圖層在每次 viewport 變動時重繪** —— 反證是
+> **5 AP 時 60.2 FPS、零 long task**。真修要做 AP 圖層批次化/視錐裁剪，屬重新設計，
+> 且與既有決策一致（1000 AP 效能家族暫緩，重啟扳機=單層 >500 AP 且卡）。**未實作。**
+> 這是 Phase 53 第 8 個「看起來嚴重但歸因/重現不成立」的案例 —— 再次印證
+> **報告的「位置」欄可信、「後果／建議修法」欄不可信**。
 >
 > **6 項未進 group，需使用者先決策或先驗證**（見 groups 檔末節），其中最重要：
 > `LayerToggle.jsx:83` 的修法要選 (a) 拆 12 個單欄位 selector 或 (b) 引入 `zustand/shallow`

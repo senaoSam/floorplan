@@ -14,6 +14,11 @@ import Icon from '@/components/Icon/Icon'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import './CameraListPanel.sass'
 
+// 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
+// `?? []` returns a new reference whenever the floor's key is absent, so
+// zustand saw a changed slice on EVERY store write and re-rendered.
+const EMPTY = Object.freeze([])
+
 // Compact mock-CCTV thumbnail shown when a roster row is hovered (Verkada
 // parity §J3 — Command pops a live preview on marker hover). Same dark-frame
 // look as LiveViewModal, one static frame; offline shows no-signal static.
@@ -54,7 +59,7 @@ function CameraListPanel() {
   const collapsed = useCameraStore((s) => s.cameraListCollapsed)
   const toggleCollapsed = useCameraStore((s) => s.toggleCameraListCollapsed)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
-  const cameras = useCameraStore((s) => s.camerasByFloor[activeFloorId] ?? [])
+  const cameras = useCameraStore((s) => s.camerasByFloor[activeFloorId] ?? EMPTY)
   const unplaced = useCameraStore((s) => s.unplacedCameras)
   const placeCamera = useCameraStore((s) => s.placeCamera)
   const removeUnplacedCamera = useCameraStore((s) => s.removeUnplacedCamera)

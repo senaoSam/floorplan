@@ -7,6 +7,11 @@ import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { getPatternById, sampleGain } from '@/constants/antennaPatterns'
 import Label3D from './Label3D'
 
+// 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
+// `?? []` returns a new reference whenever the floor's key is absent, so
+// zustand saw a changed slice on EVERY store write and re-rendered.
+const EMPTY = Object.freeze([])
+
 // 47-8a: off-band APs are dimmed (not hidden) to match the 2D heatmap band
 // filter — keep the same factor as apsLayer's BAND_DIM_ALPHA.
 const BAND_DIM_ALPHA = 0.3
@@ -368,7 +373,7 @@ const APMarker = React.memo(function APMarker({ ap, pxToM, dimOpacity, isActiveF
 })
 
 export default function APLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true, onAPHover }) {
-  const allAPs = useAPStore((s) => s.apsByFloor[floorId] ?? [])
+  const allAPs = useAPStore((s) => s.apsByFloor[floorId] ?? EMPTY)
   // Keep 2D and 3D visibility in sync — same per-band layer toggle (hides).
   const showAPBand = useEditorStore((s) => s.showAPBand)
   // 47-8a: heatmap band filter dims (not hides) off-band APs — mirror 2D.

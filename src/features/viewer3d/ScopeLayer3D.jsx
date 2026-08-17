@@ -1,10 +1,15 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useEffect } from 'react'
 import * as THREE from 'three'
 import { useThree } from '@react-three/fiber'
 import { Line2 } from 'three/examples/jsm/lines/Line2'
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial'
 import { useScopeStore } from '@/store/useScopeStore'
+
+// 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
+// `?? []` returns a new reference whenever the floor's key is absent, so
+// zustand saw a changed slice on EVERY store write and re-rendered.
+const EMPTY = Object.freeze([])
 
 // Match 2D ScopeLayer color choices so the 3D overlay reads as the same
 // object type across views. Floor holes have moved to FloorHoleVolume3D
@@ -83,9 +88,18 @@ function ScopeOutline({ positions, color, opacity }) {
 
 // Polygon outline as a continuous Line Loop on the ground plane. Slightly
 // lifted off the floor so z-fighting with the floor image doesn't flicker.
-function PolygonFill({ pointsM, yOffset, style, dimOpacity = 1 }) {
+function PolygonFill({ points, pxToM, yOffset, style, dimOpacity = 1 }) {
+  // 53-G9: converted here (not by the caller) so the memo key is the stable
+  // store array + scalar, not a freshly-built array from the JSX prop.
+  const pointsM = useMemo(() => pointsToMeters(points, pxToM), [points, pxToM])
   const shape = useMemo(() => buildShape(pointsM), [pointsM])
   const geom  = useMemo(() => (shape ? new THREE.ShapeGeometry(shape) : null), [shape])
+
+  // 53-G9: ShapeGeometry allocates GPU buffers that outlive the React element
+  // unless disposed. Without this, dragging a camera for a minute with 3
+  // scopes on screen left ~10800 geometries resident. Mirrors the identical
+  // ShapeGeometry in CameraLayer3D.jsx:262, which already does this.
+  useEffect(() => () => { if (geom) geom.dispose() }, [geom])
 
   const outlinePts = useMemo(() => {
     if (!pointsM || pointsM.length < 4) return null
@@ -139,7 +153,7 @@ function pointsToMeters(pts, pxToM) {
 }
 
 export default function ScopeLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
-  const scopes = useScopeStore((s) => s.scopesByFloor[floorId] ?? [])
+  const scopes = useScopeStore((s) => s.scopesByFloor[floorId] ?? EMPTY)
 
   if (!pxToM) return null
   if (!scopes.length) return null
@@ -151,7 +165,12 @@ export default function ScopeLayer3D({ floorId, pxToM, dimOpacity = 1 }) {
         return (
           <PolygonFill
             key={z.id}
-            pointsM={pointsToMeters(z.points, pxToM)}
+            // 53-G9: pass the RAW points + pxToM and convert inside, memoized.
+            // Calling pointsToMeters() here built a brand-new array on every
+            // render, so PolygonFill's `[pointsM]` memos could never hit and
+            // the ShapeGeometry was rebuilt every frame of a camera drag.
+            points={z.points}
+            pxToM={pxToM}
             yOffset={0.005}
             style={style}
             dimOpacity={dimOpacity}

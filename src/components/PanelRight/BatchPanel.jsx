@@ -18,6 +18,11 @@ import { wrapAzimuth } from '@/utils/angle'
 import './_shared/shared.sass'
 import './BatchPanel.sass'
 
+// 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
+// `?? []` returns a new reference whenever the floor's key is absent, so
+// zustand saw a changed slice on EVERY store write and re-rendered.
+const EMPTY = Object.freeze([])
+
 // Bulk-edit panel for a marquee multi-selection (oldSrc BatchPanel ported 1:1
 // once the per-store batch-mutation actions landed). Homogeneous selections of
 // walls / APs / scopes expose per-type bulk editors; mixed selections keep
@@ -63,11 +68,11 @@ function BatchPanel() {
 
   const removeWalls      = useWallStore((s) => s.removeWalls)
   const updateWalls      = useWallStore((s) => s.updateWalls)
-  const aps              = useAPStore((s) => s.apsByFloor[activeFloorId] ?? [])
-  const walls            = useWallStore((s) => s.wallsByFloor[activeFloorId] ?? [])
+  const aps              = useAPStore((s) => s.apsByFloor[activeFloorId] ?? EMPTY)
+  const walls            = useWallStore((s) => s.wallsByFloor[activeFloorId] ?? EMPTY)
   const removeAPs        = useAPStore((s) => s.removeAPs)
   const updateAPs        = useAPStore((s) => s.updateAPs)
-  const scopes           = useScopeStore((s) => s.scopesByFloor[activeFloorId] ?? [])
+  const scopes           = useScopeStore((s) => s.scopesByFloor[activeFloorId] ?? EMPTY)
   const removeScopes     = useScopeStore((s) => s.removeScopes)
   const updateScopes     = useScopeStore((s) => s.updateScopes)
   const removeFloorHoles = useFloorHoleStore((s) => s.removeFloorHoles)
