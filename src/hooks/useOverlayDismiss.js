@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react'
+import { useRef, useCallback, useEffect } from 'react'
 
 // Overlay 背景關閉：要求 mousedown 與 mouseup「都」發生在 overlay 本身。
 //
@@ -21,6 +21,27 @@ import { useRef, useCallback } from 'react'
 // undefined，React 不會掛上監聽。
 export function useOverlayDismiss(onDismiss) {
   const downOnSelfRef = useRef(false)
+
+  // 53-G10 (23l): Escape also dismisses. Six of the eight overlays using this
+  // hook had no Escape handling at all (verified on LiveViewModal: Esc left it
+  // open), so每個 caller 各自補一次只會再漏一次 —— 併進 hook 讓整族一次修好。
+  // `disabled` 的 caller 傳 null，這裡就不掛監聽（執行中不可關閉的語意保留）。
+  // ConfirmDialog / ScaleDialog 自己也處理 Escape，重複呼叫同一個 onDismiss
+  // 是幂等的（都只是關閉），不會有副作用。
+  useEffect(() => {
+    if (!onDismiss) return undefined
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return
+      // 讓輸入框先吃掉 Esc（IME 組字中取消、清空搜尋框等原生行為）。
+      const t = e.target
+      const tag = t?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || t?.isContentEditable) return
+      e.preventDefault()
+      onDismiss()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onDismiss])
 
   const onMouseDown = useCallback((e) => {
     // e.target === e.currentTarget 表示按在 overlay 自己身上，不是子孫節點。

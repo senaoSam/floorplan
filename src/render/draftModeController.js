@@ -5,6 +5,7 @@ import { generateId } from '@/utils/id'
 import { snapTrayPoint } from '@/features/draft/traySnap'
 import { isAnyBodyDragging } from '@/store/useDragOverlayStore'
 import { getFloorHeight } from '@/store/useFloorStore'
+import { showUiToast } from '@/store/useUiToastStore'
 
 // Owns the draft-mode click / move / commit / cancel flow.
 // Returns the callback set viewport.bindViewport reads, plus a separate
@@ -124,7 +125,13 @@ export function createDraftModeController({
   }
 
   const commitScope = (points, type = 'in') => {
-    if (points.length < 3) return
+    // 53-G10 (P3-20): say why nothing happened. Pressing Enter with only two
+    // points dropped the whole draft with zero feedback — indistinguishable
+    // from the tool being broken.
+    if (points.length < 3) {
+      showUiToast('範圍至少需要 3 個點（目前 ' + points.length + ' 點）')
+      return
+    }
     const fid = useFloorStore.getState().activeFloorId
     if (!fid) return
     const floor = useFloorStore.getState().floors.find((f) => f.id === fid)
@@ -139,7 +146,10 @@ export function createDraftModeController({
   }
 
   const commitHole = (points) => {
-    if (points.length < 3) return
+    if (points.length < 3) {
+      showUiToast('中庭至少需要 3 個點（目前 ' + points.length + ' 點）')
+      return
+    }
     const fid = useFloorStore.getState().activeFloorId
     if (!fid) return
     const floor = useFloorStore.getState().floors.find((f) => f.id === fid)
@@ -153,7 +163,10 @@ export function createDraftModeController({
   }
 
   const commitTray = (points) => {
-    if (points.length < 2) return
+    if (points.length < 2) {
+      showUiToast('線槽至少需要 2 個點（目前 ' + points.length + ' 點）')
+      return
+    }
     const fid = useFloorStore.getState().activeFloorId
     if (!fid) return
     const floor = useFloorStore.getState().floors.find((f) => f.id === fid)

@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useRef, useEffect } from 'react'
 import './shared.sass'
 
 // 24-3 Form primitives for right-panel controls. Wraps the bare HTML form
@@ -18,6 +18,43 @@ export function TextInput({
   value, onChange, placeholder, maxLength, disabled, autoFocus, onBlur, onKeyDown,
   className = '',
 }) {
+  // 53-G10 (P1-11): Escape reverts to the value the field had when it gained
+  // focus, then blurs. These inputs write straight through to the store on every
+  // keystroke, so clearing one with Delete (the gesture F2 invites) committed an
+  // empty name immediately and Escape did nothing — verified: an AP went to ""
+  // and stayed there. A blur guard already substitutes a fallback name (52-D9),
+  // but that replaces the name rather than restoring the one the user had.
+  const revertRef = useRef(value)
+  const focusedRef = useRef(false)
+
+  // Track the last committed value while unfocused: `autoFocus` can mount the
+  // input already focused, so onFocus is not guaranteed to run first.
+  useEffect(() => {
+    if (!focusedRef.current) revertRef.current = value
+  }, [value])
+
+  const handleFocus = () => { focusedRef.current = true; revertRef.current = value }
+  const handleBlur = (e) => { focusedRef.current = false; onBlur?.(e) }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      const revertTo = revertRef.current
+      if (revertTo !== value) onChange?.(revertTo ?? '')
+      // Blur AFTER the reverted value has been committed. Callers may attach an
+      // onBlur guard that substitutes a fallback when the field is empty (52-D9
+      // does exactly that for names); blurring synchronously here let that guard
+      // observe the still-empty value and mint a NEW name (AP-01 -> AP-06)
+      // instead of the restore the user asked for.
+      const el = e.currentTarget
+      focusedRef.current = false
+      setTimeout(() => el.blur(), 0)
+      return
+    }
+    onKeyDown?.(e)
+  }
+
   return (
     <input
       type="text"
@@ -28,8 +65,9 @@ export function TextInput({
       disabled={disabled}
       autoFocus={autoFocus}
       onChange={(e) => onChange?.(e.target.value)}
-      onBlur={onBlur}
-      onKeyDown={onKeyDown}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
+      onKeyDown={handleKeyDown}
     />
   )
 }

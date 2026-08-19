@@ -150,7 +150,12 @@ function AutoPlaceModal({ open, onClose }) {
             name: `AP-${String(base + i + 1).padStart(2, '0')}`,
           }))
           const removeIds = r.removeApIds ?? []
-          setResult({ proposedAps: named, removeApIds: removeIds, stats: r.stats })
+          // 53-G10 (P0-3): stamp the floor this plan was computed FOR. The
+          // preview overlay is deliberately click-through so the sidebar stays
+          // usable, which means the user can switch floors between planning and
+          // applying. Same self-describing-payload rule the preview store
+          // already follows on the next line.
+          setResult({ floorId: activeFloorId, proposedAps: named, removeApIds: removeIds, stats: r.stats })
           setPreview(activeFloorId, named, removeIds)
         }
         worker.terminate()
@@ -194,20 +199,34 @@ function AutoPlaceModal({ open, onClose }) {
 
   const handleApply = useCallback(() => {
     if (!result) return
+    // 53-G10 (P0-3): apply to the floor the plan was COMPUTED for, never to
+    // whatever happens to be active now. This used to read activeFloorId, so
+    // switching floors with the preview open wrote the whole plan to the wrong
+    // floor — verified: a 7-AP plan for floor B landed on floor A (5 -> 12)
+    // while B stayed at 5, with coordinates from B's layout and the APs that
+    // should have been replaced left in place.
+    const targetFloorId = result.floorId
+    const floorStillExists = useFloorStore.getState().floors.some((f) => f.id === targetFloorId)
+    if (!targetFloorId || !floorStillExists) {
+      setError('規劃所屬的樓層已不存在，請重新規劃')
+      clearPreview()
+      setResult(null)
+      return
+    }
     const store = useAPStore.getState()
     if (result.removeApIds.length > 0) {
-      store.removeAPs(activeFloorId, result.removeApIds)
+      store.removeAPs(targetFloorId, result.removeApIds)
     }
     // 以 apNameBase 連號命名（避開 setAPs 載入不推進 counter 的撞名）；
     // addAP 逐顆進，counter 照常推進。
     const base = apNameBase()
     result.proposedAps.forEach((ap, i) => {
       const name = `AP-${String(base + i + 1).padStart(2, '0')}`
-      useAPStore.getState().addAP(activeFloorId, { ...ap, name })
+      useAPStore.getState().addAP(targetFloorId, { ...ap, name })
     })
     clearPreview()
     onClose()
-  }, [result, activeFloorId, clearPreview, onClose])
+  }, [result, clearPreview, onClose])
 
   const handleCancel = useCallback(() => {
     if (running) {

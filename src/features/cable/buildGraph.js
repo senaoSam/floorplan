@@ -17,6 +17,7 @@
 //   - All weights are meters: `chainage_px / scale_pxPerM × (1 + slack)`.
 
 import { cumulativeLengths, closestPointOnPolyline, segmentIntersection } from './geometry'
+import { computeFloorElevations } from '@/utils/floorStacking'
 
 export const SLACK_TRAY            = 0.10  // along-tray edges
 export const SLACK_DIRECT          = 0.20  // endpoint→foot drop, fallback Manhattan
@@ -312,6 +313,8 @@ export function buildBuildingGraph({ floors, apsByFloor = {}, switchesByFloor = 
   const warnings = []
   // riserId → ordered list of { floorId, nodeId, elevation }
   const riserFloorNodes = new Map()
+  // 53-G10 (P0-6): real per-floor elevations (running sum of floorHeight).
+  const elevations = computeFloorElevations(floors)
 
   for (const floor of floors) {
     const floorRisers = risers.filter((r) => (r.floorIds ?? []).includes(floor.id))
@@ -331,7 +334,13 @@ export function buildBuildingGraph({ floors, apsByFloor = {}, switchesByFloor = 
       riserFloorNodes.get(riserId).push({
         floorId: floor.id,
         nodeId: info.nodeId,
-        elevation: floor.elevation ?? 0,
+        // 53-G10 (P0-6): `floor.elevation` does not exist — no store or importer
+        // ever sets it, so this was ALWAYS 0. Every riser's vertical dz came out
+        // 0, making cross-floor hops free and letting Dijkstra prefer a route up
+        // and back down over a shorter same-floor one. Elevations are derived by
+        // running-sum of floorHeight (computeFloorElevations, the same source
+        // the 3D stack uses).
+        elevation: elevations[floor.id] ?? 0,
       })
     }
     warnings.push(...g.warnings)

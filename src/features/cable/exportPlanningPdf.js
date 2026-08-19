@@ -217,7 +217,15 @@ export async function buildPlanningPdf({
   let totalS2sM = 0
   let copperM = 0
   let fiberM = 0
+  // 53-G10 (23/23b): split by routeStatus so the cover can't call an
+  // unroutable AP "cabled".
+  let routedTrayCount = 0
+  let routedFallbackCount = 0
+  let unroutableCount = 0
   for (const r of routes.values()) {
+    if (r.routeStatus === 'unroutable') unroutableCount += 1
+    else if (r.routeStatus === 'fallback-manhattan') routedFallbackCount += 1
+    else routedTrayCount += 1
     if (r.cableM == null) continue
     totalApM += r.cableM
     if (r.cableType === 'fiber') fiberM += r.cableM
@@ -241,7 +249,15 @@ export async function buildPlanningPdf({
     head: [['Metric', 'Value']],
     body: [
       ['APs', String(totalAPs)],
-      ['APs with a cable route', String(routes.size)],
+      // 53-G10 (23/23b): this printed `routes.size`, i.e. every AP that got a
+      // route ENTRY — including the ones whose entry says `unroutable`. On a
+      // floor with no access switch the cover claimed 100% of APs were cabled.
+      // `fallback-manhattan` isn't a planned route either (it's a straight-line
+      // estimate when the tray graph can't reach), so it's reported separately
+      // rather than folded into the headline number.
+      ['APs with a tray route', String(routedTrayCount)],
+      ['APs on fallback estimate', String(routedFallbackCount)],
+      ['APs unroutable', String(unroutableCount)],
       ['Switches', String(totalSwitches)],
       ['Trays', String(totalTrays)],
       ['Risers', String(risers.length)],

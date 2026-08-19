@@ -503,9 +503,17 @@ export function attachAPsLayer({
       if (overlay && overlay.id === entry.ap.id) {
         const moved = Math.hypot(overlay.x - startAPX, overlay.y - startAPY)
         if (moved > DRAG_COMMIT_THRESHOLD_PX) {
+          // 53-G10 (P3-19): keep the AP on its floorplan. Dropping one outside
+          // the image hid it under the surrounding UI chrome while it kept
+          // contributing to the heatmap and pulling a cable route — an invisible
+          // object with visible effects, and no way to select it back.
+          const floor = useFloorStore.getState().floors.find((f) => f.id === entry.floorId)
+          const maxX = floor?.imageWidth
+          const maxY = floor?.imageHeight
+          const clamp = (v, max) => (max > 0 ? Math.min(Math.max(v, 0), max) : v)
           useAPStore.getState().updateAP(entry.floorId, entry.ap.id, {
-            x: overlay.x,
-            y: overlay.y,
+            x: clamp(overlay.x, maxX),
+            y: clamp(overlay.y, maxY),
           })
         }
       }

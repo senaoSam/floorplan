@@ -110,7 +110,12 @@ function APPanel({ floorId, apId }) {
   }, [floorId, apId, ap, updateAP, model, firstAllowedChannel])
 
   const handleNumber = useCallback((field, num) => {
-    if (isNaN(num) || num < 0) return
+    if (isNaN(num)) return
+    // 53-G10 (P3-21): a negative entry used to `return`, silently keeping the
+    // previous value — the field showed what the user typed but the store held
+    // something else, with no feedback that the input was rejected. Clamp to 0
+    // instead so the displayed value and the stored value always agree.
+    if (num < 0) num = 0
     if (field === 'txPower') {
       const maxTx = model.maxTxPower[ap.frequency] ?? 23
       updateAP(floorId, apId, { txPower: Math.min(num, maxTx) })

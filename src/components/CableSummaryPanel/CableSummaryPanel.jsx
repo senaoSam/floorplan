@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useState, useRef, useEffect } from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useCableStore, CAPACITY_PROFILES, getCapacityProfile } from '@/store/useCableStore'
@@ -39,6 +39,9 @@ function Section({ label, warn, open, onToggle, children }) {
 // active), so it doesn't clutter the canvas during pure-AP planning.
 function CableSummaryPanel() {
   const floors          = useFloorStore((s) => s.floors)
+  // 53-G10 (P2-30): subscribed (not read via getState) so the header figure
+  // re-renders when the user switches floors while the scope is '本層'.
+  const activeFloorId   = useFloorStore((s) => s.activeFloorId)
   const setActiveFloor  = useFloorStore((s) => s.setActiveFloor)
   const apsByFloor      = useAPStore((s) => s.apsByFloor)
   const switchesByFloor = useCableStore((s) => s.switchesByFloor)
@@ -63,6 +66,8 @@ function CableSummaryPanel() {
   // commit the floor switch, so the status string doubles as the busy flag
   // (non-null ⇒ a run is in flight ⇒ the button is disabled).
   const [exportStatus, setExportStatus] = useState(null)
+  const toastTimerRef = useRef(null)
+  useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current) }, [])
   const handleExportPdf = async () => {
     if (exportStatus) return
     setExportStatus('準備中...')
@@ -93,12 +98,23 @@ function CableSummaryPanel() {
     } catch (err) {
       console.error('PDF export failed:', err)
       setExportStatus('失敗 — 請看 console')
-      setTimeout(() => setExportStatus(null), 2500)
+      // 53-G10 (E8): tracked + cleared on unmount. A bare setTimeout kept the
+      // setExportStatus closure alive after the panel was collapsed/unmounted.
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+      toastTimerRef.current = setTimeout(() => {
+        toastTimerRef.current = null
+        setExportStatus(null)
+      }, 2500)
       return
     }
     setExportStatus(null)
   }
 
+  // 53-G10 (P2-30): the header total is building-wide, but nothing said so —
+  // standing on an empty floor it read "83.8 m" as if that floor were cabled.
+  // Both numbers are wanted, so the scope is switchable and the label always
+  // states which one is on screen.
+  const [scope, setScope] = useState('total')   // 'total' | 'floor'
   const [collapsed, setCollapsed] = useState(true)
   // Per-section collapse (same pattern as StatsDashboard). Defaults fold the
   // advanced / repeat-slicing sections (per-floor, tier split, length brackets)
@@ -141,7 +157,7 @@ function CableSummaryPanel() {
     for (const r of routes.values()) {
       byStatus[r.routeStatus] = (byStatus[r.routeStatus] ?? 0) + 1
       const fid = r.homeFloorId
-      if (!byFloor.has(fid)) byFloor.set(fid, { totalM: 0, apCount: 0 })
+      if (!byFloor.has(fid)) byFloor.set(fid, { totalM: 0, apCount: 0, s2sM: 0 })
       const f = byFloor.get(fid)
       f.apCount++
       if (r.cableM != null) {
@@ -162,6 +178,15 @@ function CableSummaryPanel() {
     for (const link of switchLinks.values()) {
       if (link.cableM == null) continue
       totalS2sM += link.cableM
+      // 53-G10 (P2-30): attribute switch-to-switch cable to the floor it starts
+      // on, so the per-floor scope below can report AP drops + S2S rather than
+      // AP drops alone. Cross-floor links count on their source floor (that is
+      // where the run is installed and where the riser drop begins).
+      const linkFid = link.srcFloorId
+      if (linkFid) {
+        if (!byFloor.has(linkFid)) byFloor.set(linkFid, { totalM: 0, apCount: 0, s2sM: 0 })
+        byFloor.get(linkFid).s2sM += link.cableM
+      }
       bom.s2s[link.cableType] = (bom.s2s[link.cableType] ?? 0) + link.cableM
       const b = bucketLen(link.cableM)
       bom.byLength[b] += link.cableM
@@ -240,12 +265,43 @@ function CableSummaryPanel() {
     return ib - ia
   })
 
+  const floorEntry = stats.byFloor.get(activeFloorId)
+  const floorM = (floorEntry?.totalM ?? 0) + (floorEntry?.s2sM ?? 0)
+  const shownM = scope === 'floor' ? floorM : stats.totalM
+
   return (
     <div className="cable-summary">
       <div className="cable-summary__header" onClick={() => setCollapsed((v) => !v)}>
         <span className="cable-summary__icon">🔌</span>
         <span className="cable-summary__title">線纜總結</span>
-        <span className="cable-summary__total">{stats.totalM.toFixed(1)} m</span>
+        <span className="cable-summary__total">{shownM.toFixed(1)} m</span>
+        {/* Segmented control, matching TrendPanel's 逐時/逐日 switch. A single
+            label reading "全案" looked like a status badge, not something you
+            could press — showing BOTH options with the active one highlighted
+            makes the affordance and the alternative obvious at a glance.
+            Placed after the figure so the header's centre stays a collapse
+            target rather than a small button that steals the click. */}
+        <span
+          className="cable-summary__seg"
+          role="group"
+          aria-label="纜線統計範圍"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className={`cable-summary__seg-btn${scope === 'floor' ? ' cable-summary__seg-btn--active' : ''}`}
+            aria-pressed={scope === 'floor'}
+            title="只計算目前樓層的纜線"
+            onClick={() => setScope('floor')}
+          >本層</button>
+          <button
+            type="button"
+            className={`cable-summary__seg-btn${scope === 'total' ? ' cable-summary__seg-btn--active' : ''}`}
+            aria-pressed={scope === 'total'}
+            title="計算全案所有樓層的纜線"
+            onClick={() => setScope('total')}
+          >全案</button>
+        </span>
         <span className={`cable-summary__arrow${collapsed ? ' cable-summary__arrow--collapsed' : ''}`}><Icon name="chevronDown" size={11} /></span>
       </div>
       {!collapsed && (
@@ -254,6 +310,16 @@ function CableSummaryPanel() {
               AP list inline (merged from the old standalone "無法接線" section
               so the count and its detail live in one place). */}
           <section className="cable-summary__section">
+            {/* 53-G10 (P2-30): the sections below are building-wide by design —
+                BOM / tray / capacity figures are procurement numbers, and the
+                per-floor split lives in its own 每樓纜線 section. The header
+                figure follows the 本層/全案 switch, so say plainly that the body
+                does not, rather than letting two scopes sit unlabelled together. */}
+            {scope === 'floor' && (
+              <p className="cable-summary__scope-note">
+                以下明細為<b>全案</b>統計（本層數字見上方與「每樓纜線」）
+              </p>
+            )}
             <p className="cable-summary__label">路由狀態（{stats.totalAP} AP）</p>
             <div className="cable-summary__row">
               <span>沿線槽</span>

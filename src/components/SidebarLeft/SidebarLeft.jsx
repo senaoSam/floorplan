@@ -40,6 +40,11 @@ import './SidebarLeft.sass'
 // Everything else (add / collapse / rename / align switch / inline floor
 // properties / reorder / remove) is identical to oldSrc.
 
+// 53-G10 (E8): time for the scene to repaint after a floor switch before the
+// PNG is baked. Matches the PDF exporter's REPAINT_SETTLE_MS rather than the
+// old 50 ms guess; two rAFs after it confirm a committed frame.
+const PNG_EXPORT_REPAINT_MS = 220
+
 function SidebarLeft() {
   const floors          = useFloorStore((s) => s.floors)
   const activeFloorId   = useFloorStore((s) => s.activeFloorId)
@@ -66,6 +71,8 @@ function SidebarLeft() {
   const [editingId, setEditingId]   = useState(null)
   const [editingName, setEditingName] = useState('')
   const editInputRef = useRef(null)
+  const exportTimerRef = useRef(null)
+  useEffect(() => () => { if (exportTimerRef.current) clearTimeout(exportTimerRef.current) }, [])
 
   const [menuOpenId, setMenuOpenId] = useState(null)
   const [pendingRemove, setPendingRemove] = useState(null)
@@ -185,9 +192,21 @@ function SidebarLeft() {
     }
     // Switch to the target floor first (so its content is what gets baked)
     // — only needed if the active floor differs.
+    //
+    // 53-G10 (E8): this was a bare `setTimeout(doExport, 50)`. 50 ms is a guess:
+    // if the scene hadn't repainted yet the PNG held the PREVIOUS floor's
+    // content while the filename said the new one — a wrong plan under a
+    // convincing name. Confirm the store actually flipped and give the scene
+    // real frames to repaint in (the PDF exporter waits 220 ms for the same
+    // reason), and clear the timer if the panel goes away first.
     if (floor.id !== activeFloorId) {
       setActiveFloor(floor.id)
-      setTimeout(doExport, 50)   // let one render frame land
+      if (exportTimerRef.current) clearTimeout(exportTimerRef.current)
+      exportTimerRef.current = setTimeout(() => {
+        exportTimerRef.current = null
+        if (useFloorStore.getState().activeFloorId !== floor.id) return
+        requestAnimationFrame(() => requestAnimationFrame(doExport))
+      }, PNG_EXPORT_REPAINT_MS)
     } else {
       doExport()
     }

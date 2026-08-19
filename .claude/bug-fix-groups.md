@@ -516,7 +516,7 @@ perf probe `routesCache: 0 hit / 0 miss` → routing 快取正確,純幾何重�
 
 ---
 
-# G10 · UI/UX 與匯出正確性(7-9 小時)
+# G10 · UI/UX 與匯出正確性 ✅ **已完成**(2026-08-19,使用者驗收 ok)
 
 | # | 位置 | 問題 |
 |---|---|---|
@@ -542,6 +542,36 @@ perf probe `routesCache: 0 hit / 0 miss` → routing 快取正確,純幾何重�
 | P0-6 | `cable/buildGraph.js:330-351` | riser 垂直段讀 `floor.elevation` → 長度恆為 0,Dijkstra 把跨樓層當免費 |
 
 **工時偏高的原因**:條數多但多數單條很小(改 CSS 一行、加 clamp、補 focus trap)。建議按子主題分批 commit:①pointer-events / 佈局 ②焦點與鍵盤 ③匯出正確性 ④輸入驗證與回饋。
+
+**✅ 完成(2026-08-19)** — 修 12 條、3 條報告過期、5 條使用者決定不改。使用者選擇「一次做完」而非分批。
+
+| # | 修法 | 實測反證 |
+|---|---|---|
+| P0-4 ✅ | focus trap(Tab 只在取消↔刪除循環)+ **預設焦點改到「取消」**;Enter 明確路由到 focused 按鈕 | **修改前**:Tab 一下焦點跑到 topbar(＋新增樓層),按 Enter **刪掉 5 道牆**(45→40)。修後五路徑全驗(Enter/Tab+Enter/Esc/滑鼠×2) |
+| P0-3 ✅ | `result` 自帶 `floorId`(照 G6 self-describing payload 慣例),套用寫回自己的樓層;樓層已刪則拒絕 | **修改前**:B 層規劃 7 顆 → 切到 A → 套用 → **7 顆全進 A**(5→12),B 還是 5。修後 AP 進 B(5→10),A 沒動 |
+| P0-6 ✅ | `floor.elevation` **不存在**(全庫無 setter)→ 改用 `computeFloorElevations` | **修改前** dz 恆為 0(跨樓層免費)。修後 riser 垂直邊權重 **3 m** |
+| 23/23b ✅ | 封面拆三行(tray route / fallback / unroutable),不再用 `routes.size` | **實測 PDF**:拿掉某層 switch 後 → APs 10 / tray route **5** / unroutable **5**(舊碼會印「10 都已布線」) |
+| P1-11 ✅ | `TextInput` 加 Esc 還原(focus 時記快照);**blur 延後一 tick** 讓還原先提交 | **修改前**:F2→清空→Esc **不還原**,AP 永久空名。第一版還原成 AP-06(與 52-D9 blur guard 打架),修正後四路徑全對 |
+| 23l ✅ | Escape **併進 `useOverlayDismiss`** —— 八個 overlay 有**六個**完全沒 Esc,逐一補只會再漏 | LiveViewModal / AutoPlace / AutoPower / ApiTest 實測全部 Esc 可關 |
+| E6 ✅ | 排序與標籤都改用 `computeFloorElevations` | 原本比 0 vs 0、高度標籤**永不顯示** |
+| E8 ✅ | 三處 timer:PNG 匯出 50ms 猜 → 220ms + 兩個 rAF + 驗證樓層真的切了;Toolbar / toast 補 unmount 清理 | 50ms 不足時 PNG 是**上一層的內容配新樓層檔名** |
+| P3-19 ✅ | 拖曳放手時 clamp 到 `imageWidth/Height` | 拖到左上角外 → clamp 到 x=0,留在 685×511 內 |
+| P3-20 ✅ | scope/hole/tray 三個 commit 都加 toast | 真滑鼠 2 點 + Enter → 「範圍至少需要 3 個點(目前 2 點)」;3 點仍正常建立 |
+| P3-21 ✅ | 負值改 clamp 到 0(原本 `return` 靜默沿用舊值) | |
+| P2-30 ✅ | **本層/全案分段切換**(照 TrendPanel `__seg` 慣例,不自創元件);本層數字含 AP 落線+S2S(跨樓層計在起點樓層) | 空樓層本層 **0.0 m**、全案 83.8 m;切樓層跟著變 |
+
+**P2-30 兩個自己造成的問題(已修)**:① 切換鈕原本放標題旁,**剛好佔住表頭正中央**搶走「點表頭展開」的點擊(用 stash 確認是自己造成的);移到數字後面。② 使用者指出「一顆會變字的按鈕看不出可以點」→ 改成**兩顆並排、active 高亮**的分段控制。③ 本層模式下 BOM 明細仍是全案數字(**依設計如此**,採購用;per-floor 另有「每樓纜線」),加一行說明而非讓兩種範圍無聲並存。
+
+**查證為報告過期(勿再修)**:
+- **P0-2**:`CanvasArea.sass:33-34` 的 `> * { pointer-events: auto }` **已存在**,實測真滑鼠點面板有效(31px→569px);且線材面板**預設收合**,「匯出 PDF」按鈕只在展開後存在 —— 不是「落在熱區連點兩下無預警下載」。
+- **23p**:兩個 demo 樓層都有 `imageUrl`,實際匯出 PDF 中 `no plan image` 出現 **0 次**。exporter 本來就會 `setActiveFloor` + `waitForFloorRepaint`。
+- **P1-11 的 context-menu 那半**:`ObjectContextMenu` 已有 Esc 與空名守衛;真正壞的是**右側面板**的 F2 路徑(已修)。
+
+**使用者決定不改**:P2-27(Camera 左鍵語意)、P2-29(單物件直接刪)、P2-25(1024px 佈局)、23z(PNG 含選取紅圈)、**P2-31**。
+P2-31 補充:報告寫「要點兩下」是**誤報**(實測一下開選單、一下選工具,hover 還會自動展開)。真正的問題是 **30×30px 純圖示零文字**,7 個群組都要 hover 才知道是什麼。但加文字/放大按鈕都會讓工具列變寬,直接撞到已決定不改的 P2-25,故一併不改。
+
+**另外發現一個既有 bug,使用者決定不記**:`exportPlanView.js:34-35` 匯出時把 `world.scale` 設為 1 但**不重畫 gStatic**,所以 PNG 線寬取決於按下匯出當時的 zoom —— 實測同一份規劃縮小匯出線材佔 5799 px、放大匯出只佔 2572 px(**差 2.25 倍**)。
+
 
 ---
 
@@ -571,8 +601,8 @@ perf probe `routesCache: 0 hit / 0 miss` → routing 快取正確,純幾何重�
 | ~~G7~~ ✅ | ~~命名唯一性與跨樓層參照~~ **已完成 2026-08-17** | ~~5-6 h~~ | — |
 | ~~G8~~ ✅ | ~~單位/比例尺/魔術數字~~ **已完成 2026-08-17** | ~~6-8 h~~ | — |
 | ~~G9~~ ✅ | ~~效能與資源洩漏~~ **已完成 2026-08-17** | ~~5-7 h~~ | — |
-| G10 | UI/UX 與匯出 | 7-9 h | — |
-| | **合計** | **61-78 h**(剩 **7-9 h**) | |
+| ~~G10~~ ✅ | ~~UI/UX 與匯出~~ **已完成 2026-08-19** | ~~7-9 h~~ | — |
+| | **合計** | **61-78 h**(**全部完成**) | |
 
 ## 分批建議
 

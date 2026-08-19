@@ -170,6 +170,13 @@ function Toolbar() {
       closeTimerRef.current = null
     }
   }
+
+  // 53-G10 (E8): clear the pending close on unmount. Switching to 3D unmounts
+  // this toolbar; a timer already in flight then fired setOpenGroupId /
+  // setToolbarMenuOpen on a gone component, and the menu-open flag it writes is
+  // shared editor state — so the next 2D mount could come up with the menu
+  // closing itself out from under the user.
+  useEffect(() => cancelClose, [])
   const scheduleClose = () => {
     cancelClose()
     closeTimerRef.current = setTimeout(() => {

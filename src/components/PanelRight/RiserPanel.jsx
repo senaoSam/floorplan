@@ -1,6 +1,7 @@
 import React from 'react'
 import { useCableStore, DEFAULT_RISER_MAGNET_PX } from '@/store/useCableStore'
 import { useFloorStore } from '@/store/useFloorStore'
+import { computeFloorElevations } from '@/utils/floorStacking'
 import { useEditorStore } from '@/store/useEditorStore'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { NumberInput, Checkbox } from './_shared/PanelControls'
@@ -32,7 +33,13 @@ function RiserPanel({ riserId }) {
   }
 
   const magnet = riser.magnetDistance ?? DEFAULT_RISER_MAGNET_PX
-  const sortedFloors = [...floors].sort((a, b) => (a.elevation ?? 0) - (b.elevation ?? 0))
+  // 53-G10 (E6): `floor.elevation` does not exist — nothing ever sets it, so
+  // this sort compared 0 against 0 (input order preserved by chance) and the
+  // label below never rendered its height. Derive real elevations the same way
+  // the 3D stack does.
+  const elevations = computeFloorElevations(floors)
+  const sortedFloors = [...floors].sort(
+    (a, b) => (elevations[a.id] ?? 0) - (elevations[b.id] ?? 0))
   const floorSet = new Set(riser.floorIds ?? [])
 
   return (
@@ -55,8 +62,8 @@ function RiserPanel({ riserId }) {
               checked={floorSet.has(f.id)}
               onChange={() => handleToggleFloor(f.id)}
               label={
-                f.elevation != null
-                  ? `${f.name ?? f.id}（${f.elevation.toFixed(1)} m）`
+                elevations[f.id] != null
+                  ? `${f.name ?? f.id}（${elevations[f.id].toFixed(1)} m）`
                   : (f.name ?? f.id)
               }
             />

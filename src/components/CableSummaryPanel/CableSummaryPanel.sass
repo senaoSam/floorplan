@@ -47,6 +47,48 @@
     text-transform: uppercase
     letter-spacing: 0.4px
 
+  // 53-G10 (P2-30): 本層 / 全案 scope toggle. Sits next to the title so the
+  // number in this header is never ambiguous about what it covers.
+  // 53-G10 (P2-30): 本層 / 全案 scope switch. Mirrors TrendPanel's __seg /
+  // __seg-btn segmented control so a two-state switch looks the same everywhere
+  // — a single toggling label read as a passive status badge.
+  &__scope-note
+    margin: 0 0 6px
+    font-size: 10px
+    line-height: 1.5
+    color: $text-secondary
+    opacity: 0.85
+    b
+      color: $text-primary
+
+  &__seg
+    display: flex
+    margin-left: 8px
+    border: 1px solid rgba(255, 255, 255, 0.12)
+    border-radius: 6px
+    overflow: hidden
+    flex: none
+
+  &__seg-btn
+    padding: 1px 7px
+    border: none
+    background: transparent
+    color: $text-secondary
+    font-size: 10px
+    font-weight: 600
+    line-height: 1.6
+    cursor: pointer
+
+    &:not(:last-child)
+      border-right: 1px solid rgba(255, 255, 255, 0.12)
+
+    &:hover
+      color: $text-primary
+
+    &--active
+      background: rgba($accent, 0.22)
+      color: $text-primary
+
   &__total
     margin-left: auto
     font-size: 13px
