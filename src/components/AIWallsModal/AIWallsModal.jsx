@@ -35,6 +35,7 @@ const POLL_TIMEOUT_MS = 5 * 60 * 1000
 // because cnn is our default; note the service's own default is still v1, so
 // `algorithm` is always sent explicitly rather than relying on the server.
 const ALGORITHMS = [
+  { id: 'cnn_vec2', label: 'cnn_vec2 — ResNet34 + run-partition Stage-B' },
   { id: 'cnn', label: 'cnn — ResNet34（預設）' },
   { id: 'cnn2', label: 'cnn2 — ResNet50' },
   { id: 'cnn_crf', label: 'cnn_crf — ResNet34+DenseCRF' },

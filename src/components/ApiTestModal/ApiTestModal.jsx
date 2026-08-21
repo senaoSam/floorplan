@@ -24,6 +24,7 @@ const DEFAULT_BASE_URL = 'https://floorplan.senao.net'
 const DEFAULT_TOKEN = '5yF5qWsxew5RbOfMO5-V1BUwaCgIc8_Bjb9O7Cw4tCE'
 
 const ALGORITHMS = [
+  { id: 'cnn_vec2', label: 'cnn_vec2 — ResNet34 + run-partition Stage-B' },
   { id: 'cnn', label: 'cnn — ResNet34 (預設)' },
   { id: 'cnn2', label: 'cnn2 — ResNet50' },
   { id: 'cnn_crf', label: 'cnn_crf — ResNet34 + DenseCRF' },
