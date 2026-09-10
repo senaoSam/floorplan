@@ -13,6 +13,16 @@ import { applyHomography, invertHomography } from '@/utils/homography'
 //   showUndetected— when true, targets outside every camera FOV still render
 //                   as faint grey ghosts; when false they're hidden outright
 //                   (only what the cameras actually see).
+// Timelapse speeds: simulated seconds advanced per real second. The label is
+// how much of the day passes each real second; 1800 (30 min/s) crosses the
+// 08:00–22:00 day in ~28s.
+export const LAPSE_SPEEDS = [
+  { value: 450,  label: '0.25x' },
+  { value: 900,  label: '0.5x' },
+  { value: 1800, label: '1x' },
+  { value: 3600, label: '2x' },
+]
+
 export const useTrackingStore = create((set) => ({
   tracksByFloor: {},
   seedByFloor: {},
@@ -32,7 +42,7 @@ export const useTrackingStore = create((set) => ({
   // Verkada "select interval, watch it evolve" experience. occupancyLapseSpeed
   // is simulated-seconds advanced per real second.
   occupancyLapsePlaying: false,
-  occupancyLapseSpeed: 1800,   // 30 simulated min per real sec → a full day in ~28s
+  occupancyLapseSpeed: 1800,   // 30 simulated min per real sec → a full day in ~28s (LAPSE_SPEEDS)
 
   setTracks: (floorId, tracks, seed) => set((s) => ({
     tracksByFloor: { ...s.tracksByFloor, [floorId]: tracks },

@@ -1,7 +1,7 @@
 import React from 'react'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
-import { useTrackingStore } from '@/store/useTrackingStore'
+import { useTrackingStore, LAPSE_SPEEDS } from '@/store/useTrackingStore'
 import { useCameraStore } from '@/store/useCameraStore'
 import { DAY_START_SEC, DAY_END_SEC, formatClock, formatClockSec } from '@/features/cameras/mockTracks'
 import { regenerateActiveFloorTracks } from '@/features/cameras/trackingBinder'
@@ -39,7 +39,9 @@ function CameraTimelineBar() {
   const occupancyLapsePlaying = useTrackingStore((s) => s.occupancyLapsePlaying)
   const setOccupancyMode = useTrackingStore((s) => s.setOccupancyMode)
   const setOccupancyRange = useTrackingStore((s) => s.setOccupancyRange)
+  const occupancyLapseSpeed = useTrackingStore((s) => s.occupancyLapseSpeed)
   const setOccupancyLapsePlaying = useTrackingStore((s) => s.setOccupancyLapsePlaying)
+  const setOccupancyLapseSpeed = useTrackingStore((s) => s.setOccupancyLapseSpeed)
   const resetOccupancyLapse = useTrackingStore((s) => s.resetOccupancyLapse)
   const setOccupancyWindowStart = useTrackingStore((s) => s.setOccupancyWindowStart)
   const trackCount = useTrackingStore((s) => (s.tracksByFloor[activeFloorId] ?? []).length)
@@ -253,17 +255,32 @@ function CameraTimelineBar() {
               className={`camera-timeline__chip${occupancyLapsePlaying ? ' camera-timeline__chip--active' : ''}`}
               onClick={() => {
                 // Starting the lapse with a full-day window shows no motion —
-                // the window already spans everything. Narrow it to 2h first so
-                // the sliding hot-spots are immediately visible.
-                if (!occupancyLapsePlaying && occupancyToSec - occupancyFromSec > 3 * 3600) {
+                // the window already spans everything, so there is nothing left
+                // to slide over. Narrow it to 2h in that one case; any width the
+                // user picked themselves is respected as-is.
+                const fullDay = occupancyFromSec <= DAY_START_SEC && occupancyToSec >= DAY_END_SEC
+                if (!occupancyLapsePlaying && fullDay) {
                   setOccupancyRange(DAY_START_SEC, DAY_START_SEC + 2 * 3600)
                 }
                 setOccupancyLapsePlaying(!occupancyLapsePlaying)
               }}
-              title="時間推移：固定統計時段寬度（自動縮成 2 小時），沿整天自動滑動播放，看活動熱點隨時間演變"
+              title="時間推移：固定你選的統計時段寬度，沿整天自動滑動播放，看活動熱點隨時間演變（整天寬度時自動縮成 2 小時）"
             >
               {occupancyLapsePlaying ? '⏸ 推移' : '⏱ 推移'}
             </button>
+            <div className="camera-timeline__speeds">
+              {LAPSE_SPEEDS.map((sp) => (
+                <button
+                  key={sp.value}
+                  type="button"
+                  className={`camera-timeline__chip${occupancyLapseSpeed === sp.value ? ' camera-timeline__chip--active' : ''}`}
+                  onClick={() => setOccupancyLapseSpeed(sp.value)}
+                  title={`推移速度：每秒走 ${Math.round(sp.value / 60)} 分鐘的模擬時間`}
+                >
+                  {sp.label}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               className={`camera-timeline__chip${clipHeatmapToFov ? ' camera-timeline__chip--active' : ''}`}
