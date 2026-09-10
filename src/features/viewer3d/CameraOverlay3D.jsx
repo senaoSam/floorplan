@@ -8,6 +8,7 @@ import { rasterizeCoverageCounts, buildFovMaskGrid } from '@/features/cameras/fo
 import { computeOccupancyGrid, renderOccupancyCanvas } from '@/features/cameras/occupancyGrid'
 import { useFrame } from '@react-three/fiber'
 import { computeFlowGrid, computeStreamlines } from '@/features/cameras/analyticsStats'
+import { useFloorPlateFactor } from './floorPlate'
 
 const EMPTY = Object.freeze([])
 
@@ -87,7 +88,14 @@ function makeTexture(canvas) {
 }
 
 // Shared mesh: a floor-aligned plane carrying `texture`, sized in metres.
+// Every camera overlay goes through here, so this is also where they all
+// follow the floor plate — these planes span the whole floor rect, and left
+// alone they'd keep drawing the square storey outline a hidden plate no
+// longer draws. Alpha normally comes from the texture itself (opacity 1);
+// ghost mode scales it down, and 'off' unmounts the mesh entirely.
 function OverlayMesh({ texture, wM, hM, yLift }) {
+  const plateFactor = useFloorPlateFactor()
+  if (plateFactor == null) return null
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[wM / 2, yLift, hM / 2]}>
       <planeGeometry args={[wM, hM]} />
@@ -95,6 +103,7 @@ function OverlayMesh({ texture, wM, hM, yLift }) {
         map={texture}
         side={THREE.DoubleSide}
         transparent
+        opacity={plateFactor}
         depthWrite={false}
         // 51-3: opt out of scene fog. Every texture this mesh carries is a
         // colour ramp read against the 2D legend (overlap count, occupancy

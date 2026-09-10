@@ -104,6 +104,13 @@ export const useEditorStore = create((set, get) => ({
   // so this only runs while the user is in 3D with the toggle on; results
   // are cached against a store fingerprint (features/viewer3d/heatmapStack).
   heatmap3DAllFloors: false,
+  // 3D viewer — how much of the floor plate (plan image + slab + outline) to
+  // draw: 'solid' | 'ghost' (translucent slab, no plan image) | 'off'.
+  // Stacked floor plates hide the storeys below them, so reviewing a whole
+  // building wants them out of the way. Separate from the 2D `showFloorImage`
+  // eye: the 2D LayerToggle panel is hidden in 3D, and the two views are read
+  // for different things (2D traces the plan, 3D reads walls/devices in space).
+  floorPlate3D: 'solid',
   // Per-kind Switch visibility (gated by showSwitches master toggle).
   showSwitchKind: { switch: true, idf: true, mdf: true, router: true },
 
@@ -201,6 +208,13 @@ export const useEditorStore = create((set, get) => ({
   toggleSidebarCollapsed: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 
   toggleLayer: (key) => set((s) => ({ [key]: !s[key] })),
+  // 3D floor plate: solid → ghost → off → solid. A cycle rather than a
+  // checkbox so the two "get it out of the way" looks sit one click apart.
+  cycleFloorPlate3D: () => set((s) => ({
+    floorPlate3D: s.floorPlate3D === 'solid' ? 'ghost'
+      : s.floorPlate3D === 'ghost' ? 'off'
+      : 'solid',
+  })),
   toggleAPBand: (band) => set((s) => ({
     showAPBand: { ...s.showAPBand, [band]: !s.showAPBand[band] },
   })),

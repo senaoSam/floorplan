@@ -4,6 +4,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore, VIEW_MODE } from '@/store/useEditorStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useHeatmapStackStore } from './heatmapStack'
+import { useFloorPlateFactor } from './floorPlate'
 
 // Heatmap plane for a NON-active stacked floor — thin consumer of the
 // heatmapStack module's per-floor painted canvases (mirror of how
@@ -16,6 +17,8 @@ export default function HeatmapStackPlane3D({ floorId }) {
   const stackOn = useEditorStore((s) => s.heatmap3DAllFloors)
   const hmEnabled = useHeatmapStore((s) => s.enabled)
   const frame = useHeatmapStackStore((s) => s.frames[floorId] ?? null)
+  // Follows the floor plate — see HeatmapPlane3D.
+  const plateFactor = useFloorPlateFactor()
 
   const canvas = frame?.canvas ?? null
   const texture = useMemo(() => {
@@ -32,7 +35,7 @@ export default function HeatmapStackPlane3D({ floorId }) {
     if (texture) texture.needsUpdate = true
   }, [texture, frame])
 
-  if (!isVisible || !stackOn || !hmEnabled) return null
+  if (!isVisible || !stackOn || !hmEnabled || plateFactor == null) return null
   if (!frame || !texture || !floor?.scale) return null
 
   const wM = floor.imageWidth / floor.scale
@@ -51,7 +54,7 @@ export default function HeatmapStackPlane3D({ floorId }) {
         map={texture}
         side={THREE.DoubleSide}
         transparent
-        opacity={0.7}
+        opacity={0.7 * plateFactor}
         depthWrite={false}
         // 51-3: opt out of scene fog. These are stacked non-active floors, so
         // they sit at a different depth than the active floor's heatmap — fog

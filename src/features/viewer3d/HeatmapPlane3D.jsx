@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore, VIEW_MODE } from '@/store/useEditorStore'
 import { subscribeHeatmapFrame, getHeatmapFrame } from '@/render/heatmapFrameBus'
+import { useFloorPlateFactor } from './floorPlate'
 
 // 3D heatmap plane for one floor — a THIN consumer of the 2D heatmap
 // adapter's painted canvas (render/heatmapFrameBus). The plane runs NO
@@ -41,6 +42,9 @@ export default function HeatmapPlane3D({ floorId, elevation }) {
   const floors = useFloorStore((s) => s.floors)
   const floor  = floors.find((f) => f.id === floorId) ?? null
   const isVisible = useEditorStore((s) => s.viewMode === VIEW_MODE.THREE_D)
+  // Follows the floor plate: a hidden plate with a full-floor heatmap
+  // rectangle still on top would keep drawing the square storey outline.
+  const plateFactor = useFloorPlateFactor()
 
   // Subscribe to repaint broadcasts ONLY while the 3D view is visible — the
   // adapter publishes per paint (60 fps during ripple transitions and solo
@@ -78,6 +82,7 @@ export default function HeatmapPlane3D({ floorId, elevation }) {
     texture.needsUpdate = true
   }, [texture, frame])
 
+  if (plateFactor == null) return null
   if (!frame || !texture || !floor?.scale) return null
   // Frames are computed for the ACTIVE floor; don't paste another floor's
   // field onto this one (brief mismatch window right after a floor switch,
@@ -107,7 +112,7 @@ export default function HeatmapPlane3D({ floorId, elevation }) {
         map={texture}
         side={THREE.DoubleSide}
         transparent
-        opacity={0.7}
+        opacity={0.7 * plateFactor}
         depthWrite={false}
         // 51-3: opt out of the scene fog. These colours ARE the RSSI reading;
         // letting distance tint them would make the same signal level look

@@ -67,13 +67,13 @@ const SLAB_GAP_M = 0.004
 const SLAB_COLOR = '#8d99ae'
 const SLAB_EDGE_COLOR = '#5c6879'
 
-function FloorSlab({ w, h, opacity = 1 }) {
+function FloorSlab({ w, h, opacity = 1, shadows = true }) {
   const transparent = opacity < 1
   return (
     <mesh
       position={[w / 2, -SLAB_GAP_M - SLAB_THICKNESS_M / 2, h / 2]}
-      receiveShadow
-      castShadow
+      receiveShadow={shadows}
+      castShadow={shadows}
       // The image plane sits right on top of this; nothing here should
       // intercept a click meant for the floor or the objects on it.
       raycast={() => null}
@@ -91,13 +91,15 @@ function FloorSlab({ w, h, opacity = 1 }) {
   )
 }
 
-// Textured floor plane. Plane geometry is XY by default; rotate -90° around X
-// so it lies on XZ (Three.js Y-up convention) and the image's "up" (−y canvas)
-// faces camera-forward (+z world-negative after flip).
-function FloorPlane({ floor, opacity = 1 }) {
-  const { w, h } = pxToMeters(floor)
+// The plan image itself. Split out of FloorPlane so the 3D "平面圖" toggle can
+// drop the texture without unmounting the slab — and, since useLoader suspends,
+// so a hidden plan doesn't hold the whole floor behind a texture fetch.
+// Plane geometry is XY by default; rotate -90° around X so it lies on XZ
+// (Three.js Y-up convention) and the image's "up" (−y canvas) faces
+// camera-forward (+z world-negative after flip).
+function FloorPlanImage({ url, w, h, opacity }) {
   // useLoader suspends until the texture is ready; wrap caller in Suspense.
-  const texture = useLoader(THREE.TextureLoader, floor.imageUrl)
+  const texture = useLoader(THREE.TextureLoader, url)
 
   // Avoid color-space washout on recent Three.js (r150+): mark the texture as
   // sRGB so the renderer does the linear→display conversion correctly.
@@ -107,6 +109,45 @@ function FloorPlane({ floor, opacity = 1 }) {
     else texture.encoding = THREE.sRGBEncoding
     texture.needsUpdate = true
   }, [texture])
+
+  const transparent = opacity < 1
+  return (
+    <mesh
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[w / 2, 0, h / 2]}
+      receiveShadow
+    >
+      <planeGeometry args={[w, h]} />
+      <meshStandardMaterial
+        map={texture}
+        side={THREE.DoubleSide}
+        transparent={transparent}
+        opacity={opacity}
+        depthWrite={!transparent}
+      />
+    </mesh>
+  )
+}
+
+// Fraction of the floor's normal opacity the slab keeps in 'ghost' mode. Low
+// enough to read the storey below through it, high enough that the plate still
+// reads as a surface rather than a stray outline.
+const GHOST_PLATE_OPACITY = 0.18
+
+// Floor plate: the plan image, the slab, and the slab outline.
+//
+// `plate` picks how much of it draws:
+//   'solid' — everything (the default look).
+//   'ghost' — translucent slab + outline, no plan image. The storeys below
+//              show through while each floor's extent stays readable.
+//   'off'   — nothing. Walls and devices float free, which is the clearest
+//              way to read a whole stacked building.
+// 'ghost'/'off' both drop shadow casting/receiving on the plate, so a
+// see-through floor doesn't keep painting an opaque shadow.
+function FloorPlane({ floor, opacity = 1, plate = 'solid' }) {
+  const { w, h } = pxToMeters(floor)
+  const ghost = plate === 'ghost'
+  const plateOpacity = ghost ? opacity * GHOST_PLATE_OPACITY : opacity
 
   // Slab edge outline. Reads as a drawn floor plate rather than a shaded box,
   // and keeps the floor's extent legible where the slab face catches little
@@ -120,26 +161,16 @@ function FloorPlane({ floor, opacity = 1 }) {
   }, [w, h])
   useEffect(() => () => { if (edges) edges.dispose() }, [edges])
 
-  if (!w || !h) return null
+  if (!w || !h || plate === 'off') return null
 
-  const transparent = opacity < 1
   return (
     <>
-      <mesh
-        rotation={[-Math.PI / 2, 0, 0]}
-        position={[w / 2, 0, h / 2]}
-        receiveShadow
-      >
-        <planeGeometry args={[w, h]} />
-        <meshStandardMaterial
-          map={texture}
-          side={THREE.DoubleSide}
-          transparent={transparent}
-          opacity={opacity}
-          depthWrite={!transparent}
-        />
-      </mesh>
-      <FloorSlab w={w} h={h} opacity={opacity} />
+      {!ghost && floor.imageUrl && (
+        <Suspense fallback={null}>
+          <FloorPlanImage url={floor.imageUrl} w={w} h={h} opacity={opacity} />
+        </Suspense>
+      )}
+      <FloorSlab w={w} h={h} opacity={plateOpacity} shadows={!ghost} />
       {edges && (
         <lineSegments
           position={[w / 2, -SLAB_GAP_M - SLAB_THICKNESS_M / 2, h / 2]}
@@ -149,7 +180,9 @@ function FloorPlane({ floor, opacity = 1 }) {
           <lineBasicMaterial
             color={SLAB_EDGE_COLOR}
             transparent
-            opacity={0.75 * opacity}
+            // Ghost keeps the outline much stronger than the slab face: the
+            // edge is what still says "a floor is here" once the face fades.
+            opacity={(ghost ? 0.55 : 0.75) * opacity}
           />
         </lineSegments>
       )}
@@ -251,7 +284,7 @@ function KeyLight({ center, radius }) {
 // CAMERA mode (Phase 34) mirrors the 2D rule "walls + floor image only":
 // every RF/cable layer is unmounted and the surveillance layers (camera
 // bodies + FOV ground polygons + live tracking targets) mount instead.
-function FloorStack({ floor, elevation, isActive, onAPHover, onSwitchHover, onCameraHover, inCameraMode }) {
+function FloorStack({ floor, elevation, isActive, onAPHover, onSwitchHover, onCameraHover, inCameraMode, floorPlate }) {
   const pxToM = 1 / getPxPerM(floor)   // 53-G8: was `|| 100`; see pxToMeters
   const dimOpacity = isActive ? 1 : 0.28
 
@@ -288,9 +321,9 @@ function FloorStack({ floor, elevation, isActive, onAPHover, onSwitchHover, onCa
 
   return (
     <group position={align.position} rotation={[0, align.rotationY, 0]} scale={[align.scale, 1, align.scale]}>
-      <Suspense fallback={null}>
-        {floor.imageUrl && <FloorPlane floor={floor} opacity={dimOpacity} />}
-      </Suspense>
+      {floor.imageUrl && (
+        <FloorPlane floor={floor} opacity={dimOpacity} plate={floorPlate} />
+      )}
       {!inCameraMode && (
         <ScopeLayer3D floorId={floor.id} pxToM={pxToM} dimOpacity={dimOpacity} />
       )}
@@ -932,6 +965,8 @@ function Viewer3D() {
   const activeFloor = floors.find((f) => f.id === activeFloorId) ?? null
   const show3DAllFloors = useEditorStore((s) => s.show3DAllFloors)
   const heatmap3DAllFloors = useEditorStore((s) => s.heatmap3DAllFloors)
+  const floorPlate3D    = useEditorStore((s) => s.floorPlate3D)
+  const cycleFloorPlate3D = useEditorStore((s) => s.cycleFloorPlate3D)
   const hmEnabled       = useHeatmapStore((s) => s.enabled)
   const toggleLayer     = useEditorStore((s) => s.toggleLayer)
   const clearSelected   = useEditorStore((s) => s.clearSelected)
@@ -1355,6 +1390,25 @@ function Viewer3D() {
           </button>
         </div>
 
+        {/* Floor plate: solid → ghost → off. Stacked plates hide the storeys
+            below, so reviewing a whole building wants them faded or gone. */}
+        <div className="viewer3d__panel-row">
+          <button
+            type="button"
+            className={`viewer3d__floors-btn${floorPlate3D !== 'solid' ? ' viewer3d__floors-btn--active' : ''}`}
+            onClick={cycleFloorPlate3D}
+            title={floorPlate3D === 'solid'
+              ? '目前：實心樓板（含平面圖）。點一下改半透明'
+              : floorPlate3D === 'ghost'
+                ? '目前：半透明樓板（無平面圖，看得到下層）。點一下完全隱藏'
+                : '目前：隱藏樓板（只剩牆體與設備）。點一下回實心'}
+          >
+            {floorPlate3D === 'solid' ? '🏢 樓板：實心'
+              : floorPlate3D === 'ghost' ? '🏢 樓板：半透明'
+              : '🏢 樓板：隱藏'}
+          </button>
+        </div>
+
         {/* 28-3 Camera presets — three quick poses to re-orient without
             orbiting manually. */}
         <div className="viewer3d__panel-row" role="group" aria-label="相機視角">
@@ -1455,6 +1509,7 @@ function Viewer3D() {
           onSwitchHover={handleSwitchHover}
           onCameraHover={handleCameraHover}
           inCameraMode={inCameraMode}
+          floorPlate={floorPlate3D}
         />
       ))}
 
