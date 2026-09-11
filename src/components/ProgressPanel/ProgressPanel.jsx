@@ -5,7 +5,7 @@ import './ProgressPanel.sass'
 const FEATURES = [
   { icon: '🗺', text: '平面圖匯入：支援 PNG / JPG / PDF，PDF 多頁自動拆分為獨立樓層' },
   { icon: '📐', text: '比例尺設定：在圖上點兩點並輸入實際距離，自動建立 px/m 換算' },
-  { icon: '🧱', text: '牆體繪製：連續線段繪製，支援端點吸附，可設定材質（玻璃到混凝土）與高度' },
+  { icon: '🧱', text: '牆體繪製：連續線段繪製，支援端點吸附，可設定材質（玻璃到混凝土）、厚度與高度' },
   { icon: '📍', text: 'AP 放置：點擊畫布放置，左鍵或右鍵按住可拖曳，支援頻段、發射功率、天線模式設定' },
   { icon: '🟩', text: '範圍區域：繪製建築覆蓋範圍多邊形，區分涵蓋內／外區域' },
   { icon: '⬛', text: '挑高區域：標記中庭、挑高等信號可跨樓層穿透的區域' },
@@ -39,6 +39,7 @@ const PHASES = [
         items: [
           { id: '3-1', done: true, text: '牆體繪製工具' },
           { id: '3-2', done: true, text: '牆體材質面板' },
+          { id: '3-5', done: true, text: '牆體厚度（純視覺：2D 實心帶 + 3D 擠出深度；畫牆預設面板選材質與厚度）' },
           { id: '3-3', done: true, text: 'Scope Zone 多邊形' },
           { id: '3-4', done: true, text: 'Floor Hole 多邊形' },
         ],

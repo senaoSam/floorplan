@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { useWallStore } from '@/store/useWallStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { DEFAULT_WALL_THICKNESS_M } from '@/constants/materials'
 import OpeningsDetail from './OpeningDetail3D'
 
 // 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
@@ -9,10 +10,9 @@ import OpeningsDetail from './OpeningDetail3D'
 // zustand saw a changed slice on EVERY store write and re-rendered.
 const EMPTY = Object.freeze([])
 
-// Fixed visual thickness for wall boxes (meters). Walls are semantically 2D
-// line segments in the rest of the app, so we pick a small value that still
-// renders clearly in 3D without distorting the floorplan's geometry.
-const WALL_THICKNESS_M = 0.1
+// Walls are semantically 2D line segments to the RF engines, but they carry a
+// visual `thicknessM` that the user edits. Fall back to the default for walls
+// created before the field existed (old saves, undo snapshots).
 
 // Default color when a wall's material has no color attribute (shouldn't
 // happen for materials from constants/materials.js, but mock imports might).
@@ -96,6 +96,7 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true })
     topHeight = 3, bottomHeight = 0,
     material,
     openings,
+    thicknessM = DEFAULT_WALL_THICKNESS_M,
   } = wall
 
   // Derive the wall's length / height / pose from its 2D endpoints.
@@ -119,8 +120,8 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true })
   // opacity changes don't need a geometry rebuild.
   const geometry = useMemo(() => {
     if (length === 0) return null
-    return buildWallGeometry(length, height, openings, bottomHeight, WALL_THICKNESS_M)
-  }, [length, height, openings, bottomHeight])
+    return buildWallGeometry(length, height, openings, bottomHeight, thicknessM)
+  }, [length, height, openings, bottomHeight, thicknessM])
 
   // Dispose the extruded geometry when the mesh unmounts / rebuilds so we
   // don't leak GPU buffers on frequent wall edits.
@@ -242,7 +243,7 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true })
           wall={wall}
           length={length}
           height={height}
-          wallThickness={WALL_THICKNESS_M}
+          wallThickness={thicknessM}
         />
       )}
     </group>

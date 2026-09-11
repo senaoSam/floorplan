@@ -59,7 +59,6 @@ import { useDraftStore } from '@/store/useDraftStore'
 import { useAutoPlaceStore } from '@/store/useAutoPlaceStore'
 import { useMaterialToastStore } from '@/store/useMaterialToastStore'
 import { showUiToast } from '@/store/useUiToastStore'
-import { MATERIAL_LIST } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 import { isTypingTarget } from '@/utils/isTypingTarget'
 import { getModeCapability } from '@/render/modeCapabilities'
@@ -758,24 +757,6 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           ed.setPlaceSwitchKind(next)
           useMaterialToastStore.getState().showToast({
             label: labels[next], color: colors[next], key: 'Tab',
-          })
-          return
-        }
-        if (ed.editorMode === EDITOR_MODE.DRAW_WALL) {
-          e.preventDefault()
-          const curId = ed.wallMaterial?.id
-          const idx = Math.max(0, MATERIAL_LIST.findIndex((m) => m.id === curId))
-          const dir = e.shiftKey ? -1 : 1
-          const next = MATERIAL_LIST[(idx + dir + MATERIAL_LIST.length) % MATERIAL_LIST.length]
-          ed.setWallMaterial(next)
-          // If a wall is also selected, rewrite its material in the same
-          // stroke — mirrors the prior 1-6 behaviour.
-          if (ed.selectedId && ed.selectedType === 'wall') {
-            const fid = useFloorStore.getState().activeFloorId
-            if (fid) useWallStore.getState().updateWall(fid, ed.selectedId, { material: next })
-          }
-          useMaterialToastStore.getState().showToast({
-            label: next.label, color: next.color, key: 'Tab',
           })
           return
         }

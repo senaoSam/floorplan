@@ -2,7 +2,7 @@ import React, { useCallback } from 'react'
 import { useWallStore } from '@/store/useWallStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
-import { MATERIAL_LIST, OPENING_TYPES, getMaterialById } from '@/constants/materials'
+import { MATERIAL_LIST, OPENING_TYPES, getMaterialById, DEFAULT_WALL_THICKNESS_M, MIN_WALL_THICKNESS_CM, MAX_WALL_THICKNESS_CM, mToCm, cmToM } from '@/constants/materials'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { NumberInput, Select, Button } from './_shared/PanelControls'
 import './_shared/shared.sass'
@@ -36,6 +36,14 @@ function WallPanel({ floorId, wallId }) {
 
   const handleHeight = useCallback((field, value) => {
     if (!isNaN(value) && value >= 0) updateWall(floorId, wallId, { [field]: value })
+  }, [floorId, wallId, updateWall])
+
+  // Thickness is visual only — it drives the 2D band width and the 3D extrude
+  // depth, never the RF engines (a wall's loss is per-crossing, not per-metre).
+  const handleThickness = useCallback((cm) => {
+    if (isNaN(cm)) return
+    const clamped = Math.min(MAX_WALL_THICKNESS_CM, Math.max(MIN_WALL_THICKNESS_CM, cm))
+    updateWall(floorId, wallId, { thicknessM: cmToM(clamped) })
   }, [floorId, wallId, updateWall])
 
   const handleDelete = () => {
@@ -98,6 +106,20 @@ function WallPanel({ floorId, wallId }) {
             width={70}
             placeholder={String(wall.material.dbLoss)}
             onChange={handleCustomDb}
+          />
+        </PanelField>
+      </PanelSection>
+
+      <PanelSection title="厚度">
+        <PanelField label="牆體">
+          <NumberInput
+            value={mToCm(wall.thicknessM ?? DEFAULT_WALL_THICKNESS_M)}
+            min={MIN_WALL_THICKNESS_CM}
+            max={MAX_WALL_THICKNESS_CM}
+            step={1}
+            unit="cm"
+            width={70}
+            onChange={handleThickness}
           />
         </PanelField>
       </PanelSection>

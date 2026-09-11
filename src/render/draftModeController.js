@@ -1,5 +1,5 @@
 import { EDITOR_MODE } from '@/store/useEditorStore'
-import { MATERIALS, OPENING_TYPES, getMaterialById } from '@/constants/materials'
+import { MATERIALS, OPENING_TYPES, getMaterialById, DEFAULT_WALL_THICKNESS_M } from '@/constants/materials'
 import { DEFAULT_TRAY } from '@/store/useCableStore'
 import { generateId } from '@/utils/id'
 import { snapTrayPoint } from '@/features/draft/traySnap'
@@ -117,9 +117,11 @@ export function createDraftModeController({
     const fid = useFloorStore.getState().activeFloorId
     if (!fid) return
     const floor = useFloorStore.getState().floors.find((f) => f.id === fid)
-    // Use editor.wallMaterial so Tab / Shift+Tab cycling (FloorplanSystem
-    // keydown) takes effect for the next drawn wall.
-    const material = useEditorStore.getState().wallMaterial ?? MATERIALS.CONCRETE
+    // Draw defaults come from the editor store so the WallDefaultsPanel
+    // picker takes effect for the next drawn wall.
+    const ed = useEditorStore.getState()
+    const material = ed.wallMaterial ?? MATERIALS.CONCRETE
+    const thicknessM = ed.wallThickness ?? DEFAULT_WALL_THICKNESS_M
     const id = generateId('wall')
     useWallStore.getState().addWall(fid, {
       id,
@@ -127,6 +129,7 @@ export function createDraftModeController({
       startX: a.x, startY: a.y,
       endX:   b.x, endY:   b.y,
       material,
+      thicknessM,
       // 53-G8: was a hardcoded 3.0. A wall drawn on a 6 m floor stopped at
       // 3 m, so the RF engine's Z filter judged rays to pass over its top and
       // applied ZERO wall loss — the heatmap showed the wall but ignored it.
@@ -170,6 +173,7 @@ export function createDraftModeController({
       // the surrounding walls anyway, so widening the run later (dragging an
       // endpoint past the opening) exposes the material the user expects.
       material: useEditorStore.getState().wallMaterial ?? MATERIALS.CONCRETE,
+      thicknessM: useEditorStore.getState().wallThickness ?? DEFAULT_WALL_THICKNESS_M,
       topHeight: getFloorHeight(floor),
       bottomHeight: 0,
       openings: [{

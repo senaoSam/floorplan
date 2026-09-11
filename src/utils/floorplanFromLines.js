@@ -1,4 +1,4 @@
-import { MATERIALS } from '@/constants/materials'
+import { MATERIALS, DEFAULT_WALL_THICKNESS_M } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 
 // Convert a flat list of `{type, x1, y1, x2, y2}` lines (e.g. produced by an
@@ -18,6 +18,7 @@ const DEFAULTS = {
   gapTolerance: 1,
   snapDistance: 4,
   wallMaterial: MATERIALS.CONCRETE,
+  wallThickness: DEFAULT_WALL_THICKNESS_M,
   topHeight: 3.0,
   bottomHeight: 0,
   doorBottomHeight: 0,
@@ -147,6 +148,7 @@ function makeWallFromRange(orient, axis, lo, hi, opts) {
     endX:   isH ? hi   : axis,
     endY:   isH ? axis : hi,
     material: opts.wallMaterial,
+    thicknessM: opts.wallThickness,
     topHeight: opts.topHeight,
     bottomHeight: opts.bottomHeight,
     openings: [],
@@ -209,6 +211,7 @@ export function floorplanFromLines(lines, options = {}) {
         material: l.type === 'window' ? MATERIALS.GLASS
                : l.type === 'door'   ? MATERIALS.WOOD
                : opts.wallMaterial,
+        thicknessM: opts.wallThickness,
         topHeight: opts.topHeight,
         bottomHeight: opts.bottomHeight,
         openings: [],

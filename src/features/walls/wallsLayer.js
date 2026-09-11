@@ -4,11 +4,12 @@ import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
 import { useDraftStore } from '@/store/useDraftStore'
-import { OPENING_TYPES, getMaterialById } from '@/constants/materials'
+import { OPENING_TYPES, getMaterialById, DEFAULT_WALL_THICKNESS_M } from '@/constants/materials'
 import { generateId } from '@/utils/id'
 import { isTypingTarget } from '@/utils/isTypingTarget'
 import { getModeCapability } from '@/render/modeCapabilities'
 import { snapToWallForTray } from '@/features/draft/traySnap'
+import { getPxPerM } from '@/store/useFloorStore'
 
 const DRAG_COMMIT_THRESHOLD_PX = 1
 
@@ -57,6 +58,22 @@ const OPENING_WIDTH_SELECTED   = WALL_BODY_WIDTH_SELECTED
 // clearSelected fires and the panel closes. That was the root cause of
 // the recurring "wall select sometimes fails / panel closes" bug.
 const HIT_TOLERANCE_SCREEN_PX = 14
+
+// Wall thickness (visual only) renders the body as a solid band whose width is
+// the wall's real thickness in world px. Everything else here — halo, hover
+// aura, selected rim — stays a fixed ring around that band, so the chrome
+// reads the same on a 0.1 m partition and a 0.6 m shear wall.
+//
+// Zoomed far out a real 0.1 m wall is sub-pixel, so the band floors at the
+// old fixed body width converted to world px (WALL_BODY_WIDTH_* / scale).
+// That is why drawWall now needs the viewport scale and why zooming has to
+// repaint, not just refresh hit areas.
+const bodyWidthWorld = (wall, baseWidth, pxPerM, vpScale) => {
+  const t = wall.thicknessM ?? DEFAULT_WALL_THICKNESS_M
+  const realWorldPx = t * pxPerM
+  const minWorldPx = baseWidth / (vpScale || 1)
+  return Math.max(realWorldPx, minWorldPx)
+}
 
 function pointToSegmentDistance(px, py, ax, ay, bx, by) {
   const dx = bx - ax
@@ -189,15 +206,30 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
     const isHovered  = hoverState.id === wall.id && hoverState.type === 'wall'
     const hoverInvert = isHovered && !isSelected
 
-    const haloWidth = hoverInvert ? WALL_HALO_WIDTH_HOVERED
-                                  : isSelected ? WALL_HALO_WIDTH_SELECTED
-                                              : WALL_HALO_WIDTH_NORMAL
-    const bodyWidth = hoverInvert ? WALL_BODY_WIDTH_HOVERED
-                                  : isSelected ? WALL_BODY_WIDTH_SELECTED
-                                              : WALL_BODY_WIDTH_NORMAL
-    const openingWidth = hoverInvert ? OPENING_WIDTH_HOVERED
-                                     : isSelected ? OPENING_WIDTH_SELECTED
-                                                  : OPENING_WIDTH_NORMAL
+    const baseBody = hoverInvert ? WALL_BODY_WIDTH_HOVERED
+                                 : isSelected ? WALL_BODY_WIDTH_SELECTED
+                                             : WALL_BODY_WIDTH_NORMAL
+    const baseHalo = hoverInvert ? WALL_HALO_WIDTH_HOVERED
+                                 : isSelected ? WALL_HALO_WIDTH_SELECTED
+                                             : WALL_HALO_WIDTH_NORMAL
+    const baseOpening = hoverInvert ? OPENING_WIDTH_HOVERED
+                                    : isSelected ? OPENING_WIDTH_SELECTED
+                                                 : OPENING_WIDTH_NORMAL
+
+    // Body is the wall's real thickness; the halo/rings sit outside it by the
+    // same screen-px margin they used to add over the old fixed-width line
+    // (halo was body+1 px on each side), converted to world px.
+    const vpScale = useViewportStore.getState().scale || 1
+    const floor = useFloorStore.getState().floors.find((f) => f.id === entry.floorId)
+    const pxPerM = getPxPerM(floor)
+    const toWorld = (screenPx) => screenPx / vpScale
+
+    const bodyWidth = bodyWidthWorld(wall, baseBody, pxPerM, vpScale)
+    const haloWidth = bodyWidth + toWorld(baseHalo - baseBody)
+    // Openings replace the wall body over their span, so they match its width.
+    const openingWidth = baseOpening === baseBody
+      ? bodyWidth
+      : bodyWidth + toWorld(baseOpening - baseBody)
 
     graphics.clear()
 
@@ -208,7 +240,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
       graphics
         .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
         .stroke({
-          width: haloWidth + WALL_SELECTED_RING_PAD,
+          width: haloWidth + toWorld(WALL_SELECTED_RING_PAD),
           color: WALL_SELECTED_RING_COLOR,
           alpha: WALL_SELECTED_RING_ALPHA,
           cap: 'round',
@@ -222,7 +254,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
       graphics
         .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
         .stroke({
-          width: haloWidth + WALL_HOVER_BEAM_PAD,
+          width: haloWidth + toWorld(WALL_HOVER_BEAM_PAD),
           color: WALL_HOVER_BEAM_COLOR,
           alpha: WALL_HOVER_BEAM_ALPHA,
           cap: 'round',
@@ -273,7 +305,12 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
   const refreshHitArea = (entry) => {
     const { container, wall } = entry
     const scale = useViewportStore.getState().scale || 1
-    const worldTol = HIT_TOLERANCE_SCREEN_PX / scale
+    // A thick wall must be clickable across its whole band, or the user sees
+    // wall under the cursor and gets nothing. Thin walls keep the generous
+    // 14-screen-px envelope that fixed the "wall select sometimes fails" bug.
+    const floor = useFloorStore.getState().floors.find((f) => f.id === entry.floorId)
+    const halfBand = bodyWidthWorld(wall, WALL_BODY_WIDTH_NORMAL, getPxPerM(floor), scale) / 2
+    const worldTol = Math.max(HIT_TOLERANCE_SCREEN_PX / scale, halfBand)
     const lastGeom = entry._hitGeom
     if (!lastGeom ||
         lastGeom.startX !== wall.startX || lastGeom.startY !== wall.startY ||
@@ -809,7 +846,10 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
     const s = useViewportStore.getState().scale
     if (s === lastScale) return
     lastScale = s
-    for (const entry of containers.values()) refreshHitArea(entry)
+    // Repaint too, not just the hit area: the body band is real-world width
+    // but floors at a screen-px minimum, and the halo/rings are screen-px
+    // margins converted with the live scale. All of those move with zoom.
+    for (const entry of containers.values()) { drawWall(entry); refreshHitArea(entry) }
   }
 
   const unsubFloor = useFloorStore.subscribe(reconcile)
