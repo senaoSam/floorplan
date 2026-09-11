@@ -1,5 +1,5 @@
 import { EDITOR_MODE } from '@/store/useEditorStore'
-import { MATERIALS } from '@/constants/materials'
+import { MATERIALS, OPENING_TYPES, getMaterialById } from '@/constants/materials'
 import { DEFAULT_TRAY } from '@/store/useCableStore'
 import { generateId } from '@/utils/id'
 import { snapTrayPoint } from '@/features/draft/traySnap'
@@ -18,7 +18,19 @@ const DRAW_MODES = new Set([
   EDITOR_MODE.DRAW_CABLE_TRAY,
   EDITOR_MODE.DRAW_SCALE,
   EDITOR_MODE.CROP_IMAGE,
+  // Door/window used to be wall-only: the gesture lived entirely on each
+  // wall's PIXI container, so a click on empty canvas reached nothing and
+  // did nothing — no toast, no cursor, no way to tell the tool from a
+  // broken one. They're draw modes here so a click off any wall lands in
+  // onDrawModeClick, where it draws its own carrier wall (see
+  // commitStandaloneOpening). Clicks that DO hit a wall never get this far:
+  // wallsLayer stops propagation first, so in-wall placement is untouched.
+  EDITOR_MODE.DRAW_DOOR,
+  EDITOR_MODE.DRAW_WINDOW,
 ])
+
+const isDoorWindowMode = (mode) =>
+  mode === EDITOR_MODE.DRAW_DOOR || mode === EDITOR_MODE.DRAW_WINDOW
 
 // Screen-px radius for the "click back on the first vertex to close the
 // polygon" gesture in DRAW_SCOPE / DRAW_FLOOR_HOLE (oldSrc Editor2D SNAP_PX
@@ -59,7 +71,11 @@ export function createDraftModeController({
         shiftHeld: !!useDraftStore.getState()._shiftHeld,
       })
     }
-    if (mode === EDITOR_MODE.DRAW_WALL) {
+    // Door/window off a wall gets DRAW_WALL's snap chain too. It matters more
+    // here than anywhere: the gesture exists to close a gap between two wall
+    // runs, and endpoint snap is what makes the new segment actually meet
+    // them instead of leaving a hairline the RF flood-fill leaks through.
+    if (mode === EDITOR_MODE.DRAW_WALL || isDoorWindowMode(mode)) {
       if (!fid) return { pos: raw, kind: null }
       // Run the exact same snap chain as DRAW_CABLE_TRAY (shift angle-lock
       // → wall endpoint → wall segment foot → parallel-wall intent lock).
@@ -122,6 +138,50 @@ export function createDraftModeController({
     // compare against even if the chain began before this controller was wired.
     if (sessionFloorId !== fid) { sessionWallIds = []; sessionFloorId = fid }
     sessionWallIds.push(id)
+  }
+
+  // Door/window drawn off any wall: build the wall it should have been cut
+  // into, spanning exactly the opening (startFrac 0 → endFrac 1).
+  //
+  // This is the whole "standalone opening" feature. An opening has no
+  // geometry of its own — only startFrac/endFrac along a host wall — so
+  // there is no such thing as one floating free. What the user actually
+  // hits is a gap the walls missed (AI import skipped it, or they drew the
+  // run and left the doorway out), and that gap IS the opening's extent.
+  // Drawing the carrier wall here keeps every downstream consumer — RF
+  // scenario, FOV blocking, 3D hole-cutting, indoor flood-fill — working
+  // off the one shape they already understand.
+  const commitStandaloneOpening = (a, b, mode) => {
+    const fid = useFloorStore.getState().activeFloorId
+    if (!fid) return
+    // Sub-pixel drags are a mis-click, not a doorway.
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 1) return
+    const floor = useFloorStore.getState().floors.find((f) => f.id === fid) ?? null
+    const kind = mode === EDITOR_MODE.DRAW_WINDOW ? 'window' : 'door'
+    const ot = kind === 'window' ? OPENING_TYPES.WINDOW : OPENING_TYPES.DOOR
+    const openingMat = getMaterialById(ot.defaultMaterial)
+    useWallStore.getState().addWall(fid, {
+      id: generateId('wall'),
+      name: useWallStore.getState().nextWallName({ floor }),
+      startX: a.x, startY: a.y,
+      endX:   b.x, endY:   b.y,
+      // The carrier's own material never shows: the opening covers the full
+      // span, so every consumer reads the opening's dB, not this one. Match
+      // the surrounding walls anyway, so widening the run later (dragging an
+      // endpoint past the opening) exposes the material the user expects.
+      material: useEditorStore.getState().wallMaterial ?? MATERIALS.CONCRETE,
+      topHeight: getFloorHeight(floor),
+      bottomHeight: 0,
+      openings: [{
+        id: generateId('opening'),
+        type: kind,
+        startFrac: 0,
+        endFrac: 1,
+        material: openingMat,
+        topHeight: 2.1,
+        bottomHeight: 0,
+      }],
+    })
   }
 
   const commitScope = (points, type = 'in') => {
@@ -189,6 +249,19 @@ export function createDraftModeController({
     const snapped = snapDraftPoint(worldPt, mode).pos
 
     if (draft.mode !== mode || draft.points.length === 0) {
+      // An on-wall opening is half-placed and this click landed off that wall
+      // (empty canvas, or any wall the layer chose not to intercept): the user
+      // is running the opening OUT of the one they just drew. Adopt the wall
+      // anchor and commit the pair here — without this the click only started
+      // a fresh draft, leaving both flows holding state and building nothing,
+      // so an L only worked when drawn INTO the existing opening.
+      const dwDraft = draft.doorWindowDraft
+      if (isDoorWindowMode(mode) && dwDraft?.anchor) {
+        commitStandaloneOpening(dwDraft.anchor, snapped, mode)
+        useDraftStore.getState().setDoorWindowDraft(null)
+        useDraftStore.getState().clearDraft()
+        return
+      }
       // Fresh chain: reset the DRAW_WALL step-back session so Backspace can't
       // reach back into walls drawn before this anchor (47-18). 53-G6: also
       // re-stamps the floor id, so a chain started after a floor switch owns
@@ -198,6 +271,15 @@ export function createDraftModeController({
       return
     }
 
+    if (isDoorWindowMode(mode)) {
+      // Second click commits one opening and ends the chain — unlike
+      // DRAW_WALL, which re-anchors to keep drawing. Openings are placed one
+      // at a time (matching the on-wall gesture), so leaving an anchor behind
+      // would make the next stray click draw a doorway across the room.
+      commitStandaloneOpening(draft.points[0], snapped, mode)
+      useDraftStore.getState().clearDraft()
+      return
+    }
     if (mode === EDITOR_MODE.DRAW_WALL) {
       commitWall(draft.points[0], snapped)
       useDraftStore.getState().beginDraft(mode, snapped)
@@ -259,6 +341,17 @@ export function createDraftModeController({
     const mode = useEditorStore.getState().editorMode
     const s = snapDraftPoint(worldPt, mode)
     useDraftStore.getState().setCursor(s.pos)
+    // An on-wall opening whose cursor has wandered off its host wall is on
+    // its way to becoming a free-space one (wallsLayer hands it over on the
+    // next click). Feed the world cursor so the preview shows that segment
+    // instead of freezing at the wall edge. wallsLayer's own pointermove
+    // clears this again whenever the cursor is back over the host wall.
+    if (isDoorWindowMode(mode)) {
+      const dwDraft = useDraftStore.getState().doorWindowDraft
+      if (dwDraft) {
+        useDraftStore.getState().setDoorWindowDraft({ ...dwDraft, freeCursor: s.pos })
+      }
+    }
     // While a body drag is in flight (e.g. dragging an existing wall in
     // DRAW_WALL) the per-object drag handler owns snapHint — it knows
     // which endpoint of the dragged object is snapping to what. Without
@@ -281,10 +374,12 @@ export function createDraftModeController({
         visibleKind = s
       }
       useDraftStore.getState().setSnapHint(visibleKind)
-    } else if (mode === EDITOR_MODE.DRAW_WALL) {
+    } else if (mode === EDITOR_MODE.DRAW_WALL || isDoorWindowMode(mode)) {
       // Wall draw — surface endpoint (cyan ring), wall-segment foot
       // (orange square) any time the cursor is in range. parallelWall
-      // still needs an anchor point.
+      // still needs an anchor point. Door/window off a wall shares this:
+      // the halo is how the user sees the new segment will meet the run
+      // it's filling in.
       if (s.kind === 'wallEndpoint') {
         useDraftStore.getState().setSnapHint({ kind: 'wallEndpoint', pos: s.pos })
       } else if (s.kind === 'wallSegment') {

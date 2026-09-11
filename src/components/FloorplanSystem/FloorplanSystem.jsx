@@ -647,19 +647,27 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           useCameraStore.getState().setDrawTool(null)
           return
         }
-        // DRAW_DOOR / DRAW_WINDOW aren't in DRAW_MODES (no multi-point draft),
-        // but they DO have a two-click "in progress" state: doorWindowDraft is
-        // set after the first click on a wall. Give them the same two-stage Esc
-        // as the polyline draw tools for consistency:
-        //   1) a door/window placement is half-done → cancel just it, STAY in
-        //      the mode (wallsLayer's own Esc handler clears dw.wallId +
+        // DRAW_DOOR / DRAW_WINDOW are two-click tools with two possible
+        // in-progress states — on a wall (doorWindowDraft) or off one (a
+        // draft point, which commits its own carrier wall). Same two-stage
+        // Esc as the polyline draw tools:
+        //   1) a placement is half-done → cancel just it, STAY in the mode
+        //      (wallsLayer's own Esc handler clears dw.wallId +
         //      doorWindowDraft; we only need to NOT leave the mode here).
         //   2) nothing half-placed → leave the tool back to SELECT.
+        // This runs BEFORE the generic isDrawMode() branch below, which
+        // these modes now also match.
         const isDoorWindow = s.editorMode === EDITOR_MODE.DRAW_DOOR
                           || s.editorMode === EDITOR_MODE.DRAW_WINDOW
         if (isDoorWindow) {
+          // Two half-done shapes are possible now: doorWindowDraft (first
+          // click landed on a wall) or a plain draft point (first click
+          // landed on empty canvas, drawing its own carrier wall). Either
+          // one cancels without leaving the tool.
           if (draft.doorWindowDraft) {
             useDraftStore.getState().setDoorWindowDraft(null)
+          } else if (draft.points.length > 0) {
+            useDraftStore.getState().clearDraft()
           } else {
             s.setEditorMode(EDITOR_MODE.SELECT)
           }

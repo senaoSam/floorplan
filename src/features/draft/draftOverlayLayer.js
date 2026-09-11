@@ -183,6 +183,10 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
       drawScaleDraft(g, points, cursor)
       return
     }
+    if (mode === EDITOR_MODE.DRAW_DOOR || mode === EDITOR_MODE.DRAW_WINDOW) {
+      drawFreeOpeningDraft(g, points, cursor, mode)
+      return
+    }
     drawPolyDraft(g, mode, points, cursor)
   }
 
@@ -296,8 +300,12 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
     const dyw = wall.endY - wall.startY
     const sx = wall.startX + dxw * draft.startFrac
     const sy = wall.startY + dyw * draft.startFrac
-    const cx = wall.startX + dxw * draft.cursorFrac
-    const cy = wall.startY + dyw * draft.cursorFrac
+    // freeCursor is set once the pointer leaves the host wall: the gesture is
+    // about to run off this wall and build its own carrier (wallsLayer's
+    // handoffToFreeOpening), so preview the segment that would actually be
+    // built rather than freezing at the wall's edge.
+    const cx = draft.freeCursor ? draft.freeCursor.x : wall.startX + dxw * draft.cursorFrac
+    const cy = draft.freeCursor ? draft.freeCursor.y : wall.startY + dyw * draft.cursorFrac
     const ot = draft.kind === 'window' ? OPENING_TYPES.WINDOW : OPENING_TYPES.DOOR
     const color = ot.color
     // Dashed coloured band (matches the eventual opening colour) between
@@ -311,6 +319,23 @@ export function attachDraftOverlay({ scene, useDraftStore, useCableStore, useFlo
     // Cursor-end marker — open ring so it reads as "this end is still
     // moving" / not yet committed.
     g.circle(cx, cy, 6 * s).stroke({ width: 2 * s, color, alpha: 1 })
+  }
+
+  // DRAW_DOOR / DRAW_WINDOW drawn OFF a wall (draft points, not wall fracs).
+  // Same marks as drawDoorWindowDraft above so the two gestures look like one
+  // tool — the only difference is where the endpoints come from.
+  function drawFreeOpeningDraft(g, points, cursor, mode) {
+    const p0 = points[0]
+    const p1 = cursor ?? points[1] ?? p0
+    if (!p0 || !p1) return
+    const vpScale = useViewportStore.getState().scale || 1
+    const s = 1 / vpScale
+    const ot = mode === EDITOR_MODE.DRAW_WINDOW ? OPENING_TYPES.WINDOW : OPENING_TYPES.DOOR
+    const color = ot.color
+    drawDashedSegment(g, p0.x, p0.y, p1.x, p1.y, color, 5, 10 * s, 5 * s, 0.85)
+    g.circle(p0.x, p0.y, 7 * s).fill({ color: HALO_COLOR, alpha: HALO_ALPHA })
+    g.circle(p0.x, p0.y, 5 * s).fill({ color, alpha: 1 })
+    g.circle(p1.x, p1.y, 6 * s).stroke({ width: 2 * s, color, alpha: 1 })
   }
 
   // Cyan ring + black halo at an existing wall endpoint the cursor is

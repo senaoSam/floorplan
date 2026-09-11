@@ -100,7 +100,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
   // Click on a different wall resets to that wall. Esc / right-click clear
   // via the shared keyboard / context-menu paths (cleared on mode exit).
   // openingKind is derived from the current editor mode (no per-mode toggle).
-  const dw = { wallId: null, startFrac: null }
+  const dw = { wallId: null, startFrac: null, anchor: null }
   const isDoorWindowMode = (mode) =>
     mode === EDITOR_MODE.DRAW_DOOR || mode === EDITOR_MODE.DRAW_WINDOW
 
@@ -333,6 +333,33 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
       // allowSelectClick.struct = true but the layer handles it differently
       // for these two modes.
       if (isDoorWindowMode(editor.editorMode)) {
+        // A free-space opening already in flight (first click landed off any
+        // wall) owns the gesture: let the click through to the stage so it
+        // finishes THAT segment. Swallowing it here would start an unrelated
+        // on-wall placement and strand the free-space draft point.
+        if (useDraftStore.getState().points.length > 0) return
+        // Two cases where a click that HITS this wall isn't a placement ON
+        // it, and must reach the stage as a free-space click instead. Both
+        // used to be swallowed here and then silently dropped, which lost
+        // the click outright — no placement, no draft — so the NEXT click
+        // paired with stale state and drew a duplicate leg.
+        //
+        //  1. Projects past either end (the hit area is padded by
+        //     HIT_TOLERANCE_SCREEN_PX, so nearby clicks still land here).
+        //  2. The wall has no room left at all — a single opening spanning
+        //     it end to end. That is exactly the carrier wall a standalone
+        //     opening creates, and chaining a new leg off its tip could
+        //     never start while this layer kept swallowing the click.
+        //     A wall with SPARE room is left alone: clicking inside one of
+        //     its existing openings must still be rejected by the on-wall
+        //     path (overlap), not escape and build a stray wall out here.
+        const local = scene.world.toLocal(e.global)
+        const f = projectToWallFrac(entry.wall, local.x, local.y)
+        if (f < 0 || f > 1) return
+        const fullSpan = (entry.wall.openings ?? []).some(
+          (o) => o.startFrac <= 1e-6 && o.endFrac >= 1 - 1e-6,
+        )
+        if (fullSpan) return
         e.stopPropagation()
         handleDoorWindowClick(entry, e, editor.editorMode)
         return
@@ -404,6 +431,10 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
         wallId: entry.wall.id,
         startFrac: dw.startFrac,
         cursorFrac: clamped,
+        anchor: dw.anchor,
+        // Back over the host wall — drop any off-wall cursor so the preview
+        // snaps back to the along-the-wall band.
+        freeCursor: null,
         kind: mode === EDITOR_MODE.DRAW_WINDOW ? 'window' : 'door',
       })
     })
@@ -572,14 +603,51 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
     stage.on('pointerupoutside', onUp)
   }
 
+  // Convert an in-flight ON-WALL placement into a free-space one, keeping the
+  // first click's world point as the anchor. The stage path (draftModeController)
+  // owns free-space openings, so we seed its draft and let this click land there
+  // as the closing point.
+  const handoffToFreeOpening = (e) => {
+    const anchor = dw.anchor
+    const mode = useEditorStore.getState().editorMode
+    dw.wallId = null
+    dw.startFrac = null
+    dw.anchor = null
+    useDraftStore.getState().setDoorWindowDraft(null)
+    if (!anchor || typeof onDrawModeClick !== 'function') return
+    // beginDraft directly rather than a synthetic first onDrawModeClick: the
+    // anchor is already the exact point the user clicked on the wall, and
+    // re-snapping it could pull it off that wall.
+    useDraftStore.getState().beginDraft(mode, anchor)
+    const local = scene.world.toLocal(e.global)
+    onDrawModeClick({ x: local.x, y: local.y })
+  }
+
   const handleDoorWindowClick = (entry, e, mode) => {
     const { wall } = entry
     const local = scene.world.toLocal(e.global)
     const frac = projectToWallFrac(wall, local.x, local.y)
+    // Second click landed on a DIFFERENT wall than the first: the user is
+    // running the opening off the end of the one they just placed (draw a
+    // vertical door, then continue horizontally from its endpoint). Hand the
+    // pair to the free-space path, anchored at the first click's world point.
+    // Without this the click silently re-anchored to the new wall, so the
+    // gesture only worked when drawn INTO the existing opening, never out of
+    // it — the direction asymmetry that made an L-shape impossible one way.
+    if (dw.wallId !== null && dw.wallId !== wall.id && dw.anchor) {
+      handoffToFreeOpening(e)
+      return
+    }
     if (frac < 0 || frac > 1) return
     if (dw.wallId !== wall.id) {
       dw.wallId = wall.id
       dw.startFrac = frac
+      // World point of the first click, kept so the gesture can escape this
+      // wall (see the hand-off above) instead of being trapped on it.
+      dw.anchor = {
+        x: wall.startX + (wall.endX - wall.startX) * frac,
+        y: wall.startY + (wall.endY - wall.startY) * frac,
+      }
       // Seed the live preview at the first click — cursorFrac will be
       // updated on every subsequent pointermove over this wall.
       useDraftStore.getState().setDoorWindowDraft({
@@ -587,6 +655,10 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
         startFrac: frac,
         cursorFrac: frac,
         kind: mode === EDITOR_MODE.DRAW_WINDOW ? 'window' : 'door',
+        // World point of this click. Carried in the draft so the stage path
+        // can finish the opening off this wall when the second click lands
+        // elsewhere (draftModeController's anchor-adoption branch).
+        anchor: dw.anchor,
       })
       return
     }
@@ -612,6 +684,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
     }
     dw.wallId = null
     dw.startFrac = null
+    dw.anchor = null
     useDraftStore.getState().setDoorWindowDraft(null)
   }
 
@@ -634,6 +707,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
     if (e.key === 'Escape') {
       dw.wallId = null
       dw.startFrac = null
+      dw.anchor = null
       useDraftStore.getState().setDoorWindowDraft(null)
     }
   }
@@ -650,6 +724,7 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
       if (!isDoorWindowMode(mode)) {
         dw.wallId = null
         dw.startFrac = null
+        dw.anchor = null
         useDraftStore.getState().setDoorWindowDraft(null)
       }
     }
