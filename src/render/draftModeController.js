@@ -410,7 +410,32 @@ export function createDraftModeController({
     useDraftStore.getState().clearDraft()
   }
 
-  const cancelDraft = () => useDraftStore.getState().clearDraft()
+  // Esc during a draw = throw away the whole shape in progress, not just the
+  // rubber-band segment.
+  //
+  // For the accumulating modes (tray / scope / hole) clearing the draft IS
+  // that, since nothing is written until commit. DRAW_WALL needs the extra
+  // step: it writes each segment to the store as you go, so clearing the
+  // draft alone used to leave every finished segment behind and drop only
+  // the pending one — the same Esc meant two different things depending on
+  // which tool you held. Remove the chain's own segments too.
+  //
+  // Scope is exactly the chain: sessionWallIds is the list Backspace already
+  // steps back through, and onDrawModeClick resets it whenever a fresh chain
+  // begins, so an earlier chain that ended (Esc, tool switch, floor switch)
+  // is never in it. Walls that existed before the chain are never touched.
+  const cancelDraft = () => {
+    const mode = useEditorStore.getState().editorMode
+    if (mode === EDITOR_MODE.DRAW_WALL) {
+      const fid = useFloorStore.getState().activeFloorId
+      // 53-G6: the list only means anything on the floor that built it.
+      if (sessionFloorId === fid && sessionWallIds.length > 0) {
+        useWallStore.getState().removeWalls(fid, sessionWallIds)
+      }
+      resetWallSession()
+    }
+    useDraftStore.getState().clearDraft()
+  }
 
   const onDrawModeRightClick = commitDraft
   const onDrawModeDoubleClick = commitDraft

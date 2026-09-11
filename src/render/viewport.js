@@ -67,6 +67,10 @@ export function bindViewport({
   // still works: pointerup with no drag leaves the draft alive for the
   // user's next pointerdown to commit at the 2nd point.
   let cropDragDownGlobal = null
+  // When onStageDown last committed a draft from a button-2 pointerdown.
+  // The contextmenu handler uses it to avoid committing the same
+  // right-click twice (see onContextMenu).
+  let lastRmbCommitAt = -Infinity
 
   const apply = (s) => {
     world.position.set(s.x, s.y)
@@ -221,6 +225,10 @@ export function bindViewport({
     // regardless of whether the cursor sits over a wall / AP / floor
     // image. With no active draft, commitDraft early-returns.
     if (button === 2 && typeof isDrawMode === 'function' && isDrawMode()) {
+      // Stamp the time so the contextmenu fallback below can tell "the same
+      // right-click I already handled" from "a right-click that never
+      // produced a button-2 pointerdown at all".
+      lastRmbCommitAt = performance.now()
       if (typeof onDrawModeRightClick === 'function') onDrawModeRightClick()
     }
   }
@@ -398,7 +406,28 @@ export function bindViewport({
   // native one on the canvas. (Right-click on a layer's hit container
   // routes through PIXI federated events; right-click on background
   // currently just dismisses.)
-  const onContextMenu = (e) => e.preventDefault()
+  //
+  // This is also the FALLBACK path for committing a draft with the right
+  // button. onStageDown handles the usual case, but it only sees a
+  // right-click that arrives as a pointerdown with button 2 — and not every
+  // device sends one. Laptop trackpads in particular (two-finger tap, or
+  // tap-bottom-right) can raise contextmenu with no such pointerdown, which
+  // left right-click-to-commit doing nothing at all: points kept piling up
+  // with no way to finish the shape, so the only way out was Esc, which
+  // throws the whole polyline away. Hence "I can never draw a cable tray on
+  // my laptop".
+  const RMB_DEDUPE_MS = 500
+  const onContextMenu = (e) => {
+    e.preventDefault()
+    // A mouse fires BOTH pointerdown(button 2) and contextmenu; onStageDown
+    // already committed that one. Only act when no such pointerdown arrived.
+    const handledByPointerDown = performance.now() - lastRmbCommitAt < RMB_DEDUPE_MS
+    if (handledByPointerDown) return
+    if (typeof isDrawMode === 'function' && isDrawMode()
+      && typeof onDrawModeRightClick === 'function') {
+      onDrawModeRightClick()
+    }
+  }
   canvas.addEventListener('contextmenu', onContextMenu)
 
   return () => {
