@@ -198,6 +198,42 @@ function CameraPanel({ floorId, cameraId }) {
         </PanelField>
       </PanelSection>
 
+      <PanelSection title="安裝">
+        <PanelField label="安裝高度">
+          <NumberInput
+            value={camera.z ?? 2.5}
+            min={0}
+            step={0.1}
+            unit="m"
+            width={70}
+            onChange={(v) => { if (!isNaN(v) && v >= 0) handleField('z', v) }}
+          />
+        </PanelField>
+        <PanelField label="常用高度" hint="一鍵套用">
+          <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
+            {HEIGHT_PRESETS.map((h) => {
+              const active = Math.abs((camera.z ?? 2.5) - h.m) < 0.01
+              return (
+                <button
+                  key={h.m}
+                  type="button"
+                  onClick={() => handleField('z', h.m)}
+                  title={h.title}
+                  style={{
+                    padding: '2px 8px', borderRadius: 8, cursor: 'pointer', fontSize: 11,
+                    border: `1px solid ${active ? '#10b981' : 'rgba(255,255,255,0.18)'}`,
+                    background: active ? 'rgba(16,185,129,0.18)' : 'transparent',
+                    color: active ? '#10b981' : '#94a3b8', fontWeight: 600,
+                  }}
+                >
+                  {h.m}m
+                </button>
+              )
+            })}
+          </span>
+        </PanelField>
+      </PanelSection>
+
       <PanelSection title="視野">
         <PanelField label="型號" hint="套用後可再微調各參數">
           <Select
@@ -281,42 +317,6 @@ function CameraPanel({ floorId, cameraId }) {
             ⚠ 尚未設定比例尺，可視距離以預設 40 px/m 估算
           </div>
         )}
-      </PanelSection>
-
-      <PanelSection title="安裝">
-        <PanelField label="安裝高度">
-          <NumberInput
-            value={camera.z ?? 2.5}
-            min={0}
-            step={0.1}
-            unit="m"
-            width={70}
-            onChange={(v) => { if (!isNaN(v) && v >= 0) handleField('z', v) }}
-          />
-        </PanelField>
-        <PanelField label="常用高度" hint="一鍵套用">
-          <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
-            {HEIGHT_PRESETS.map((h) => {
-              const active = Math.abs((camera.z ?? 2.5) - h.m) < 0.01
-              return (
-                <button
-                  key={h.m}
-                  type="button"
-                  onClick={() => handleField('z', h.m)}
-                  title={h.title}
-                  style={{
-                    padding: '2px 8px', borderRadius: 8, cursor: 'pointer', fontSize: 11,
-                    border: `1px solid ${active ? '#10b981' : 'rgba(255,255,255,0.18)'}`,
-                    background: active ? 'rgba(16,185,129,0.18)' : 'transparent',
-                    color: active ? '#10b981' : '#94a3b8', fontWeight: 600,
-                  }}
-                >
-                  {h.m}m
-                </button>
-              )
-            })}
-          </span>
-        </PanelField>
       </PanelSection>
     </PanelShell>
   )

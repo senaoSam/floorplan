@@ -19,6 +19,21 @@
   flex-direction: column
   height: 100%
 
+  // Breathing room under the last control. Without it the bottom row sits
+  // flush against the window edge at full scroll, so "scrolled to the end"
+  // and "the list is cut off" look identical — in a demo that reads as a
+  // missing feature rather than the end of the panel.
+  //
+  // It belongs here, on the box that actually grows past the viewport, not
+  // on .panel-right: that element scrolls, but its own height stays at the
+  // viewport, so a spacer there lands under the overflowing content instead
+  // of after it. flex-none keeps the column from collapsing it away.
+  &::after
+    content: ''
+    display: block
+    flex: none
+    height: 40px
+
   // 24-5 group themes — keep in sync with toolbar groups (Toolbar.jsx GROUPS):
   //   structure (wall / scope / floor_hole)  → slate
   //   wireless  (ap)                         → cyan
