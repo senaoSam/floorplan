@@ -290,6 +290,13 @@ function SidebarLeft() {
     setDragIndex(null); setDropIndex(null)
   }
   const handleDragEnd = () => { setDragIndex(null); setDropIndex(null) }
+  // Step one floor along the array (delta +1 = up on screen — the list is
+  // rendered reversed, see the row map).
+  const moveFloor = (idx, delta) => {
+    const to = idx + delta
+    if (to < 0 || to >= floors.length) return
+    reorderFloors(idx, to)
+  }
 
   if (sidebarCollapsed) {
     return (
@@ -385,21 +392,24 @@ function SidebarLeft() {
                   e.stopPropagation()
                   if (!isEditing) setMenuOpenId(floor.id)
                 }}
+                draggable={!isEditing}
+                onDragStart={(e) => handleDragStart(e, idx)}
                 onDragOver={(e) => handleDragOver(e, idx)}
                 onDrop={(e) => handleDrop(e, idx)}
                 onDragEnd={handleDragEnd}
               >
-                {/* Reorder affordance (ui-spec B11): dragging starts from the
-                    grip only, so row clicks (= switch floor) can't turn into
-                    accidental drags. */}
+                {/* The whole row is the drag source. It used to be the grip
+                    alone (ui-spec B11, guarding row clicks against accidental
+                    drags), but nobody found it — the grip read as decoration
+                    next to the ▣ icon. The grip stays as the visual cue for
+                    what the row now does; ↑↓ and the ⋯ menu cover reordering
+                    for anyone who never thinks to drag. */}
                 <span
                   className="sidebar-left__floor-grip"
-                  title="拖曳調整樓層順序"
-                  draggable={!isEditing}
-                  onDragStart={(e) => handleDragStart(e, idx)}
-                  onClick={(e) => e.stopPropagation()}
+                  title="拖曳整列調整樓層順序"
+                  aria-hidden="true"
                 >
-                  ⠿
+                  ⠶⠶
                 </span>
                 <span className="sidebar-left__floor-icon">▣</span>
                 {isEditing ? (
@@ -429,16 +439,38 @@ function SidebarLeft() {
                   </span>
                 )}
                 {!isEditing && (
-                  <button
-                    className="sidebar-left__floor-menu-btn"
-                    title="選項"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setMenuOpenId(isMenuOpen ? null : floor.id)
-                    }}
-                  >
-                    ⋯
-                  </button>
+                  <>
+                    {/* Explicit reorder, for the times dragging doesn't occur
+                        to you. The list renders top-down (highest floor first)
+                        while `floors` is bottom-up, so on-screen "up" is a
+                        move towards the END of the array. */}
+                    <button
+                      className="sidebar-left__floor-move-btn"
+                      title="往上移一層"
+                      disabled={idx === floors.length - 1}
+                      onClick={(e) => { e.stopPropagation(); moveFloor(idx, +1) }}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      className="sidebar-left__floor-move-btn"
+                      title="往下移一層"
+                      disabled={idx === 0}
+                      onClick={(e) => { e.stopPropagation(); moveFloor(idx, -1) }}
+                    >
+                      ↓
+                    </button>
+                    <button
+                      className="sidebar-left__floor-menu-btn"
+                      title="選項"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setMenuOpenId(isMenuOpen ? null : floor.id)
+                      }}
+                    >
+                      ⋯
+                    </button>
+                  </>
                 )}
                 {isMenuOpen && (
                   <div
@@ -446,6 +478,20 @@ function SidebarLeft() {
                     onClick={(e) => e.stopPropagation()}
                   >
                     <button className="sidebar-left__menu-item" onClick={() => startRename(floor)}>重新命名</button>
+                    <button
+                      className="sidebar-left__menu-item"
+                      disabled={idx === floors.length - 1}
+                      onClick={() => { setMenuOpenId(null); moveFloor(idx, +1) }}
+                    >
+                      往上移一層
+                    </button>
+                    <button
+                      className="sidebar-left__menu-item"
+                      disabled={idx === 0}
+                      onClick={() => { setMenuOpenId(null); moveFloor(idx, -1) }}
+                    >
+                      往下移一層
+                    </button>
                     <button className="sidebar-left__menu-item" onClick={() => startAlign(floor)}>對齊樓層</button>
                     <button
                       className="sidebar-left__menu-item"

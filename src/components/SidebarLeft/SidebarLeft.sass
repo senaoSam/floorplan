@@ -166,9 +166,22 @@
     &:hover
       background: rgba(255, 255, 255, 0.06)
       color: $text-primary
+      // The row itself is the drag source now, so say so on hover.
+      cursor: grab
 
-      .sidebar-left__floor-menu-btn
+      .sidebar-left__floor-menu-btn,
+      .sidebar-left__floor-move-btn
         opacity: 1
+
+      .sidebar-left__floor-move-btn:disabled
+        opacity: 0.25
+
+      .sidebar-left__floor-grip
+        opacity: 0.9
+        color: $text-primary
+
+    &:active
+      cursor: grabbing
 
     &--active
       background: rgba($accent, 0.12)
@@ -177,18 +190,19 @@
     &--drop-target
       box-shadow: inset 0 2px 0 $accent
 
-  // Drag-reorder grip (ui-spec B11) — the only drag-start surface of a row.
+  // Drag-reorder grip. Not a drag surface of its own any more — the whole
+  // row is — so this is purely the cue that the row can be dragged. It was
+  // 11px at 0.45 opacity next to the same-sized ▣ icon, which read as
+  // decoration; at demo time nobody could find how to reorder floors.
   &__floor-grip
     flex: none
-    font-size: 11px
+    font-size: 14px
+    line-height: 1
+    letter-spacing: -2px
     color: $text-secondary
-    opacity: 0.45
-    cursor: grab
+    opacity: 0.7
     user-select: none
-    &:hover
-      opacity: 1
-    &:active
-      cursor: grabbing
+    pointer-events: none
 
   &__floor-icon
     font-size: 12px
@@ -210,6 +224,34 @@
     padding: 2px 6px
     outline: none
     min-width: 0
+
+  // Explicit one-step reorder. Same hover-reveal treatment as the ⋯ button
+  // so the row stays quiet until pointed at.
+  &__floor-move-btn
+    width: 18px
+    height: 18px
+    border: none
+    border-radius: 4px
+    background: transparent
+    color: $text-secondary
+    cursor: pointer
+    font-size: 11px
+    line-height: 1
+    opacity: 0
+    flex-shrink: 0
+    display: flex
+    align-items: center
+    justify-content: center
+
+    &:hover:not(:disabled)
+      background: rgba(255, 255, 255, 0.12)
+      color: $text-primary
+
+    // Dimmed only once the row reveals it — a bare `&:disabled` would beat
+    // the `opacity: 0` above and leave the top/bottom floor's arrow faintly
+    // visible on every unhovered row.
+    &:disabled
+      cursor: default
 
   &__floor-menu-btn
     width: 20px
