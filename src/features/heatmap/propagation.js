@@ -29,7 +29,7 @@ import {
 } from './geometry.js'
 import { apsShareSpectrum } from './frequency'
 import { widthNoiseDelta } from '@/constants/channelWidths'
-import { getPatternById, sampleGain, sectorTaperDb } from '@/constants/antennaPatterns'
+import { getPatternById, sampleGain, sampleGainV, sectorTaperDb } from '@/constants/antennaPatterns'
 
 const C = 299792458
 const dbToLin = (db) => Math.pow(10, db / 10)
@@ -202,9 +202,13 @@ function makeReflectedPath(txPowerDbm, apGainDbi, pathLossDb, distanceM, gammaPe
 //                explicitly rejected so existing omni results stay unchanged)
 // - directional: peak, sector taper applied to BOTH the
 //                horizontal and the vertical offset (same beamwidth cone).
-// - custom:      peak + Gh(horizontal offset) + Gv(vertical
-//                offset), both cuts sampled from the same catalog pattern
-//                (matches the 3D lobe / preview surface r = Gh(az) + Gv(el)).
+// - custom:      peak + Gh(horizontal offset) + Gv(vertical offset), each cut
+//                sampled from its OWN array on the catalog pattern (`samples`
+//                for H, `samplesV` for V — the V cut is the 3GPP TR 38.901
+//                element pattern). Matches the 3D lobe / preview surface
+//                r = Gh(az) + Gv(el). Before the 2-cut split both planes read
+//                the same array, which forced every pattern to be rotationally
+//                symmetric.
 // Azimuth/angles are taken in the canvas frame (+x = 0°, +y = 90°) to match
 // APLayer's rendering convention. The pattern samples array is indexed in the
 // same +x-origin, clockwise direction, so no frame conversion is required.
@@ -235,7 +239,7 @@ function apGainDbi(ap, targetPoint, targetZM = 0) {
   if (mode === 'custom') {
     const pattern = getPatternById(ap.patternId)
     const relDb = sampleGain(pattern, absOff * Math.PI / 180)
-      + sampleGain(pattern, vertOff * Math.PI / 180)
+      + sampleGainV(pattern, vertOff * Math.PI / 180)
     return peak + relDb
   }
 

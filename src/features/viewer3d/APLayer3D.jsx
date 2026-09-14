@@ -4,7 +4,7 @@ import { useFrame } from '@react-three/fiber'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
-import { getPatternById, sampleGain } from '@/constants/antennaPatterns'
+import { getPatternById, sampleGain, sampleGainV } from '@/constants/antennaPatterns'
 import Label3D from './Label3D'
 
 // 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
@@ -46,9 +46,8 @@ const LOBE_AZ_SEGS = 64
 const LOBE_EL_SEGS = 32
 
 // Volumetric antenna lobe: a spherical parametric surface where the radius at
-// (azimuth, elevation) is the normalized combined gain. The catalog only
-// authors a horizontal cut, so the vertical cut reuses the same samples
-// (patch/sector antennas are roughly symmetric) — combined in dB space:
+// (azimuth, elevation) is the normalized combined gain. The catalog authors a
+// horizontal cut and a separate vertical cut (`samplesV`), combined in dB space:
 //   r(az, el) = normalize(Gh(az) + Gv(el − tilt)) · peakRadius
 // tiltDeg (Phase 40) shifts the vertical cut so the surface matches the exact
 // engine formula in apGainDbi — baked into the geometry rather than a rigid
@@ -61,7 +60,7 @@ function buildCustomLobeGeometry(pattern, peakRadius, minDb, tiltDeg) {
   let p = 0
   for (let j = 0; j <= LOBE_EL_SEGS; j++) {
     const el = -Math.PI / 2 + (j / LOBE_EL_SEGS) * Math.PI
-    const gv = sampleGain(pattern, el - tiltRad)
+    const gv = sampleGainV(pattern, el - tiltRad)
     for (let i = 0; i <= LOBE_AZ_SEGS; i++) {
       const az = i * (2 * Math.PI / LOBE_AZ_SEGS)
       const db = Math.max(sampleGain(pattern, az) + gv, minDb)

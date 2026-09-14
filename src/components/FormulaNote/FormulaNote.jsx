@@ -137,8 +137,10 @@ function FormulaNote() {
           </li>
           <li>
             Custom pattern：<code>G_tx = 峰值 + sampleGain(pattern, |Δθ|) +
-            sampleGain(pattern, |Δε|)</code>，垂直切面重用同一組 36 個 10°
-            水平取樣（bore-sight = 0 dB）
+            sampleGainV(pattern, |Δε|)</code>。水平切面用 pattern 自帶的 36 個
+            10° 取樣（cos² / 扇區）；垂直切面用 3GPP TR 38.901 元件方向圖
+            <code>A_v(θ) = −min[12(θ/θ₃dB)², SLA]</code>（θ₃dB = 65°）另外生成，
+            不再重用水平取樣（bore-sight = 0 dB）
           </li>
         </ul>
         <p className="muted">
