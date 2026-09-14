@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { MATERIALS } from '@/constants/materials'
+import { MATERIALS, DEFAULT_WALL_THICKNESS_M } from '@/constants/materials'
 
 export const EDITOR_MODE = {
   SELECT: 'select',
@@ -71,9 +71,11 @@ export const useEditorStore = create((set, get) => ({
   // know which AP band / switch kind to drop on the next click.
   placeApBand: 5,
   placeSwitchKind: 'switch',
-  // Active wall material for DRAW_WALL — Tab / Shift+Tab in DRAW_WALL mode
-  // cycles MATERIAL_LIST and pops a toast (FloorplanSystem keydown).
+  // Draw-wall defaults — the WallDefaultsPanel (canvas top-left, DRAW_WALL
+  // only) is the UI for both. Tab cycling used to set the material with no
+  // persistent indicator; the picker replaced it.
   wallMaterial: MATERIALS.CONCRETE,
+  wallThickness: DEFAULT_WALL_THICKNESS_M,
 
   // Toolbar dropdown open — surfaced so the mode hint banner can hide
   // itself while a dropdown is expanded.
@@ -203,6 +205,7 @@ export const useEditorStore = create((set, get) => ({
   setPlaceApBand: (band) => set({ placeApBand: band }),
   setPlaceSwitchKind: (kind) => set({ placeSwitchKind: kind }),
   setWallMaterial: (mat) => set({ wallMaterial: mat }),
+  setWallThickness: (m) => set({ wallThickness: m }),
   setToolbarMenuOpen: (open) => set({ toolbarMenuOpen: open }),
   togglePanelCollapsed: () => set((s) => ({ panelCollapsed: !s.panelCollapsed })),
   toggleSidebarCollapsed: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),

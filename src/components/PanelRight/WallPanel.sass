@@ -48,6 +48,15 @@
     font-size: 11px
     color: $text-secondary
 
+  // 「改用材質值」— only rendered while a customDb override is active, as the
+  // one-click way to drop it. Sits next to the dB input inside the same
+  // field row, so it stays quiet (ghost) rather than competing with it.
+  &__use-material
+    font-size: 11px
+    padding: 2px 8px
+    white-space: nowrap
+    flex-shrink: 0
+
   // 門窗 — dense single-row item (type badge + material select + start~end %
   // inputs + delete). Not worth modelling as <PanelField> since it has too
   // many controls per row.

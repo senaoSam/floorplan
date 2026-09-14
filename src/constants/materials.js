@@ -105,3 +105,20 @@ export const FLOOR_SLAB_DEFAULT_DB = Object.fromEntries(
 
 export const DEFAULT_FLOOR_SLAB_MATERIAL_ID = 'concrete'
 export const DEFAULT_FLOOR_SLAB_DB = FLOOR_SLAB_DEFAULT_DB[DEFAULT_FLOOR_SLAB_MATERIAL_ID]
+
+// Wall thickness (metres) — visual only. The RF engines treat a wall as a
+// zero-width segment whose material carries a per-crossing dB, so thickness
+// never reaches propagation; it drives the 2D band width and the 3D extrude
+// depth. 0.1 is the value 3D had hardcoded before walls carried the field.
+export const DEFAULT_WALL_THICKNESS_M = 0.1
+export const MIN_WALL_THICKNESS_M = 0.01
+export const MAX_WALL_THICKNESS_M = 2
+
+// The UI edits thickness in centimetres — a wall is 10 or 30 cm, never 0.1 or
+// 0.3 of anything, and metres force a decimal point onto every entry. Storage
+// stays in metres because the 3D extrude and the px/m scale both want metres.
+export const mToCm = (m) => Math.round((m ?? DEFAULT_WALL_THICKNESS_M) * 100)
+export const cmToM = (cm) => cm / 100
+export const DEFAULT_WALL_THICKNESS_CM = mToCm(DEFAULT_WALL_THICKNESS_M)
+export const MIN_WALL_THICKNESS_CM = mToCm(MIN_WALL_THICKNESS_M)
+export const MAX_WALL_THICKNESS_CM = mToCm(MAX_WALL_THICKNESS_M)

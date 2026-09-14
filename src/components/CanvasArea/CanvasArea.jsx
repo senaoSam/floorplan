@@ -9,6 +9,7 @@ import ActiveModeBadge from '@/components/Toolbar/ActiveModeBadge'
 import LayerToggle from '@/components/LayerToggle/LayerToggle'
 import RegulatorySelector from '@/components/RegulatorySelector/RegulatorySelector'
 import DevicePlanningPanel from '@/components/DevicePlanningPanel/DevicePlanningPanel'
+import WallDefaultsPanel from '@/components/WallDefaultsPanel/WallDefaultsPanel'
 import ClientPanelMount from '@/components/ClientPanel/ClientPanel'
 import ClientViewMenuMount from '@/components/ClientPanel/ClientViewMenu'
 import StatsDashboardMount from '@/components/StatsDashboard/StatsDashboard'
@@ -69,6 +70,9 @@ function CanvasArea() {
             {!inCameraMode && <DevicePlanningPanel />}
           </div>
           {!inCameraMode && <RegulatorySelector />}
+          {/* Self-gates to DRAW_WALL — the material + thickness stamped onto
+              the next drawn wall. */}
+          <WallDefaultsPanel />
           <CoveragePanel />
         </div>
       )}

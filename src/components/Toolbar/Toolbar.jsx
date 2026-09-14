@@ -60,7 +60,7 @@ const GROUPS = [
     label: '牆 / 結構',
     representativeIcon: 'wall',
     items: [
-      { mode: EDITOR_MODE.DRAW_WALL,       icon: 'wall',       label: '畫牆（Tab 切換材質）' },
+      { mode: EDITOR_MODE.DRAW_WALL,       icon: 'wall',       label: '畫牆' },
       { mode: EDITOR_MODE.DRAW_DOOR,       icon: 'door',       label: '門' },
       { mode: EDITOR_MODE.DRAW_WINDOW,     icon: 'window',     label: '窗' },
       { mode: EDITOR_MODE.DRAW_FLOOR_HOLE, icon: 'floorHole',  label: '中庭' },

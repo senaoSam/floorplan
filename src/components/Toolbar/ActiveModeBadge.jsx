@@ -13,7 +13,7 @@ const MODE_HINT = {
   [EDITOR_MODE.MARQUEE_SELECT]:   { group: '操作',     name: '框選模式',  accent: 'pointer',   hint: '左鍵拖曳框選多物件；Ctrl+Click 追加選取' },
   [EDITOR_MODE.PAN]:              { group: '操作',     name: '平移模式',  accent: 'pointer',   hint: '拖曳畫布移動視角' },
   [EDITOR_MODE.DRAW_SCALE]:       { group: '標註',     name: '比例尺模式', accent: 'measure',  hint: '點擊兩點設定比例' },
-  [EDITOR_MODE.DRAW_WALL]:        { group: '結構',     name: '畫牆模式',  accent: 'structure', hint: '左鍵點擊設定端點，Backspace 退上一段，右鍵或 Esc 結束｜Tab / Shift+Tab 切換材質' },
+  [EDITOR_MODE.DRAW_WALL]:        { group: '結構',     name: '畫牆模式',  accent: 'structure', hint: '左鍵點擊設定端點，Backspace 退上一段，右鍵或 Esc 結束｜材質與厚度在左上「畫牆預設」設定' },
   [EDITOR_MODE.DRAW_DOOR]:        { group: '結構',     name: '門模式',    accent: 'structure', hint: '點擊牆體兩點設定門的位置；右鍵或 Esc 取消' },
   [EDITOR_MODE.DRAW_WINDOW]:      { group: '結構',     name: '窗模式',    accent: 'structure', hint: '點擊牆體兩點設定窗的位置；右鍵或 Esc 取消' },
   [EDITOR_MODE.DRAW_FLOOR_HOLE]:  { group: '結構',     name: '中庭模式',  accent: 'structure', hint: '左鍵點擊設定端點，靠近起點閉合區域，Backspace 退一步；右鍵或 Esc 取消' },
