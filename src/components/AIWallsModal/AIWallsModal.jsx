@@ -217,8 +217,14 @@ export default function AIWallsModal({ open, onClose }) {
       if (lines.length === 0) throw new Error('辨識完成，但沒有偵測到任何線段。')
 
       setProgressMsg('轉換並寫入樓層…')
-      const { walls, stats } = floorplanFromLines(lines)
+      // The scale has to be resolved first: the detector reports wall
+      // thickness in source pixels, and px/m is what turns those into the
+      // metres `thicknessM` stores. With no doors there is no scale, and
+      // every wall falls back to the default thickness.
       const scaleInfo = autoScaleFromDoors(lines)
+      const { walls, stats } = floorplanFromLines(lines, {
+        pxPerM: scaleInfo?.pxPerM ?? null,
+      })
 
       // 52-B5: last check before the destructive write — setWalls replaces the
       // whole layer, so a stale run landing here would clobber the live one.
@@ -361,6 +367,11 @@ export default function AIWallsModal({ open, onClose }) {
                 {result.profile && ` · profile ${result.profile}`}
               </div>
             )}
+            <div style={{ marginTop: 4 }}>
+              {result.stats.thicknessApplied
+                ? `牆厚：${result.stats.measuredWalls}/${result.stats.mergedWalls} 條套用偵測厚度`
+                : `牆厚：無比例尺，${result.stats.mergedWalls} 條全用預設值`}
+            </div>
             {result.scaleInfo ? (
               <div style={{ marginTop: 4 }}>
                 自動比例尺：{result.scaleInfo.pxPerM.toFixed(2)} px/m

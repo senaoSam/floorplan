@@ -1,4 +1,9 @@
-import { MATERIALS, DEFAULT_WALL_THICKNESS_M } from '@/constants/materials'
+import {
+  MATERIALS,
+  DEFAULT_WALL_THICKNESS_M,
+  MIN_WALL_THICKNESS_M,
+  MAX_WALL_THICKNESS_M,
+} from '@/constants/materials'
 import { generateId } from '@/utils/id'
 
 // Convert a flat list of `{type, x1, y1, x2, y2}` lines (e.g. produced by an
@@ -17,14 +22,69 @@ const DEFAULTS = {
   axisTolerance: 2,
   gapTolerance: 1,
   snapDistance: 4,
+  // Two segments only merge when their detected thickness agrees to within
+  // this many source pixels. Detectors quantize differently (cnn returns
+  // integers, cv+graph returns floats like 2.8 vs 3.0), so an exact match
+  // would split a uniform wall on rounding noise alone.
+  thicknessTolerancePx: 2,
   wallMaterial: MATERIALS.CONCRETE,
   wallThickness: DEFAULT_WALL_THICKNESS_M,
+  // px/m for converting the detector's pixel thickness into metres. Null
+  // means no scale is known (no doors were detected, so the door-width
+  // heuristic could not run) — every wall then keeps `wallThickness`.
+  pxPerM: null,
   topHeight: 3.0,
   bottomHeight: 0,
   doorBottomHeight: 0,
   doorTopHeight: 2.1,
   windowBottomHeight: 0.9,
   windowTopHeight: 2.1,
+}
+
+// The detector reports thickness in source pixels, and only for segments it
+// actually measured: cv+graph leaves it null on icon-derived openings, and
+// `graph_fill` walls it inferred rather than measured come back as 0.
+const thicknessPxOf = (line) => {
+  const t = line?.thickness
+  if (typeof t !== 'number' || !isFinite(t) || t <= 0) return null
+  return t
+}
+
+// Only wall segments describe the wall's own thickness. CNN stamps a constant
+// 6.0 onto every door and window, which is a placeholder rather than a
+// measurement, so openings never vote on the span they sit in.
+const wallThicknessPxOf = (item) =>
+  item.line.type === 'wall' ? thicknessPxOf(item.line) : null
+
+// Length-weighted median: a 400px run at 6px outweighs a 20px stub at 16px.
+// Median rather than mean so one mis-measured stub cannot drag the result.
+function representativeThicknessPx(items) {
+  const samples = []
+  for (const it of items) {
+    const t = wallThicknessPxOf(it)
+    if (t == null) continue
+    samples.push({ t, w: Math.max(it.hi - it.lo, 1) })
+  }
+  if (samples.length === 0) return null
+  samples.sort((a, b) => a.t - b.t)
+  const total = samples.reduce((s, v) => s + v.w, 0)
+  let acc = 0
+  for (const s of samples) {
+    acc += s.w
+    if (acc >= total / 2) return s.t
+  }
+  return samples[samples.length - 1].t
+}
+
+// Convert detected pixels to the stored metre value, clamped to the same
+// range the thickness UI enforces. Without a scale the caller's default wins.
+function thicknessMFromPx(px, opts) {
+  if (px == null || !opts.pxPerM || !isFinite(opts.pxPerM) || opts.pxPerM <= 0) {
+    return opts.wallThickness
+  }
+  const m = px / opts.pxPerM
+  if (!isFinite(m) || m <= 0) return opts.wallThickness
+  return Math.min(MAX_WALL_THICKNESS_M, Math.max(MIN_WALL_THICKNESS_M, m))
 }
 
 const orientationOf = (l, axisTolerance) => {
@@ -75,30 +135,48 @@ function bucketByAxis(items, axisTolerance) {
   return out
 }
 
-function mergeBucket(items, gapTolerance) {
+// A span tracks the thickness of the last wall segment that joined it, so the
+// next candidate is compared against its immediate neighbour rather than
+// against the span's average — a long run that drifts 2px at a time is a real
+// taper and should split, not collapse into one averaged wall.
+const newSpan = (item) => ({
+  lo: item.lo,
+  hi: item.hi,
+  axisSum: item.axis,
+  axisCount: 1,
+  members: [item],
+  lastWallThickness: wallThicknessPxOf(item),
+})
+
+// Openings carry no usable thickness, so they never break a span — a door
+// between two equal-thickness walls still yields one wall with an opening.
+// Two walls only stay together when both measured a thickness and the two
+// agree within tolerance; an unmeasured wall (thickness 0 or null) is treated
+// as "no opinion" and joins whatever it touches.
+function thicknessAllowsMerge(span, item, tolerance) {
+  const next = wallThicknessPxOf(item)
+  if (next == null) return true
+  const prev = span.lastWallThickness
+  if (prev == null) return true
+  return Math.abs(next - prev) <= tolerance
+}
+
+function mergeBucket(items, gapTolerance, thicknessTolerance) {
   if (items.length === 0) return []
   const sorted = items.slice().sort((a, b) => a.lo - b.lo)
-  const spans = [{
-    lo: sorted[0].lo,
-    hi: sorted[0].hi,
-    axisSum: sorted[0].axis,
-    axisCount: 1,
-    members: [sorted[0]],
-  }]
+  const spans = [newSpan(sorted[0])]
   for (let i = 1; i < sorted.length; i++) {
     const cur = sorted[i]
     const last = spans[spans.length - 1]
-    if (cur.lo - last.hi <= gapTolerance) {
+    if (cur.lo - last.hi <= gapTolerance && thicknessAllowsMerge(last, cur, thicknessTolerance)) {
       last.hi = Math.max(last.hi, cur.hi)
       last.axisSum += cur.axis
       last.axisCount += 1
       last.members.push(cur)
+      const t = wallThicknessPxOf(cur)
+      if (t != null) last.lastWallThickness = t
     } else {
-      spans.push({
-        lo: cur.lo, hi: cur.hi,
-        axisSum: cur.axis, axisCount: 1,
-        members: [cur],
-      })
+      spans.push(newSpan(cur))
     }
   }
   return spans
@@ -139,7 +217,7 @@ const openingFromMember = (m, wall, orient, opts) => {
   }
 }
 
-function makeWallFromRange(orient, axis, lo, hi, opts) {
+function makeWallFromRange(orient, axis, lo, hi, thicknessM, opts) {
   const isH = orient === 'h'
   return {
     id: generateId('wall'),
@@ -148,7 +226,7 @@ function makeWallFromRange(orient, axis, lo, hi, opts) {
     endX:   isH ? hi   : axis,
     endY:   isH ? axis : hi,
     material: opts.wallMaterial,
-    thicknessM: opts.wallThickness,
+    thicknessM,
     topHeight: opts.topHeight,
     bottomHeight: opts.bottomHeight,
     openings: [],
@@ -211,7 +289,12 @@ export function floorplanFromLines(lines, options = {}) {
         material: l.type === 'window' ? MATERIALS.GLASS
                : l.type === 'door'   ? MATERIALS.WOOD
                : opts.wallMaterial,
-        thicknessM: opts.wallThickness,
+        // Only walls carry a measured thickness; a diagonal door/window keeps
+        // the default rather than the detector's placeholder.
+        thicknessM: thicknessMFromPx(
+          l.type === 'wall' ? thicknessPxOf(l) : null,
+          opts,
+        ),
         topHeight: opts.topHeight,
         bottomHeight: opts.bottomHeight,
         openings: [],
@@ -225,15 +308,22 @@ export function floorplanFromLines(lines, options = {}) {
   let mergedWallCount = 0
   let attachedOpenings = 0
   let orphanCount = 0
+  let measuredWalls = 0
   const builtWalls = []
 
   for (const [orient, items] of [['h', hItems], ['v', vItems]]) {
     const buckets = bucketByAxis(items, opts.axisTolerance)
     for (const bucketItems of buckets.values()) {
-      const spans = mergeBucket(bucketItems, opts.gapTolerance)
+      const spans = mergeBucket(bucketItems, opts.gapTolerance, opts.thicknessTolerancePx)
       for (const span of spans) {
         const axis = span.axisSum / span.axisCount
-        const wall = makeWallFromRange(orient, axis, span.lo, span.hi, opts)
+        const thicknessPx = representativeThicknessPx(span.members)
+        if (thicknessPx != null) measuredWalls += 1
+        const wall = makeWallFromRange(
+          orient, axis, span.lo, span.hi,
+          thicknessMFromPx(thicknessPx, opts),
+          opts,
+        )
         for (const m of span.members) {
           if (m.line.type === 'wall') continue
           const op = openingFromMember(m, wall, orient, opts)
@@ -261,6 +351,10 @@ export function floorplanFromLines(lines, options = {}) {
       attachedOpenings,
       standalone: standalone.length,
       orphans: orphanCount,
+      // How many merged walls got a thickness from the detector, and whether
+      // a scale existed to turn those pixels into metres.
+      measuredWalls,
+      thicknessApplied: !!(opts.pxPerM && isFinite(opts.pxPerM) && opts.pxPerM > 0),
     },
   }
 }
