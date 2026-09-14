@@ -34,6 +34,10 @@ function WallPanel({ floorId, wallId }) {
     if (v >= 0) updateWall(floorId, wallId, { customDb: v })
   }, [floorId, wallId, updateWall])
 
+  const clearCustomDb = useCallback(() => {
+    updateWall(floorId, wallId, { customDb: null })
+  }, [floorId, wallId, updateWall])
+
   const handleHeight = useCallback((field, value) => {
     if (!isNaN(value) && value >= 0) updateWall(floorId, wallId, { [field]: value })
   }, [floorId, wallId, updateWall])
@@ -107,6 +111,19 @@ function WallPanel({ floorId, wallId }) {
             placeholder={String(wall.material.dbLoss)}
             onChange={handleCustomDb}
           />
+          {/* Switching material deliberately keeps the override (47-11), so
+              picking a material while one is active changes nothing the
+              engine reads. That's easy to miss from the material grid above —
+              this is the one-click way back to the material's own dB. */}
+          {wall.customDb != null && (
+            <Button
+              variant="ghost"
+              onClick={clearCustomDb}
+              className="wall-panel__use-material"
+            >
+              改用材質值
+            </Button>
+          )}
         </PanelField>
       </PanelSection>
 
