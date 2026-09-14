@@ -173,4 +173,40 @@ export function sampleGainV(pattern, offsetRad) {
   return sampleCut(pattern.samplesV ?? pattern.samples, offsetRad)
 }
 
+// ── GPU upload support ─────────────────────────────────────────
+// The WebGL engine uploads every catalog pattern into one shared texture and
+// addresses a pattern by its SLOT (row index). The slot must be stable for the
+// life of a session — it is baked into the per-AP texel data and the cache
+// signatures — so it is derived from ANTENNA_PATTERN_LIST order, which is
+// itself fixed by the ANTENNA_PATTERNS literal above.
+//
+// An unknown id must resolve the SAME way it does in JS: getPatternById falls
+// back to the default pattern, so the slot does too. Returning -1 here would
+// make the shader treat the AP as omni while the JS engine still applied the
+// default lobe — a ~36 dB divergence between the two engines.
+export function getPatternSlot(id) {
+  const i = ANTENNA_PATTERN_LIST.findIndex((p) => p.id === id)
+  return i >= 0 ? i : ANTENNA_PATTERN_LIST.indexOf(getPatternById(id))
+}
+
+// Flat Float32Array of every pattern's two cuts, laid out one pattern per row:
+//   row r, column k          = H sample k of pattern r
+//   row r, column k + 36     = V sample k of pattern r
+// Row stride is PATTERN_SAMPLES * 2. The shader reads it as an R32F texture of
+// width (PATTERN_SAMPLES * 2) and height (pattern count).
+export const PATTERN_ROW_FLOATS = PATTERN_SAMPLES * 2
+
+export function buildPatternTextureData() {
+  const rows = ANTENNA_PATTERN_LIST.length
+  const data = new Float32Array(rows * PATTERN_ROW_FLOATS)
+  ANTENNA_PATTERN_LIST.forEach((p, r) => {
+    const base = r * PATTERN_ROW_FLOATS
+    for (let k = 0; k < PATTERN_SAMPLES; k++) {
+      data[base + k] = p.samples[k]
+      data[base + PATTERN_SAMPLES + k] = (p.samplesV ?? p.samples)[k]
+    }
+  })
+  return { data, width: PATTERN_ROW_FLOATS, height: rows }
+}
+
 export { PATTERN_SAMPLES, STEP_DEG }

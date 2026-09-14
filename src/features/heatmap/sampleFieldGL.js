@@ -9,19 +9,18 @@
 //      target. Output is read back once. Eligible iff:
 //        - opts.maxReflOrder is 0 (no image-source reflections)
 //        - opts.enableDiffraction is false (no knife-edge diffraction)
-//        - no AP has antennaMode === 'custom'
 //        - no out-of-scope mask (scopes still applied host-side post-render)
 //      This path solves the N_AP host dispatch overhead that dominated 1000+
 //      AP scenes (per-AP path is O(N_AP) GL submits + N_AP readPixels).
 //
 //   2. Per-AP fallback (HM-F5a..F5d) — original behaviour. Each AP renders
 //      its own R32F grid, then `aggregateApContributions` folds them into the
-//      4 fields on the CPU. Used when refl/diff is on or any custom AP is
-//      present — the per-fragment NMAX coherent-sum + N_AP loop would explode
-//      register pressure on the GPU, and custom-pattern APs need JS-side
-//      lobe sampling that hasn't been ported to GLSL.
+//      4 fields on the CPU. Used when refl/diff is on — the per-fragment NMAX
+//      coherent-sum + N_AP loop would explode register pressure on the GPU.
+//      Custom-pattern APs no longer force this path: the shader samples the
+//      catalog cuts from a texture (see propagationGL's uPatterns).
 
-import { rssiFromAp, aggregateApContributions } from './propagation'
+import { aggregateApContributions } from './propagation'
 import { fitGridStep } from './sampleField'
 import { createPropagationGL } from './propagationGL'
 import {
@@ -57,12 +56,13 @@ function getGL() {
 }
 
 // Decide whether the aggregated single-pass path is safe for this scenario.
+// Custom-pattern APs used to disqualify the whole scenario, because the shader
+// had no way to evaluate a catalog pattern. The pattern cuts now live in a
+// texture the shader samples directly, so custom APs ride the aggregated path
+// like any other antenna mode.
 function canUseAggregated(scenario, opts) {
   if (opts?.maxReflOrder && opts.maxReflOrder > 0) return false
   if (opts?.enableDiffraction) return false
-  for (const ap of scenario.aps) {
-    if (ap.antennaMode === 'custom') return false
-  }
   return true
 }
 
@@ -175,17 +175,17 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
     return { rssi, sinr, snr, cci, nx, ny, gridStepM, originX, originY }
   }
 
-  // ---- per-AP fallback (refl on, diff on, or custom AP present) ----
+  // ---- per-AP fallback (refl on or diff on) ----
   // HM-F5j: bake one LOS R8 grid per AP up front. Each subsequent renderAp
   // pass uses its AP's LOS texture to short-circuit the direct-path wall
   // scan + diffraction at fragments where the AP→rx ray hits zero walls
   // (mode A: refl loop still runs to preserve JS parity). The cache inside
   // propagationGL keeps textures alive across frames so an AP that didn't
   // move only pays for the bake when walls change.
-  // Skip when the caller opts out (debug: `losEnabled: false`); custom-
-  // pattern APs go through the JS RSSI override below so the LOS short-
-  // circuit on those APs would be wasted work — but the bake is cheap and
-  // the cache key is per-AP, so we still bake them.
+  // Skip when the caller opts out (debug: `losEnabled: false`). Custom-pattern
+  // APs used to discard the shader grid entirely, which made their bake wasted
+  // work; now that the shader evaluates the pattern, the short-circuit pays off
+  // for them like any other AP.
   const losEnabled = opts.losEnabled !== false
   const losMap = losEnabled
     ? gl.bakeLos(
@@ -196,11 +196,8 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
     : null
 
   // HM-F5k: bake AP→corner geometry + AP→wall mirror textures once per AP.
-  // The savings only land in the refl/diff loops, so we still bake for
-  // custom-pattern APs (cheap, JS path replaces the shader output anyway —
-  // the bake's wasted work is dominated by the JS RSSI compute that
-  // follows). opts.apGeoEnabled lets callers turn this off (debug parity
-  // check vs unbaked path).
+  // The savings only land in the refl/diff loops. opts.apGeoEnabled lets
+  // callers turn this off (debug parity check vs unbaked path).
   const apGeoEnabled = opts.apGeoEnabled !== false
   const apGeoMap = apGeoEnabled
     ? gl.bakeApGeo(scenario.aps.map((ap, i) => ({ ap, key: ap.id ?? `_idx_${i}` })))
@@ -209,7 +206,7 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
   // 任務 2 (C): per-AP output-grid cache. The cache container + invalidation
   // live in propagationGL (in lockstep with losCache/apGeoCache via
   // wallsVersion); here we build the hash from every input that affects this
-  // AP's grid and consult it before paying for renderAp / the custom JS loop.
+  // AP's grid and consult it before paying for renderAp.
   // Opt out with opts.gridCacheEnabled === false (parity-check path).
   const gridCacheOn =
     opts.gridCacheEnabled !== false &&
@@ -232,7 +229,7 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
     }
     const apKey = ap.id ?? `_idx_${k}`
 
-    // Per-AP hash: every AP field the shader (uploadAps t0-t3) or the custom
+    // Per-AP hash: every AP field the shader (uploadAps t0-t3) or the pattern
     // JS lobe (patternId/azimuth/beamwidth) reads, plus the gains baked in
     // apForGL, plus the shared geomSig. _idx_<k> keys also fold in k so two
     // id-less APs at different list positions never collide.
@@ -271,29 +268,10 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
       },
     )
 
-    let grid
-    if (ap.antennaMode === 'custom') {
-      // Custom-pattern AP fallback to JS for the antenna lobe — opts are
-      // forwarded verbatim so refl/diff/freqN stay in sync with the shader's
-      // own gating.
-      const corrected = new Float32Array(shaderGrid.length)
-      for (let j = 0; j < ny; j++) {
-        for (let i = 0; i < nx; i++) {
-          const idx = j * nx + i
-          const x = originX + i * gridStepM
-          const y = originY + j * gridStepM
-          const rx = { x, y, zM: rxZM }
-          const { rssiDbm } = rssiFromAp(ap, rx, scenario.walls, scenario.corners, {
-            ...opts,
-            floorBoundaries: boundaries,
-          })
-          corrected[idx] = rssiDbm
-        }
-      }
-      grid = corrected
-    } else {
-      grid = shaderGrid
-    }
+    // Every antenna mode — custom included — is evaluated in the shader now,
+    // so the grid it returns is final. This used to re-run rssiFromAp over
+    // every cell for custom-pattern APs, throwing the shader's own result away.
+    const grid = shaderGrid
     if (gridCacheOn) gl.setCachedGrid(apKey, hash, grid, nx, ny)
     perApGrids.push(grid)
   }
@@ -416,7 +394,7 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
     return { rssi, sinr, snr, cci, nx, ny, gridStepM, originX, originY }
   }
 
-  // ---- per-AP fallback (refl on, diff on, or custom AP present) ----
+  // ---- per-AP fallback (refl on or diff on) ----
   const losEnabled = opts.losEnabled !== false
   const losMap = losEnabled
     ? gl.bakeLos(
@@ -461,13 +439,9 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
     for (let p = 0; p < batch.length; p++) {
       const { k, apKey, hash } = batch[p]
       const ap = scenario.aps[k]
-      let grid = grids[p]
-      if (ap.antennaMode === 'custom') {
-        // Custom-pattern AP: replace the shader grid with the JS lobe,
-        // chunked so the row loop never owns the thread for > ~5 ms.
-        grid = await customApGridChunked(ap, scenario, boundaries, opts, nx, ny, originX, originY, gridStepM, rxZM, isStale)
-        if (grid === null) return false
-      }
+      // The shader evaluates custom patterns itself now, so its grid is final
+      // for every antenna mode (this used to re-run the lobe in JS).
+      const grid = grids[p]
       if (gridCacheOn) gl.setCachedGrid(apKey, hash, grid, nx, ny)
       perApGrids[k] = grid
     }
@@ -532,30 +506,6 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
   if (!(await flushPending())) return null
 
   return aggregateChunked(perApGrids, scenario, nx, ny, originX, originY, gridStepM, w, h, mask, isStale)
-}
-
-async function customApGridChunked(ap, scenario, boundaries, opts, nx, ny, originX, originY, gridStepM, rxZM, isStale) {
-  const corrected = new Float32Array(nx * ny)
-  let sliceStart = performance.now()
-  for (let j = 0; j < ny; j++) {
-    for (let i = 0; i < nx; i++) {
-      const idx = j * nx + i
-      const x = originX + i * gridStepM
-      const y = originY + j * gridStepM
-      const rx = { x, y, zM: rxZM }
-      const { rssiDbm } = rssiFromAp(ap, rx, scenario.walls, scenario.corners, {
-        ...opts,
-        floorBoundaries: boundaries,
-      })
-      corrected[idx] = rssiDbm
-    }
-    if (j < ny - 1 && performance.now() - sliceStart > CHUNK_BUDGET_MS) {
-      await yieldMacro()
-      if (isStale()) return null
-      sliceStart = performance.now()
-    }
-  }
-  return corrected
 }
 
 // Phase 41-6: the O(grid × N_AP) fold, sliced by rows on a ~5 ms budget with

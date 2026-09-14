@@ -25,8 +25,12 @@
 //     sec(θ) oblique magnification capped at 3.5
 //   - Wall openings already pre-expanded into segment list by buildScenario,
 //     so shader sees them as just shorter wall segments with their own dbLoss
-//   - AP antenna gain: omni and directional (patch/sector approximation).
-//     Custom-pattern APs trigger host fallback (renderAp + JS aggregate).
+//   - AP antenna gain: omni, directional (patch/sector approximation) and
+//     custom catalog patterns. Custom patterns are uploaded once as an R32F
+//     texture (one row per pattern: 36 H samples then 36 V) and sampled in the
+//     shader, so they no longer trigger the old whole-grid host fallback.
+
+import { buildPatternTextureData, getPatternSlot } from '@/constants/antennaPatterns'
 
 const VS = `#version 300 es
 in vec2 aPos;
@@ -75,10 +79,12 @@ uniform float uCenterMHz;
 uniform float uChannelWidthMHz;
 uniform float uFOver24;        // HM-F8: (centerMHz/1000) / 2.4, host-precomputed
 uniform float uAntGainDbi;     // base AP antenna gain (constant per AP)
-uniform int   uAntMode;        // 0 = omni, 1 = directional, 2 = treat as omni (custom — host fallback handles real pattern)
+uniform int   uAntMode;        // 0 = omni, 1 = directional, 2 = custom (samples uPatterns)
 uniform float uAntAzimuthDeg;
 uniform float uAntBeamwidthDeg;
 uniform float uAntTiltDeg;     // boresight elevation, degrees (+up, Phase 40)
+uniform sampler2D uPatterns;   // R32F, one row per catalog pattern: 36 H then 36 V samples
+uniform int   uAntPatternSlot; // row index into uPatterns; -1 = not a catalog pattern
 uniform float uRxGainDbi;
 uniform float uRxZM;
 
@@ -175,6 +181,10 @@ uniform int uApGeoEnabled;
 
 const float PI = 3.14159265358979;
 const float SLAB_SEC_CAP = 3.5;
+// Catalog pattern sampling geometry — mirrors PATTERN_SAMPLES / STEP_DEG in
+// constants/antennaPatterns.js. Rows of uPatterns are [36 H samples][36 V].
+const int   PATTERN_SAMPLES  = 36;
+const float PATTERN_STEP_DEG = 10.0;
 const float DIRECTIONAL_BACK_DB = 20.0;
 const float DIRECTIONAL_EDGE_DEG = 15.0;
 const float EPS0 = 8.854187817e-12;
@@ -895,14 +905,30 @@ float sectorTaperDb(float absOffDeg, float halfBwDeg) {
   return -DIRECTIONAL_BACK_DB * (absOffDeg - halfBwDeg) / DIRECTIONAL_EDGE_DEG;
 }
 
+// Linear interpolation into one 36-sample cut of a catalog pattern. slot is
+// the pattern's row; cutBase is 0 for the H cut, 36 for the V cut. Mirrors
+// sampleCut in constants/antennaPatterns.js (same wrap + lerp).
+float samplePatternCut(int slot, int cutBase, float offsetDeg) {
+  float norm = mod(mod(abs(offsetDeg), 360.0) + 360.0, 360.0);
+  float idx = norm / PATTERN_STEP_DEG;
+  int lo = int(floor(idx));
+  float frac = idx - float(lo);
+  int loI = int(mod(float(lo), float(PATTERN_SAMPLES)));
+  int hiI = int(mod(float(loI + 1), float(PATTERN_SAMPLES)));
+  float a = texelFetch(uPatterns, ivec2(cutBase + loI, slot), 0).r;
+  float b = texelFetch(uPatterns, ivec2(cutBase + hiI, slot), 0).r;
+  return a * (1.0 - frac) + b * frac;
+}
+
 // AP antenna gain in dBi for a ray heading from AP to target. Mirrors
-// apGainDbi in propagation.js modulo custom-pattern (host falls back).
+// apGainDbi in propagation.js for ALL three modes — custom included, which
+// used to force a whole-grid CPU recompute on the host.
 // Phase 40: the same sector taper also applies to the vertical offset
 // (ray elevation − uAntTiltDeg), so a tilted directional AP loses gain
 // toward rays leaving its beamwidth cone vertically.
 float apGainDbi(vec2 target, float targetZ) {
   if (uAntMode == 0) return uAntGainDbi;
-  if (uAntMode == 2) return uAntGainDbi;   // custom — caller already routes to JS path
+  if (uAntMode == 2 && uAntPatternSlot < 0) return uAntGainDbi;   // unknown id → omni
   vec2 dxy = target - uApPos.xy;
   if (abs(dxy.x) < 1e-9 && abs(dxy.y) < 1e-9) return uAntGainDbi;
   float rayDeg = atan(dxy.y, dxy.x) * 180.0 / PI;
@@ -911,6 +937,12 @@ float apGainDbi(vec2 target, float targetZ) {
   float absOff = abs(off);
   float elevDeg = atan(targetZ - uApPos.z, length(dxy)) * 180.0 / PI;
   float vertOff = abs(elevDeg - uAntTiltDeg);
+  if (uAntMode == 2) {
+    // custom: Gh from the H cut, Gv from the V cut (2-cut split).
+    return uAntGainDbi
+      + samplePatternCut(uAntPatternSlot, 0, absOff)
+      + samplePatternCut(uAntPatternSlot, PATTERN_SAMPLES, vertOff);
+  }
   float halfBw = uAntBeamwidthDeg * 0.5;
   return uAntGainDbi + sectorTaperDb(absOff, halfBw) + sectorTaperDb(vertOff, halfBw);
 }
@@ -1237,8 +1269,8 @@ void main() {
 // AP texture layout (uAps, RGBA32F, 4 texels per AP, packed 4096-wide):
 //   t0 = (x, y, zM, txDbm)
 //   t1 = (centerMHz, channelWidthMHz, antGainDbi, antMode)
-//        antMode: 0 = omni, 1 = directional. Custom never reaches the
-//        aggregated path — host falls back to renderAp.
+//        antMode: 0 = omni, 1 = directional, 2 = custom (samples uPatterns
+//        at the row given by t3.z).
 //   t2 = (azimuthDeg, beamwidthDeg, freqLoMHz, freqHiMHz)
 //        [freqLo, freqHi] = AP's occupied band; SINR co-channel test compares
 //        against the serving AP's range (same band + interval intersect).
@@ -1275,6 +1307,7 @@ uniform sampler2D uSlabs;
 uniform int uSlabCount;
 uniform sampler2D uHolePoly;
 uniform int uHolePolyLen;
+uniform sampler2D uPatterns;   // R32F pattern cuts: row = pattern, [36 H][36 V]
 
 uniform sampler2D uGridIdx;
 uniform sampler2D uGridList;
@@ -1297,6 +1330,10 @@ uniform int uCascadeFactor;
 
 const float PI = 3.14159265358979;
 const float SLAB_SEC_CAP = 3.5;
+// Catalog pattern sampling geometry — mirrors PATTERN_SAMPLES / STEP_DEG in
+// constants/antennaPatterns.js. Rows of uPatterns are [36 H samples][36 V].
+const int   PATTERN_SAMPLES  = 36;
+const float PATTERN_STEP_DEG = 10.0;
 const float DIRECTIONAL_BACK_DB = 20.0;
 const float DIRECTIONAL_EDGE_DEG = 15.0;
 
@@ -1567,13 +1604,30 @@ float sectorTaperDb(float absOffDeg, float halfBwDeg) {
   return -DIRECTIONAL_BACK_DB * (absOffDeg - halfBwDeg) / DIRECTIONAL_EDGE_DEG;
 }
 
-// Per-AP gain at the fragment. apMode: 0 omni, 1 directional. azimuth/beamwidth
-// /tilt only consulted when mode=1; matches apGainDbi in propagation.js.
+// Linear interpolation into one 36-sample cut of a catalog pattern — same
+// helper as the per-AP shader; mirrors sampleCut in antennaPatterns.js.
+// (cutBase, not 'half' — that is a reserved word in GLSL ES.)
+float samplePatternCut(int slot, int cutBase, float offsetDeg) {
+  float norm = mod(mod(abs(offsetDeg), 360.0) + 360.0, 360.0);
+  float idx = norm / PATTERN_STEP_DEG;
+  int lo = int(floor(idx));
+  float frac = idx - float(lo);
+  int loI = int(mod(float(lo), float(PATTERN_SAMPLES)));
+  int hiI = int(mod(float(loI + 1), float(PATTERN_SAMPLES)));
+  float a = texelFetch(uPatterns, ivec2(cutBase + loI, slot), 0).r;
+  float b = texelFetch(uPatterns, ivec2(cutBase + hiI, slot), 0).r;
+  return a * (1.0 - frac) + b * frac;
+}
+
+// Per-AP gain at the fragment. apMode: 0 omni, 1 directional, 2 custom.
+// azimuth/tilt apply to modes 1 and 2; beamwidth only to mode 1; patSlot only
+// to mode 2. Matches apGainDbi in propagation.js.
 // Phase 40: sector taper applies to the vertical offset (ray elevation −
 // tiltDeg) as well as the horizontal one.
 float apGainAt(vec2 apPos, float apZ, vec2 target, float targetZ, int mode,
-               float gainDbi, float azDeg, float bwDeg, float tiltDeg) {
+               float gainDbi, float azDeg, float bwDeg, float tiltDeg, int patSlot) {
   if (mode == 0) return gainDbi;
+  if (mode == 2 && patSlot < 0) return gainDbi;   // unknown pattern id → omni
   vec2 dxy = target - apPos;
   if (abs(dxy.x) < 1e-9 && abs(dxy.y) < 1e-9) return gainDbi;
   float rayDeg = atan(dxy.y, dxy.x) * 180.0 / PI;
@@ -1582,6 +1636,11 @@ float apGainAt(vec2 apPos, float apZ, vec2 target, float targetZ, int mode,
   float absOff = abs(off);
   float elevDeg = atan(targetZ - apZ, length(dxy)) * 180.0 / PI;
   float vertOff = abs(elevDeg - tiltDeg);
+  if (mode == 2) {
+    return gainDbi
+      + samplePatternCut(patSlot, 0, absOff)
+      + samplePatternCut(patSlot, PATTERN_SAMPLES, vertOff);
+  }
   float halfBw = bwDeg * 0.5;
   return gainDbi + sectorTaperDb(absOff, halfBw) + sectorTaperDb(vertOff, halfBw);
 }
@@ -1653,6 +1712,7 @@ void main() {
     vec3 apPos = t0.xyz; float txDbm = t0.w;
     float centerMHz = t1.x; float antGain = t1.z; int antMode = int(t1.w);
     float azDeg = t2.x; float bwDeg = t2.y; float tiltDeg = t3.y;
+    int   patSlot = int(t3.z);
 
     // Cull by free-space-only RSSI: txDbm + max possible gain - PL(d) < floor.
     // Clamp horizontal distance to 0.25 m before the 3D combine, matching JS
@@ -1668,7 +1728,7 @@ void main() {
     float fOver24 = (centerMHz / 1000.0) / 2.4;
     float wallLoss = accumulateWallLossField(apPos.xy, apPos.z, rx, rxZ, fOver24);
     float slabLoss = accumulateSlabLossField(apPos.xy, apPos.z, rx, rxZ);
-    float gain = apGainAt(apPos.xy, apPos.z, rx, rxZ, antMode, antGain, azDeg, bwDeg, tiltDeg);
+    float gain = apGainAt(apPos.xy, apPos.z, rx, rxZ, antMode, antGain, azDeg, bwDeg, tiltDeg, patSlot);
     float pl = pathLossDbField(dDir, centerMHz) + wallLoss + slabLoss;
     float rxDb = txDbm + gain + uRxGainDbi - pl;
 
@@ -1722,6 +1782,7 @@ void main() {
     vec3 apPos = t0.xyz; float txDbm = t0.w;
     float centerMHz = t1.x; float antGain = t1.z; int antMode = int(t1.w);
     float azDeg = t2.x; float bwDeg = t2.y; float tiltDeg = t3.y;
+    int   patSlot = int(t3.z);
 
     vec2 dxy = rx - apPos.xy;
     float dxyDir = max(length(dxy), 0.25);
@@ -1733,7 +1794,7 @@ void main() {
     float fOver24 = (centerMHz / 1000.0) / 2.4;
     float wallLoss = accumulateWallLossField(apPos.xy, apPos.z, rx, rxZ, fOver24);
     float slabLoss = accumulateSlabLossField(apPos.xy, apPos.z, rx, rxZ);
-    float gain = apGainAt(apPos.xy, apPos.z, rx, rxZ, antMode, antGain, azDeg, bwDeg, tiltDeg);
+    float gain = apGainAt(apPos.xy, apPos.z, rx, rxZ, antMode, antGain, azDeg, bwDeg, tiltDeg, patSlot);
     float pl = pathLossDbField(dDir, centerMHz) + wallLoss + slabLoss;
     float rxDb = txDbm + gain + uRxGainDbi - pl;
 
@@ -2204,6 +2265,22 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   const apsTex = gl.createTexture()
   let apCount = 0
 
+  // Catalog antenna patterns, uploaded once: R32F, one row per pattern holding
+  // 36 H samples then 36 V samples. Static for the life of the context (the
+  // catalog is a module constant), so there is no invalidation path — which is
+  // also why a custom-pattern AP no longer forces the whole grid back onto the
+  // CPU the way the old host-side fallback did.
+  const patternsTex = gl.createTexture()
+  ;(() => {
+    const { data, width, height } = buildPatternTextureData()
+    gl.bindTexture(gl.TEXTURE_2D, patternsTex)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, width, height, 0, gl.RED, gl.FLOAT, data)
+  })()
+
   // HM-F5j: LOS field cache. Each AP gets its own R8 texture sized to the
   // sample grid; we recompute only when geometry changes (walls update or
   // the AP itself moves). `wallsVersion` is bumped in uploadWalls and acts
@@ -2401,15 +2478,12 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // FS_FIELD shader's expectations exactly:
   //   t0 = (x, y, zM, txDbm)
   //   t1 = (centerMHz, channelWidthMHz, antGainDbi, antMode)
-  //          antMode 0 = omni, 1 = directional. Custom-pattern APs must be
-  //          rejected at the host (sampleFieldGL falls back to renderAp), so
-  //          they should never reach here — but if one does we encode it as 0
-  //          (omni) to avoid producing garbage; the host fallback is
-  //          authoritative.
+  //          antMode 0 = omni, 1 = directional, 2 = custom (reads uPatterns).
   //   t2 = (azimuthDeg, beamwidthDeg, freqLoMHz, freqHiMHz)
-  //   t3 = (band, tiltDeg, _, _)
+  //   t3 = (band, tiltDeg, patternSlot, _)
   //          band 1=2.4 GHz, 2=5 GHz, 3=6 GHz; cross-band APs never co-channel.
   //          tiltDeg = boresight elevation (+up, Phase 40).
+  //          patternSlot = row in uPatterns for mode 2; -1 otherwise.
   function uploadAps(apList) {
     apCount = apList?.length ?? 0
     const totalTexels = Math.max(1, apCount * 4)
@@ -2424,7 +2498,8 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       const centerMHz = ap.centerMHz || 5190
       const bwMHz = ap.channelWidth || 20
       const gainDbi = ap._antGainDbi ?? 0
-      const mode = ap.antennaMode === 'directional' ? 1 : 0
+      const mode = ap.antennaMode === 'directional' ? 1
+        : (ap.antennaMode === 'custom' ? 2 : 0)
       data[o + 4] = centerMHz
       data[o + 5] = bwMHz
       data[o + 6] = gainDbi
@@ -2439,6 +2514,9 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       const band = f === 2.4 ? 1 : f === 5 ? 2 : f === 6 ? 3 : 0
       data[o + 12] = band
       data[o + 13] = ap.tiltDeg ?? 0
+      // t3.z = catalog pattern row for antennaMode 'custom' (-1 when the mode
+      // isn't custom or the id isn't in the catalog; shader then reads omni).
+      data[o + 14] = ap.antennaMode === 'custom' ? getPatternSlot(ap.patternId) : -1
     }
     gl.bindTexture(gl.TEXTURE_2D, apsTex)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, tw, th, 0, gl.RGBA, gl.FLOAT, data)
@@ -3082,6 +3160,8 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.uniform1f(gl.getUniformLocation(prog, 'uAntGainDbi'), ap._antGainDbi)
     gl.uniform1i(gl.getUniformLocation(prog, 'uAntMode'),
       ap.antennaMode === 'directional' ? 1 : (ap.antennaMode === 'custom' ? 2 : 0))
+    gl.uniform1i(gl.getUniformLocation(prog, 'uAntPatternSlot'),
+      ap.antennaMode === 'custom' ? getPatternSlot(ap.patternId) : -1)
     gl.uniform1f(gl.getUniformLocation(prog, 'uAntAzimuthDeg'), ap.azimuthDeg ?? 0)
     gl.uniform1f(gl.getUniformLocation(prog, 'uAntBeamwidthDeg'), ap.beamwidthDeg ?? 60)
     gl.uniform1f(gl.getUniformLocation(prog, 'uAntTiltDeg'), ap.tiltDeg ?? 0)
@@ -3156,6 +3236,10 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, apGeoEntry?.mirrorTex || apGeoPlaceholderTex)
     gl.uniform1i(gl.getUniformLocation(prog, 'uApWallMirror'), 8)
     gl.uniform1i(gl.getUniformLocation(prog, 'uApGeoEnabled'), apGeoEntry ? 1 : 0)
+
+    gl.activeTexture(gl.TEXTURE9)
+    gl.bindTexture(gl.TEXTURE_2D, patternsTex)
+    gl.uniform1i(gl.getUniformLocation(prog, 'uPatterns'), 9)
 
     gl.bindVertexArray(vao)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
@@ -3294,6 +3378,10 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     // HM-F5h: bind the coarse mask + tell the shader whether cascade is on.
     // When cascadeFactor = 0, the shader skips the mask check entirely (the
     // placeholder only keeps the sampler unit texture-complete).
+    gl.activeTexture(gl.TEXTURE7)
+    gl.bindTexture(gl.TEXTURE_2D, patternsTex)
+    gl.uniform1i(gl.getUniformLocation(progField, 'uPatterns'), 7)
+
     gl.activeTexture(gl.TEXTURE6)
     gl.bindTexture(gl.TEXTURE_2D, maskTarget ? maskTarget.tex : maskPlaceholderTex)
     gl.uniform1i(gl.getUniformLocation(progField, 'uMask'), 6)
