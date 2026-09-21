@@ -108,6 +108,41 @@ const EDGE_FEATHER_M = 1.5
 // runs, ~3.9× fewer grid points than 0.5 m.
 const COARSE_STEP_M = 1.0
 
+// AP count past which the coarse stage also thins the APs, not just the grid.
+// Below this the coarse pass is already fast enough that the approximation
+// would buy nothing (500 AP lands in ~310 ms) and the field stays exact.
+const COARSE_THIN_AP = 600
+// Side (world METRES — scenario.aps carry pos in metres, not image pixels) of
+// the buckets the thinning keeps one AP from. Sized so a dense plan keeps about
+// one AP per room: 1000 APs on the 30 × 22 m demo plan leave ~110, taking the
+// coarse pass from 938 ms to ~130 ms.
+const COARSE_THIN_CELL_M = 2.6
+
+// Pick a spatially even subset of a scenario's APs for the coarse preview.
+// Bucketing by position beats both alternatives measured against the true
+// 1000-AP field: one AP per bucket (108 kept) came in at 2.09 dB mean error
+// and 32.5% of cells off by >3 dB, versus 2.74 / 46% for every 4th AP by index
+// (250 kept) and 13.84 / 64.9% for the 250 strongest by tx power — sorting by
+// power clusters the survivors into whichever area happens to hold the hottest
+// radios and leaves the rest of the plan unlit.
+//
+// The result feeds the COARSE stage only. It is a placeholder the ripple plays
+// over for a few hundred ms; the fine stage that follows uses every AP.
+function thinScenarioForCoarse(scenario) {
+  const aps = scenario.aps ?? []
+  if (aps.length <= COARSE_THIN_AP) return scenario   // identity → caller sees no thinning
+  const kept = new Map()
+  for (const ap of aps) {
+    // buildScenario stores the position on `pos` in metres — there is no ap.x.
+    const x = ap.pos?.x, y = ap.pos?.y
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return scenario  // unknown shape → don't thin
+    const key = `${Math.floor(x / COARSE_THIN_CELL_M)},${Math.floor(y / COARSE_THIN_CELL_M)}`
+    if (!kept.has(key)) kept.set(key, ap)
+  }
+  if (kept.size === aps.length) return scenario       // nothing to gain
+  return { ...scenario, aps: [...kept.values()] }
+}
+
 // 41-2 wobble parameters. The transition is NOT an old→new dBm lerp — that
 // reads as coverage blobs growing/shrinking (a moved AP's old blob collapses
 // inward while the new one inflates from its centre), which the user
@@ -130,13 +165,20 @@ const WOBBLE_AMP_DB = 9
 // finer layers only breaking up the shape.
 //   lambdaM — wavelength in world metres
 //   weight  — share of the amplitude (sums to 1)
-//   du/dv   — drift in lattice cells per second; mixed signs at non-multiple
-//             rates keep the layers from re-aligning into a visible period
+//   du/dv   — drift in LATTICE CELLS per second, mixed signs at non-multiple
+//             rates so the layers never re-align into a visible period.
+//
+// Drift is in lattice cells, but one cell spans lambdaM metres — so the same
+// du moves a 20 m octave ten times slower ACROSS THE FLOOR than a 2 m one.
+// The first version of this table kept the old ~0.5 figures while stretching
+// the wavelengths, which stalled the motion to a crawl (reported as "0.25x
+// speed"). Each octave's du/dv is therefore scaled with its wavelength to hold
+// roughly 5-7 metres per second of world-space travel across all four.
 const WOBBLE_OCTAVES = [
-  { lambdaM: 20,  weight: 0.55, du:  0.13, dv:  0.09 },
-  { lambdaM:  9,  weight: 0.27, du: -0.21, dv:  0.16 },
-  { lambdaM:  4,  weight: 0.13, du:  0.35, dv: -0.27 },
-  { lambdaM:  1.8, weight: 0.05, du: -0.55, dv: -0.42 },
+  { lambdaM: 20,  weight: 0.55, du:  0.30, dv:  0.22 },
+  { lambdaM:  9,  weight: 0.27, du: -0.62, dv:  0.47 },
+  { lambdaM:  4,  weight: 0.13, du:  1.45, dv: -1.10 },
+  { lambdaM:  1.8, weight: 0.05, du: -3.05, dv: -2.35 },
 ]
 const WOBBLE_DECAY_MS = 900    // amplitude ramp-down once the final field is in
 const WOBBLE_HOLD_MAX_MS = 4000 // safety cap if the fine stage never lands
@@ -1077,12 +1119,14 @@ export function attachHeatmapLayer({
         stepM: field.gridStepM, originX: field.originX, originY: field.originY,
       }, ctx, awaitingFine)
     }
-    const stage = async (stepM, opts) => {
+    // `sc` lets the coarse stage run against a thinned scenario; the fine
+    // stage always passes the real one.
+    const stage = async (stepM, opts, sc = scenario) => {
       try {
-        return await sampleFieldGLAsync(scenario, stepM, { ...opts, isStale })
+        return await sampleFieldGLAsync(sc, stepM, { ...opts, isStale })
       } catch (e) {
         console.warn('[heatmap] async shader engine failed, falling back to JS:', e.message)
-        return sampleField(scenario, stepM, opts)
+        return sampleField(sc, stepM, opts)
       }
     }
     try {
@@ -1095,14 +1139,26 @@ export function attachHeatmapLayer({
         lastIdleInputs = idleInputs
         return
       }
+      // The coarse stage exists to put SOMETHING on screen within a frame or
+      // two while the user-quality pass runs, so the field isn't just blank.
+      // It bought that by widening the grid alone — but the shader loops over
+      // every AP per fragment, so cost tracks AP COUNT far more than cell
+      // count. Measured (interleaved, median of 5, idle GPU) at 1000 AP:
+      // dropping 2806 cells to 744 saved nothing at all (938 ms vs 918 ms),
+      // leaving a ~1.4 s blank hold before anything appeared.
+      //
+      // So on big scenes the coarse pass also THINS the APs, which is the
+      // lever that actually moves: 1000 AP -> 938 ms, 250 -> 134 ms.
       const coarseStep = Math.max(hm.gridStepM, COARSE_STEP_M)
-      const fineNeeded = hm.gridStepM < coarseStep || baseOpts.maxReflOrder > 0 || baseOpts.enableDiffraction
+      const coarseScenario = thinScenarioForCoarse(scenario)
+      const fineNeeded = coarseScenario !== scenario ||
+        hm.gridStepM < coarseStep || baseOpts.maxReflOrder > 0 || baseOpts.enableDiffraction
       // gridCacheEnabled:false on a non-final coarse stage — its per-AP grids
       // (custom-AP scenes) would evict the fine-quality cache entries that
       // make unchanged-AP recomputes cheap.
       const coarse = await stage(coarseStep, fineNeeded
         ? { ...baseOpts, maxReflOrder: 0, enableDiffraction: false, gridCacheEnabled: false }
-        : baseOpts)
+        : baseOpts, coarseScenario)
       if (coarse === null || isStale()) return
       present(coarse, fineNeeded)
       if (!fineNeeded) {
