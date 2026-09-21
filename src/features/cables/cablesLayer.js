@@ -7,7 +7,7 @@ import {
 } from '@/features/cable/computeRoutes'
 import { clearRoutesCache } from '@/features/cable/routesCache'
 import { perfOn, probe, probeEvent } from '@/features/cable/perfProbe'
-import { useEditorStore } from '@/store/useEditorStore'
+import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 
@@ -591,6 +591,21 @@ export function attachCablesLayer({
   let lastDragKey = ''
 
   const rebuildImpl = () => {
+    // Hidden layer → skip the geometry rebuild entirely. layerVisibilityBinder
+    // only flips `cables.visible`, so this layer kept re-tessellating every
+    // route on each AP/floor/cable store event while nothing was on screen —
+    // measured at 1000 AP as 251 ms of the 299 ms synchronous cost of a single
+    // updateAP, all of it invisible work. Mark the routing dirty and drop the
+    // frozen background so the next rebuild (after the layer is shown again,
+    // which fires this via the editor subscription below) redraws from scratch.
+    if (!layer.visible) {
+      routingDirty = true
+      splitKey = null
+      staticEpoch = -1
+      lastDragAffected = null
+      lastDragKey = ''
+      return
+    }
     const { floors, activeFloorId } = useFloorStore.getState()
     let apsByFloor = useAPStore.getState().apsByFloor
     let switchesByFloor = useCableStore.getState().switchesByFloor
@@ -852,8 +867,29 @@ export function attachCablesLayer({
   // mark routingDirty so the cache is reused (32-E perf A).
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
+  // Visibility is applied by layerVisibilityBinder off this same store, so a
+  // hidden→shown flip arrives here as an editor event. rebuildImpl bails out
+  // while hidden, leaving the layer empty, and the selection guard below would
+  // otherwise swallow the very event that has to refill it.
+  let lastVisible = layer.visible
   const unsubEditor = useEditorStore.subscribe(() => {
     const s = useEditorStore.getState()
+    // Both binders subscribe to the editor store; if ours runs first, `visible`
+    // still holds the pre-flip value. Read the flags the binder reads, so the
+    // refill can't depend on subscriber order.
+    const nowVisible = !!s.showCables
+      && s.editorMode !== EDITOR_MODE.CAMERA
+    if (nowVisible !== lastVisible) {
+      lastVisible = nowVisible
+      if (nowVisible) {
+        // The binder may not have set layer.visible yet — do it here so the
+        // rebuild below doesn't hit rebuildImpl's hidden guard and no-op.
+        layer.visible = true
+        probeEvent('editor/visibility')
+        rebuild()
+      }
+      return
+    }
     if (s.selectedId === lastSelectedId && s.selectedType === lastSelectedType) return
     lastSelectedId = s.selectedId
     lastSelectedType = s.selectedType
