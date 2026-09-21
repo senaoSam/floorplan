@@ -112,12 +112,32 @@ const COARSE_STEP_M = 1.0
 // reads as coverage blobs growing/shrinking (a moved AP's old blob collapses
 // inward while the new one inflates from its centre), which the user
 // rejected as physically wrong. Instead the new field paints IMMEDIATELY at
-// full size and a drifting value-noise perturbation (±WOBBLE_AMP_DB) makes
-// every contour line ripple while the fine result is still computing; when
-// it lands the base swaps underneath (masked by the ripple) and the
-// amplitude decays to zero.
-const WOBBLE_AMP_DB = 1.6      // peak contour perturbation
-const WOBBLE_LAMBDA_M = 2      // ripple wavelength (metres, world space)
+// full size and a drifting value-noise perturbation makes every contour line
+// ripple while the fine result is still computing; when it lands the base
+// swaps underneath (masked by the ripple) and the amplitude decays to zero.
+//
+// Nominal amplitude. The octaves below partly cancel, so the perturbation
+// actually spans ~10 dB peak-to-peak (σ ≈ 2.1) rather than ±9 — measured on a
+// 60 × 45 m grid. The previous 1.6 landed at 2.8 p-p, inside one colour step,
+// which is why the contours barely moved.
+const WOBBLE_AMP_DB = 9
+// Octaves of the drifting noise, coarsest first. The old shape was ONE 2 m
+// layer sampled twice: both taps shared a lattice and a wavelength, so the
+// second was just the first shifted — a repeating texture jittering in place.
+// 2 m is also finer than the contour spacing, so it read as local twitching
+// rather than the whole field moving. These octaves don't share a wavelength,
+// and the weight sits on the long ones so the field swells as a whole, with
+// finer layers only breaking up the shape.
+//   lambdaM — wavelength in world metres
+//   weight  — share of the amplitude (sums to 1)
+//   du/dv   — drift in lattice cells per second; mixed signs at non-multiple
+//             rates keep the layers from re-aligning into a visible period
+const WOBBLE_OCTAVES = [
+  { lambdaM: 20,  weight: 0.55, du:  0.13, dv:  0.09 },
+  { lambdaM:  9,  weight: 0.27, du: -0.21, dv:  0.16 },
+  { lambdaM:  4,  weight: 0.13, du:  0.35, dv: -0.27 },
+  { lambdaM:  1.8, weight: 0.05, du: -0.55, dv: -0.42 },
+]
 const WOBBLE_DECAY_MS = 900    // amplitude ramp-down once the final field is in
 const WOBBLE_HOLD_MAX_MS = 4000 // safety cap if the fine stage never lands
 
@@ -133,23 +153,37 @@ function latticeSample(lat, latN, u, v) {
   return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy
 }
 
-// out = base + amp × noise(worldXY drifting over time). Two counter-drifting
-// samples interfere into a watery shimmer instead of one sliding pattern.
-// NaN (scope-mask holes) stays NaN.
+// out = base + amp × fBm(worldXY drifting over time). Each octave reads the
+// lattice at its own wavelength, drift and origin, so they never re-align into
+// a visible repeat. NaN (scope-mask holes) stays NaN.
 function wobbleInto(out, base, ampDb, tSec, lat, latN, nx, ny, stepM, originX, originY) {
-  const inv = 1 / WOBBLE_LAMBDA_M
-  const du1 = tSec * 0.55, dv1 = tSec * 0.40
-  const du2 = -tSec * 0.37, dv2 = tSec * 0.29
+  // Per-octave constants hoisted out of the pixel loop.
+  const oct = WOBBLE_OCTAVES
+  const n = oct.length
+  const inv = new Float64Array(n)
+  const offU = new Float64Array(n)
+  const offV = new Float64Array(n)
+  const w = new Float64Array(n)
+  for (let k = 0; k < n; k++) {
+    inv[k] = 1 / oct[k].lambdaM
+    // Each octave starts at a different corner of the lattice so the same
+    // random values never line up across octaves.
+    offU[k] = tSec * oct[k].du + k * 11.7
+    offV[k] = tSec * oct[k].dv + k * 5.3
+    w[k] = oct[k].weight
+  }
   for (let j = 0; j < ny; j++) {
-    const wy = (originY + j * stepM) * inv
+    const yM = originY + j * stepM
     for (let i = 0; i < nx; i++) {
       const idx = j * nx + i
       const b = base[idx]
       if (Number.isNaN(b)) { out[idx] = NaN; continue }
-      const wx = (originX + i * stepM) * inv
-      const n = 0.6 * latticeSample(lat, latN, wx + du1, wy + dv1)
-              + 0.4 * latticeSample(lat, latN, wx + du2 + 7.3, wy + dv2 + 3.1)
-      out[idx] = b + ampDb * n
+      const xM = originX + i * stepM
+      let acc = 0
+      for (let k = 0; k < n; k++) {
+        acc += w[k] * latticeSample(lat, latN, xM * inv[k] + offU[k], yM * inv[k] + offV[k])
+      }
+      out[idx] = b + ampDb * acc
     }
   }
 }
@@ -525,7 +559,10 @@ export function attachHeatmapLayer({
       if (!awaitingFine && anim.decayAt === null) anim.decayAt = now
       return
     }
-    const latN = 32
+    // 64 not 32: the coarsest octave reads the lattice every 20 m, so 32 cells
+    // wrap after ~640 m of world space and a large plan would show the same
+    // swell twice. 64 doubles that for 4 KB of noise.
+    const latN = 64
     const lattice = new Float32Array(latN * latN)
     for (let i = 0; i < lattice.length; i++) lattice[i] = Math.random() * 2 - 1
     const state = {
