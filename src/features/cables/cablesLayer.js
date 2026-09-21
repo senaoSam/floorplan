@@ -261,6 +261,11 @@ export function attachCablesLayer({
   // change) leaves stale cable geometry frozen in the cached texture.
   let routesEpoch = 0
   let staticEpoch = -1
+  // AP ids whose routes the LAST routes-epoch bump touched, or null when that
+  // bump was a full reroute (i.e. assume every route changed). Read by the
+  // dragend append path to tell its own single-AP commit apart from a real
+  // topology change.
+  let lastIncrementalApIds = null
   // 32-E: the store-slice refs from the last FULL computeRoutes, so a dirty
   // rebuild can diff what actually changed. A drag COMMIT (updateAP on release)
   // or any single-AP edit changes only that AP's object (Zustand immutable
@@ -314,6 +319,14 @@ export function attachCablesLayer({
     baseResult = { routes, switchLinks }
     lastInputs = building
     routingDirty = false
+    // Record WHICH routes this incremental pass touched. The routes epoch alone
+    // can't say: it bumps identically for a full reroute and for a one-AP edit,
+    // so the dragend append path treated its own commit as "everything changed"
+    // and fell back to redrawing all ~300 (the 32-E fast path never fired on a
+    // real drag). Callers that already know the set they're re-adding can check
+    // this instead. Only ever set on the incremental branch — a full reroute
+    // leaves it null, which reads as "assume everything".
+    lastIncrementalApIds = new Set(changed.map(({ ap }) => ap.id))
     return baseResult
   }
 
@@ -347,6 +360,7 @@ export function attachCablesLayer({
         baseResult = computeRoutes(building)
         lastInputs = building
         routingDirty = false
+        lastIncrementalApIds = null   // full reroute — every route may have moved
         routesEpoch++
       }
       return baseResult
@@ -357,6 +371,7 @@ export function attachCablesLayer({
       baseResult = computeRoutes(building)
       lastInputs = building
       routingDirty = false
+      lastIncrementalApIds = null   // full reroute — every route may have moved
       routesEpoch++
       return baseResult
     }
@@ -747,7 +762,26 @@ export function attachCablesLayer({
       splitKey === `|${lastDragKey}` && lastDragKey !== '' &&
       lastDragAffected &&
       (lastDragAffected.apIds.size + lastDragAffected.linkIds.size) > 0
-    if (releasing && !routesStale) {
+
+    // A release commits the dragged AP's position, which reroutes that one AP
+    // and bumps the routes epoch — so `routesStale` was true on the very frame
+    // the append path exists for, and every real drag fell back to redrawing
+    // all ~300 routes (measured: 257 ms at 1000 AP, 64 ms at 300). The epoch
+    // bump is only disqualifying when routes OTHER than the ones we are about
+    // to append changed. When the reroute was incremental and its touched set
+    // is covered by the routes this append redraws, gStatic's other routes are
+    // still current and the append is exact. No incremental record (a full
+    // reroute) keeps the old conservative behaviour.
+    const staleOnlyForAppended =
+      routesStale &&
+      releasing &&
+      lastIncrementalApIds !== null &&
+      lastIncrementalApIds.size > 0 &&
+      // switchLinks are not covered by the incremental AP record, so only take
+      // this path when the append is purely AP routes.
+      lastDragAffected.linkIds.size === 0 &&
+      [...lastIncrementalApIds].every((id) => lastDragAffected.apIds.has(id))
+    if (releasing && (!routesStale || staleOnlyForAppended)) {
       // Append the dropped route(s) into frozen gStatic (no clear → keep the
       // other 299). Only safe when the rest of the routes are still current
       // (routesStale guards the tray-move case where they all changed).
