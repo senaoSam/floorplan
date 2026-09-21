@@ -95,6 +95,10 @@ function drawDashedSegment(g, ax, ay, bx, by, color, width, dashOn, dashOff, alp
 }
 
 function drawSolidSegment(g, ax, ay, bx, by, color, width, alpha) {
+  // Zero-length guard, matching drawDashedSegment above. Without it a segment
+  // whose ends coincide still strokes, and cap:'round' turns it into a dot —
+  // routes pick up a dot wherever two path points share a position.
+  if (Math.abs(bx - ax) <= 1e-9 && Math.abs(by - ay) <= 1e-9) return
   g.moveTo(ax, ay).lineTo(bx, by)
     .stroke({ width, color, alpha, cap: 'round' })
 }
@@ -448,6 +452,56 @@ export function attachCablesLayer({
   // (alpha 1, with highlight band), the rest to gStatic (dimmed by container).
   //   keep('route', route)  → draw this AP→Switch route?
   //   keep('link',  link)   → draw this Switch→Switch link?
+
+  // Every endpoint that snaps to a tray adds its own anchor to that tray, and a
+  // route running along the tray steps through every anchor between its ends.
+  // Once many APs snap to one tray their feet land on identical chainages, so
+  // the point list fills with consecutive duplicates — at 1000 AP on a single
+  // tray, 93,748 points of which 91% repeated the point before them. Each
+  // repeat still drew a node circle, and since those fill at alpha 0.9 the
+  // repeats composited into a denser blob instead of landing on top of an
+  // identical circle. That made the redraw superlinear (300 AP 6 ms → 1000 AP
+  // 244 ms) AND made a run's colour depend on how many APs happened to snap
+  // nearby, which carries no meaning: the same cable renders differently as the
+  // AP count changes.
+  //
+  // Collapsing each run to one point draws the circle the geometry actually
+  // calls for. Only the marker loops use this — route.points is untouched, so
+  // cable lengths, tray fill, exports and the 3D layer keep reading the routing
+  // output verbatim, and the segment loops still walk every point (they are
+  // now no-ops on zero-length pairs, see drawSolidSegment).
+  //
+  // Points compare including floorId: coincident xy on different floors are
+  // different points, and the marker loops already branch on floorId.
+  const dedupeMarkerPoints = (pts) => {
+    if (!pts || pts.length < 3) return pts   // too short to hold a run worth scanning
+    let hasDup = false
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i]
+      if (a.x === b.x && a.y === b.y && a.floorId === b.floorId) { hasDup = true; break }
+    }
+    if (!hasDup) return pts                  // common case: hand back the original array
+    const out = [pts[0]]
+    for (let i = 1; i < pts.length; i++) {
+      const prev = out[out.length - 1], p = pts[i]
+      if (p.x === prev.x && p.y === prev.y && p.floorId === prev.floorId) {
+        // A run can mix kinds, and kind drives radius/outline. Keep whichever
+        // paints the largest marker so the survivor covers what the run drew.
+        if (markerRank(p) > markerRank(prev)) out[out.length - 1] = p
+        continue
+      }
+      out.push(p)
+    }
+    return out
+  }
+  // Ranks a point by how much marker it paints: endpoints draw none, plain tray
+  // points a small dot, feet and risers a larger dot with an outline.
+  const markerRank = (p) => {
+    if (p.kind === 'endpoint') return 0
+    if (nodeHasOutline(p)) return 2
+    return 1
+  }
+
   const drawRoutes = (g, badgeRoot, routes, switchLinks, dctx, keep) => {
     const {
       s, activeFloorId, hasFocus,
@@ -523,7 +577,7 @@ export function attachCablesLayer({
       }
       // Node markers for tray points on this floor (skip endpoints — they
       // belong to AP / Switch icons).
-      for (const p of pts) {
+      for (const p of dedupeMarkerPoints(pts)) {
         if (p.floorId !== activeFloorId) continue
         if (p.kind === 'endpoint') continue
         const radius = trayNodeRadius(p) * s
@@ -579,7 +633,7 @@ export function attachCablesLayer({
           drawSolidSegment(g, a.x, a.y, b.x, b.y, trunk, 1.9 * s, 0.95)
         }
       }
-      for (const p of pts) {
+      for (const p of dedupeMarkerPoints(pts)) {
         if (p.floorId !== activeFloorId) continue
         if (p.kind === 'endpoint') continue
         const radius = switchLinkNodeRadius(p) * s
