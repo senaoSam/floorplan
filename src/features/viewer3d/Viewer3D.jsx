@@ -501,6 +501,10 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart
   const startCam      = useRef(new THREE.Vector3())
   const tweenStartMs  = useRef(0)
   const tweenDurMs    = useRef(0)
+  // Wall-clock timestamp of the previous default-lerp frame. 0 means "no
+  // previous frame", so the first step of a lift uses a nominal 60fps delta
+  // rather than the gap since some earlier, unrelated tween.
+  const lastLerpMs    = useRef(0)
   // Idle auto-rotate: after the 2D→3D entry tween lands, the camera keeps
   // slowly orbiting the floor (showcase turntable) until the user touches the
   // controls. `wantAutoRotateAfterTween` is set by tweenTo when the caller
@@ -549,10 +553,14 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart
     const camOffset = new THREE.Vector3().copy(camera.position).sub(controls.target)
     desiredTarget.current.copy(nextTarget)
     desiredCam.current.copy(nextTarget).add(camOffset)
+    lastLerpMs.current = 0
     tweening.current = true
   }, [target, camera])
 
-  useFrame((_, dt) => {
+  // No `dt` parameter on purpose: r3f's delta is a constant 0 here (see the
+  // default-lerp branch below), so taking it would only invite a future edit
+  // to reintroduce the bug. Frame timing comes from performance.now().
+  useFrame(() => {
     const controls = controlsRef.current
     if (!controls) return
     if (!tweening.current) {
@@ -619,8 +627,21 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart
 
     // Default: frame-rate independent critically-damped-ish lerp (used when
     // active floor changes — quick snap into place).
+    //
+    // The delta comes from performance.now() rather than useFrame's `dt`.
+    // WakeOnVisible now restarts the clock r3f stops on frameloop 'never', so
+    // `dt` is live again and would work here — but this lift is the one thing
+    // that has to survive the clock being stopped, since a stopped clock's
+    // `dt` of 0 makes alpha 0 and every lerp a silent no-op (the tween runs,
+    // frames tick, desiredCam is right, and the camera never moves). Keeping
+    // its own clock means a future frameloop change can't resurrect that.
+    // The fixed-duration branch above is already independent for the same
+    // reason: it times itself off performance.now() too.
+    const now = performance.now()
+    const dtMs = lastLerpMs.current > 0 ? now - lastLerpMs.current : 16.7
+    lastLerpMs.current = now
     const k = 8
-    const alpha = 1 - Math.exp(-k * Math.min(dt, 0.1))
+    const alpha = 1 - Math.exp(-k * Math.min(dtMs / 1000, 0.1))
     controls.target.lerp(desiredTarget.current, alpha)
     camera.position.lerp(desiredCam.current, alpha)
     controls.update()
@@ -931,11 +952,28 @@ function SceneEnvironment({ intensity = 1 }) {
 // parked until the next invalidate(), and with the previous mode 'never' every
 // queued invalidate was dropped. Kick one on the hidden→visible edge so the
 // first 3D frame paints immediately after the switch.
+//
+// The clock needs the same treatment, for a related reason. r3f 7.0.29 calls
+// `clock.stop()` + `clock.elapsedTime = 0` when it sees frameloop 'never'
+// (react-three-fiber.cjs.dev.js:1135), and `setFrameloop` only flips the store
+// flag — nothing in the library ever calls `clock.start()` again. So once this
+// viewer has been hidden, `clock.elapsedTime` stays pinned at 0 and
+// `useFrame`'s delta stays 0 for the life of the page, which silently freezes
+// every animation that reads either one (the AP selection pulse, the camera
+// overlay's chevron crawl). Restarting it on the hidden→visible edge fixes
+// them all at the source; `start()` also clears the stopped flag so getDelta()
+// resumes returning real deltas.
 function WakeOnVisible({ isVisible }) {
   const invalidate = useThree((s) => s.invalidate)
+  const clock = useThree((s) => s.clock)
   useEffect(() => {
-    if (isVisible) invalidate()
-  }, [isVisible, invalidate])
+    if (!isVisible) return
+    // start() resets elapsedTime to 0 and re-bases oldTime on now, so the
+    // first frame after the switch gets a sane delta instead of a jump
+    // proportional to how long the viewer sat hidden.
+    if (clock) clock.start()
+    invalidate()
+  }, [isVisible, invalidate, clock])
   return null
 }
 
