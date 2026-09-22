@@ -1393,6 +1393,35 @@ function Viewer3D() {
             to the floor rail, where it sits beside the floor list that asks
             the same question. */}
         <div className="viewer3d__panel-row">
+          {/* Phase 48+ per-floor heatmap planes on every stacked floor. Only
+              computes while this is on and 3D is visible; unchanged data
+              re-uses cached canvases.
+              Absent in CAMERA mode, which hides the heatmap layer outright
+              (layerVisibilityBinder) — a control for something that cannot be
+              drawn is worse than no control.
+
+              It leads the row precisely because it is the one that leaves:
+              the row is right-aligned, so dropping the RIGHT-hand button
+              would slide its neighbour 84px across, moving a control that is
+              present in both modes. With the removable one first, everything
+              that survives the mode change keeps its place. */}
+          {!inCameraMode && (
+            <button
+              type="button"
+              className={`viewer3d__floors-btn${heatmap3DAllFloors ? ' viewer3d__floors-btn--active' : ''}`}
+              onClick={() => toggleLayer('heatmap3DAllFloors')}
+              disabled={!hmEnabled || !show3DAllFloors}
+              aria-pressed={heatmap3DAllFloors}
+              title={
+                !hmEnabled ? '先開啟熱圖再使用'
+                  : !show3DAllFloors ? '請先在右側樓層條切換為「全樓」'
+                  : heatmap3DAllFloors ? '關閉其他樓層的熱圖平面'
+                  : '為每個樓層各算一張熱圖（進 3D 才計算，資料未變時使用快取）'
+              }
+            >
+              各層熱圖
+            </button>
+          )}
           <button
             type="button"
             className={`viewer3d__floors-btn${autoRotate ? ' viewer3d__floors-btn--active' : ''}`}
@@ -1401,24 +1430,6 @@ function Viewer3D() {
             aria-pressed={autoRotate}
           >
             自動旋轉
-          </button>
-          {/* Phase 48+ per-floor heatmap planes on every stacked floor. Only
-              computes while this is on and 3D is visible; unchanged data
-              re-uses cached canvases. */}
-          <button
-            type="button"
-            className={`viewer3d__floors-btn${heatmap3DAllFloors ? ' viewer3d__floors-btn--active' : ''}`}
-            onClick={() => toggleLayer('heatmap3DAllFloors')}
-            disabled={!hmEnabled || !show3DAllFloors}
-            aria-pressed={heatmap3DAllFloors}
-            title={
-              !hmEnabled ? '先開啟熱圖再使用'
-                : !show3DAllFloors ? '請先在右側樓層條切換為「全樓」'
-                : heatmap3DAllFloors ? '關閉其他樓層的熱圖平面'
-                : '為每個樓層各算一張熱圖（進 3D 才計算，資料未變時使用快取）'
-            }
-          >
-            各層熱圖
           </button>
         </div>
 
