@@ -395,26 +395,48 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart
   const onAutoRotateStartRef = useRef(onAutoRotateStart)
   onAutoRotateStartRef.current = onAutoRotateStart
 
-  // Configure the idle turntable spin + stop it the instant the user grabs the
-  // controls. autoRotateSpeed is intentionally low for a gentle showcase turn
-  // (default is 2.0). The `start` event fires on the first pointerdown / wheel,
-  // so any user interaction immediately ends the spin and hands the camera back.
+  // Configure the idle turntable spin + hand the camera back the instant the
+  // user grabs the controls. autoRotateSpeed is intentionally low for a gentle
+  // showcase turn (default is 2.0). The `start` event fires on the first
+  // pointerdown / wheel, so any user interaction ends whatever the camera was
+  // doing on its own.
+  //
+  // That has to include an in-flight tween, not just the spin. A floor change
+  // lifts the camera over a few hundred ms, and grabbing the controls inside
+  // that window left both parties writing camera.position every frame: the
+  // orbit moved it, then the lerp pulled it back toward the lift's goal. The
+  // visible result depended on who got the last word that frame — usually the
+  // view snapping back, and if the user held on past the tween's convergence
+  // check, a lift that quietly never arrived (floor switched to 5F, camera
+  // still sitting at the old storey's height). Cancelling here means the
+  // camera keeps exactly the pose the user dragged it to.
   useEffect(() => {
     const controls = controlsRef.current
     if (!controls) return
     controls.autoRotate = false
     controls.autoRotateSpeed = 0.6
-    const stopSpin = () => {
+    const yieldToUser = () => {
       autoRotating.current = false
       wantAutoRotateAfterTween.current = false
       controls.autoRotate = false
+      // Drop the tween and adopt wherever the user is taking the camera, so
+      // the goal can't reassert itself for the rest of this interaction.
+      tweening.current = false
+      tweenDurMs.current = 0
+      desiredTarget.current.copy(controls.target)
+      desiredCam.current.copy(camera.position)
+      // Forget which target we last tweened toward. That value is recorded
+      // when a lift STARTS, so a cancelled one would otherwise be remembered
+      // as already reached — and every later switch back to that floor would
+      // compare equal and skip its lift for the rest of the session.
+      lastTarget.current = [NaN, NaN, NaN]
       // Let the parent's toggle button reflect that the user interaction
       // ended the spin (so it doesn't keep showing "on").
       onAutoRotateStopRef.current?.()
     }
-    controls.addEventListener('start', stopSpin)
-    return () => controls.removeEventListener('start', stopSpin)
-  }, [])
+    controls.addEventListener('start', yieldToUser)
+    return () => controls.removeEventListener('start', yieldToUser)
+  }, [camera])
 
   // Expose live camera + controls + a tween command so the parent can read
   // the current pose on demand AND drive an animated pose change without us
