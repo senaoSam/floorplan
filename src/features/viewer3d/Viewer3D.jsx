@@ -27,6 +27,8 @@ import SwitchLayer3D from './SwitchLayer3D'
 import CableLayer3D from './CableLayer3D'
 import GroundGrid3D from './GroundGrid3D'
 import FloorElevatorRail from './FloorElevatorRail'
+import FloorTabTower3D from './FloorTabTower3D'
+import { pointerClaimedByUi } from './tabPointerGuard'
 import { computeFloorElevations } from '@/utils/floorStacking'
 import './Viewer3D.sass'
 
@@ -416,6 +418,12 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart
     controls.autoRotate = false
     controls.autoRotateSpeed = 0.6
     const yieldToUser = () => {
+      // A click on an in-scene control (the floor tabs) reaches OrbitControls
+      // too — it binds pointerdown on the canvas itself, so nothing in r3f's
+      // event layer can hold it back. Without this check, clicking a tab
+      // cancelled the very lift that click requested, stranding the camera
+      // between storeys.
+      if (pointerClaimedByUi()) return
       autoRotating.current = false
       wantAutoRotateAfterTween.current = false
       controls.autoRotate = false
@@ -1034,6 +1042,13 @@ function Viewer3D() {
   // view gets a tight frustum (sharp shadows) while 全樓層 widens it enough to
   // reach the top of the stack. Falls back to a small radius pre-load so the
   // first frame isn't degenerate.
+  // Per-floor footprint in metres, for the Phase 56 tab tower's corner picking.
+  const floorSizes = useMemo(() => {
+    const out = {}
+    for (const f of visibleFloors) out[f.id] = pxToMeters(f)
+    return out
+  }, [visibleFloors])
+
   const shadowRadius = useMemo(() => {
     if (!visibleFloors.length) return 20
     let maxR = 0
@@ -1528,6 +1543,20 @@ function Viewer3D() {
           floorPlate={floorPlate3D}
         />
       ))}
+
+      {/* Phase 56 floor tabs — the in-scene counterpart to the rail, for
+          switching floors without leaving the model. Only worth drawing when
+          more than one storey is on screen; with a single floor the tab would
+          state what the sidebar and the rail already say. */}
+      {visibleFloors.length > 1 && (
+        <FloorTabTower3D
+          floors={visibleFloors}
+          elevations={elevations}
+          floorSizes={floorSizes}
+          activeFloorId={activeFloorId}
+          onSelect={(id) => { if (id !== activeFloorId) setActiveFloor(id) }}
+        />
+      )}
 
       {/* 10-5f: floor-hole vertical extents rendered at scene root so a single
           column can span multiple floors regardless of which FloorStack groups
