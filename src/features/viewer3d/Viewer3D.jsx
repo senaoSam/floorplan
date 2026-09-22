@@ -26,8 +26,9 @@ import TrayLayer3D from './TrayLayer3D'
 import SwitchLayer3D from './SwitchLayer3D'
 import CableLayer3D from './CableLayer3D'
 import GroundGrid3D from './GroundGrid3D'
-import { computeFloorElevations } from '@/utils/floorStacking'
 import Icon from '@/components/Icon/Icon'
+import FloorElevatorRail from './FloorElevatorRail'
+import { computeFloorElevations } from '@/utils/floorStacking'
 import './Viewer3D.sass'
 
 // r3f v7 doesn't include drei by default. Make OrbitControls available as a
@@ -376,7 +377,7 @@ function FloorStack({ floor, elevation, isActive, onAPHover, onSwitchHover, onCa
 // sidebar) we tween target + camera position together for a short window so
 // the view glides instead of snapping. Outside that window OrbitControls owns
 // the camera fully — keeping it hijacked per-frame breaks orbit/pan/zoom.
-function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart, initialTargetRef }) {
+function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart, initialTargetRef, holdTarget }) {
   const controlsRef = useRef()
   const { camera, gl } = useThree()
   // Keep the latest stop/start callbacks in refs so the listeners and useFrame
@@ -544,8 +545,16 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart
       lastTarget.current = [target[0], target[1], target[2]]
       return
     }
+    // Phase 55 decision 5: while the floor rail is being dragged, hold the
+    // lift. A drag sweeps through every storey between its ends, and tweening
+    // to each one turns a scan into the camera chasing the pointer up the
+    // building. `holdTarget` is a dep, so the release re-runs this effect.
+    if (holdTarget) return
     // Skip if the numeric target didn't actually change — `target` is often a
     // fresh array each render (Viewer3D recomputes it on any state change).
+    // `lastTarget` is deliberately NOT updated by the held branch above, so a
+    // target that moved during a drag still compares as changed here and the
+    // release performs exactly one lift to wherever the drag landed.
     const [lx, ly, lz] = lastTarget.current
     if (lx === target[0] && ly === target[1] && lz === target[2]) return
     lastTarget.current = [target[0], target[1], target[2]]
@@ -555,7 +564,7 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart
     desiredCam.current.copy(nextTarget).add(camOffset)
     lastLerpMs.current = 0
     tweening.current = true
-  }, [target, camera])
+  }, [target, camera, holdTarget])
 
   // No `dt` parameter on purpose: r3f's delta is a constant 0 here (see the
   // default-lerp branch below), so taking it would only invite a future edit
@@ -689,67 +698,6 @@ function EmptyScene() {
       <GroundGrid3D center={[0, 0, 0]} radius={40} cell={1} major={10} />
       <axesHelper args={[3]} />
     </>
-  )
-}
-
-// 28-2 Compact floor selector dropdown. Stays out of the way (single trigger
-// button) until clicked, then expands into a list anchored to the trigger.
-// Outside-click and Esc close it, matching the SidebarLeft floor menu UX.
-function FloorSelector({ floors, activeFloorId, onSelect }) {
-  const [open, setOpen] = useState(false)
-  const wrapRef = useRef(null)
-  const activeFloor = floors.find((f) => f.id === activeFloorId)
-  useEffect(() => {
-    if (!open) return
-    const onDocClick = (e) => {
-      if (!wrapRef.current?.contains(e.target)) setOpen(false)
-    }
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
-    const t = setTimeout(() => {
-      document.addEventListener('mousedown', onDocClick)
-      document.addEventListener('keydown', onKey)
-    }, 0)
-    return () => {
-      clearTimeout(t)
-      document.removeEventListener('mousedown', onDocClick)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
-
-  return (
-    <div className="viewer3d__floor-selector" ref={wrapRef}>
-      <button
-        type="button"
-        className={`viewer3d__floor-trigger${open ? ' viewer3d__floor-trigger--open' : ''}`}
-        onClick={() => setOpen((o) => !o)}
-        title={activeFloor?.name ?? '選擇樓層'}
-      >
-        <span className="viewer3d__floor-trigger-label">{activeFloor?.name ?? '—'}</span>
-        <span className="viewer3d__floor-trigger-caret"><Icon name="chevronDown" size={10} /></span>
-      </button>
-      {open && (
-        <ul className="viewer3d__floor-list" role="listbox" aria-label="樓層選擇">
-          {/* Top-down = highest floor first, matching the SidebarLeft list and
-              the 3D stack (floors[0] on the ground). Reverse render only;
-              onSelect uses floor.id so no index bookkeeping is needed. */}
-          {floors.slice().reverse().map((floor) => {
-            const isActive = floor.id === activeFloorId
-            return (
-              <li
-                key={floor.id}
-                role="option"
-                aria-selected={isActive}
-                className={`viewer3d__floor-option${isActive ? ' viewer3d__floor-option--active' : ''}`}
-                onClick={() => { onSelect(floor.id); setOpen(false) }}
-                title={floor.name}
-              >
-                {floor.name}
-              </li>
-            )
-          })}
-        </ul>
-      )}
-    </div>
   )
 }
 
@@ -1154,6 +1102,10 @@ function Viewer3D() {
   const [autoRotate, setAutoRotate] = useState(false)
   // Top-right control panel collapse (just its header bar when collapsed).
   const [panelCollapsed, setPanelCollapsed] = useState(false)
+  // Phase 55: true while the floor rail's slider is being dragged. Passed to
+  // CameraRig, which holds the floor-change lift until the drag ends so a scan
+  // through several storeys doesn't make the camera chase the pointer.
+  const [railDragging, setRailDragging] = useState(false)
 
   // Shared 3/4 iso camera offset (relative to target), scaled to the floor
   // diagonal so every iso view frames the same regardless of floor size. ONE
@@ -1389,15 +1341,10 @@ function Viewer3D() {
 
         {!panelCollapsed && (
         <>
+        {/* Phase 55: the 單樓層/全樓層 toggle moved to the floor rail (right
+            edge) — it asks the same question as the floor list, so it belongs
+            beside it rather than in a panel two corners away. */}
         <div className="viewer3d__panel-row">
-          <button
-            type="button"
-            className={`viewer3d__floors-btn${show3DAllFloors ? ' viewer3d__floors-btn--active' : ''}`}
-            onClick={() => toggleLayer('show3DAllFloors')}
-            title={show3DAllFloors ? '切換為只顯示當前樓層' : '切換為顯示全部樓層'}
-          >
-            {show3DAllFloors ? '🏢 全樓層' : '🏠 單樓層'}
-          </button>
           <button
             type="button"
             className={`viewer3d__floors-btn${autoRotate ? ' viewer3d__floors-btn--active' : ''}`}
@@ -1419,7 +1366,7 @@ function Viewer3D() {
             disabled={!hmEnabled || !show3DAllFloors}
             title={
               !hmEnabled ? '先開啟熱圖再使用'
-                : !show3DAllFloors ? '需先切換為顯示全部樓層'
+                : !show3DAllFloors ? '請先在右側樓層條切換為「全樓」'
                 : heatmap3DAllFloors ? '關閉其他樓層的熱圖平面'
                 : '為每個樓層各算一張熱圖（進 3D 才計算，資料未變時使用快取）'
             }
@@ -1475,22 +1422,21 @@ function Viewer3D() {
             正視
           </button>
         </div>
-
-        {/* 28-2 Floor selector — compact dropdown. Click the trigger to expand
-            the list, click a row to switch active floor (heatmap remounts,
-            camera tweens, layers retarget). */}
-        {floors.length > 0 && (
-          <div className="viewer3d__panel-row">
-            <FloorSelector
-              floors={floors}
-              activeFloorId={activeFloorId}
-              onSelect={(id) => { if (id !== activeFloorId) setActiveFloor(id) }}
-            />
-          </div>
-        )}
         </>
         )}
       </div>
+
+      {/* Phase 55 floor elevator rail — right edge, vertically centred. The
+          fixed-screen-position way to switch floors (replaces the 28-2
+          dropdown) and carries the 單樓層/全樓層 toggle. */}
+      <FloorElevatorRail
+        floors={floors}
+        activeFloorId={activeFloorId}
+        onSelect={(id) => { if (id !== activeFloorId) setActiveFloor(id) }}
+        onDraggingChange={setRailDragging}
+        showAllFloors={show3DAllFloors}
+        onToggleAllFloors={() => toggleLayer('show3DAllFloors')}
+      />
 
       {/* 28-4 Device hover readout (AP / switch / camera) — floating HTML
           tooltip. Pointer is captured at the viewer3d container level so the
@@ -1576,7 +1522,7 @@ function Viewer3D() {
         />
       )}
 
-      <CameraRig target={center} cameraStateRef={cameraStateRef} onAutoRotateStop={() => setAutoRotate(false)} onAutoRotateStart={() => setAutoRotate(true)} initialTargetRef={initialTargetRef} />
+      <CameraRig target={center} cameraStateRef={cameraStateRef} onAutoRotateStop={() => setAutoRotate(false)} onAutoRotateStart={() => setAutoRotate(true)} initialTargetRef={initialTargetRef} holdTarget={railDragging} />
       </Canvas>
     </div>
   )
