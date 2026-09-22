@@ -39,15 +39,32 @@ function cacheLabel(text, entry) {
   labelTextureCache.set(text, entry)
 }
 
-function getLabelTexture(text) {
-  const hit = labelTextureCache.get(text)
+// Colour variants. `plain` is the original dark pill with light text, used by
+// every existing caller; `accent` inverts it to a filled blue pill with dark
+// text for "this one is selected".
+//
+// A tinted plate behind the plain pill was the first attempt at that state and
+// read as a highlight bar rather than a selected label — the pill kept its own
+// dark background, so the blue only showed around the edges. Painting the pill
+// itself is what makes the state unmistakable.
+const VARIANTS = {
+  plain:  { fill: 'rgba(15, 23, 42, 0.88)', stroke: 'rgba(255, 255, 255, 0.25)', text: '#f1f5f9' },
+  accent: { fill: '#3b82f6',                stroke: 'rgba(255, 255, 255, 0.55)', text: '#0b1220' },
+}
+
+function getLabelTexture(text, variant = 'plain') {
+  // The cache key carries the variant: keyed on text alone, the first render
+  // of a name would pin its colours for every later use of that same name.
+  const key = variant === 'plain' ? text : `${variant}::${text}`
+  const hit = labelTextureCache.get(key)
   if (hit) {
     // Refresh recency: delete + re-set moves it to the end of the order, so
     // labels currently on screen aren't evicted by a burst of renames.
-    labelTextureCache.delete(text)
-    labelTextureCache.set(text, hit)
+    labelTextureCache.delete(key)
+    labelTextureCache.set(key, hit)
     return hit
   }
+  const colors = VARIANTS[variant] ?? VARIANTS.plain
   const pad = 18
   const fontSize = 42
   const s = SUPERSAMPLE
@@ -70,7 +87,7 @@ function getLabelTexture(text) {
   ctx.textAlign = 'center'
   // Pill background
   const r = layoutH / 2
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.88)'
+  ctx.fillStyle = colors.fill
   ctx.beginPath()
   ctx.moveTo(r, 0)
   ctx.lineTo(layoutW - r, 0)
@@ -78,11 +95,11 @@ function getLabelTexture(text) {
   ctx.lineTo(r, layoutH)
   ctx.arc(r, r, r, Math.PI / 2, -Math.PI / 2)
   ctx.fill()
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)'
+  ctx.strokeStyle = colors.stroke
   ctx.lineWidth = 2
   ctx.stroke()
   // Text
-  ctx.fillStyle = '#f1f5f9'
+  ctx.fillStyle = colors.text
   ctx.fillText(text, layoutW / 2, layoutH / 2)
 
   const tex = new THREE.CanvasTexture(canvas)
@@ -96,7 +113,7 @@ function getLabelTexture(text) {
   else tex.encoding = THREE.sRGBEncoding
   tex.needsUpdate = true
   const entry = { texture: tex, aspect: layoutW / layoutH }
-  cacheLabel(text, entry)
+  cacheLabel(key, entry)
   return entry
 }
 
@@ -105,11 +122,20 @@ export function __labelCacheStats() {
   return { size: labelTextureCache.size, max: LABEL_CACHE_MAX }
 }
 
-export default function Label3D({ text, position, opacity = 1, heightM = 0.5 }) {
-  const { texture, aspect } = useMemo(() => getLabelTexture(text), [text])
+// `interactive` opts a label out of raycasting. Sprites are hit-testable by
+// default, and these draw with depthTest:false, so a label sitting in front of
+// a clickable object silently eats its pointer events even when the object is
+// visually on top. Callers that place their own hit target behind a label pass
+// interactive={false} so the target is what the pointer actually finds.
+export default function Label3D({ text, position, opacity = 1, heightM = 0.5, interactive = true, variant = 'plain' }) {
+  const { texture, aspect } = useMemo(() => getLabelTexture(text, variant), [text, variant])
   const widthM = heightM * aspect
   return (
-    <sprite position={position} scale={[widthM, heightM, 1]}>
+    <sprite
+      position={position}
+      scale={[widthM, heightM, 1]}
+      raycast={interactive ? undefined : () => null}
+    >
       <spriteMaterial
         map={texture}
         transparent
