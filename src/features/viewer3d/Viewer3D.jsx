@@ -26,7 +26,6 @@ import TrayLayer3D from './TrayLayer3D'
 import SwitchLayer3D from './SwitchLayer3D'
 import CableLayer3D from './CableLayer3D'
 import GroundGrid3D from './GroundGrid3D'
-import Icon from '@/components/Icon/Icon'
 import FloorElevatorRail from './FloorElevatorRail'
 import { computeFloorElevations } from '@/utils/floorStacking'
 import './Viewer3D.sass'
@@ -190,6 +189,15 @@ function FloorPlane({ floor, opacity = 1, plate = 'solid' }) {
     </>
   )
 }
+
+// Floor-plate modes, in the order the segmented control shows them: most
+// drawn to least. Mirrors useEditorStore's cycle order so the control reads
+// left-to-right the way the old button used to step.
+const FLOOR_PLATE_OPTIONS = [
+  { value: 'solid', label: '實心', title: '實心樓板（含平面圖）' },
+  { value: 'ghost', label: '半透', title: '半透明樓板（無平面圖，看得到下層）' },
+  { value: 'off',   label: '隱藏', title: '隱藏樓板（只剩牆體與設備）' },
+]
 
 // 51-3: fog tint. Matches the bottom stop of the CSS sky gradient in
 // Viewer3D.sass — the band the floor plate meets — so fogged geometry fades
@@ -952,7 +960,7 @@ function Viewer3D() {
   const show3DAllFloors = useEditorStore((s) => s.show3DAllFloors)
   const heatmap3DAllFloors = useEditorStore((s) => s.heatmap3DAllFloors)
   const floorPlate3D    = useEditorStore((s) => s.floorPlate3D)
-  const cycleFloorPlate3D = useEditorStore((s) => s.cycleFloorPlate3D)
+  const setFloorPlate3D = useEditorStore((s) => s.setFloorPlate3D)
   const hmEnabled       = useHeatmapStore((s) => s.enabled)
   const toggleLayer     = useEditorStore((s) => s.toggleLayer)
   const clearSelected   = useEditorStore((s) => s.clearSelected)
@@ -1100,8 +1108,6 @@ function Viewer3D() {
   // The rig's OrbitControls `start` listener flips this back off when the user
   // grabs the camera, via onAutoRotateStop below.
   const [autoRotate, setAutoRotate] = useState(false)
-  // Top-right control panel collapse (just its header bar when collapsed).
-  const [panelCollapsed, setPanelCollapsed] = useState(false)
   // Phase 55: true while the floor rail's slider is being dragged. Passed to
   // CameraRig, which holds the floor-change lift until the drag ends so a scan
   // through several storeys doesn't make the camera chase the pointer.
@@ -1314,88 +1320,22 @@ function Viewer3D() {
       onPointerMove={handleContainerPointerMove}
       onPointerLeave={() => setHoveredDevice(null)}
     >
-      {/* All 3D controls are grouped into a single dark-glass top-right panel
-          (collapsible) so they read as one panel and don't clash with the
-          host product's top-left toolbar. Rows: floor-visibility + auto-rotate,
-          camera presets, floor selector. */}
-      <div className={`viewer3d__panel${panelCollapsed ? ' viewer3d__panel--collapsed' : ''}`}>
-        <div className="viewer3d__panel-head">
-          <button
-            type="button"
-            className="viewer3d__panel-caret"
-            onClick={() => setPanelCollapsed((c) => !c)}
-            title={panelCollapsed ? '展開' : '收合'}
-          >
-            <Icon name={panelCollapsed ? 'chevronRight' : 'chevronDown'} size={12} />
-          </button>
-          <span className="viewer3d__panel-title">3D 視圖</span>
-          {/* 3D is view-only (ui-spec §2.5): objects can be selected (right
-              panel opens for edits) but geometry is edited back in 2D. */}
-          <span
-            className="viewer3d__panel-badge"
-            title="3D 僅供檢視：點選物件可開啟右側屬性面板編輯參數；移動 / 繪製請回 2D"
-          >
-            唯讀
-          </span>
-        </div>
+      {/* 3D controls, grouped into one dark-glass card in the top-right so
+          they read as a panel rather than buttons scattered over the canvas.
+          Two bands separated by a rule, because these are not one kind of
+          control: camera presets are ACTIONS (fire and forget, no state),
+          while the rest are STATE (each shows what is currently on). Mixing
+          them in one list made every row look equally clickable-with-effect.
 
-        {!panelCollapsed && (
-        <>
-        {/* Phase 55: the 單樓層/全樓層 toggle moved to the floor rail (right
-            edge) — it asks the same question as the floor list, so it belongs
-            beside it rather than in a panel two corners away. */}
-        <div className="viewer3d__panel-row">
-          <button
-            type="button"
-            className={`viewer3d__floors-btn${autoRotate ? ' viewer3d__floors-btn--active' : ''}`}
-            onClick={toggleAutoRotate}
-            title={autoRotate ? '停止自動旋轉' : '自動旋轉（轉盤環繞，拖曳即停）'}
-          >
-            🔄 自動旋轉
-          </button>
-        </div>
-
-        {/* Phase 48+ 全樓層熱圖 — per-floor field planes on every stacked
-            floor. Only computes while this toggle is on and 3D is visible;
-            unchanged data re-uses cached canvases. */}
-        <div className="viewer3d__panel-row">
-          <button
-            type="button"
-            className={`viewer3d__floors-btn${heatmap3DAllFloors ? ' viewer3d__floors-btn--active' : ''}`}
-            onClick={() => toggleLayer('heatmap3DAllFloors')}
-            disabled={!hmEnabled || !show3DAllFloors}
-            title={
-              !hmEnabled ? '先開啟熱圖再使用'
-                : !show3DAllFloors ? '請先在右側樓層條切換為「全樓」'
-                : heatmap3DAllFloors ? '關閉其他樓層的熱圖平面'
-                : '為每個樓層各算一張熱圖（進 3D 才計算，資料未變時使用快取）'
-            }
-          >
-            🌡️ 全樓層熱圖
-          </button>
-        </div>
-
-        {/* Floor plate: solid → ghost → off. Stacked plates hide the storeys
-            below, so reviewing a whole building wants them faded or gone. */}
-        <div className="viewer3d__panel-row">
-          <button
-            type="button"
-            className={`viewer3d__floors-btn${floorPlate3D !== 'solid' ? ' viewer3d__floors-btn--active' : ''}`}
-            onClick={cycleFloorPlate3D}
-            title={floorPlate3D === 'solid'
-              ? '目前：實心樓板（含平面圖）。點一下改半透明'
-              : floorPlate3D === 'ghost'
-                ? '目前：半透明樓板（無平面圖，看得到下層）。點一下完全隱藏'
-                : '目前：隱藏樓板（只剩牆體與設備）。點一下回實心'}
-          >
-            {floorPlate3D === 'solid' ? '🏢 樓板：實心'
-              : floorPlate3D === 'ghost' ? '🏢 樓板：半透明'
-              : '🏢 樓板：隱藏'}
-          </button>
-        </div>
-
+          No title bar: "3D 視圖" restated the mode the 2D/3D switch already
+          shows, the 唯讀 badge repeated what the right panel says when you
+          select something, and the collapse caret guarded four short rows.
+          Labels carry no icons — 🏢 appeared on three unrelated controls, so
+          it had stopped distinguishing anything. */}
+      <div className="viewer3d__panel">
         {/* 28-3 Camera presets — three quick poses to re-orient without
-            orbiting manually. */}
+            orbiting manually. First because they are the safest control here:
+            they change the viewpoint, never what is drawn. */}
         <div className="viewer3d__panel-row" role="group" aria-label="相機視角">
           <button
             type="button"
@@ -1422,8 +1362,67 @@ function Viewer3D() {
             正視
           </button>
         </div>
-        </>
-        )}
+
+        <div className="viewer3d__panel-rule" />
+
+        {/* The two on/off toggles, side by side so their lit/unlit states can
+            be compared at a glance.
+            Phase 55: the 單樓層/全樓層 toggle used to lead this row; it moved
+            to the floor rail, where it sits beside the floor list that asks
+            the same question. */}
+        <div className="viewer3d__panel-row">
+          <button
+            type="button"
+            className={`viewer3d__floors-btn${autoRotate ? ' viewer3d__floors-btn--active' : ''}`}
+            onClick={toggleAutoRotate}
+            title={autoRotate ? '停止自動旋轉' : '自動旋轉（轉盤環繞，拖曳即停）'}
+            aria-pressed={autoRotate}
+          >
+            自動旋轉
+          </button>
+          {/* Phase 48+ per-floor heatmap planes on every stacked floor. Only
+              computes while this is on and 3D is visible; unchanged data
+              re-uses cached canvases. */}
+          <button
+            type="button"
+            className={`viewer3d__floors-btn${heatmap3DAllFloors ? ' viewer3d__floors-btn--active' : ''}`}
+            onClick={() => toggleLayer('heatmap3DAllFloors')}
+            disabled={!hmEnabled || !show3DAllFloors}
+            aria-pressed={heatmap3DAllFloors}
+            title={
+              !hmEnabled ? '先開啟熱圖再使用'
+                : !show3DAllFloors ? '請先在右側樓層條切換為「全樓」'
+                : heatmap3DAllFloors ? '關閉其他樓層的熱圖平面'
+                : '為每個樓層各算一張熱圖（進 3D 才計算，資料未變時使用快取）'
+            }
+          >
+            各層熱圖
+          </button>
+        </div>
+
+        {/* Floor plate: solid → ghost → off. A segmented control rather than
+            the old one-button cycle — three states can't be read off a single
+            label, and reaching the third meant clicking through the second.
+            Same shape as the floor rail's 全樓/單層 switch, so "pick one of
+            these" looks the same wherever it appears in the 3D view.
+            Its own row: three segments need the panel's full width. */}
+        <div className="viewer3d__panel-seg" role="group" aria-label="樓板顯示">
+          <span className="viewer3d__panel-seg-label">樓板</span>
+          <div className="viewer3d__panel-seg-track">
+            {FLOOR_PLATE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`viewer3d__panel-seg-btn${floorPlate3D === opt.value ? ' viewer3d__panel-seg-btn--on' : ''}`}
+                onClick={() => { if (floorPlate3D !== opt.value) setFloorPlate3D(opt.value) }}
+                title={opt.title}
+                aria-pressed={floorPlate3D === opt.value}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Phase 55 floor elevator rail — right edge, vertically centred. The

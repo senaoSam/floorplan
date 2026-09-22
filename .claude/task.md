@@ -48,6 +48,191 @@
 
 ## 還沒做的事
 
+### Phase 55 3D 樓層電梯條（Floor Elevator Rail）— 2026-09-22 立項
+
+> **來由**：3D 切樓層目前只有左側 SidebarLeft 與右上 FloorSelector 兩個 DOM 入口，兩者都與 3D 空間無關。
+> 使用者要更直覺的切換方式。設計討論結論：**分兩個 Phase**，55 做螢幕固定的 2D overlay 電梯條，56 做 3D 空間中的樓層標籤塔。
+> 兩者不衝突且互補（55 解決「快速切換」，56 解決「視線不離開模型的空間對應」），但**分開做、各自驗收**。
+
+**定位**：螢幕右側固定的 2D overlay 垂直樓層控制條。取代右上 `FloorSelector`，並接管單/全樓層切換。
+
+**組成（由上而下）**
+```
+     ┌─────┐
+     │ 🏢  │  ← 單/全樓層切換（接管自 viewer3d__panel）
+     ├─────┤
+     │ 4F  │
+     │ 3F  │
+     │▓2F▓ │  ← active 滑塊，可拖曳
+     │ 1F  │
+     └─────┘
+```
+
+- **樓層刻度**：由上而下＝高樓層在上（對齊 SidebarLeft 與 3D 堆疊；`floors[0]` 在地面，故 render 用 `floors.slice().reverse()`）。每格顯示 `floor.name`。
+- **active 滑塊**：高亮，可拖曳。
+- **點擊任一格**：直接切該層。
+- **單/全樓層切換**：置於條頂端，**兩段式 switch `全樓` | `單層`**（2026-09-22 使用者拍板；經歷 icon → 長文字二態 → 兩段式三版）。沿用 `toggleLayer('show3DAllFloors')`。
+  - **為何兩段式而非單顆二態鈕**：單顆鈕永遠要回答「現在顯示的字是當前狀態、還是點了會變成的狀態」，只能靠 tooltip 解；兩個選項同時列出、亮起來的那半就是現況，一眼就懂。
+  - **兩段各自是獨立 button，且只在「自己不是亮的那半」時才呼叫 toggle** → 點亮著的那半是 no-op，不會把使用者剛選的狀態切掉；該半 `cursor: default` 不誘導點擊。
+  - 亮色用 `rgba(59,130,246,0.85)`，與 active 樓層格同一個藍 → 「這是目前狀態」在整條 rail 讀起來一致（Phase 56 標籤塔也要對齊此值）。
+  - 未亮那半用 `$text-secondary` 不是 `$text-tertiary`：它是可點的活選項不是 disabled，tertiary 在深色 track 上 11px 幾乎看不清。
+  - 字級 11px（格子 12px）→ 讀起來是「條的標頭」而非兩個樓層項。
+  - 格子改 `min-width: 100%` 跟著 switch 的寬度，否則 highlight 會比上方窄一截。
+
+**拍板的設計決策（2026-09-22 使用者確認）**
+
+| # | 決策 | 理由 |
+|---|------|------|
+| 1 | 電梯條形式＝**可拖曳滑塊版**（非純按鈕堆） | 拖曳可連續掃樓層找目標；純按鈕堆少了掃描能力 |
+| 2 | **不做**「拖曳中 3D 樓層剖面」（拖到哪層、該層以上樓板暫時隱藏） | 與既有 `floorPlate3D` 三態控制重疊會打架 |
+| 3 | 放**右側** | 與被取代的 FloorSelector 同側，肌肉記憶不變；沿用 Phase 39 `--right-dock` 避讓 |
+| 4 | **拿掉**右上 `FloorSelector` | 定位與電梯條完全重疊（都是螢幕固定位置切換器），電梯條更直覺且多了拖曳掃描。左側 SidebarLeft **保留**（2D 模式也要用） |
+| 5 | **拖曳中不移動鏡頭**，只換 active 樓層高亮，**放開才 tween 到位** | 拖曳目的是「掃描找樓層」，此時使用者在看整棟堆疊，鏡頭不該一路追（既有 tween `k=8`，連拖 5 層會暈） |
+| 6 | `🌡️ 全樓層熱圖` 鈕**留在 viewer3d__panel 不搬**，但 disabled 時 title 改為明講「請先在右側樓層條切換為全樓層」 | 它是熱圖家族設定，屬於面板；搬到電梯條會讓條開始長雜物。但單/全樓層移走後它的 disabled 依賴變成跨區域（`disabled={!hmEnabled || !show3DAllFloors}`），必須把指引寫清楚 |
+| 7 | 55 與 56 **視覺語彙須共用** | active 樓層在電梯條是高亮滑塊、在 3D 標籤塔是高亮牌子，兩邊同時亮，使用者才會理解成「同一件事的兩個視圖」而非兩套獨立控制項 |
+
+**實作要點**
+
+| 項目 | 做法 |
+|---|---|
+| 狀態 | **不新增 store state**；讀 `floors` / `activeFloorId` / `show3DAllFloors`，寫 `setActiveFloor` / `toggleLayer` |
+| 拖曳 | pointer capture；格高＝容器高 ÷ 樓層數；拖曳中 clamp + **只在跨格時**才呼叫 `setActiveFloor`（避免同層重複觸發 tween） |
+| 避讓 | 沿用 Phase 39 `--right-dock` CSS 變數（PanelRight 開啟時平移） |
+| z-index | 用 `_variables.sass` token，**禁裸數字**（Phase 39 規範） |
+| 樣式 | `.sass` indented，`@use '@/styles/variables' as *` |
+| 移除 | `FloorSelector` component（Viewer3D.jsx ~L677）+ 其 sass（`.viewer3d__floor-selector` / `__floor-trigger` / `__floor-trigger-label` / `__floor-trigger-caret` / `__floor-list` / `__floor-option`） |
+
+**MCP 驗證（2026-09-22，0 console errors）**
+- 位置/幾何：rail 右緣 917（視窗 929）、垂直置中、5 格各 30px 連續無縫、由上而下 5F→1F、1F active
+- 點擊切換：點 3F → store `activeFloorId` = `floor-test-3`、rail highlight 同步
+- **拖曳掃描**：5F→4F→3F→2F→1F 逐格跟隨，`dragging` 全程 true、放開轉 false
+- **決策 5 實測成立**：整段拖曳 `camera.position.y` 恆為 **25.89 零變動**（鏡頭完全不追）
+- 長距掃描（20 層）：9F→11F→13F→14F→16F→18F→20F 單調跟隨；**兩端 overshoot 正確 clamp**（往上超出→20F、往下超出→2F，不會卡住或變 null）
+- 單/全樓層 toggle：🏢↔🏠 與 `show3DAllFloors` 雙向同步、`aria-pressed` 正確；`🌡️ 全樓層熱圖` 在單樓層時 disabled 且 title 顯示新指引「請先在右側樓層條切換為全樓層（🏠 → 🏢）」
+- **right-dock 避讓**：選取 AP 開 PanelRight → `--right-dock` 0px→300px、rail 右緣 917→617（PanelRight 左緣 629，無重疊）
+- 20 層高樓：rail 高度 408px 仍在視窗內（917）、cells 捲動（600 > 360）、active cell 自動捲入視野（1F 時 scrollTop 240、跳 20F 後 scrollTop 0）
+- 截圖：`.playwright-mcp/p55-01` ~ `p55-06`
+
+**55-B 既有 bug 修復：切樓層鏡頭升降完全失效（2026-09-22，驗證 55 時發現並一併修掉）**
+
+**症狀**：切樓層後鏡頭完全不動。實測 `camera.position.y` 恆為 25.89，而 1F↔5F 的 target 應差 12m。
+**已 stash 反證**：把 55 改動全部 stash 回 baseline 後，用 `setActiveFloor`（等同 SidebarLeft 路徑）切樓層鏡頭一樣不動 → 確認是既有 bug，非 55 造成。
+
+**歸因過程（逐層探針，不靠推理）**：先前推測的「`CameraRig` first-mount 分支 seed 錯 `lastTarget`」**是錯的**，探針打臉：
+- effect 有正常觸發、`lastTarget=[15,1,…]` vs `target=[15,13,…]` 判定有變、`TWEEN-START` 有發、`desiredCam.y=37.89` 算得完全正確
+- `useFrame` 也有在跑（idle 500ms 內 25 幀）、`tweening.current` 全程 true、走的是 default-lerp 分支（`durMs: 0`）
+- 但 `camY` 每幀原地不動 → 在 lerp 內直接打印：**`dt: 0` → `alpha: 0` → 每次 lerp 都是 no-op**
+
+**真根因**：**r3f 的 `frameloop` 切成 `'never'`（2D 時隱藏 3D）會停掉 r3f 內部的 three.js `Clock`，切回 `'always'` 不會重啟它** —— 所以 `useFrame` 的 `dt` 整個 page 生命週期恆為 **0**。
+旁證：raw rAF 正常（150ms delta），固定時長的 tween 分支（相機預設位 俯瞰/等角/正視、2D→3D 進場）**不受影響**，因為它本來就用 `performance.now()` 自己計時；auto-rotate 也正常，因為走 OrbitControls 自己的計時。
+
+**修法**（`Viewer3D.jsx` CameraRig）：default-lerp 分支改用 `performance.now()` 自算 delta（新增 `lastLerpMs` ref，tween 起始時歸零避免用到上一次 tween 的殘留時間戳），並**移除 `useFrame` 的 `dt` 參數**（留著只會誘使後人再踩一次）。
+
+**驗證**：
+- 點擊切樓層：5F=**37.89** / 3F=**31.89** / 1F=**25.89**（樓高 3m，數值完全對得上），且有正常緩動收斂（25.89→33.34→34.18→37.14→37.63→37.79→…→37.89）
+- 拖曳：全程凍結 25.89 → 放開後單次升降到 37.89（**決策 5 至此才真正可觀察**）
+- SidebarLeft 路徑（store `setActiveFloor`）同樣正常
+- 無回歸：三個相機預設位各自落在不同正確姿態、2D→3D 進場動畫正常滑行（41→45 俯視 beat → 37.89 等角）、進場後 auto-rotate 正常啟動
+
+**55-C 同源根因修復：r3f Clock 被停掉導致所有 `elapsedTime` 動畫凍結（2026-09-22，使用者指示一併處理）**
+
+**r3f 原始碼實證**（`react-three-fiber.cjs.dev.js`）：
+- L1135：`if (frameloop === 'never') { clock.stop(); clock.elapsedTime = 0 }`
+- L1275：`setFrameloop` **只改 store flag**，全 library **沒有任何一處呼叫 `clock.start()`**
+→ 本專案 2D 時把 `frameloop` 設為 `'never'`（Phase 45 凍結），之後切回 `'always'` clock 永遠不會重啟，
+  所以 `clock.elapsedTime` 恆為 0、`useFrame` 的 `dt` 恆為 0，**整個 page 生命週期都如此**。這是 r3f 7.0.29 的限制，不是專案 bug。
+
+**實測凍結證據**（探針 `window.__clockElapsed`）：`elapsedTime` 六次取樣全為 `0`。
+
+**修法**：`WakeOnVisible` 在 hidden→visible 邊緣加一行 `clock.start()`（與既有的 `invalidate()` 並列）。
+一行解決所有消費者，且 `start()` 會重設 elapsedTime 並以當下為基準重算 oldTime，所以切回來的第一幀不會拿到「隱藏多久」的暴衝 delta。
+
+**A/B 反證**（把 `clock.start()` 註解掉再跑同一組量測）：
+
+| 指標 | 沒有修法 | 有修法 |
+|---|---|---|
+| AP 選取脈動環 `scale.x` | `1,1,1,1,1,1` **完全不動** | `1.43→1.47→1.01→1.05→1.09→1.14→1.18→1.22` 正確鋸齒（1.0→1.5，週期 1.6s） |
+| Camera flow chevron 畫布像素和 | 首次畫完後 `54229629` **四次不變** | 每次取樣都不同（10 取樣 10 個相異值） |
+| `useFrame` 的 `dt` | 恆 `0` | `~0.0166`（60fps） |
+
+**`dt` 修法（55-B）刻意保留不回收**：clock 修好後 `dt` 已恢復正常、`performance.now()` 版本技術上變成多餘，
+但切樓層升降是「clock 萬一again被停掉也必須還能動」的那一個，保留自帶計時可避免日後改 frameloop 時又無聲復發（固定時長 tween 分支本來就是同樣理由自帶計時）。
+
+**回歸驗證（0 console errors）**：
+- **Phase 45 隱藏凍結未破**（最大風險點）：2D 時 flow 畫布像素和兩次取樣完全相同 → 隱藏中確實沒在跑；切回 3D 恢復動畫
+- 切樓層升降：點擊 5F=37.89 / 3F=31.89 / 1F=25.89（樓高 3m 完全對得上）
+- 決策 5：拖曳中 camY 四次取樣全等（凍結）→ 放開升到 37.89
+- 2D→3D 進場動畫：14 取樣 13 個相異值，正確弧線（41.23→45.17 俯視 beat→37.89 等角），進場後 auto-rotate 正常啟動
+- 三個相機預設位：俯瞰/等角/正視 各自落在不同正確姿態
+- 樓層電梯條：round trip 後 5 格與 active 態都正常
+
+> **量測陷阱筆記**：flow 動畫「切回 3D 後沒恢復」曾誤判一次——2 次取樣剛好抓到 crawl 相位相近的兩幀。
+> 改成 10 次取樣才看出 10 個相異值。**判定週期性動畫是否在跑，取樣數要遠大於 2。**
+
+**55-D scope 切換改兩段式 switch（2026-09-22 使用者指示，三版演進）**：
+`🏢/🏠` icon →（一版）文字二態 `全部樓層`/`僅當前層` →（定案）**兩段式 `全樓` | `單層`，亮左或亮右**。
+
+**量測驗證（0 console errors）**：兩段等寬各 34px、同一列、皆不換行（22px 高）、switch 與格子左右緣對齊（誤差 <0.6px）、
+條寬 90px；**窄視窗 929px 仍完整在視窗內**，開 PanelRight 後 rail 右緣 617 vs 面板左緣 629 **無重疊**；
+`aria-pressed` 兩段都正確跟著切換。
+- **點亮著那半 = no-op 已實測**（`showAll` 維持 `true` 不變）；點暗的那半才切換。
+- **從 switch 往下拖進格子不會誤觸選樓層**（active 維持 5F）——switch 在 drag host 之外。
+**互動無回歸**：點擊升降 5F=37.89/3F=31.89/1F=25.89、拖曳凍結後放開升到 37.89。
+截圖 `.playwright-mcp/p55-10`（全樓）、`p55-11`（單層）、`p55-12`（窄視窗+面板）。
+
+**55-E 3D 面板精簡 + 重排 + 去 icon（2026-09-22 使用者指示）**
+
+**移除**：標題「3D 視圖」（2D/3D 切換鈕已經說明了模式）、「唯讀」徽記（選取物件時右側面板本來就會說）、收合 chevron（只守著四列短內容）→ 連帶刪掉 `panelCollapsed` state 與 `Icon` import。
+
+**重排的依據：六個鈕本來就不是同一類東西**——相機預設位是**動作**（觸發即忘、無狀態），其餘是**狀態**（各自顯示目前開/關）。舊排法把兩類混在同一串列，每列看起來都一樣「點了會怎樣」。新版分兩區、中間一條 hairline：
+
+```
+┌──────────────────────┐
+│  俯瞰   等角   正視   │  ← 動作（最安全：只改視角不改內容）
+├──────────────────────┤  ← hairline
+│  自動旋轉   各層熱圖  │  ← 開關（並排，亮暗好比較）
+│  樓板 [實心|半透|隱藏] │  ← 三段式（獨佔一列）
+└──────────────────────┘
+```
+
+**去 icon**：🏢 同時出現在三個不相干的控制項上（全樓層 / 樓板 / 樓板三態），早就失去辨識功能。全部改純文字。
+**改名**：`🌡️ 全樓層熱圖` → **`各層熱圖`**（與電梯條的「全樓」呼應，且明講「每層各一張」）。
+
+**樓板改三段式**（使用者拍板）：單顆循環鈕的問題是「三態無法從單一 label 讀出來」，而且要到第三態得先經過第二態。
+新增 store `setFloorPlate3D(value)` 直接設值（保留原 `cycleFloorPlate3D` 未動，以防他處使用）。
+形狀與電梯條的 `全樓|單層` 完全一致 → 「從這幾個選一個」在 3D 視圖內處處同一個語彙；亮色統一 `rgba(59,130,246,0.85)`。
+
+**順帶修的既有缺漏**：`__floors-btn` **從來沒有 `:disabled` 樣式**。以前「全樓層熱圖」單獨一列還看不太出來，現在與「自動旋轉」並排，不加的話兩顆看起來一樣可按、只有 tooltip 說不行 → 補 `opacity: 0.4` + `cursor: not-allowed`。
+
+**驗證（0 console errors）**：
+- 結構：標題/徽記/chevron 皆已不存在、hairline 實際存在（162×1px）、面板 184×135、**全面板文字零 emoji/icon glyph**
+- 三段式樓板：三態各自設值正確、**點亮著那段是 no-op**、**3D 場景確實跟著變**（實心 8 張貼圖平面 → 半透 3 張（平面圖消失）→ 隱藏 2 張且 slab/edge 數下降 198/51→193/46）
+- disabled：切「單層」後 各層熱圖 `disabled=true`、opacity 0.4、cursor not-allowed、tooltip 改為「請先在右側樓層條切換為『全樓』」；切回「全樓」恢復
+- 無回歸：三個預設位各自落在不同正確姿態、自動旋轉可切且**實際在轉**、各層熱圖 store 正確、電梯條不受影響
+- 截圖 `.playwright-mcp/p55-13`（新面板）、`p55-14`（disabled 態）、`p55-15`（最終）
+
+### Phase 56 3D 樓層標籤塔（Floor Tab Tower）— 2026-09-22 立項，**待 55 驗收後開工**
+
+**定位**：3D 空間中、貼著樓層堆疊外緣的可點樓層牌，像大樓側面的樓層指示。解決「視線不離開模型」的空間對應。
+
+- 每層 slab 外側掛一片 billboard 牌（`x = -offset` 樓板外，`y = elevation + 樓高一半`）。
+- hover → 牌子放大 + 該層整體從 dim 提到接近 active 亮度（預覽）；click → `setActiveFloor`，鏡頭沿用既有 tween 升降。
+- active 牌高亮，與 Phase 55 電梯條滑塊同一套語彙（決策 7）。
+
+**地基（已存在，不用新做）**
+- `Label3D.jsx`：billboard sprite、深色 pill + 白字、texture LRU 快取 256、`depthTest={false}` 故永不被遮擋。
+- `FloorStack`（Viewer3D.jsx ~L287）：每層一個 group，已抬到 `computeFloorElevations` 的 elevation，非 active 層已有 `dimOpacity` 語彙。
+- 切 active floor 已有鏡頭 lerp tween（`k=8`，註解稱 "floor-switch lifts"）。
+
+**開工前要拍板的兩個取捨（尚未決定）**
+1. **牌子貼哪一側**：(a) 貼死世界座標某側（簡單，但相機繞到背面會被整棟擋住）／(b) 每 frame 依相機方位選最近一角（永遠看得到，但繞圈時會「跳」角）／(c) 四角都掛（永遠有一組面向你，但四倍 sprite + 視覺變吵）。**先前傾向 (b)，且把換角限制在「相機停下時」避免拖曳中亂跳。**
+2. **連接線**：Label3D 是 `depthTest={false}`，牌子**不會**被上層樓板擋住、會穿透浮在最上面。這是好事（永遠點得到）也是壞事（看似飄在空中、跟樓層對不上）。**先前傾向保留 `depthTest={false}` 但加一條連接線從牌子拉到該層樓板邊緣**，讓歸屬讀得出來。
+
+**注意**：樓板 slab 與 edge 目前都是 `raycast={() => null}`（刻意不吃點擊，避免攔截落在空白處的點擊）。標籤塔要**新增**明確 hit target，**不要**解開既有的 raycast 關閉。
+
+---
+
+
 ### Phase 53 三輪 bug 獵捕修復（2026-08-13 立項，**G1~G10 ✅ 全部完成 2026-08-19**）
 
 > **報告**：`.claude/bug-hunt-2026-08-12.md`（93 條，含每條的失效情境與檔案:行號）

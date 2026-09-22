@@ -218,6 +218,10 @@ export const useEditorStore = create((set, get) => ({
       : s.floorPlate3D === 'ghost' ? 'off'
       : 'solid',
   })),
+  // Pick a plate mode outright. The 3D panel's segmented control shows all
+  // three at once, so it sets the one the user clicked instead of stepping
+  // through the cycle to reach it.
+  setFloorPlate3D: (floorPlate3D) => set({ floorPlate3D }),
   toggleAPBand: (band) => set((s) => ({
     showAPBand: { ...s.showAPBand, [band]: !s.showAPBand[band] },
   })),

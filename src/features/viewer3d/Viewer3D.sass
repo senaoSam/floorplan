@@ -15,10 +15,12 @@
   // old flat value, now the midpoint).
   background: linear-gradient(180deg, #0a0f1d 0%, #0f172a 55%, #16203a 100%)
 
-  // Unified top-right control panel. Holds every 3D control (floor
-  // visibility, auto-rotate, presets, floor selector) grouped inside one
-  // dark-glass card (matching CoveragePanel / TrendPanel chrome) so they read
-  // as a single panel instead of buttons scattered over the canvas.
+  // Top-right control card. Holds the camera presets and the view-state
+  // controls in one dark-glass surface (matching CoveragePanel / TrendPanel
+  // chrome) so they read as a single panel instead of loose buttons.
+  //
+  // No header row any more: the title repeated the mode the 2D/3D switch
+  // already shows, and the collapse caret guarded only a few short rows.
   &__panel
     position: absolute
     top: 12px
@@ -31,55 +33,24 @@
     flex-direction: column
     align-items: stretch
     gap: 6px
-    padding: 9px 10px 10px
+    padding: 10px
     background: rgba(15, 23, 42, 0.9)
     border: 1px solid rgba(255, 255, 255, 0.12)
     border-radius: 12px
     backdrop-filter: blur(6px)
     pointer-events: auto
-    &--collapsed
-      gap: 0
-      padding-bottom: 9px
-
-  // Header row: title + collapse caret.
-  &__panel-head
-    display: flex
-    align-items: center
-    gap: 6px
-
-  &__panel-title
-    flex: 1
-    font-size: 12px
-    font-weight: 700
-    color: $text-primary
-    white-space: nowrap
-
-  // 「唯讀」badge — 3D is a viewer, not an editor (ui-spec §2.5).
-  &__panel-badge
-    flex: none
-    padding: 1px 7px
-    border: 1px solid rgba(148, 163, 184, 0.45)
-    border-radius: 8px
-    color: $text-tertiary
-    font-size: 10px
-    font-weight: 600
-    cursor: help
-    user-select: none
-
-  &__panel-caret
-    background: transparent
-    border: none
-    color: $text-secondary
-    font-size: 11px
-    cursor: pointer
-    padding: 0 2px
-    &:hover
-      color: $text-primary
 
   &__panel-row
     display: flex
     justify-content: flex-end
     gap: 6px
+
+  // Divides the camera ACTIONS above from the view STATE below. The only
+  // grouping this panel needs, so it is a hairline rather than a heading.
+  &__panel-rule
+    height: 1px
+    margin: 1px 0
+    background: rgba(255, 255, 255, 0.1)
 
   &__floors-btn
     pointer-events: auto
@@ -104,6 +75,16 @@
       &:hover
         background: rgba(37, 99, 235, 0.9)
 
+    // 各層熱圖 is unavailable unless the heatmap is on AND the rail is set to
+    // 全樓. It now sits beside 自動旋轉, so without this the two look equally
+    // pressable and only the tooltip says otherwise.
+    &:disabled
+      opacity: 0.4
+      cursor: not-allowed
+      &:hover
+        border-color: rgba(255, 255, 255, 0.18)
+        background: rgba(30, 41, 59, 0.85)
+
   &__preset-btn
     pointer-events: auto
     height: 30px
@@ -121,6 +102,59 @@
     &:hover
       border-color: rgba(255, 255, 255, 0.4)
       background: rgba(51, 65, 85, 0.9)
+
+  // Floor-plate segmented control. Same construction as the floor rail's
+  // 全樓/單層 switch — outer track, segments carry the fill — so "pick one of
+  // these" looks identical wherever it appears in the 3D view.
+  &__panel-seg
+    display: flex
+    align-items: center
+    gap: 8px
+
+  &__panel-seg-label
+    flex: none
+    color: $text-secondary
+    font-size: 11px
+    white-space: nowrap
+
+  &__panel-seg-track
+    flex: 1
+    display: flex
+    gap: 2px
+    padding: 2px
+    border: 1px solid rgba(255, 255, 255, 0.18)
+    border-radius: 8px
+    background: rgba(15, 23, 42, 0.7)
+
+  &__panel-seg-btn
+    flex: 1
+    min-width: 0
+    height: 22px
+    padding: 0 6px
+    border: none
+    border-radius: 6px
+    background: transparent
+    // Secondary, not tertiary: an unlit segment is a live choice meant to be
+    // read and clicked, not disabled text.
+    color: $text-secondary
+    font-size: 11px
+    line-height: 1
+    white-space: nowrap
+    cursor: pointer
+    transition: background 0.15s, color 0.15s
+
+    &:hover
+      color: $text-primary
+      background: rgba(51, 65, 85, 0.75)
+
+    // Live segment. Same blue as an active floor cell and the rail's lit
+    // half, so "this is the current state" reads the same everywhere.
+    &--on
+      color: #fff
+      background: rgba(59, 130, 246, 0.85)
+      cursor: default
+      &:hover
+        background: rgba(59, 130, 246, 0.85)
 
   // Phase 55 Floor elevator rail — vertical floor strip pinned to the right
   // edge, centred vertically. Replaces the 28-2 floor-selector dropdown
