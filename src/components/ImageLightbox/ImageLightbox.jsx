@@ -1,13 +1,20 @@
-import React, { useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import './ImageLightbox.sass'
 
 // Full-screen image viewer for inspecting API result images (overlay /
-// denoised) at native size. Sits above the modal that opened it.
+// denoised). Sits above the modal that opened it.
 //
-// Click the backdrop or press Escape to close. The image itself scrolls inside
-// the frame when it overflows, so clicking it never dismisses the viewer.
+// Opens fit-to-frame; clicking the image toggles native 1:1 size, where it
+// scrolls inside the frame. Click the backdrop or press Escape to close.
 export default function ImageLightbox({ open, src, title, onClose }) {
+  const [fit, setFit] = useState(true)
+
+  // Every newly opened image starts fitted.
+  useEffect(() => {
+    if (open) setFit(true)
+  }, [open, src])
+
   useEffect(() => {
     if (!open) return
     const onKeyDown = (e) => {
@@ -52,9 +59,16 @@ export default function ImageLightbox({ open, src, title, onClose }) {
         </div>
       </div>
       <div className="image-lightbox__frame">
-        <img className="image-lightbox__img" src={src} alt={title || ''} />
+        <img
+          className={`image-lightbox__img image-lightbox__img--${fit ? 'fit' : 'native'}`}
+          src={src}
+          alt={title || ''}
+          onClick={() => setFit((v) => !v)}
+        />
       </div>
-      <div className="image-lightbox__hint">點擊背景或按 Esc 關閉</div>
+      <div className="image-lightbox__hint">
+        點擊圖片切換{fit ? '原尺寸' : '符合畫面'} · 點擊背景或按 Esc 關閉
+      </div>
     </div>,
     document.body,
   )

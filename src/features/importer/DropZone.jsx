@@ -38,7 +38,7 @@ function DropZone() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".png,.jpg,.jpeg,.pdf"
+        accept=".png,.jpg,.jpeg,.pdf,.dxf,.dwg"
         style={{ display: 'none' }}
         onChange={handleFileChange}
       />
@@ -53,7 +53,7 @@ function DropZone() {
       {!busy && (
         <>
           <p className="drop-zone__sub">或點擊選擇檔案</p>
-          <p className="drop-zone__hint">支援 PNG、JPG、PDF（多頁自動拆樓層）</p>
+          <p className="drop-zone__hint">支援 PNG、JPG、PDF（多頁自動拆樓層）、DXF、DWG</p>
         </>
       )}
     </div>

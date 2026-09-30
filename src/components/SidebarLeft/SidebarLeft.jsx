@@ -355,7 +355,7 @@ function SidebarLeft() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".png,.jpg,.jpeg,.pdf"
+            accept=".png,.jpg,.jpeg,.pdf,.dxf,.dwg"
             style={{ display: 'none' }}
             onChange={handleFileChange}
           />

@@ -167,6 +167,7 @@ function ContextMenuMount() {
     onDelete = () => {
       useFloorStore.getState().updateFloor(targetId, {
         imageUrl: null,
+        cadFile: null,
         imageWidth: undefined,
         imageHeight: undefined,
         cropX: null,

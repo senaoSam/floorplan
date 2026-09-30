@@ -20,6 +20,7 @@ import CoveragePanel from '@/components/CameraTimeline/CoveragePanel'
 import LiveViewModal from '@/components/CameraTimeline/LiveViewModal'
 import CalibrationModal from '@/components/CameraTimeline/CalibrationModal'
 import DropZone from '@/features/importer/DropZone'
+import ImportLoadingOverlay from '@/components/ImportLoadingOverlay/ImportLoadingOverlay'
 import './CanvasArea.sass'
 
 // Standalone-mode canvas pane — wraps the embeddable FloorplanSystem
@@ -58,6 +59,7 @@ function CanvasArea() {
           <DropZone />
         </div>
       )}
+      {(hasFloor || is3D) && <ImportLoadingOverlay />}
       <Toolbar />
       <ActiveModeBadge />
       {/* Top-left stack: layer toggle row → regulatory → coverage report

@@ -386,7 +386,7 @@ export default function ApiTestModal({ open, onClose }) {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/png,image/jpeg"
+                accept="image/png,image/jpeg,.dxf,.dwg"
                 disabled={running}
                 onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
               />

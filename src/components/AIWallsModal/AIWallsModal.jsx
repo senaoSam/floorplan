@@ -10,7 +10,8 @@ import './AIWallsModal.sass'
 
 // AI Wall flow — backed by the "Floorplan cv+graph pipeline" service.
 //
-//   1. POST the active floor's image to /jobs (multipart) and get a job_id.
+//   1. POST the active floor's image — or its source DXF/DWG for a CAD
+//      floor — to /jobs (multipart) and get a job_id.
 //   2. Poll GET /jobs/{id} until the job reaches a terminal state.
 //   3. Convert the returned line list into walls via floorplanFromLines
 //      and REPLACE the active floor's walls.
@@ -166,14 +167,27 @@ export default function AIWallsModal({ open, onClose }) {
     setStep('running')
     const t0 = performance.now()
     try {
-      // 1 — upload the raw floor image and enqueue the job.
-      setProgressMsg('上傳底圖…')
-      const srcRes = await fetch(floor.imageUrl)
-      if (!srcRes.ok) throw new Error(`讀取底圖失敗 (HTTP ${srcRes.status})`)
-      const srcBlob = await srcRes.blob()
-
+      // 1 — upload the floor's source and enqueue the job. A CAD floor sends
+      // the original DXF/DWG (the backend sniffs the format from content but
+      // wants the real file name); anything else sends the raw floor image.
       const fd = new FormData()
-      fd.append('file', srcBlob, 'floorplan.png')
+      let toCanvas = 1
+      if (floor.cadFile) {
+        setProgressMsg('上傳 CAD 檔…')
+        fd.append('file', floor.cadFile, floor.cadFile.name)
+      } else {
+        setProgressMsg('上傳底圖…')
+        const srcRes = await fetch(floor.imageUrl)
+        if (!srcRes.ok) throw new Error(`讀取底圖失敗 (HTTP ${srcRes.status})`)
+        const srcBlob = await srcRes.blob()
+        // PDF backgrounds are rendered at 2× for sharpness, so the file is
+        // larger than the floor's canvas size. The detector answers in the
+        // file's pixels; this factor maps them back onto the canvas.
+        const srcBitmap = await createImageBitmap(srcBlob)
+        toCanvas = floor.imageWidth / srcBitmap.width
+        srcBitmap.close()
+        fd.append('file', srcBlob, 'floorplan.png')
+      }
       fd.append('algorithm', algorithm)
       fd.append('output', 'full')
 
@@ -213,7 +227,16 @@ export default function AIWallsModal({ open, onClose }) {
 
       // 3 — the coordinates ride along on the completed job; /coords would
       // return the same lines, so there's no need for a second round trip.
-      const lines = final.lines ?? []
+      // A CAD floor's background is the backend's own /input rendering, so
+      // its coordinates land 1:1 (toCanvas stays 1).
+      const lines = (final.lines ?? []).map((l) => (toCanvas === 1 ? l : {
+        ...l,
+        x1: l.x1 * toCanvas,
+        y1: l.y1 * toCanvas,
+        x2: l.x2 * toCanvas,
+        y2: l.y2 * toCanvas,
+        thickness: l.thickness == null ? l.thickness : l.thickness * toCanvas,
+      }))
       if (lines.length === 0) throw new Error('辨識完成，但沒有偵測到任何線段。')
 
       setProgressMsg('轉換並寫入樓層…')

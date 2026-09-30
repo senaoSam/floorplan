@@ -1,26 +1,47 @@
-import { useRef, useEffect, useCallback, useState } from 'react'
+import { useCallback } from 'react'
 import { useFloorStore } from '@/store/useFloorStore'
+import { useFloorImportStore } from '@/store/useFloorImportStore'
 import { renderPdfPageToBlob, renderAllPdfPages } from '@/utils/pdfUtils'
 import { showUiToast } from '@/store/useUiToastStore'
+import { isCadFile, fetchCadBackground } from './cadImport'
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg']
 
 // Shared floor-import logic used by DropZone and SidebarLeft's "+" button.
-// Handles PNG/JPG/PDF (single or multi-page) and drives a loading message.
+// Handles PNG/JPG/PDF (single or multi-page) and DXF/DWG (rendered by the
+// backend) and drives a loading message.
 export function useFloorImport() {
-  const isMountedRef = useRef(true)
-  const [loadingMsg, setLoadingMsg] = useState(null)
-
-  useEffect(() => {
-    isMountedRef.current = true
-    return () => { isMountedRef.current = false }
-  }, [])
+  // Shared store, not local state: the canvas overlay shows the same message.
+  // Writes are no longer gated on "still mounted" — DropZone unmounts the
+  // moment its import adds the first floor, and skipping the final clear
+  // would leave the overlay up forever.
+  const loadingMsg    = useFloorImportStore((s) => s.loadingMsg)
+  const setLoadingMsg = useFloorImportStore((s) => s.setLoadingMsg)
 
   const importImageFloor     = useFloorStore((s) => s.importImageFloor)
   const importMultipleFloors = useFloorStore((s) => s.importMultipleFloors)
+  const updateFloor          = useFloorStore((s) => s.updateFloor)
 
   const processFile = useCallback(async (file) => {
     if (!file) return
+
+    if (isCadFile(file)) {
+      // The browser can't parse CAD, so the backend renders the background.
+      // The backend's own message (422, missing input) is more useful than
+      // the generic "corrupt or unsupported" toast below, so surface it.
+      try {
+        const { blob, width, height } = await fetchCadBackground(file, setLoadingMsg)
+        const floor = importImageFloor(blob, width, height)
+        // Keep the source so AI walls can send the CAD itself, not a raster.
+        updateFloor(floor.id, { cadFile: file })
+      } catch (err) {
+        console.error('CAD 匯入失敗', err)
+        showUiToast(`「${file.name}」匯入失敗：${err?.message || err}`)
+      } finally {
+        setLoadingMsg(null)
+      }
+      return
+    }
 
     try {
       if (IMAGE_TYPES.includes(file.type)) {
@@ -45,7 +66,7 @@ export function useFloorImport() {
         } finally {
           URL.revokeObjectURL(probeUrl)
         }
-        if (isMountedRef.current) setLoadingMsg(null)
+        setLoadingMsg(null)
 
       } else if (file.type === 'application/pdf') {
         setLoadingMsg('解析 PDF…')
@@ -61,7 +82,7 @@ export function useFloorImport() {
           const { pages } = await renderAllPdfPages(arrayBuffer)
           importMultipleFloors(pages)
         }
-        if (isMountedRef.current) setLoadingMsg(null)
+        setLoadingMsg(null)
       }
     } catch (err) {
       console.error('匯入失敗', err)
@@ -70,9 +91,9 @@ export function useFloorImport() {
       // happened. Name the file — with multi-file drops it matters which.
       showUiToast(`「${file.name}」匯入失敗：檔案可能已損毀或格式不支援`)
     } finally {
-      if (isMountedRef.current) setLoadingMsg(null)
+      setLoadingMsg(null)
     }
-  }, [importImageFloor, importMultipleFloors])
+  }, [importImageFloor, importMultipleFloors, updateFloor, setLoadingMsg])
 
   return { processFile, loadingMsg, isLoading: loadingMsg !== null }
 }
