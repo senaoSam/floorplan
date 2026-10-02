@@ -351,24 +351,54 @@ function wheelsAt(positions, spec) {
 
 // ── Riders (scooter, bicycle) ──────────────────────────────────────────────
 // A seated rider from rods and balls, posed per vehicle: jacket/jersey on the
-// 'jacket' layer (its own per-track colour, so the rider doesn't wear the
-// vehicle's paint), trousers and shoes 'trim', hands 'skin', helmet 'helmet'.
+// 'riderJacket' layer (its own per-track colour, so the rider doesn't wear
+// the vehicle's paint), trousers and shoes 'riderTrim', hands 'riderSkin',
+// helmet 'riderHelmet'. The rider* layers go into their own group so
+// TrackLayer3D can swap in a realistic seated person (see SEATS) and hide
+// this one; it stays as the fallback while the people models load.
 // Joint positions are given for the +Z side; the other side mirrors them.
 function rider({ hip, shoulder, head, elbow, hand, knee, foot }) {
-  const parts = { jacket: [], trim: [], skin: [], helmet: [] }
-  parts.jacket.push(rod([hip[0], hip[1], 0], [shoulder[0], shoulder[1], 0], 0.16, 10))  // torso
-  parts.jacket.push([ball(0.16), place(shoulder[0], shoulder[1], 0)])                   // shoulders
-  parts.helmet.push([ball(0.135), place(...head)])
+  const parts = { riderJacket: [], riderTrim: [], riderSkin: [], riderHelmet: [] }
+  parts.riderJacket.push(rod([hip[0], hip[1], 0], [shoulder[0], shoulder[1], 0], 0.16, 10))  // torso
+  parts.riderJacket.push([ball(0.16), place(shoulder[0], shoulder[1], 0)])                   // shoulders
+  parts.riderHelmet.push([ball(0.135), place(...head)])
   for (const side of [(p) => p, mirrorZ]) {
     const [s, e, h] = [shoulder, elbow, hand].map(side)
-    parts.jacket.push(rod(s, e, 0.055), rod(e, h, 0.048))                              // sleeves
-    parts.skin.push([ball(0.045), place(...h)])                                        // hands
+    parts.riderJacket.push(rod(s, e, 0.055), rod(e, h, 0.048))                         // sleeves
+    parts.riderSkin.push([ball(0.045), place(...h)])                                   // hands
     const [hp, k, f] = [hip, knee, foot].map(side)
-    parts.trim.push(rod(hp, k, 0.07), rod(k, f, 0.055))                                // legs
-    parts.trim.push([box(0.22, 0.07, 0.1), place(f[0] + 0.06, f[1] - 0.02, f[2])])     // shoes
+    parts.riderTrim.push(rod(hp, k, 0.07), rod(k, f, 0.055))                           // legs
+    parts.riderTrim.push([box(0.22, 0.07, 0.1), place(f[0] + 0.06, f[1] - 0.02, f[2])]) // shoes
   }
   return parts
 }
+// How a realistic person sits on each two-wheeler (TrackLayer3D poses one
+// with peopleModels' setAngles and places it so its pelvis lands on `pelvis`,
+// in vehicle space). Angles are radians about the sideways axis: limbs + =
+// forward, spine − = lean forward; the arms are then refitted so the wrists
+// land on `grip` (right hand; the left mirrors z). Scooter: upright, knees up,
+// feet on the floorboard, half-shell helmet. Bicycle: leaning to the bar, feet
+// following the pedals around `crank` (centre + arm length), no helmet.
+const SEATS = {
+  scooter: {
+    // Forward on the saddle and leaning in: from further back the 0.5–0.56 m
+    // arms fell ~30 cm short of the grips.
+    pelvis: [-0.13, 0.86, 0],
+    angles: { spine: -0.3, thighL: 1.4, thighR: 1.4, calfL: -1.35, calfR: -1.35, upperArmL: 0.95, upperArmR: 0.95, forearmL: 0.45, forearmR: 0.45 },
+    grip: [0.49, 1.12, 0.29],
+    helmet: true,
+  },
+  bicycle: {
+    pelvis: [-0.2, 1.0, 0],
+    angles: { spine: -0.55, thighL: 1.15, thighR: 0.75, calfL: -1.1, calfR: -0.6, upperArmL: 1.1, upperArmR: 1.1, forearmL: 0.25, forearmR: 0.25 },
+    grip: [0.31, 1.0, 0.2],
+    // Bottom bracket and crank-arm length; the ankle sits this far above and
+    // behind the pedal axle.
+    crank: { x: 0, y: 0.3, r: 0.17, ankle: [-0.03, 0.09] },
+    helmet: false,
+  },
+}
+
 // Merge several { material: parts[] } maps into one.
 function combine(...maps) {
   const out = {}
@@ -827,7 +857,7 @@ function buildScooter() {
   const body = pinchZ(extrudeCentered(s, 0.34, 0.03), (x) => 1 - 0.3 * clamp01((x - 0.45) / 0.35) - 0.25 * clamp01((-x - 0.6) / 0.32))
   const r = rider({
     hip: [-0.32, 0.88, 0.12], shoulder: [-0.2, 1.38, 0.2], head: [-0.16, 1.62, 0],
-    elbow: [0.18, 1.16, 0.26], hand: [0.6, 1.13, 0.3],
+    elbow: [0.12, 1.16, 0.26], hand: [0.5, 1.13, 0.3],
     knee: [0.12, 0.86, 0.17], foot: [0.18, 0.46, 0.14],
   })
   return {
@@ -837,11 +867,11 @@ function buildScooter() {
         [box(0.62, 0.1, 0.3), place(-0.42, 0.79, 0)],                       // seat
         rod([0.62, 0.21, 0.07], [0.74, 0.95, 0.07], 0.022),                 // fork legs
         rod([0.62, 0.21, -0.07], [0.74, 0.95, -0.07], 0.022),
-        rod([0.74, 0.95, 0], [0.66, 1.12, 0], 0.03),                        // steering column
-        rod([0.64, 1.12, -0.36], [0.64, 1.12, 0.36], 0.018),                // handlebar
+        rod([0.74, 0.95, 0], [0.56, 1.12, 0], 0.03),                        // steering column
+        rod([0.54, 1.12, -0.36], [0.54, 1.12, 0.36], 0.018),                // handlebar
         ...[1, -1].flatMap((z) => [
-          rod([0.62, 1.12, z * 0.26], [0.6, 1.3, z * 0.29], 0.008),          // mirror stalks
-          [box(0.04, 0.06, 0.12), place(0.6, 1.32, z * 0.3)],                // mirrors
+          rod([0.52, 1.12, z * 0.26], [0.5, 1.3, z * 0.29], 0.008),          // mirror stalks
+          [box(0.04, 0.06, 0.12), place(0.5, 1.32, z * 0.3)],                // mirrors
         ]),
       ],
       head: [[box(0.06, 0.08, 0.16), place(0.73, 1.08, 0)]],
@@ -849,6 +879,7 @@ function buildScooter() {
       plate: [[box(0.02, 0.1, 0.16), place(-0.9, 0.42, 0)]],
     }, r)),
     wheels: wheelsAt([{ x: 0.62, z: 0 }, { x: -0.6, z: 0 }], wheel),
+    seat: SEATS.scooter,
   }
 }
 
@@ -883,14 +914,28 @@ function buildBicycle() {
         rod([-0.17, 0.86, 0], [-0.19, 0.91, 0], 0.012),  // seat post
         rod(headTop, [0.36, 1.0, 0], 0.015),             // stem
         rod([0.36, 1.0, -0.24], [0.36, 1.0, 0.24], 0.012), // handlebar
-        ...both((z) => rod([0, 0.3, z * 0.08], [0.06, 0.18, z * 0.08], 0.012)),    // cranks
       ],
-      chrome: [[new THREE.CylinderGeometry(0.1, 0.1, 0.008, 24), place(0, 0.3, 0.07, Math.PI / 2)]], // chainring
       head: [[box(0.04, 0.04, 0.05), place(0.42, 0.98, 0)]],
       tail: [[box(0.03, 0.04, 0.05), place(-0.26, 0.86, 0)]],
     }, r)),
     wheels: wheelsAt([{ x: 0.52, z: 0 }, { x: -0.52, z: 0 }], wheel),
+    crank: { x: SEATS.bicycle.crank.x, y: SEATS.bicycle.crank.y, geometry: buildCrank(SEATS.bicycle.crank.r) },
+    seat: SEATS.bicycle,
   }
+}
+
+// Crank set, about the bottom bracket (local origin), axle along Z: two arms
+// 180° apart, pedals on their ends, chainring on the right. One vertex-
+// coloured geometry so it turns as one mesh.
+function buildCrank(r) {
+  const toAxleZ = new THREE.Matrix4().makeRotationX(Math.PI / 2)
+  return mergeParts([
+    rod([0, 0, 0.08], [r, 0, 0.08], 0.012), rod([0, 0, -0.08], [-r, 0, -0.08], 0.012),
+    [box(0.09, 0.02, 0.07), place(r, 0, 0.12), '#2b2f35'],
+    [box(0.09, 0.02, 0.07), place(-r, 0, -0.12), '#2b2f35'],
+    [new THREE.CylinderGeometry(0.1, 0.1, 0.008, 24), place(0, 0, 0.07).multiply(toAxleZ), '#b8c0c8'],
+    [new THREE.CylinderGeometry(0.02, 0.02, 0.18, 8), toAxleZ, '#6b737d'],   // axle
+  ].map((p) => (p.length === 2 ? [...p, '#15181d'] : p)))
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -914,6 +959,7 @@ export function disposeVehicleGeometries(all) {
   for (const set of Object.values(all)) {
     for (const l of set.layers) l.geometry.dispose()
     for (const w of set.wheels) w.geometry.dispose()
+    set.crank?.geometry.dispose()
   }
 }
 
@@ -928,18 +974,24 @@ export function makeVehicle(set, kind) {
   const extra = []
   let jacketMat = null
   const g = new THREE.Group()
+  // The primitive rider (two-wheelers), grouped so a realistic one can
+  // replace it.
+  const riderGroup = new THREE.Group()
   for (const { material, geometry } of set.layers) {
+    const isRider = material.startsWith('rider')
+    const preset = isRider ? material.slice(5).toLowerCase() : material
     let m = tintMat
-    if (material === 'jacket') {
+    if (preset === 'jacket') {
       m = jacketMat = new THREE.MeshStandardMaterial({ color: '#1f2937', roughness: 0.8, metalness: 0 })
-    } else if (material !== 'paint') {
-      m = new THREE.MeshStandardMaterial(MATERIALS[material])
+    } else if (preset !== 'paint') {
+      m = new THREE.MeshStandardMaterial(MATERIALS[preset])
       extra.push(m)
     }
     const mesh = new THREE.Mesh(geometry, m)
-    mesh.castShadow = !NO_SHADOW.has(material)
-    g.add(mesh)
+    mesh.castShadow = !NO_SHADOW.has(preset)
+    ;(isRider ? riderGroup : g).add(mesh)
   }
+  if (riderGroup.children.length) g.add(riderGroup)
   // Wheels: each its own mesh at the hub so it can roll (rotation about the
   // axle, local Z). Each carries its own radius — trucks and bikes differ.
   const wheelMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.15 })
@@ -952,10 +1004,22 @@ export function makeVehicle(set, kind) {
     g.add(w)
     return w
   })
+  if (set.crank) {
+    const c = new THREE.Mesh(set.crank.geometry, wheelMat)
+    c.position.set(set.crank.x, set.crank.y, 0)
+    c.castShadow = true
+    g.add(c)
+    g.userData.crank = c
+  }
+  // Two-wheelers lean into turns: yaw first, then roll about their own
+  // forward axis.
+  if (set.seat) g.rotation.order = 'YXZ'
   g.visible = false
   g.userData.vehicleKind = kind
   g.userData.tintMat = tintMat
   g.userData.jacketMat = jacketMat
+  g.userData.seat = set.seat ?? null
+  g.userData.primitiveRider = riderGroup.children.length ? riderGroup : null
   g.userData.extraMats = extra
   g.userData.wheels = wheels
   g.userData.minWheelRadius = Math.min(...wheels.map((w) => w.userData.radius))

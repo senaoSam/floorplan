@@ -8,7 +8,7 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { sampleTrackAt, trackHeadingAt } from '@/features/cameras/mockTracks'
 import { trackTint } from '@/features/cameras/trackColor'
 import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from '@/features/cameras/fovPolygon'
-import { loadPeopleModels, createPerson, applyPersonState, disposePerson, personOutfit } from './peopleModels'
+import { loadPeopleModels, createPerson, applyPersonState, disposePerson, personOutfit, addHalfHelmet, fitGrips, prepareLegIK, applyLegIK } from './peopleModels'
 import { buildVehicleGeometries, disposeVehicleGeometries, makeVehicle, disposeVehicle, pickVehicleType, vehicleColors, applyVehicleState } from './vehicleModels'
 
 // Live tracking targets in 3D (Phase 34, CAMERA mode only — Viewer3D gates
@@ -86,6 +86,14 @@ const SPEED_TAU = 0.25
 const YAW_TAU_PERSON = 0.18
 const YAW_TAU_VEHICLE = 0.35
 const MAX_RAW_SPEED = 12
+// Two-wheelers lean into turns: lean = atan(speed × turn rate / g), eased
+// with LEAN_TAU and capped at MAX_LEAN (≈ 29°, so fast playback can't lay
+// them flat). The crank turns once per CRANK_RATIO wheel radians of travel
+// (a simple fixed gear).
+const LEAN_TAU = 0.25
+const MAX_LEAN = 0.5
+const GRAVITY = 9.81
+const CRANK_RATIO = 2.2
 
 // Stable male/female pick per track, so a person keeps the same body for the
 // whole walk even when pool slots shift as other tracks start and end.
@@ -94,6 +102,39 @@ function trackSex(id) {
   let h = 0
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
   return (h & 1) ? 'f' : 'm'
+}
+
+// Scooter helmet colours, picked per track.
+const HELMET_COLORS = ['#f3f4f6', '#15171a', '#c62828', '#f2c230', '#1e5aa8', '#b8bec6']
+function helmetColor(id) {
+  const s = String(id)
+  let h = 7
+  for (let i = 0; i < s.length; i++) h = (h * 131 + s.charCodeAt(i)) | 0
+  return HELMET_COLORS[(h >>> 0) % HELMET_COLORS.length]
+}
+
+// A realistic seated rider on a two-wheeler slot (vehicleModels SEATS), one
+// per sex, created on first use and kept on the vehicle group. Placed so the
+// pelvis lands on the seat; helmeted if the seat says so.
+const _seatOffset = new THREE.Vector3()
+function seatedRider(fig, sex, models) {
+  const riders = fig.userData.riders ?? (fig.userData.riders = {})
+  let r = riders[sex]
+  if (!r) {
+    const seat = fig.userData.seat
+    r = createPerson(models[sex])
+    r.userData.setAngles(seat.angles)
+    _seatOffset.fromArray(seat.pelvis).sub(models[sex].pelvisRest)
+    r.position.copy(_seatOffset)
+    // Still unparented, so the rider's world space IS the vehicle frame:
+    // fit the wrists to the grips, and measure the legs for pedalling.
+    fitGrips(r, seat)
+    if (seat.crank) r.userData.legIK = prepareLegIK(r)
+    if (seat.helmet) addHalfHelmet(r, '#f3f4f6')
+    fig.add(r)
+    riders[sex] = r
+  }
+  return r
 }
 
 function pointInPoly(x, y, pts) {
@@ -435,7 +476,12 @@ export default function TrackLayer3D({ floorId, pxToM }) {
   useEffect(() => () => {
     Object.values(geo).forEach((g) => g.dispose())
     disposeVehicleGeometries(vehicleGeo)
-    for (const pool of Object.values(carPools.current)) pool.forEach(disposeVehicle)
+    for (const pool of Object.values(carPools.current)) {
+      for (const v of pool) {
+        disposeVehicle(v)
+        for (const r of Object.values(v.userData.riders ?? {})) disposePerson(r)
+      }
+    }
     carPools.current = {}
     for (const g of personPool) {
       g.userData.tintMat?.dispose()
@@ -549,6 +595,7 @@ export default function TrackLayer3D({ floorId, pxToM }) {
         ud.trackId = track.id
         ud.yaw = targetYaw
         ud.speed = 0
+        ud.lean = 0
         ud.hasLast = false
       }
       let stepDist = 0
@@ -562,8 +609,17 @@ export default function TrackLayer3D({ floorId, pxToM }) {
       // person pivots over a few hundred ms, a vehicle a little slower.
       let dYaw = targetYaw - ud.yaw
       dYaw = Math.atan2(Math.sin(dYaw), Math.cos(dYaw))
-      ud.yaw += dYaw * (1 - Math.exp(-dtSec / (isCar ? YAW_TAU_VEHICLE : YAW_TAU_PERSON)))
+      const yawStep = dYaw * (1 - Math.exp(-dtSec / (isCar ? YAW_TAU_VEHICLE : YAW_TAU_PERSON)))
+      ud.yaw += yawStep
       fig.rotation.y = ud.yaw
+      // Two-wheelers: lean into the turn the smoothed heading is making.
+      // +yaw turns toward −Z, and leaning that way is a −roll about +X.
+      if (ud.seat) {
+        const yawRate = dtSec > 0 ? yawStep / dtSec : 0
+        const target = Math.max(-MAX_LEAN, Math.min(MAX_LEAN, -Math.atan((ud.speed * yawRate) / GRAVITY)))
+        ud.lean += (target - ud.lean) * (1 - Math.exp(-dtSec / LEAN_TAU))
+        fig.rotation.x = ud.lean
+      }
       // Per-track lightness-jittered base colour (memoised in trackColor.js).
       const tint = trackTint(isCar ? CAR_COLOR : PERSON_COLOR, track.id)
       // Realistic people and vehicles show their own colours when detected
@@ -575,6 +631,19 @@ export default function TrackLayer3D({ floorId, pxToM }) {
       } else if (fig.userData.vehicleKind) {
         _stateColor.set(tint)
         applyVehicleState(fig, detected, vehicleColors(fig.userData.vehicleKind, track.id), detected ? 1 : GHOST_OPACITY, seenBySelected, _stateColor, HIGHLIGHT_EMISSIVE)
+        // Two-wheelers: a realistic seated rider once the people models are
+        // in (the primitive rider stays as the fallback until then). Sex and
+        // look are per track, like pedestrians'.
+        if (ud.seat && models) {
+          const sex = trackSex(track.id)
+          const rider = seatedRider(fig, sex, models)
+          rider.visible = true
+          const other = ud.riders[sex === 'm' ? 'f' : 'm']
+          if (other) other.visible = false
+          if (ud.primitiveRider) ud.primitiveRider.visible = false
+          rider.userData.helmet?.material.color.set(helmetColor(track.id))
+          applyPersonState(rider, detected, personOutfit(`${track.id}#rider`), detected ? 1 : GHOST_OPACITY, seenBySelected, _stateColor, HIGHLIGHT_EMISSIVE)
+        }
       } else {
         applyState(fig, detected, tint, seenBySelected)
       }
@@ -596,6 +665,20 @@ export default function TrackLayer3D({ floorId, pxToM }) {
         // The cap applies to the smallest wheel, so none of them strobes.
         ud.rollDist += Math.min(stepDist, MAX_WHEEL_STEP * ud.minWheelRadius)
         for (const w of ud.wheels) w.rotation.z = -ud.rollDist / w.userData.radius
+        // Bicycle: turn the crank with the wheels and keep both ankles on the
+        // pedals (right arm at angle a on +Z, left arm opposite).
+        if (ud.crank) {
+          const a = -ud.rollDist / (ud.minWheelRadius * CRANK_RATIO)
+          ud.crank.rotation.z = a
+          const rider = ud.riders && Object.values(ud.riders).find((r) => r.visible)
+          const ik = rider?.userData.legIK
+          if (ik) {
+            const c = ud.seat.crank
+            for (const [side, ang] of [['R', a], ['L', a + Math.PI]]) {
+              applyLegIK(rider, ik, side, c.x + c.r * Math.cos(ang) + c.ankle[0], c.y + c.r * Math.sin(ang) + c.ankle[1])
+            }
+          }
+        }
       }
 
       // Walk cycle for people, driven by the SMOOTHED ground speed, so it

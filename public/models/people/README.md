@@ -14,4 +14,11 @@ Modifications from the original FBX + TGA:
 - The body colour texture's ALPHA channel is a cloth mask (1 = garment, 0 = skin), derived by a
   skin-tone colour test. TrackLayer3D tints the garment with the tracking-state colour; it is not
   transparency (the material is OPAQUE).
+- Skeleton reduced from 80 to the 20 body bones (pelvis, three spine, neck, head; per side clavicle,
+  upper arm, forearm, hand, thigh, calf, foot). Face, finger and toe influences were moved to the
+  nearest kept ancestor (head / hand / foot) and renormalised; those bones are never animated here,
+  so the mesh deforms identically. Facial animation and finger poses are not possible with these files.
+- The head colour texture's ALPHA channel is a mask too: 0 = other (eyes, mouth), 128 = skin (lips
+  included), 255 = hair (scalp, brows), from a colour test. Material extras carry each model's mean
+  skin colour / hair luminance (linear) so the runtime can recolour skin and hair per track.
 - Geometry quantized (KHR_mesh_quantization).
