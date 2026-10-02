@@ -2,7 +2,6 @@ import React, { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useR
 import { Canvas, extend, useFrame, useLoader, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment'
 import { useFloorStore, getPxPerM, getFloorHeight } from '@/store/useFloorStore'
 import { useEditorStore, VIEW_MODE, EDITOR_MODE } from '@/store/useEditorStore'
 import { useViewportStore } from '@/store/useViewportStore'
@@ -26,6 +25,7 @@ import TrayLayer3D from './TrayLayer3D'
 import SwitchLayer3D from './SwitchLayer3D'
 import CableLayer3D from './CableLayer3D'
 import GroundGrid3D from './GroundGrid3D'
+import { buildSkyEnvScene } from './skyEnvironment'
 import FloorElevatorRail from './FloorElevatorRail'
 import FloorTabTower3D from './FloorTabTower3D'
 import { pointerClaimedByUi } from './tabPointerGuard'
@@ -869,9 +869,11 @@ const EXPOSURE = 0.8
 // 51-1 Image-based lighting. Without an environment map every
 // meshStandardMaterial falls back to the three analytic lights alone, so
 // roughness/metalness have nothing to reflect and every surface reads as flat
-// plastic. RoomEnvironment is three's built-in procedural studio box (a few
-// emissive planes in a room); PMREMGenerator pre-filters it into the roughness
-// mip chain that standard/physical materials sample. Assigning the result to
+// plastic. The environment is a procedural outdoor sky (skyEnvironment.js —
+// horizon band, zenith, ground bounce, sun lobe on the KeyLight axis; it
+// replaced three's RoomEnvironment studio box, which lit every face equally
+// and gave glass a grey room to reflect). PMREMGenerator pre-filters it into
+// the roughness mip chain that standard/physical materials sample. Assigning the result to
 // scene.environment applies it to every PBR material in the scene at once —
 // no per-material change anywhere else in viewer3d/.
 //
@@ -881,9 +883,9 @@ const EXPOSURE = 0.8
 // We set outputColorSpace explicitly — with IBL added, an unmanaged output
 // would wash the whole scene out.
 //
-// The generator + the baked cube target are disposed on unmount; the
-// RoomEnvironment scene itself is disposed right after baking since PMREM only
-// needs it for the one render.
+// The generator + the baked cube target are disposed on unmount; the sky
+// scene itself is disposed right after baking since PMREM only needs it for
+// the one render.
 function SceneEnvironment({ intensity = 1 }) {
   const gl = useThree((s) => s.gl)
   const scene = useThree((s) => s.scene)
@@ -897,10 +899,10 @@ function SceneEnvironment({ intensity = 1 }) {
 
     const pmrem = new THREE.PMREMGenerator(gl)
     pmrem.compileEquirectangularShader()
-    const room = new RoomEnvironment()
-    const envRT = pmrem.fromScene(room, 0.04)
+    const sky = buildSkyEnvScene(KEY_LIGHT_DIR)
+    const envRT = pmrem.fromScene(sky.scene, 0.04)
     scene.environment = envRT.texture
-    room.dispose?.()
+    sky.dispose()
     // Repaint: the frameloop may already be idle when the bake lands.
     invalidate()
 
@@ -925,6 +927,15 @@ function SceneEnvironment({ intensity = 1 }) {
   // share of the lighting goes up. Settled on the darkest pairing (0.30 with
   // EXPOSURE 0.80) — still brighter than the flat pre-51-1 look, but with the
   // material depth IBL buys and the strongest face-to-face separation.
+  //
+  // The sky environment carries far less energy than the studio box (most of
+  // its sphere is the dim zenith and dark ground), so the same 0.30 rendered
+  // the walls at 99.8 / 72.0. Re-swept to land back on the RoomEnvironment
+  // 0.30 look (144.4 / 48.1 on this measuring pose, exposure .80):
+  //   sky .30   99.8 / 72.0    sky .80  130.1 / 51.4
+  //   sky 1.0  139.6 / 47.5    sky 1.1  143.9 / 47.1    sky 1.2  147.9 / 45.1
+  // Hence 1.1 at the call site — same brightness and contrast as before; what
+  // changed is where the light comes from, not how much of it there is.
   useEffect(() => {
     if (!scene) return
     if ('environmentIntensity' in scene) scene.environmentIntensity = intensity
@@ -1523,7 +1534,7 @@ function Viewer3D() {
           FOG_COLOR matches the bottom stop of the CSS sky gradient, which is
           the band the floor plate meets. */}
       <fog attach="fog" args={[FOG_COLOR, fogNear, fogFar]} />
-      <SceneEnvironment intensity={0.30} />
+      <SceneEnvironment intensity={1.1} />
       <ambientLight intensity={0.12} />
       <KeyLight center={center} radius={shadowRadius} />
       <hemisphereLight args={['#e2e8f0', '#1e293b', 0.12]} />

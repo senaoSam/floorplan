@@ -4,6 +4,8 @@ import { useWallStore } from '@/store/useWallStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { DEFAULT_WALL_THICKNESS_M } from '@/constants/materials'
 import OpeningsDetail from './OpeningDetail3D'
+import { getWallSurface, wallTint, makeWallAOPatch } from './wallSurface'
+import { glassMaterialProps } from './glassMaterial'
 
 // 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
 // `?? []` returns a new reference whenever the floor's key is absent, so
@@ -19,19 +21,25 @@ const EMPTY = Object.freeze([])
 const DEFAULT_WALL_COLOR = '#94a3b8'
 
 // Build an ExtrudeGeometry for a wall segment whose "side view" is a rectangle
-// of size length × height with rectangular holes per opening. Geometry is
-// authored centered on (0, 0, 0) so the caller can position it with a single
+// of size length × height with rectangular holes per opening. The finished
+// geometry is centered on (0, 0, 0) so the caller can position it with a single
 // center translate + Y rotate, matching the no-openings Box path.
+//
+// The Shape itself is authored with its origin at the wall's bottom-left and
+// only translated to center afterwards: ExtrudeGeometry copies shape coords
+// into uv, so this makes uv "metres along / metres up from the floor" — the
+// procedural wall textures (wallSurface.js) tile in metres and their brick
+// courses and panel joints start at the floor on every wall.
 function buildWallGeometry(length, height, openings, wallBottom, thickness) {
   const halfL = length / 2
   const halfH = height / 2
 
   const shape = new THREE.Shape()
-  shape.moveTo(-halfL, -halfH)
-  shape.lineTo( halfL, -halfH)
-  shape.lineTo( halfL,  halfH)
-  shape.lineTo(-halfL,  halfH)
-  shape.lineTo(-halfL, -halfH)
+  shape.moveTo(0, 0)
+  shape.lineTo(length, 0)
+  shape.lineTo(length, height)
+  shape.lineTo(0, height)
+  shape.lineTo(0, 0)
 
   for (const op of openings ?? []) {
     const s = Math.max(0, Math.min(1, op.startFrac ?? 0))
@@ -41,12 +49,12 @@ function buildWallGeometry(length, height, openings, wallBottom, thickness) {
     // Opening height range is stored in absolute meters; convert to wall-local.
     const opBottom = (op.bottomHeight ?? 0) - wallBottom
     const opTop    = (op.topHeight    ?? height + wallBottom) - wallBottom
-    const yLo = Math.max(-halfH, Math.min(halfH, opBottom - halfH))
-    const yHi = Math.max(-halfH, Math.min(halfH, opTop    - halfH))
+    const yLo = Math.max(0, Math.min(height, opBottom))
+    const yHi = Math.max(0, Math.min(height, opTop))
     if (yHi <= yLo) continue
 
-    const xLo = s * length - halfL
-    const xHi = e * length - halfL
+    const xLo = s * length
+    const xHi = e * length
 
     // Three.js Shape treats holes as paths with opposite winding from the
     // outer contour. Authoring the hole counter-clockwise relative to the
@@ -60,13 +68,14 @@ function buildWallGeometry(length, height, openings, wallBottom, thickness) {
     shape.holes.push(hole)
   }
 
-  // Extrude along +Z for "thickness", then shift -depth/2 so the geometry is
-  // centered on the Z axis as well. bevelEnabled=false keeps edges crisp.
+  // Extrude along +Z for "thickness", then shift so the geometry is centered
+  // on all three axes (uv keeps the bottom-left origin — translate() moves
+  // positions only). bevelEnabled=false keeps edges crisp.
   const geom = new THREE.ExtrudeGeometry(shape, {
     depth: thickness,
     bevelEnabled: false,
   })
-  geom.translate(0, 0, -thickness / 2)
+  geom.translate(-halfL, -halfH, -thickness / 2)
   return geom
 }
 
@@ -75,16 +84,19 @@ function buildWallGeometry(length, height, openings, wallBottom, thickness) {
 const SELECT_EMISSIVE = '#e74c3c'
 const HOVER_EMISSIVE  = '#ffffff'
 
-// 51-6: glass walls render as glass rather than as a tinted solid. Matched to
-// the window panes OpeningDetail3D already draws (transmission 0.9 / roughness
-// 0.05 / ior 1.5 / opacity 0.35) so a glass wall and a glass window in the
+// 51-6: glass walls render as glass rather than as a tinted solid, with the
+// same material as the window panes OpeningDetail3D draws (glassMaterial.js —
+// Fresnel alpha + sky reflection) so a glass wall and a glass window in the
 // same view read as the same material.
 //
 // Both glass materials qualify. Low-E is the more transmission-blocking of the
 // two for RF, but visually it is still glass — the RF difference is carried by
 // dbLoss in the engine, not by how the wall looks.
 const GLASS_MATERIAL_IDS = new Set(['glass', 'low_e_glass'])
-const GLASS_OPACITY = 0.35
+
+// A wall counts as standing on the floor (gets the contact-AO band at its
+// foot) when its bottom is within this of floor level.
+const ON_FLOOR_EPS_M = 0.02
 
 // Outline colour. A cool grey rather than black: against the 51-3 backdrop a
 // black outline reads as a gap between surfaces instead of an edge.
@@ -157,12 +169,27 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true })
   const setSelected  = useEditorStore((s) => s.setSelected)
   const [hovered, setHovered] = useState(false)
 
-  if (length === 0 || !geometry) return null
+  // Fake-AO uniforms. One object per wall, mutated in place as the wall is
+  // edited; the compiled shader holds references to these same objects (see
+  // makeWallAOPatch), so a height edit lands without a recompile. Also above
+  // the early return, for the same 53-G1 reason as the hooks above.
+  const aoUniforms = useMemo(() => ({
+    uWallHalfH: { value: 0 },
+    uWallContact: { value: 1 },
+  }), [])
+  aoUniforms.uWallHalfH.value = height / 2
+  aoUniforms.uWallContact.value = Math.abs(bottomHeight) <= ON_FLOOR_EPS_M ? 1 : 0
+  const aoPatch = useMemo(() => makeWallAOPatch(aoUniforms), [aoUniforms])
 
   const color = material?.color ?? DEFAULT_WALL_COLOR
+  const tint = useMemo(() => wallTint(color), [color])
+
+  if (length === 0 || !geometry) return null
+
   const transparent = dimOpacity < 1
   const hasOpenings = (wall.openings?.length ?? 0) > 0
   const isGlass = GLASS_MATERIAL_IDS.has(material?.id)
+  const surface = isGlass ? null : getWallSurface(material?.id)
 
   // CAMERA mode passes selectable=false — walls are reference geometry there
   // (only cameras are editable), so clicks fall through and hover stays off.
@@ -187,7 +214,7 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true })
   return (
     <group position={center} rotation={[0, rotationY, 0]}>
       <mesh
-        // Glass doesn't cast: three's shadow pass ignores transmission and
+        // Glass doesn't cast: three's shadow pass ignores the pane's alpha and
         // would throw the same opaque silhouette a concrete wall does, which
         // is the one thing that would give away that it isn't really glass.
         castShadow={!isGlass}
@@ -198,30 +225,35 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true })
       >
         <primitive object={geometry} attach="geometry" />
         {isGlass ? (
-          <meshPhysicalMaterial
-            color={color}
-            transmission={0.9}
-            roughness={0.05}
-            metalness={0}
-            ior={1.5}
-            side={THREE.DoubleSide}
-            transparent
-            opacity={GLASS_OPACITY * dimOpacity}
-            depthWrite={false}
+          // key: switching glass ↔ opaque swaps the material TYPE's props
+          // wholesale; a fresh element avoids carrying one's onBeforeCompile
+          // onto the other.
+          <meshStandardMaterial
+            key="glass"
+            {...glassMaterialProps(color, dimOpacity)}
             emissive={emissive}
             emissiveIntensity={emissiveIntensity}
           />
         ) : (
+          // Realistic surface (wallSurface.js): painted albedo × a light tint
+          // of the material's identification colour, height map as bump, and
+          // per-material roughness/metalness. The AO patch darkens the wall
+          // foot and lower band.
           <meshStandardMaterial
-            color={color}
-            roughness={0.85}
-            metalness={0.05}
+            key="opaque"
+            color={tint}
+            map={surface.map}
+            bumpMap={surface.bumpMap}
+            bumpScale={surface.bumpScale}
+            roughness={surface.roughness}
+            metalness={surface.metalness}
             side={THREE.DoubleSide}
             transparent={transparent}
             opacity={dimOpacity}
             depthWrite={!transparent}
             emissive={emissive}
             emissiveIntensity={emissiveIntensity}
+            onBeforeCompile={aoPatch}
           />
         )}
       </mesh>

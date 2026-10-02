@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { useTrackingStore } from '@/store/useTrackingStore'
@@ -8,6 +8,8 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { sampleTrackAt, trackHeadingAt } from '@/features/cameras/mockTracks'
 import { trackTint } from '@/features/cameras/trackColor'
 import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from '@/features/cameras/fovPolygon'
+import { loadPeopleModels, createPerson, applyPersonState, disposePerson, personOutfit } from './peopleModels'
+import { buildVehicleGeometries, disposeVehicleGeometries, makeVehicle, disposeVehicle, pickVehicleType, vehicleColors, applyVehicleState } from './vehicleModels'
 
 // Live tracking targets in 3D (Phase 34, CAMERA mode only — Viewer3D gates
 // the mount). Mirrors tracksLayer's semantics: a target is solid-coloured
@@ -16,9 +18,14 @@ import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from '@
 // fading trail ribbon (last TRAIL_SEC of path, same window as 2D), and while
 // a camera is selected the targets inside ITS fov glow (emissive boost).
 //
-// Figures are low-poly primitive assemblies (two-tone clothed person with
-// knees and shoes; extruded car profile with glass/wheels/door seams) —
-// recognisable at plan scale without shipping model assets. Detected targets
+// People are Rocketbox avatars (peopleModels.js — one male, one female, picked
+// per track) with a procedural walk cycle and their garments dyed the state
+// colour; skin and hair stay real. Until the models have loaded (or if they
+// fail to), people fall back to the low-poly primitive assembly below (two-
+// tone clothed person with knees and shoes). Vehicles are nine generic
+// procedural types (vehicleModels.js — cars, taxi, racer, truck, bus, scooter
+// and bicycle with riders) picked per track, body paint in the state colour,
+// wheels rolling with the distance travelled. Detected targets
 // carry a per-track lightness jitter (trackColor.js, shared with 2D) so a
 // crowd doesn't read as clones. The playback clock writes the tracking store
 // every frame, so this layer updates IMPERATIVELY: fixed pools of THREE.Group
@@ -31,7 +38,6 @@ const CAR_COLOR = '#3b82f6'
 const UNDETECTED_COLOR = '#64748b'
 const GHOST_OPACITY = 0.4
 const DARK_PART_COLOR = '#1e293b'
-const HUB_COLOR = '#94a3b8'
 
 // Trail — mirrors the 2D tracksLayer semantics exactly: the last TRAIL_SEC of
 // simulated path, faded linearly along the tail, at half the icon's alpha;
@@ -67,6 +73,28 @@ const KNEE_FACTOR = 1.4      // knee flexion vs hip amplitude (swing phase only)
 // frame and an uncapped phase strobes (legs freeze at random poses = gliding).
 // 0.45 rad/frame ≈ a brisk 4 Hz stride at 60 fps — fast but still a walk.
 const MAX_PHASE_STEP = 0.45
+// Same idea for car wheels: ≈ 0.6 rad/frame keeps the hub cross readable as
+// turning forward instead of strobing.
+const MAX_WHEEL_STEP = 0.6
+// Motion smoothing (seconds — time constants of an exponential approach).
+// SPEED_TAU: how quickly the gait follows a speed change (start/stop eases
+// over ~0.5 s instead of popping). YAW_TAU_*: how quickly a figure turns to a
+// new leg's heading — a 170° waypoint reversal takes ~0.5 s for a person,
+// ~0.9 s for a vehicle. MAX_RAW_SPEED (m/s) clamps the per-frame estimate so
+// a timeline scrub can't fling the smoothed value.
+const SPEED_TAU = 0.25
+const YAW_TAU_PERSON = 0.18
+const YAW_TAU_VEHICLE = 0.35
+const MAX_RAW_SPEED = 12
+
+// Stable male/female pick per track, so a person keeps the same body for the
+// whole walk even when pool slots shift as other tracks start and end.
+function trackSex(id) {
+  const s = String(id)
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+  return (h & 1) ? 'f' : 'm'
+}
 
 function pointInPoly(x, y, pts) {
   const n = pts.length / 2
@@ -81,65 +109,9 @@ function pointInPoly(x, y, pts) {
 }
 
 // ── Shared geometries (one of each; meshes reference them) ────────────────
-// The car is an extruded SIDE PROFILE (bumper curves, hood, windshield rake,
-// trunk, wheel arches) with a narrower dark greenhouse extrusion on top —
-// same triangle-budget ballpark as the old stacked boxes, but it reads as a
-// sedan instead of a brick. People are capsule assemblies (round shoulders /
-// limbs) with swinging arms.
-const CAR_GC = 0.26          // body underside before bevel (ground clearance)
-const WHEEL_R = 0.33
-const WHEEL_X = 1.38         // axle offset from car centre
-const ARCH_R = 0.46          // wheel-arch cut radius (bevel shrinks it ~0.08)
-const CAR_BODY_W = 1.5       // extrude depth; bevel adds 2×0.08 → ~1.66 total
-const CAR_GLASS_W = 1.26     // narrower so the glass reads inset from the body
-
-// Side silhouette in the XY plane: +X = front, Y = up. Drawn CCW from the
-// front lower lip, over the roofline to the tail, then back along the
-// underside where the two absarc calls carve the wheel arches upward.
-function carBodyShape() {
-  const s = new THREE.Shape()
-  s.moveTo(2.18, CAR_GC)                          // front lower lip
-  s.quadraticCurveTo(2.34, 0.32, 2.31, 0.52)      // front bumper
-  s.quadraticCurveTo(2.28, 0.7, 2.02, 0.76)       // nose
-  s.lineTo(0.98, 0.9)                             // hood
-  s.lineTo(-1.7, 1.02)                            // belt line
-  s.quadraticCurveTo(-2.26, 1.0, -2.3, 0.72)      // trunk lid
-  s.quadraticCurveTo(-2.32, 0.4, -2.08, CAR_GC)   // rear bumper
-  s.lineTo(-WHEEL_X - ARCH_R, CAR_GC)
-  s.absarc(-WHEEL_X, CAR_GC, ARCH_R, Math.PI, 0, true)  // rear arch
-  s.lineTo(WHEEL_X - ARCH_R, CAR_GC)
-  s.absarc(WHEEL_X, CAR_GC, ARCH_R, Math.PI, 0, true)   // front arch
-  return s
-}
-
-// Greenhouse (windshield → roof → rear window). Base overlaps the body's
-// belt line slightly so no seam shows between the two extrusions.
-function carGlassShape() {
-  const s = new THREE.Shape()
-  s.moveTo(0.92, 0.88)                            // windshield base
-  s.lineTo(0.26, 1.38)                            // windshield rake
-  s.quadraticCurveTo(0.06, 1.44, -0.3, 1.44)      // roof front
-  s.lineTo(-0.86, 1.42)                           // roof
-  s.quadraticCurveTo(-1.1, 1.38, -1.72, 0.92)     // rear window
-  return s
-}
-
-// Extrude runs 0→depth along Z; recentre so the profile sits on the car's
-// long axis. Bevel rounds every edge (incl. the roofline) so highlights from
-// the IBL catch on the car the way they do on real paintwork.
-function extrudeCentered(shape, depth, bevel) {
-  const g = new THREE.ExtrudeGeometry(shape, {
-    depth,
-    curveSegments: 12,
-    bevelEnabled: true,
-    bevelThickness: bevel,
-    bevelSize: bevel,
-    bevelSegments: 3,
-  })
-  g.translate(0, 0, -depth / 2)
-  return g
-}
-
+// People fallback: capsule assemblies (round shoulders / limbs) with swinging
+// arms, shown while the realistic models load. Vehicles live in
+// vehicleModels.js.
 function buildGeometries() {
   return {
     head: new THREE.SphereGeometry(0.11, 16, 12),
@@ -156,15 +128,6 @@ function buildGeometries() {
     thigh: new THREE.CapsuleGeometry(0.062, 0.3, 4, 8),   // total ~0.42
     shin: new THREE.CapsuleGeometry(0.052, 0.28, 4, 8),   // total ~0.38
     shoe: new THREE.BoxGeometry(0.24, 0.08, 0.11),        // long axis = forward
-    carBody: extrudeCentered(carBodyShape(), CAR_BODY_W, 0.08),
-    carGlass: extrudeCentered(carGlassShape(), CAR_GLASS_W, 0.05),
-    wheel: new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, 0.24, 18),
-    hub: new THREE.CylinderGeometry(0.14, 0.14, 0.25, 12),
-    // Handle is deliberately oversized vs a real one (~11 cm long): at the
-    // mid-range distance a planner actually orbits from, true scale shrank
-    // below a pixel and the car lost its only side-surface detail.
-    doorHandle: new THREE.BoxGeometry(0.26, 0.075, 0.075),
-    exhaust: new THREE.CylinderGeometry(0.045, 0.045, 0.18, 10),
   }
 }
 
@@ -268,60 +231,12 @@ function makePerson(geo) {
   return g
 }
 
-// Little sedan: extruded body profile (long hood = front) + narrower dark
-// greenhouse + four wheels tucked into the arches with lighter hubs. Body
-// takes the state tint; glass/tires stay dark, hubs stay grey, and all of
-// them fade with the ghost opacity.
-function makeCar(geo) {
-  const tintMat = new THREE.MeshStandardMaterial({ color: CAR_COLOR, roughness: 0.35, metalness: 0.35 })
-  const darkMat = new THREE.MeshStandardMaterial({ color: DARK_PART_COLOR, roughness: 0.25, metalness: 0.4 })
-  const hubMat = new THREE.MeshStandardMaterial({ color: HUB_COLOR, roughness: 0.4, metalness: 0.6 })
-  const g = new THREE.Group()
-  const body = new THREE.Mesh(geo.carBody, tintMat)
-  body.castShadow = true
-  const glass = new THREE.Mesh(geo.carGlass, darkMat)
-  glass.castShadow = true
-  g.add(body, glass)
-  for (const [wx, wz] of [[WHEEL_X, 0.69], [WHEEL_X, -0.69], [-WHEEL_X, 0.69], [-WHEEL_X, -0.69]]) {
-    const tire = new THREE.Mesh(geo.wheel, darkMat)
-    tire.rotation.x = Math.PI / 2
-    tire.position.set(wx, WHEEL_R, wz)
-    tire.castShadow = true
-    const hub = new THREE.Mesh(geo.hub, hubMat)
-    hub.rotation.x = Math.PI / 2
-    hub.position.set(wx, WHEEL_R, wz)
-    g.add(tire, hub)
-  }
-  // Door handles (front/rear door) on the flat body side. NOTE the extrude's
-  // flat side CAP sits at |z| = depth/2 + bevelThickness = 0.83 (the bevel
-  // expands outward from z ∈ [0, depth]; the cap fills the original contour
-  // at the outer end) — anything placed at |z| < 0.83 is buried inside the
-  // body. Proud ~3 cm so they stay readable as dark hardware.
-  for (const sz of [0.835, -0.835]) {
-    for (const hx of [0.34, -0.56]) {
-      const handle = new THREE.Mesh(geo.doorHandle, darkMat)
-      handle.position.set(hx, 0.93, sz)
-      g.add(handle)
-    }
-  }
-  // Exhaust tip poking out under the rear bumper, driver side.
-  const exhaust = new THREE.Mesh(geo.exhaust, hubMat)
-  exhaust.rotation.z = Math.PI / 2
-  exhaust.position.set(-2.28, 0.24, 0.48)
-  g.add(exhaust)
-  g.visible = false
-  g.userData.tintMat = tintMat
-  g.userData.darkMat = darkMat
-  g.userData.hubMat = hubMat
-  return g
-}
-
 // `baseColor` arrives already per-track jittered (trackColor.js). People
 // derive their outfit from it every call: pants a darker shade, head a
 // lighter desaturated (skin-ish) shade — derived rather than fixed so the
 // ghost state greys the whole figure consistently.
 function applyState(group, detected, baseColor, highlight = false) {
-  const { tintMat, pantsMat, skinMat, shoeMat, darkMat, hubMat } = group.userData
+  const { tintMat, pantsMat, skinMat, shoeMat, darkMat, hubMat, extraMats } = group.userData
   _stateColor.set(detected ? baseColor : UNDETECTED_COLOR)
   const tinted = [tintMat]
   tintMat.color.copy(_stateColor)
@@ -353,7 +268,7 @@ function applyState(group, detected, baseColor, highlight = false) {
     // own far side through itself — acceptable.)
     m.depthWrite = true
   }
-  for (const m of [darkMat, hubMat, shoeMat]) {
+  for (const m of extraMats ?? [darkMat, hubMat, shoeMat]) {
     if (!m) continue
     m.opacity = detected ? 1 : GHOST_OPACITY
     m.transparent = !detected
@@ -467,25 +382,73 @@ function updateTrail(mesh, track, t, pos, color, alphaBase, pxToM) {
 export default function TrackLayer3D({ floorId, pxToM }) {
   const geo = useMemo(buildGeometries, [])
   const personPool = useMemo(() => Array.from({ length: POOL_PERSON }, () => makePerson(geo)), [geo])
-  const carPool = useMemo(() => Array.from({ length: POOL_CAR }, () => makeCar(geo)), [geo])
+  // Vehicles: nine types (vehicleModels.js), picked per track. Shared
+  // geometry is built once; cars are created lazily into per-type pools
+  // (POOL_CAR each at most) and parented under carGroup.
+  const vehicleGeo = useMemo(buildVehicleGeometries, [])
+  const carGroup = useMemo(() => new THREE.Group(), [])
+  const carPools = useRef({})
+  const getCar = (kind, idx) => {
+    if (idx >= POOL_CAR) return null
+    const pool = carPools.current[kind] ?? (carPools.current[kind] = [])
+    while (pool.length <= idx) {
+      const g = makeVehicle(vehicleGeo[kind], kind)
+      pool.push(g)
+      carGroup.add(g)
+    }
+    return pool[idx]
+  }
   const trailMat = useMemo(makeTrailMaterial, [])
   // Trail slot i belongs to figure slot i of the matching pool.
   const personTrails = useMemo(() => Array.from({ length: POOL_PERSON }, () => makeTrail(trailMat, TRAIL_HALF_W_PERSON)), [trailMat])
   const carTrails = useMemo(() => Array.from({ length: POOL_CAR }, () => makeTrail(trailMat, TRAIL_HALF_W_CAR)), [trailMat])
 
+  // Realistic people. `models` stays null until both GLBs are loaded and
+  // calibrated; the primitive pool covers people until then. Figures are
+  // cloned lazily into per-sex pools (a SkeletonUtils clone costs a few ms
+  // and most scenes never show 90 of either) and parented under rbxGroup.
+  const [models, setModels] = useState(null)
+  useEffect(() => {
+    let alive = true
+    loadPeopleModels()
+      .then((m) => { if (alive) setModels(m) })
+      .catch((err) => console.warn('[TrackLayer3D] people models failed to load; using primitive figures', err))
+    return () => { alive = false }
+  }, [])
+  const rbxGroup = useMemo(() => new THREE.Group(), [])
+  const rbxPools = useRef({ m: [], f: [] })
+  useEffect(() => () => {
+    for (const pool of Object.values(rbxPools.current)) for (const g of pool) disposePerson(g)
+    rbxPools.current = { m: [], f: [] }
+  }, [])
+  const getRbx = (sex, idx) => {
+    const pool = rbxPools.current[sex]
+    if (idx >= POOL_PERSON) return null
+    while (pool.length <= idx) {
+      const g = createPerson(models[sex])
+      pool.push(g)
+      rbxGroup.add(g)
+    }
+    return pool[idx]
+  }
+
   useEffect(() => () => {
     Object.values(geo).forEach((g) => g.dispose())
-    for (const g of [...personPool, ...carPool]) {
+    disposeVehicleGeometries(vehicleGeo)
+    for (const pool of Object.values(carPools.current)) pool.forEach(disposeVehicle)
+    carPools.current = {}
+    for (const g of personPool) {
       g.userData.tintMat?.dispose()
       g.userData.pantsMat?.dispose()
       g.userData.skinMat?.dispose()
       g.userData.shoeMat?.dispose()
       g.userData.darkMat?.dispose()
       g.userData.hubMat?.dispose()
+      g.userData.extraMats?.forEach((m) => m.dispose())
     }
     for (const m of [...personTrails, ...carTrails]) m.geometry.dispose()
     trailMat.dispose()
-  }, [geo, personPool, carPool, personTrails, carTrails, trailMat])
+  }, [geo, vehicleGeo, personPool, personTrails, carTrails, trailMat])
 
   // FOV polygons in CANVAS PX space for detection — cached on refs.
   const fovCache = useRef({ cams: null, walls: null, polys: [] })
@@ -535,6 +498,12 @@ export default function TrackLayer3D({ floorId, pxToM }) {
 
     let pi = 0
     let ci = 0
+    // Per-sex slot counters for the realistic people (pi still counts every
+    // person — it indexes the trail ribbons).
+    const used = { m: 0, f: 0 }
+    // Per-type slot counters for vehicles (ci still counts every car — it
+    // indexes the trail ribbons).
+    const carUsed = {}
     for (const track of tracks) {
       if (t < track.t0 || t > track.t1) continue
       const pos = sampleTrackAt(track, t)
@@ -551,16 +520,64 @@ export default function TrackLayer3D({ floorId, pxToM }) {
 
       const isCar = track.type === 'car'
       const idx = isCar ? ci++ : pi++
-      const fig = isCar ? carPool[idx] : personPool[idx]
+      let fig
+      if (isCar) {
+        const kind = pickVehicleType(track.id)
+        const slot = carUsed[kind] ?? 0
+        carUsed[kind] = slot + 1
+        fig = getCar(kind, slot)
+      }
+      else if (models) {
+        const sex = trackSex(track.id)
+        fig = getRbx(sex, used[sex]++)
+      } else fig = personPool[idx]
       if (!fig) continue   // pool exhausted — extremely unlikely
       fig.visible = true
-      fig.position.set(pos.x * pxToM, 0, pos.y * pxToM)
-      // Cars and people both face their walking/driving direction
-      // (yaw = −heading per the wall convention).
-      fig.rotation.y = -trackHeadingAt(track, t)
+      const ud = fig.userData
+      const wx = pos.x * pxToM, wz = pos.y * pxToM
+      fig.position.set(wx, 0, wz)
+
+      // Motion state is smoothed, because the mock tracks are piecewise-
+      // linear: constant speed per leg, ~45% of legs are dwells, and the
+      // waypoints turn sharply (median 126°). Driving the gait straight from
+      // each frame's raw movement made the stride jitter with every uneven
+      // frame and snapped the body round in one frame at every waypoint.
+      // A pool slot that just switched to another track resets, so it
+      // doesn't glide over from the previous figure's pose.
+      const targetYaw = -trackHeadingAt(track, t)   // yaw = −heading per the wall convention
+      if (ud.trackId !== track.id) {
+        ud.trackId = track.id
+        ud.yaw = targetYaw
+        ud.speed = 0
+        ud.hasLast = false
+      }
+      let stepDist = 0
+      if (ud.hasLast) stepDist = Math.hypot(wx - ud.lastX, wz - ud.lastZ)
+      ud.lastX = wx; ud.lastZ = wz; ud.hasLast = true
+      // Speed: exponential smoothing of distance / frame time (clamped so a
+      // timeline scrub doesn't fling it).
+      const rawSpeed = dtSec > 0 ? Math.min(stepDist / dtSec, MAX_RAW_SPEED) : 0
+      ud.speed += (rawSpeed - ud.speed) * (1 - Math.exp(-dtSec / SPEED_TAU))
+      // Heading: turn toward the leg's direction along the shortest way — a
+      // person pivots over a few hundred ms, a vehicle a little slower.
+      let dYaw = targetYaw - ud.yaw
+      dYaw = Math.atan2(Math.sin(dYaw), Math.cos(dYaw))
+      ud.yaw += dYaw * (1 - Math.exp(-dtSec / (isCar ? YAW_TAU_VEHICLE : YAW_TAU_PERSON)))
+      fig.rotation.y = ud.yaw
       // Per-track lightness-jittered base colour (memoised in trackColor.js).
       const tint = trackTint(isCar ? CAR_COLOR : PERSON_COLOR, track.id)
-      applyState(fig, detected, tint, seenBySelected)
+      // Realistic people and vehicles show their own colours when detected
+      // and grey out as ghosts; the state colour stays on the trail (and as
+      // the glow when the selected camera sees them).
+      if (fig.userData.rbx) {
+        _stateColor.set(tint)
+        applyPersonState(fig, detected, personOutfit(track.id), detected ? 1 : GHOST_OPACITY, seenBySelected, _stateColor, HIGHLIGHT_EMISSIVE)
+      } else if (fig.userData.vehicleKind) {
+        _stateColor.set(tint)
+        applyVehicleState(fig, detected, vehicleColors(fig.userData.vehicleKind, track.id), detected ? 1 : GHOST_OPACITY, seenBySelected, _stateColor, HIGHLIGHT_EMISSIVE)
+      } else {
+        applyState(fig, detected, tint, seenBySelected)
+      }
 
       // Trail ribbon — same colour/alpha state as the figure, at half alpha.
       const trailColor = detected ? _trailColor.set(tint) : TRAIL_COLOR_GHOST
@@ -569,29 +586,37 @@ export default function TrackLayer3D({ floorId, pxToM }) {
         track, t, pos, trailColor, detected ? 1 : GHOST_OPACITY, pxToM,
       )
 
-      // Walk cycle for people. Drive the stride from the figure's ACTUAL
-      // ground movement this frame (distance between last frame's world
-      // position and this one), so it stays correct at any playback speed,
-      // when scrubbing, or paused — a still person stops stepping, a fast one
-      // steps faster. Legs swing about the hips in anti-phase; the torso bobs
-      // twice per stride. Per-frame wall-clock delta gives a speed estimate
-      // for the swing amplitude.
+      // Wheels roll by the distance actually covered this frame, so they stop
+      // when the car stops and turn faster when it speeds up. Capped per
+      // frame: at 10x/60x playback an uncapped roll aliases into the
+      // wagon-wheel effect (spokes appear to stand still or run backwards).
+      if (isCar) {
+        // Rolling toward +X spins a wheel about −Z (its top moves forward) by
+        // distance / its own radius — a truck's wheels and a bike's differ.
+        // The cap applies to the smallest wheel, so none of them strobes.
+        ud.rollDist += Math.min(stepDist, MAX_WHEEL_STEP * ud.minWheelRadius)
+        for (const w of ud.wheels) w.rotation.z = -ud.rollDist / w.userData.radius
+      }
+
+      // Walk cycle for people, driven by the SMOOTHED ground speed, so it
+      // stays correct at any playback speed, when scrubbing, or paused — a
+      // still person eases to a stand, a fast one steps faster — without
+      // inheriting frame-to-frame jitter. Legs swing about the hips in
+      // anti-phase; the torso bobs twice per stride.
       if (!isCar) {
-        const ud = fig.userData
-        const wx = pos.x * pxToM, wz = pos.y * pxToM
-        let stepDist = 0
-        if (ud.hasLast) stepDist = Math.hypot(wx - ud.lastX, wz - ud.lastZ)
-        ud.lastX = wx; ud.lastZ = wz; ud.hasLast = true
         // Advance phase by metres walked / stride length (× 2π per stride),
         // capped per frame so fast playback stays a readable brisk walk
         // instead of strobing.
-        ud.walkPhase += Math.min((stepDist / STRIDE_M) * Math.PI * 2, MAX_PHASE_STEP)
-        // Amplitude from instantaneous speed (distance this frame / dt), eased
-        // in and capped so a near-still person barely moves.
-        const speedMps = dtSec > 0 ? stepDist / dtSec : 0
-        const amp = Math.min(1, speedMps / WALK_FULL_SPEED) * LEG_SWING_MAX
+        ud.walkPhase += Math.min(((ud.speed * dtSec) / STRIDE_M) * Math.PI * 2, MAX_PHASE_STEP)
+        // Amplitude grows with speed, capped so a near-still person barely moves.
+        const amp = Math.min(1, ud.speed / WALK_FULL_SPEED) * LEG_SWING_MAX
         const sw = Math.sin(ud.walkPhase)
         const cw = Math.cos(ud.walkPhase)
+        if (ud.rbx) {
+          // Same gait on the avatar's bones (peopleModels.js pose()).
+          ud.pose(sw, cw, amp, -Math.abs(sw) * amp * BODY_BOB_M)
+          continue
+        }
         ud.legL.rotation.z = sw * amp
         ud.legR.rotation.z = -sw * amp
         // Knees flex while their leg swings forward (cos gates the swing
@@ -605,15 +630,25 @@ export default function TrackLayer3D({ floorId, pxToM }) {
         ud.body.position.y = -Math.abs(sw) * amp * BODY_BOB_M
       }
     }
-    for (let i = pi; i < POOL_PERSON; i++) { personPool[i].visible = false; personTrails[i].visible = false }
-    for (let i = ci; i < POOL_CAR; i++) { carPool[i].visible = false; carTrails[i].visible = false }
+    // Realistic people take over the primitive pool entirely once loaded.
+    for (let i = models ? 0 : pi; i < POOL_PERSON; i++) personPool[i].visible = false
+    for (let i = pi; i < POOL_PERSON; i++) personTrails[i].visible = false
+    for (const sex of ['m', 'f']) {
+      const pool = rbxPools.current[sex]
+      for (let i = used[sex]; i < pool.length; i++) pool[i].visible = false
+    }
+    for (let i = ci; i < POOL_CAR; i++) carTrails[i].visible = false
+    for (const [kind, pool] of Object.entries(carPools.current)) {
+      for (let i = carUsed[kind] ?? 0; i < pool.length; i++) pool[i].visible = false
+    }
   })
 
   if (!pxToM) return null
   return (
     <group>
       {personPool.map((g, i) => <primitive key={`p-${i}`} object={g} />)}
-      {carPool.map((g, i) => <primitive key={`c-${i}`} object={g} />)}
+      <primitive object={rbxGroup} />
+      <primitive object={carGroup} />
       {personTrails.map((m, i) => <primitive key={`pt-${i}`} object={m} />)}
       {carTrails.map((m, i) => <primitive key={`ct-${i}`} object={m} />)}
     </group>

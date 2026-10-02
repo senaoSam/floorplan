@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react'
-import * as THREE from 'three'
+import { glassMaterialProps } from './glassMaterial'
 
 // --- Size parameters (meters). Single source of truth for both the detail
 // meshes here and the hole geometry built in WallLayer3D. ---
@@ -132,8 +132,9 @@ function Window({ cx, cy, w, h, wallThickness, color }) {
   const fd = frameDepth
   const ft = Math.min(frameThickness, Math.min(w, h) * 0.18)
   // Use material color as a tint on the frame when provided, otherwise the
-  // default deep-gray. Glass always uses the physical-material blue so it
-  // reads as glass regardless of the material metadata.
+  // default deep-gray. Glass always uses the fixed pane blue (with the shared
+  // Fresnel glass material) so it reads as glass regardless of the material
+  // metadata.
   const frameCol = color && color.toLowerCase() !== '#ffffff' ? color : frameColor
 
   const halfW = w / 2
@@ -177,30 +178,12 @@ function Window({ cx, cy, w, h, wallThickness, color }) {
       {/* Upper pane */}
       <mesh position={[0,  paneH / 2 + mullionWidth / 2, 0]}>
         <boxGeometry args={[innerW, paneH, glassThickness]} />
-        <meshPhysicalMaterial
-          color={glassColor}
-          transmission={0.9}
-          roughness={0.05}
-          metalness={0}
-          transparent
-          opacity={0.35}
-          side={THREE.DoubleSide}
-          ior={1.5}
-        />
+        <meshStandardMaterial {...glassMaterialProps(glassColor)} />
       </mesh>
       {/* Lower pane */}
       <mesh position={[0, -paneH / 2 - mullionWidth / 2, 0]}>
         <boxGeometry args={[innerW, paneH, glassThickness]} />
-        <meshPhysicalMaterial
-          color={glassColor}
-          transmission={0.9}
-          roughness={0.05}
-          metalness={0}
-          transparent
-          opacity={0.35}
-          side={THREE.DoubleSide}
-          ior={1.5}
-        />
+        <meshStandardMaterial {...glassMaterialProps(glassColor)} />
       </mesh>
 
       {/* Sill — sits just below the opening and protrudes from the front. */}
