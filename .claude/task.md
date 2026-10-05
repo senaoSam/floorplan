@@ -48,6 +48,73 @@
 
 ## 還沒做的事
 
+### Phase 57 熱圖演算法審查修正（2026-10-05 立項，尚未開工）
+
+> **來由**：5 角色審查（天線 / 波傳遞 / AP / 程式正確性 / 效能）× 2 輪交叉驗證。
+> 結論：JS 引擎與 GLSL shader **公式逐條比對一致**；問題在幾何建模、頻道模型、單點查詢與熱圖情境不同、快取。
+> **執行順序（使用者指定）**：Tier 1 不影響畫面 → Tier 2 純效能 → Tier 3 影響畫面（**一條一條做，每條人工看取捨決定要不要**）。
+> **教訓沿用（Phase 53）**：下表「位置」欄可信，「影響 / 修法」欄改碼前要先實測反證；dB 數字多數已由波傳角色用 Node 跑真引擎驗過。
+> **雙引擎**：凡改物理公式，`propagation.js` 與 `propagationGL.js` 必須同步改，並驗 parity。
+
+#### Tier 1 — 不影響畫面（一般場景輸出 bit-identical）
+
+| ID | 項目 | 位置 | 說明 |
+|---|---|---|---|
+| 57-1 | per-AP corner / mirror 貼圖改 4096 寬打包 | propagationGL.js:2974/2993 上傳、:1114/:1184 讀取 | 現在是 nC×1 / nW×1 單列，超過 MAX_TEXTURE_SIZE（UHD 770 = 16384）時 `texImage2D` 靜默失敗但 `uApGeoEnabled` 仍為 1 → 大 DXF 反射/繞射讀錯值。比照 wallsTex 的 4096 寬打包。一般場景不變 |
+| 57-2 | `outGridCache` 刪除 AP / ghost AP 時 evict | propagationGL.js:2338 | 目前只在牆/角/樓板變更才清，刪掉的 AP 與 auto-place ghost 一直佔記憶體（每筆最多 ~16 MB） |
+| 57-3 | 零長度牆 `mirrorPoint` NaN 防護 | propagationGL.js shader mirrorPoint（`apGeoEnabled=false` debug 路徑） | baked 路徑已有 `|| 1`，debug 路徑沒有；NaN 會穿過所有 `<` cull 進入加總 |
+| 57-4 | 刪除 `channelWidths.js` 沒人呼叫的 `channelRangeMHz` / `channelsOverlap` | constants/channelWidths.js:35-57 | 與 frequency.js 重複且全 src 無呼叫端（動手前再 grep 一次）。57-24 修頻道模型時只需改一份 |
+| 57-5 | 過時註解 | propagation.js:343（寫 concrete b=1.99，實為 0.6）、rfConstants.js:9（寫 1m→0.25dB，2.4G 實為 0.15） | 純註解 |
+
+#### Tier 2 — 純效能（輸出應不變；每條做完 before/after 熱圖像素比對確認一致）
+
+| ID | 項目 | 位置 | 說明 / 預期 |
+|---|---|---|---|
+| 57-6 | LOS / apGeo 改 lazy bake + 依時間淘汰 | propagationGL.js:2908、:3020-3026；sampleFieldGL.js:189-203、:398-409 | 單 AP 拖曳時 bake 只含該 AP，其餘 AP 的 LOS/geo 快取被清；放開後對**所有** AP 重 bake（geo bake 是 corners×walls 主執行緒暴力法，100AP/1000 牆 ≈ 1.5 億次線段測試）。per-AP 格點快取本身有保留（第二輪修正）。改為只對 cache miss 的 AP bake。S |
+| 57-7 | fold 熱迴圈預算查表 | sampleFieldGL.js:531、frequency.js:25-30 | 每格呼叫 `aggregateApContributions`，每次 `apsShareSpectrum` 配兩個陣列 + `Math.pow`（60k 格×200AP ≈ 2400 萬個暫時陣列）。改成 N×N spectrum-share 表 + 線性功率表 + typed array。S |
+| 57-8 | 3D 全樓層熱圖快取依牆簽名分 LRU | propagationGL.js:2443-2474、heatmapStack.js:138-168 | 各樓層牆清單不同 → `uploadWalls` 每層都 bump `wallsVersion` 清光 LOS/geo/grid 快取，樓層間互清、2D 也被清。只在開「全樓層熱圖」時發生。M |
+| 57-9 | auto-power `evaluate` 增量化 | autoPowerPlan.js:220-253 | 每步只改一台 AP 卻全量 cells×N 重算。改為每格記 best AP + 各頻譜組干擾和，O(cells)。預估 300AP 50s → 快 10–50×。**P95 要保持精確（不可改近似 histogram 讓結果變動）**，否則移 Tier 3。依賴 57-7 的查表。M |
+| 57-10 | auto-place 候選矩陣剪枝 | autoPlacePlan.js:202-208、:253-254 | 自由空間上界 RSSI < target−20 的 (候選,格) 對直接跳過（對增益與 tie-break 都沒貢獻）。驗證：放置結果與改前完全相同。S |
+| 57-11 | JS 反射路徑 `walls.filter` 改 index 排除 | propagation.js:394 | 每牆每接收點一次 filter = O(W²) 配置。只影響 JS 引擎/fallback。S |
+
+#### Tier 3 — 影響畫面（一條一條做；每條「決定」欄由使用者看完取捨後填）
+
+> 排列：越前面越確定、越小、越不爭議。每條都要 before/after 截圖給使用者比對。
+
+| ID | 項目 | 位置 | 現象 / 影響 | 取捨 | 決定 |
+|---|---|---|---|---|---|
+| 57-12 | 熱圖貼圖半格偏移 | heatmapGL.js:67（`f = uv·nx − 0.5`）、sampleField.js:49、heatmapAdapter.js:970-976 | 樣本 i 在 `i·step`，卻被畫在 texel 中心 → 左緣 +0.5 格、右緣 −0.5 格的拉伸（預設 ±0.25 m，拖曳 1 m 步長 ±0.5 m）。修法 `f = uv·(totalW/step)` | 零成本；牆影/AP 熱點位置微移 | ⬜ |
+| 57-13 | 反射牆不檢查高度範圍（+ 效能附帶） | propagation.js:375-417、propagationGL.js:1099-1161（`wZLo/wZHi` 讀了沒用） | 他樓層的牆在本層產生反射（實測 1–5 dB），矮隔間也會反射。修完後：反射迴圈只跑本層牆數（≈ F× 省）、他層 AP 可走 direct-only 跳過 geo bake | 更準 + 更快；多樓層場景熱圖紋路會變 | ⬜ |
+| 57-14 | 門窗開口上下方沒有牆（門楣 / 窗台） | buildScenario.js:85-101 | 開口只產生 [bottom, top] 一段；門 top=2.1 m、牆高 3 m → 射線從門上方穿過付 0 dB。AP 在門附近時門後**高估約 19 dB**（實測 10 m 處 −51.4 vs 實牆 −70.4） | 修法單純（補兩段牆材質線段）；有門的區域會明顯變暗 | ⬜ |
+| 57-15 | GPU grid DDA 16 格 ring 去重會重複算牆 | propagationGL.js:397-417 | 每格所有列出的牆都推進 ring（不只命中的），密集格 ≥16 牆就沖掉 → 長斜牆可能被算兩次（+12~30 dB），JS 不會 → 雙引擎分歧。修法：只接受交點 t 落在當前 cell t 區間內的命中，不需要 ring（更省） | 只在密集 DXF 場景有差；更快 | ⬜ |
+| 57-16 | 寬頻道中心用主頻道而非 bonded block + 自動頻道規劃忽略頻寬 | frequency.js:10-29、propagationGL.js:2510-2511、autoChannelPlan.js:70-76 | ch36@80 被當成 5140–5220（應 5170–5250）→ 所有 >20 MHz AP 的 SINR/CCI/衝突清單誤判（漏判或誤判，數十 dB）；autoChannelPlan 用 20 MHz 頻道 + 只比 `channel===ch`，6G 預設 80 MHz 時把鄰居排在同一 block。**注意**：47-6 拍板的是「半徑」不動，本條是「頻寬」，不衝突 | RSSI 不受影響；SINR/CCI 圖與自動頻道結果會變 | ⬜ |
+| 57-17 | hover / planQuality / Client View 與熱圖用不同情境 | heatmapHoverBinder.js:37、:69；planQuality.js:89；hoverProbe.js:14-19；simulate.js:51 | 它們用平面情境：rx z=0（熱圖 1.0 m）、無他樓層 AP/牆/樓板、反射繞射關、無 band filter → 同一點數字與顏色差數 dB。違反「JS 是單點查詢主力」定位。選項 A：統一用 cross-floor 情境 + 同樣反射繞射設定；選項 B：hover 直接讀已顯示的場（O(1)、一定一致） | 數字變了但熱圖不變；hover 成本（選 A 時）上升 | ⬜ |
+| 57-18 | 斜射牆損 sec(θ) 上限 3.5 | propagation.js:57-63、:294/:306（樓板）；propagationGL.js:329-337 | 用入射角 θ_i，物理應為折射角 θ_t（混凝土 75° 時 ≈1.1 而非 3.5）→ 5G 混凝土斜射 19→66 dB，**單牆多算最多 ~47 dB**；金屬/Low-E 本不該套 sec。選項：改 sec(θ_t) + 少量 Fresnel 項；或只把上限降到 ~2 | **最大 dB 誤差項**；走廊斜射處會大幅變亮 | ⬜ |
+| 57-19 | 角落繞射幾乎從不生效 | geometry.js:55-62；propagation.js:418-431；propagationGL.js:1202-1205 | 端點 t=0/1 也算命中 → 角落自己那道牆兩腿各算一次；L/T 交點、門框（開口把牆切成相接線段）因 hits>1 直接被剔除。陰影邊緣硬切、低估 6–19 dB。修法：排除端點與角落重合的牆（需 corner→wallId 貼圖） | shader 成本 +5–20%（若先做 57-22 則約持平）；陰影邊緣變柔和 | ⬜ |
+| 57-20 | 天線方向圖不隨 tilt 旋轉座標系 | propagation.js:228-242；propagationGL.js:934-944、:1633-1642；PatternPreview3D.jsx:121 | 目前 offH=rayAz−az、offV=elev−tilt（**Phase 40 當初的設計**）。吸頂 patch tilt −90 在 az180°/el−45° 給 −30.8 dB，正確 −5.8 dB → 半個樓層 25–30 dB 假陰影。修法：ray 先轉入天線座標（解 azimuth 再解 tilt）後取偏角；CPU 預算每 AP mat3。**tilt=0 時結果 bit-identical** | 只影響有 tilt 的 directional/custom AP；成本 <2% | ⬜ |
+| 57-21 | H+V 方向圖相加無下限（3GPP A_max） | propagation.js:241-248 + shader 同處 | Gh+Gv 最低到 −50~−60 dB，3GPP TR 38.901 限 A_max ≈ 25–30 dB → 背瓣約多算 20 dB，定向 AP 背後的覆蓋與 CCI 被低估。一個 `min` | 零成本；定向 AP 背後變亮 | ⬜ |
+| 57-22 | 路徑同調相加 → 功率相加（local mean） | propagation.js:444-460；propagationGL.js:1222-1229 | 0.5 m 格點對 5 GHz（λ≈6 cm）是 aliasing，出現假衰落斑（單反射體實測差 ~7 dB）；業界顯示 local mean。**同時是效能大改**：去掉 N 頻率取樣迴圈與 `vec2 Hperp[40]` 陣列，per-AP shader 估 1.5–3× | 開反射時熱圖斑紋消失、整體略亮；物理定位改變，需慎重 | ⬜ |
+| 57-23 | 方向圖峰值未依 directivity 正規化 + EIRP 上限（**必須綁一起**） | propagation.js:221/243/248；apModels.js:129 | 峰值固定用 omni datasheet 增益 → 定向主瓣少 3–6 dB（天線角色估 4–10，第二輪修正為 3–6）。只修這條會冒出 41 dBm EIRP，所以要同時加 band/region EIRP 上限（6G LPI：5 dBm/MHz + 10log BW） | 需要決定法規區域資料來源；定向 AP 主瓣變亮 | ⬜ |
+| 57-24 | 反射/繞射路徑長用 2D、直達用 3D | propagation.js:398-405、:415-424 + shader | 反射分量 1.5 m 處多 2.7 dB、3 m 處 0.9 dB、10 m 外 <0.1 dB；相位延遲也偏。只影響 AP 附近 | 小；若做 57-22 則相位部分消失 | ⬜ |
+| 57-25 | 樓板損耗不隨頻率縮放、預設 12 dB 偏低 | buildCrossFloor.js:54、useFloorStore.js:159 | ITU-R P.1238 約 15–16 dB，鋼筋樓板 20–30 dB；5/6G 垂直方向跨樓層 CCI 高估 5–15 dB（但斜向有 sec 放大，見 57-18，兩者要一起看） | 跨樓層干擾變少 | ⬜ |
+| 57-26 | 跨樓層 AP 方位角未隨 `alignRotation` 旋轉 | buildScenario.js:241、:250-256；buildCrossFloor.js | 位置有轉、azimuth 沒轉 → 他層定向 AP 主瓣偏一個對齊角。omni 不受影響 | 小 | ⬜ |
+| 57-27 | `mountType` 對 RF 無作用、tilt 預設 0 | APPanel.jsx:36、:41-43；buildScenario.js:226-246 | 吸頂 patch/sector 預設朝水平，正下方約 −23 dB（Phase 40 已記「當時未納入」）。要先決定 mountType 是否只是外觀 | 產品決策 | ⬜ |
+| 57-28 | 雜訊底與干擾門檻兩邊不一致 | sampleFieldGL.js:162、:381（熱圖固定 −95）；Client View −92/−95/−96；熱圖干擾算到 −120、Client View 門檻 −82（useClientViewStore.js:54） | 同點 SINR/SNR 兩處數字不同（2.4G 差 3 dB） | 要選一套統一 | ⬜ |
+| 57-29 | Client View 細節 | simulate.js:159（SNR→MCS，**spec 規定**，client-view-spec.md:47）、simulate.js:185-186/275-281（干擾源取自已過濾候選、上下行混用）、dataRate.js:57-79（11ac 用 11ax 速率、2.4G 到 MCS 9–11、AP 串流數沒建模） | MCS 改 SINR 是 spec 變更，AP 角色建議改、程式角色認為屬規格決策 | 規格決策 | ⬜ |
+| 57-30 | 圖例配色 / −67 等高線 / cutoff | modes.js:13-19、:33-39；heatmapGL.js:185-187 | −67 設計目標落在橘紅、無 −67 等高線、−75 以下全同色（−76 與 −95 看起來一樣） | 純視覺習慣改變 | ⬜ |
+| 57-31 | 缺少熱圖模式：data rate / channel overlap / secondary coverage | useHeatmapStore.js:9；sampleField.js:57 已算 redundancy | 新功能 | 新功能 | ⬜ |
+| 57-32 | 客戶端天線增益 offset、6 GHz LPI、Tx 不隨頻寬 | rfConstants.js:3（RX_ANT_GAIN_DBI=0）；apModels.js:86 | 手機實際 −3~−5 dBi（含人體）→ 邊緣樂觀 3–5 dB；Ekahau/Hamina 有 per-device offset。可與 57-23 一起做 | 覆蓋變小 | ⬜ |
+| 57-33 | planQuality 判準 | planQuality.js:63-83、:90、:111-115 | 衝突用「12 m 內頻譜重疊」忽略牆，業界用 AP-AP RSSI ≥ −82/−85；覆蓋率與 secondary 混頻段 | 面板數字變 | ⬜ |
+| 57-34 | auto-place 候選與最終熱圖參數不一致 | autoPlacePlan.js:68-84、:394 | 候選 AP 用 3 dBi + zM 2.4、目標 −65（coverage 用 −67，可能是刻意 margin）；干擾半徑寫死 300 canvas px 隨比例尺變 | 自動放置結果變 | ⬜ |
+| 57-35 | 波紋動畫幀改用拖曳解析度 | heatmapAdapter.js:616-639；heatmapGL.js:345-420 | 波紋期間（≤4.9 s）每幀 4 個全尺寸 pass + 整張 PIXI 上傳；大平面圖 UHD 770 可能每幀數十 ms。**先量測**再決定 | 效能；動畫中途畫質降低 | ⬜ |
+| 57-36 | heatmapStack per-AP 門檻與 2D 不一致 | heatmapStack.js:146（舊的 walls×APs 1500/20000）vs heatmapAdapter.js:952-957（per-segment 比例） | 同一場景 2D 與 3D 走不同路徑（反射繞射開關不同）→ 顏色不同 | 3D 熱圖可能變 | ⬜ |
+| 57-37 | 共線線段接點重複計算 | geometry.js:56 | 射線剛好穿過兩共線段接點 → 兩段都算（實測多 19 dB）；但窗口只有微米寬，只影響個別格點（門框）。程式角色判定為 cleanup | 極小 | ⬜ |
+| 57-38 | 單 AP 物件只有一個 radio → `radios[]` 模型 | AP 資料模型全域 | 企業 AP 是雙/三頻同址；AP 數量、BOM、PoE、secondary 計數、auto-place 分頻放置都會錯。與 47-8b「單台三頻」backlog 同一件事。**規模大，若要做另立 Phase** | 資料模型大改 | ⬜ |
+| 57-39 | **缺絕對成本門檻 → 大場景 GPU 重置（黑畫面）** ⚠ 優先 | heatmapAdapter.js:952-957（只看 AP÷牆段比例）；propagationGL.js per-AP 反射/繞射迴圈；bakeApGeoOne:2943 | 現有降級門檻是「AP 密到關掉也看不出來」的**畫質判準**，不是成本上限 → 牆多 AP 少時比例永遠 <0.25，反射繞射永遠開。**2026-10-05 實測（UHD 770）：demo + 4200 道散佈小牆（共 4245 段）+ 只剩 1 台 AP + gridStep 2 m → 單次 per-AP draw 觸發 GPU Device lost / CONTEXT_LOST，PIXI 一起掛 → 整個畫面黑，熱圖退回 JS；連續兩次後 Chrome 封鎖整個 origin 的 WebGL（3D 也開不了），須重啟瀏覽器**。即大 DXF（數千段）匯入就會發生。修法方向：加絕對成本估算（如 walls×corners×APs×cells）超過就降級，或把單次 draw 切塊（tile）避免 TDR；CPU geo bake 也要切片。尚未用舊程式碼重現（瀏覽器被封鎖中斷），但第一次 5 AP 卡死時程式碼正是 stash 後的舊版 | 大場景畫面會失去反射繞射（或改 tile 則畫面不變）；**不修會整頁黑掉** | ⬜ |
+
+
+---
+
 ### Phase 55 3D 樓層電梯條（Floor Elevator Rail）— 2026-09-22 立項
 
 > **來由**：3D 切樓層目前只有左側 SidebarLeft 與右上 FloorSelector 兩個 DOM 入口，兩者都與 3D 空間無關。
