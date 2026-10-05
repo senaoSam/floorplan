@@ -340,8 +340,8 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   const freqMhz = ap.centerMHz || 5190
   const wavelength = C / (freqMhz * 1e6)
   const kWave = (2 * Math.PI) / wavelength
-  // HM-F8: per-AP wall-loss frequency scale (1 at 2.4 GHz, ~2.7 at 5 GHz with
-  // concrete's b=1.99). Threaded through every accumulateWallLoss call.
+  // HM-F8: per-AP wall-loss frequency scale (1 at 2.4 GHz, ~1.6 at 5 GHz with
+  // concrete's b=0.6). Threaded through every accumulateWallLoss call.
   const fOver24 = (freqMhz / 1000) / 2.4
 
   // Absolute Z of AP / rx; 0 when caller didn't provide elevation data.

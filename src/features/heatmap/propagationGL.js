@@ -159,7 +159,7 @@ uniform float uCullFloorDbm;
 
 // HM-F5k: per-AP precomputed corner / wall geometry, baked once when AP or
 // walls change and reused across every fragment.
-//   uApCornersGeo (RGBA32F, 1×N_corners): per corner
+//   uApCornersGeo (RGBA32F, N_corners packed 4096 wide): per corner
 //     .r = d1 (length AP→corner in metres)
 //     .g = geomLos (1.0 = AP→corner crosses zero walls geometrically;
 //                   0.0 = at least one wall geometrically crosses, must run
@@ -168,7 +168,7 @@ uniform float uCullFloorDbm;
 //     guaranteed no-op for every fragment, so we skip it. When 0.0 we still
 //     must run the scan because the Z filter (which depends on cZM, a
 //     fragment-local quantity) may rescue some hits.
-//   uApWallMirror (RGBA32F, 1×N_walls): per wall
+//   uApWallMirror (RGBA32F, N_walls packed 4096 wide): per wall
 //     .rg = apImg.xy = mirrorPoint(AP, wall.a, wall.b)
 //     The reflection loop reads this instead of recomputing mirrorPoint per
 //     fragment.
@@ -792,7 +792,10 @@ float accumulateWallLossExcept(vec2 ap, float apZ, vec2 rx, float rxZ, int exclu
 // mirrorPoint exactly: n = unit segment normal, then p - 2*(p-a)·n * n.
 vec2 mirrorPoint(vec2 p, vec2 a, vec2 b) {
   vec2 d = b - a;
-  vec2 n = normalize(vec2(-d.y, d.x));
+  // 57-3: zero-length wall → normalize() is NaN in GLSL. JS norm() falls back
+  // to a zero normal (mirror = p); match it so NaN can't reach the sum.
+  float dl = length(d);
+  vec2 n = dl > 1e-12 ? vec2(-d.y, d.x) / dl : vec2(0.0);
   float k = dot(p - a, n);
   return p - 2.0 * k * n;
 }
@@ -1111,7 +1114,7 @@ float rssiWithReflections(vec2 rx, float rxZ) {
       // loop. Geometry is identical to JS — same n = unit segment normal,
       // same p - 2(p-a)·n·n.
       vec2 apImg = uApGeoEnabled == 1
-        ? texelFetch(uApWallMirror, ivec2(w, 0), 0).xy
+        ? texelFetch(uApWallMirror, ivec2(w % 4096, w / 4096), 0).xy
         : mirrorPoint(uApPos.xy, wa, wb);
       vec3 hit = segSegHit(apImg, rx, wa, wb);
       if (hit.z < 0.5) continue;
@@ -1181,7 +1184,7 @@ float rssiWithReflections(vec2 rx, float rxZ) {
       float d1;
       bool s1Skip = false;
       if (uApGeoEnabled == 1) {
-        vec4 g = texelFetch(uApCornersGeo, ivec2(ci, 0), 0);
+        vec4 g = texelFetch(uApCornersGeo, ivec2(ci % 4096, ci / 4096), 0);
         d1 = g.r;
         s1Skip = g.g > 0.5;
       } else {
@@ -2341,6 +2344,16 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     const e = outGridCache.get(apKey)
     return (e && e.hash === hash) ? e : null
   }
+  // 57-2: drop grids of APs that no longer exist (deleted APs, cleared
+  // auto-place ghosts). Without this they stay until the next wall edit.
+  // liveKeys must be every AP that still exists (all floors, not just the
+  // rendered/band-filtered subset) so unchanged-AP reuse is untouched.
+  // `_idx_*` fallback keys aren't stable ids, so they're left alone.
+  function pruneCachedGrids(liveKeys) {
+    for (const k of [...outGridCache.keys()]) {
+      if (!liveKeys.has(k) && !String(k).startsWith('_idx_')) outGridCache.delete(k)
+    }
+  }
   function setCachedGrid(apKey, hash, grid, nx, ny) {
     // Store a copy — renderAp returns a fresh array per call today, but copying
     // is cheap insurance against any future buffer reuse leaking a mutation
@@ -2949,9 +2962,11 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     const cached = apGeoCache.get(apKey)
     if (cached && cached.hash === hash) return cached
 
-    // Allocate or resize textures. Layout:
-    //   cornersTex: 1 row × N_corners texels, RGBA32F, .rg = (d1, geomLos)
-    //   mirrorTex:  1 row × N_walls texels,   RGBA32F, .rg = (apImg.x, apImg.y)
+    // Allocate or resize textures. Layout (57-1: packed 4096 wide like
+    // wallsTex / uCorners — a single row overflows MAX_TEXTURE_SIZE on big
+    // DXF imports and texImage2D fails silently; ≤4096 entries is unchanged):
+    //   cornersTex: N_corners texels, RGBA32F, .rg = (d1, geomLos)
+    //   mirrorTex:  N_walls texels,   RGBA32F, .rg = (apImg.x, apImg.y)
     let entry = cached
     if (!entry) {
       const cornersTex = gl.createTexture()
@@ -2972,7 +2987,8 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
 
     // ---- corners pass ----
     const nC = Math.max(1, bakeCorners.length)
-    const cData = new Float32Array(nC * 4)
+    const cW = Math.min(nC, 4096), cH = Math.ceil(nC / 4096)
+    const cData = new Float32Array(cW * cH * 4)
     for (let i = 0; i < bakeCorners.length; i++) {
       const c = bakeCorners[i]
       const dx = c.x - apX, dy = c.y - apY
@@ -2982,11 +2998,12 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       cData[i * 4 + 1] = los
     }
     gl.bindTexture(gl.TEXTURE_2D, entry.cornersTex)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, nC, 1, 0, gl.RGBA, gl.FLOAT, cData)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, cW, cH, 0, gl.RGBA, gl.FLOAT, cData)
 
     // ---- wall-mirror pass ----
     const nW = Math.max(1, bakeWalls.length)
-    const mData = new Float32Array(nW * 4)
+    const mW = Math.min(nW, 4096), mH = Math.ceil(nW / 4096)
+    const mData = new Float32Array(mW * mH * 4)
     for (let i = 0; i < bakeWalls.length; i++) {
       const w = bakeWalls[i]
       // mirrorPoint(AP, w.a, w.b): n = unit segment normal; apImg = AP - 2((AP-w.a)·n)·n
@@ -2998,7 +3015,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       mData[i * 4 + 1] = apY - 2 * k * ny
     }
     gl.bindTexture(gl.TEXTURE_2D, entry.mirrorTex)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, nW, 1, 0, gl.RGBA, gl.FLOAT, mData)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, mW, mH, 0, gl.RGBA, gl.FLOAT, mData)
 
     entry.hash = hash
     entry.cornerCount = bakeCorners.length
@@ -3120,18 +3137,20 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     try {
       await waitFence(sync)
       return handles.map((h) => {
+        // 57-39: tiled renders hand back already-read data.
+        if (h.data) return h.data
         const out = new Float32Array(h.nx * h.ny)
         consumed.add(h)
         readPboInto(h.pbo, out)
         return out
       })
     } finally {
-      for (const h of handles) if (!consumed.has(h)) pboRelease(h.pbo)
+      for (const h of handles) if (h.pbo && !consumed.has(h)) pboRelease(h.pbo)
     }
   }
   // Stale-generation cleanup: recycle the buffers without reading them.
   function discardApReads(handles) {
-    for (const h of handles) pboRelease(h.pbo)
+    for (const h of handles) if (h.pbo) pboRelease(h.pbo)
   }
 
   // Uniform setup + draw for one AP, leaving the sized output FBO bound so the caller
@@ -3242,7 +3261,14 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.uniform1i(gl.getUniformLocation(prog, 'uPatterns'), 9)
 
     gl.bindVertexArray(vao)
+    // 57-39: opts.scissor limits the draw to one tile for tiled renders.
+    const sc = opts.scissor
+    if (sc) {
+      gl.enable(gl.SCISSOR_TEST)
+      gl.scissor(sc.x, sc.y, sc.w, sc.h)
+    }
     gl.drawArrays(gl.TRIANGLES, 0, 6)
+    if (sc) gl.disable(gl.SCISSOR_TEST)
     return { nx, ny }
   }
 
@@ -3271,6 +3297,87 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     return { pbo, nx, ny }
+  }
+
+  // 57-39: tiled per-AP render. Refl/diff cost per fragment grows with
+  // walls × corners, and the AP-per-segment downgrade never fires on "many
+  // walls, few APs" (big DXF imports). There a single full-grid draw outlasts
+  // the GPU watchdog: the context is lost (black screen, JS fallback), and
+  // after a couple of losses Chrome blocks WebGL for the page. Measured on the
+  // UHD 770 baseline: 4245 segments + 1 AP at a 2 m grid already did it, at
+  // ~170 ms per fragment — so even ONE grid row can exceed the watchdog, and
+  // tiles go below a row when needed.
+  //
+  // Each tile (full rows, or a run of cells within one row) is drawn, read
+  // into its own PBO, flushed and fenced before the next, so no single
+  // submission runs long. Tile size adapts to measured time (TILE_TARGET_MS),
+  // starting from TILE_START_FRAGS cells — or from the previous AP's measured
+  // rate when the geometry is unchanged.
+  // Output is identical to the single draw: the scissor only selects which
+  // fragments run; each fragment sees the same program, uniforms and inputs.
+  // Small scenes stay on the single-draw path (TILE_GEOM_MIN), untouched.
+  const TILE_GEOM_MIN = 600
+  // 200 ms keeps ~10× headroom under the ~2 s watchdog while making the
+  // ramp-up short; growth is capped at ×8 per tile.
+  const TILE_TARGET_MS = 200
+  const TILE_START_FRAGS = 4
+  let tileHint = null // { key, msPerFrag }
+  function apDrawNeedsTiling(scenario, opts = {}) {
+    const refl = opts.maxReflOrder && opts.maxReflOrder > 0
+    const geom = (refl ? scenario.walls.length : 0) + (opts.enableDiffraction ? cornerCount : 0)
+    return geom >= TILE_GEOM_MIN
+  }
+  // Returns { data, nx, ny } — already read back (resolveApReads passes it
+  // through), or null when the request went stale mid-way.
+  async function renderApSubmitTiled(ap, scenario, gridStepM, originM, rxZM, slabMeta, opts = {}, isStale = () => false) {
+    const nx = opts.gridSize?.nx ?? (Math.ceil(scenario.size.w / gridStepM) + 1)
+    const ny = opts.gridSize?.ny ?? (Math.ceil(scenario.size.h / gridStepM) + 1)
+    const startVersion = wallsVersion
+    const hintKey = `${wallsVersion}|${cornerCount}|${opts.maxReflOrder > 0 ? 1 : 0}|${opts.enableDiffraction ? 1 : 0}`
+    // Half the target on the first tile when reusing a hint: APs differ in cost.
+    let frags = (tileHint && tileHint.key === hintKey)
+      ? Math.floor((TILE_TARGET_MS * 0.5) / tileHint.msPerFrag)
+      : TILE_START_FRAGS
+    const out = new Float32Array(nx * ny)
+    let x0 = 0, y0 = 0
+    while (y0 < ny) {
+      frags = Math.max(1, frags)
+      // Full rows when the budget covers at least one row from a row start,
+      // otherwise a run of cells inside the current row.
+      let w, h
+      if (x0 === 0 && frags >= nx) { w = nx; h = Math.min(ny - y0, Math.floor(frags / nx)) }
+      else { w = Math.min(nx - x0, frags); h = 1 }
+      // Full setup per tile: cheap, and keeps the tile correct even if
+      // anything else touched the program / FBO while we awaited.
+      renderApDraw(ap, scenario, gridStepM, originM, rxZM, slabMeta, { ...opts, scissor: { x: x0, y: y0, w, h } })
+      if (gl.isContextLost()) throw new Error('GL context lost during tiled renderAp')
+      const pbo = pboAcquire(w * h * 4)
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo.buf)
+      gl.readPixels(x0, y0, w, h, gl.RED, gl.FLOAT, 0)
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+      const t0 = performance.now()
+      try {
+        await waitFence(fenceFlush())
+      } catch (e) {
+        pboRelease(pbo)
+        throw e
+      }
+      const dt = Math.max(performance.now() - t0, 1)
+      if (isStale() || wallsVersion !== startVersion) {
+        pboRelease(pbo)
+        return null
+      }
+      // Rows are contiguous in `out` (full-width tiles or a single row run).
+      readPboInto(pbo, out.subarray(y0 * nx + x0, y0 * nx + x0 + w * h))
+      const done = w * h
+      const msPerFrag = dt / done
+      tileHint = { key: hintKey, msPerFrag }
+      frags = Math.min(done * 8, Math.floor(TILE_TARGET_MS / msPerFrag))
+      x0 += w
+      if (h > 1 || x0 >= nx) { y0 += h; x0 = 0 }
+    }
+    return { data: out, nx, ny }
   }
 
   // HM-F5g: aggregated all-AP single-pass render. Only valid for the scalar
@@ -3550,7 +3657,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     uploadWalls, uploadCorners, uploadSlabs, uploadAps, bakeLos, bakeApGeo,
     renderAp, renderField,
     renderFieldAsync, renderApSubmit, resolveApReads, discardApReads,
-    getWallsVersion, getCachedGrid, setCachedGrid, setUseGrid, dispose, gl,
+    getWallsVersion, getCachedGrid, setCachedGrid, pruneCachedGrids, apDrawNeedsTiling, renderApSubmitTiled, setUseGrid, dispose, gl,
     // 53-G4: true once the context is lost/restored (or reports itself lost).
     // Callers should drop this instance rather than keep dispatching into it.
     isDead,

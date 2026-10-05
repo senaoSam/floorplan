@@ -479,15 +479,31 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
 
     const losEntry = losMap?.get(apKey)
     const apGeoEntry = apGeoMap?.get(apKey)
+    const apOpts = {
+      ...opts,
+      gridSize: { nx, ny },
+      losTex: losEntry?.tex,
+      losFastMode: opts.losFastMode === true,
+      apGeoEntry,
+    }
+    // 57-39: heavy geometry → strip-by-strip render so no single GPU
+    // submission trips the watchdog. Drain the pending batch first so the
+    // strips' fences don't wait behind queued full-grid draws.
+    if (gl.apDrawNeedsTiling?.(scenario, opts)) {
+      if (isStale()) {
+        gl.discardApReads(pending.map((p) => p.handle))
+        return null
+      }
+      if (!(await flushPending())) return null
+      const handle = await gl.renderApSubmitTiled(
+        apForGL, scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta, apOpts, isStale)
+      if (handle === null) return null
+      pending.push({ k, apKey, hash, handle })
+      if (!(await flushPending())) return null
+      continue
+    }
     const handle = gl.renderApSubmit(
-      apForGL, scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta,
-      {
-        ...opts,
-        gridSize: { nx, ny },
-        losTex: losEntry?.tex,
-        losFastMode: opts.losFastMode === true,
-        apGeoEntry,
-      },
+      apForGL, scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta, apOpts,
     )
     pending.push({ k, apKey, hash, handle })
     if (pending.length >= SUBMIT_BATCH) {
@@ -504,6 +520,12 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
     return null
   }
   if (!(await flushPending())) return null
+  // 57-2: evict cached grids of APs that no longer exist. Only callers that
+  // know the full live AP set pass liveApIds (the idle path) — a solo-drag
+  // render's scenario holds one AP and must not prune the others.
+  if (gridCacheOn && opts.liveApIds && typeof gl.pruneCachedGrids === 'function') {
+    gl.pruneCachedGrids(opts.liveApIds)
+  }
 
   return aggregateChunked(perApGrids, scenario, nx, ny, originX, originY, gridStepM, w, h, mask, isStale)
 }

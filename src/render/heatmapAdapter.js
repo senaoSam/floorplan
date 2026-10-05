@@ -1116,10 +1116,17 @@ export function attachHeatmapLayer({
   // generation so a newer compute() drops this one wholesale.
   const runIdle = async (gen, scenario, hm, ctxBase, forceAggregated, padding, idleInputs) => {
     const isStale = () => gen !== generation
+    // 57-2: every AP that still exists (all floors, ghosts included, before
+    // the band filter) — lets the engine drop cached grids of deleted APs.
+    const liveApIds = new Set()
+    for (const list of Object.values(idleInputs.apsAll ?? {})) {
+      for (const ap of list ?? []) liveApIds.add(ap.id)
+    }
     const baseOpts = {
       maxReflOrder: forceAggregated ? 0 : (hm.reflections ? 1 : 0),
       enableDiffraction: forceAggregated ? false : hm.diffraction,
       padding,
+      liveApIds,
     }
     const modeCfg = getModeConfig(hm.mode)
     const ctx = { ...ctxBase, blur: hm.blur, contours: hm.showContours, anchors: modeCfg.anchors }

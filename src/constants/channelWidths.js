@@ -28,34 +28,6 @@ export function clampWidthForBand(band, width) {
   return DEFAULT_CHANNEL_WIDTH[band] ?? 20
 }
 
-// ── Frequency range helpers ──────────────────────────────────────────────
-// Center frequency (MHz) of a channel within a band. Simplified:
-//   2.4 GHz: 2407 + 5·N   (ch1=2412, ch6=2437, ch11=2462)
-//   5   GHz: 5000 + 5·N   (ch36=5180, ch149=5745)
-//   6   GHz: 5950 + 5·N   (ch1=5955, ch5=5975, …)
-function channelCenterMHz(band, channel) {
-  if (band === 2.4) return 2407 + 5 * channel
-  if (band === 5)   return 5000 + 5 * channel
-  if (band === 6)   return 5950 + 5 * channel
-  return 0
-}
-
-// Return [loMHz, hiMHz] occupied by an AP's channel at the given width.
-export function channelRangeMHz(band, channel, width) {
-  const center = channelCenterMHz(band, channel)
-  const half = width / 2
-  return [center - half, center + half]
-}
-
-// Two APs' channels overlap iff they are on the same band and their frequency
-// ranges intersect. A 40 MHz AP on ch36 overlaps a 20 MHz AP on ch40, etc.
-export function channelsOverlap(bandA, chA, wA, bandB, chB, wB) {
-  if (bandA !== bandB) return false
-  const [loA, hiA] = channelRangeMHz(bandA, chA, wA)
-  const [loB, hiB] = channelRangeMHz(bandB, chB, wB)
-  return loA < hiB && loB < hiA
-}
-
 // ── Data rate / SNR adjustments ──────────────────────────────────────────
 // Noise floor rises by 10·log10(W/20) dB as bandwidth grows (wider receiver → more noise).
 // 20→0 dB, 40→+3, 80→+6, 160→+9.
