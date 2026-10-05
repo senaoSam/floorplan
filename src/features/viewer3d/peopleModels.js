@@ -260,7 +260,10 @@ function calibrate(scene) {
   )
   const helmetLocal = head.matrixWorld.clone().invert().multiply(helmetWorld)
   holder.remove(scene)
-  return { orient, rest, axes, axesFwd, dye, pelvisRest, helmetLocal }
+  // Top of the head (hair included) above the head bone — for fitting a
+  // seated figure under a roof (fitHeadroom).
+  const headTopAbove = world.max.y - headPos.y
+  return { orient, rest, axes, axesFwd, dye, pelvisRest, helmetLocal, headTopAbove }
 }
 
 let loadPromise = null
@@ -518,7 +521,12 @@ function solveArms(g, seat) {
   const angles = {}
   let worst = 0
   for (const [side, sz] of [['R', 1], ['L', -1]]) {
-    const target = new THREE.Vector3(seat.grip[0], seat.grip[1], sz * seat.grip[2])
+    // `grips` gives each hand its own target ([right, left]) — a car's
+    // steering wheel sits off the centreline; `grip` is one right-hand
+    // target mirrored across it (handlebars).
+    const target = seat.grips
+      ? new THREE.Vector3(...seat.grips[side === 'R' ? 0 : 1])
+      : new THREE.Vector3(seat.grip[0], seat.grip[1], sz * seat.grip[2])
     const hand = g.userData.bones.get(`bip01${side.toLowerCase()}hand`)
     const err = (q) => {
       g.userData.setAngles({ [`upperArm${side}`]: [q[0], q[1]], [`forearm${side}`]: q[2] })
@@ -546,6 +554,16 @@ function solveArms(g, seat) {
     worst = Math.max(worst, best)
   }
   return { angles, err: worst }
+}
+
+// Lower a seated figure until the top of its head clears `maxY` (in its
+// parent's frame — again, call before parenting). A tall model can't sit
+// upright under a low car roof from the same seat height as a short one.
+export function fitHeadroom(g, maxY) {
+  g.updateMatrixWorld(true)
+  const head = g.userData.bones.get('bip01head').getWorldPosition(_vh)
+  const top = head.y + g.userData.template.headTopAbove
+  if (top > maxY) g.position.y -= top - maxY
 }
 
 // Two-bone leg IK in the sagittal (x-y) plane. prepareLegIK measures, with

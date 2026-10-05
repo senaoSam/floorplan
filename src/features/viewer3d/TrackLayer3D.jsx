@@ -8,8 +8,8 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { sampleTrackAt, trackHeadingAt } from '@/features/cameras/mockTracks'
 import { trackTint } from '@/features/cameras/trackColor'
 import { buildBlockingSegments, computeFovPolygon, cameraCoverageRadii } from '@/features/cameras/fovPolygon'
-import { loadPeopleModels, createPerson, applyPersonState, disposePerson, personOutfit, addHalfHelmet, fitGrips, prepareLegIK, applyLegIK } from './peopleModels'
-import { buildVehicleGeometries, disposeVehicleGeometries, makeVehicle, disposeVehicle, pickVehicleType, vehicleColors, applyVehicleState } from './vehicleModels'
+import { loadPeopleModels, createPerson, applyPersonState, disposePerson, personOutfit, addHalfHelmet, fitGrips, fitHeadroom, prepareLegIK, applyLegIK } from './peopleModels'
+import { buildVehicleGeometries, disposeVehicleGeometries, makeVehicle, disposeVehicle, pickVehicleType, vehicleColors, applyVehicleState, updateVehicleLights } from './vehicleModels'
 
 // Live tracking targets in 3D (Phase 34, CAMERA mode only — Viewer3D gates
 // the mount). Mirrors tracksLayer's semantics: a target is solid-coloured
@@ -94,6 +94,25 @@ const LEAN_TAU = 0.25
 const MAX_LEAN = 0.5
 const GRAVITY = 9.81
 const CRANK_RATIO = 2.2
+// Vehicle lamps (vehicleModels updateVehicleLights):
+//   night       — head/tail lamps on between NIGHT_FROM_H and NIGHT_TO_H of
+//                 the playback clock (daytime running lamps always on)
+//   brake       — decelerating harder than BRAKE_DECEL m/s², or held for
+//                 BRAKE_HOLD_SEC after coming to a stop (not when parked)
+//   turn signal — the heading TURN_LOOKAHEAD_SEC ahead on the track differs
+//                 from the current one by more than TURN_SIGNAL_RAD, so the
+//                 signal comes on BEFORE the turn; it stays on TURN_HOLD_SEC
+//                 after, flashing at BLINK_HZ (wall-clock, so the flasher
+//                 keeps a natural rate at fast playback)
+const NIGHT_FROM_H = 18
+const NIGHT_TO_H = 6
+const BRAKE_DECEL = 0.6
+const BRAKE_HOLD_SEC = 4
+const ACCEL_TAU = 0.3
+const TURN_LOOKAHEAD_SEC = 2.5
+const TURN_SIGNAL_RAD = 0.35
+const TURN_HOLD_SEC = 1
+const BLINK_HZ = 1.5
 
 // Stable male/female pick per track, so a person keeps the same body for the
 // whole walk even when pool slots shift as other tracks start and end.
@@ -127,8 +146,12 @@ function seatedRider(fig, sex, models) {
     _seatOffset.fromArray(seat.pelvis).sub(models[sex].pelvisRest)
     r.position.copy(_seatOffset)
     // Still unparented, so the rider's world space IS the vehicle frame:
-    // fit the wrists to the grips, and measure the legs for pedalling.
+    // fit under the roof (car drivers), fit the wrists to the grips, and
+    // measure the legs for pedalling.
+    if (seat.headroom) fitHeadroom(r, seat.headroom)
     fitGrips(r, seat)
+    // A driver's shadow would fall inside the closed car — skip the pass.
+    if (seat.driver) r.traverse((o) => { if (o.isMesh) o.castShadow = false })
     if (seat.crank) r.userData.legIK = prepareLegIK(r)
     if (seat.helmet) addHalfHelmet(r, '#f3f4f6')
     fig.add(r)
@@ -544,6 +567,8 @@ export default function TrackLayer3D({ floorId, pxToM }) {
 
     let pi = 0
     let ci = 0
+    const hourOfDay = (t / 3600) % 24
+    const night = hourOfDay >= NIGHT_FROM_H || hourOfDay < NIGHT_TO_H
     // Per-sex slot counters for the realistic people (pi still counts every
     // person — it indexes the trail ribbons).
     const used = { m: 0, f: 0 }
@@ -568,7 +593,9 @@ export default function TrackLayer3D({ floorId, pxToM }) {
       const idx = isCar ? ci++ : pi++
       let fig
       if (isCar) {
-        const kind = pickVehicleType(track.id)
+        // Baseline relay cars carry their type (mockTracks guarantees the mix
+        // on screen); other cars get one from the weighted pick.
+        const kind = track.vehicleKind ?? pickVehicleType(track.id)
         const slot = carUsed[kind] ?? 0
         carUsed[kind] = slot + 1
         fig = getCar(kind, slot)
@@ -597,6 +624,11 @@ export default function TrackLayer3D({ floorId, pxToM }) {
         ud.speed = 0
         ud.lean = 0
         ud.hasLast = false
+        ud.prevSpeed = 0
+        ud.accel = 0
+        ud.sinceMoving = Infinity
+        ud.turnSide = 0
+        ud.turnHold = 0
       }
       let stepDist = 0
       if (ud.hasLast) stepDist = Math.hypot(wx - ud.lastX, wz - ud.lastZ)
@@ -612,9 +644,29 @@ export default function TrackLayer3D({ floorId, pxToM }) {
       const yawStep = dYaw * (1 - Math.exp(-dtSec / (isCar ? YAW_TAU_VEHICLE : YAW_TAU_PERSON)))
       ud.yaw += yawStep
       fig.rotation.y = ud.yaw
+      // Vehicle lamps for this frame (see the constants above).
+      if (isCar) {
+        const accelRaw = dtSec > 0 ? (ud.speed - ud.prevSpeed) / dtSec : 0
+        ud.prevSpeed = ud.speed
+        ud.accel += (accelRaw - ud.accel) * (1 - Math.exp(-dtSec / ACCEL_TAU))
+        ud.sinceMoving = ud.speed > 0.5 ? 0 : ud.sinceMoving + dtSec
+        const brake = ud.accel < -BRAKE_DECEL || (ud.speed < 0.3 && ud.sinceMoving < BRAKE_HOLD_SEC)
+        let dAhead = -trackHeadingAt(track, Math.min(track.t1, t + TURN_LOOKAHEAD_SEC)) - ud.yaw
+        dAhead = Math.atan2(Math.sin(dAhead), Math.cos(dAhead))
+        // +yaw turns toward −Z, the left side.
+        if (Math.abs(dAhead) > TURN_SIGNAL_RAD) {
+          ud.turnSide = dAhead > 0 ? -1 : 1
+          ud.turnHold = TURN_HOLD_SEC
+        } else if ((ud.turnHold -= dtSec) <= 0) {
+          ud.turnSide = 0
+        }
+        if (ud.blinkPhase === undefined) ud.blinkPhase = Math.random()
+        const blink = ((nowMs / 1000) * BLINK_HZ + ud.blinkPhase) % 1 < 0.55
+        updateVehicleLights(fig, { night, brake, turn: ud.turnSide, blink })
+      }
       // Two-wheelers: lean into the turn the smoothed heading is making.
       // +yaw turns toward −Z, and leaning that way is a −roll about +X.
-      if (ud.seat) {
+      if (ud.seat?.lean) {
         const yawRate = dtSec > 0 ? yawStep / dtSec : 0
         const target = Math.max(-MAX_LEAN, Math.min(MAX_LEAN, -Math.atan((ud.speed * yawRate) / GRAVITY)))
         ud.lean += (target - ud.lean) * (1 - Math.exp(-dtSec / LEAN_TAU))

@@ -15,7 +15,9 @@ import { getPxPerM } from '@/store/useFloorStore'
 // complementary to fovPolygon's line-of-sight rules.)
 //
 // Track shape (sparse waypoint samples, linearly interpolated):
-//   { id, type: 'person'|'car', t0, t1, samples: [{ t, x, y }] }
+//   { id, type: 'person'|'car', t0, t1, samples: [{ t, x, y }], vehicleKind? }
+// `vehicleKind` is set on the baseline car relays only (see RELAY_*_KINDS) —
+// the 3D view draws that vehicle type; 2D and the analytics ignore it.
 // `samples` is time-ascending; consecutive equal positions encode a dwell.
 
 // Deterministic seedable RNG (mulberry32) so the same seed reproduces the
@@ -47,7 +49,15 @@ export const DAYS_PER_WEEK = 7
 // people / cars present at every moment of the day; the hourly spawns below
 // add the rush-hour peaks on top.
 const MIN_ON_SCREEN_PERSON = 30
-const MIN_ON_SCREEN_CAR = 5
+// Car relays carry a vehicle type (user ask: at any time, at least 5 different
+// car types plus 2 scooters and 2 bicycles in 3D). The first slots are fixed
+// two-wheelers; the rest rotate through the other types leg by leg, never two
+// of the same type at once (assignRelayKinds), so all of them show up over a
+// day. MIN_ON_SCREEN_CAR = two-wheel slots + rotating slots.
+const RELAY_TWO_WHEEL_KINDS = ['scooter', 'scooter', 'bicycle', 'bicycle']
+const RELAY_ROTATING_KINDS = ['sedan', 'suv', 'ev', 'taxi', 'racer', 'truck', 'bus']
+const RELAY_ROTATING_SLOTS = 5
+const MIN_ON_SCREEN_CAR = RELAY_TWO_WHEEL_KINDS.length + RELAY_ROTATING_SLOTS
 
 // Hourly spawn intensity (tracks per hour) — lunch + evening peaks so the
 // occupancy heatmap (34-3) shows believable busy/quiet periods.
@@ -291,19 +301,24 @@ export function generateDayTracks(floor, walls, opts = {}) {
   // ≥30 people, ≥5 cars at any moment). Each slot is a relay of back-to-back
   // tracks covering 08:00–22:00: when one leaves, the next takes over.
   const relay = (isCar, durRange) => {
+    const legs = []
     let t = dayStart
     while (t < dayEnd - 60) {
       const tr = buildTrackRetry(t, Math.min(dayEnd, t + randIn(rng, durRange)), isCar)
       if (tr) {
         tracks.push(tr)
+        legs.push(tr)
         t = tr.t1   // hand over the same second — a 1s seam would dip the minimum
       } else {
         t += 120   // every retry boxed in (extremely rare) — nudge forward
       }
     }
+    return legs
   }
   for (let i = 0; i < MIN_ON_SCREEN_PERSON; i++) relay(false, TRACK_DURATION_SEC)
-  for (let i = 0; i < MIN_ON_SCREEN_CAR; i++) relay(true, CAR_DURATION_SEC)
+  const carSlots = []
+  for (let i = 0; i < MIN_ON_SCREEN_CAR; i++) carSlots.push(relay(true, CAR_DURATION_SEC))
+  assignRelayKinds(carSlots)
 
   // Bursty hourly visitors on top of the baseline — the rush-hour texture
   // that the occupancy heatmap and analysis-window comparisons surface.
@@ -321,6 +336,34 @@ export function generateDayTracks(floor, walls, opts = {}) {
   }
 
   return tracks
+}
+
+// Vehicle types for the car relay slots. Two-wheel slots keep one fixed type
+// all day. The rotating slots' legs are visited in START-time order, and each
+// takes a type no other rotating slot is showing at that moment — preferring
+// the one seen least recently, so every type comes round. Checking only at a
+// leg's start is enough: a leg that starts later while this one runs checks
+// against it in turn. With fewer slots than types there is always one free.
+function assignRelayKinds(slots) {
+  const fixed = RELAY_TWO_WHEEL_KINDS.length
+  slots.slice(0, fixed).forEach((legs, i) => {
+    for (const tr of legs) tr.vehicleKind = RELAY_TWO_WHEEL_KINDS[i]
+  })
+  const legs = slots.slice(fixed)
+    .flatMap((ls, slot) => ls.map((tr) => ({ tr, slot })))
+    .sort((a, b) => a.tr.t0 - b.tr.t0)
+  const lastUsed = new Map(RELAY_ROTATING_KINDS.map((k) => [k, -Infinity]))
+  const showing = new Map()   // slot → its current leg
+  for (const { tr, slot } of legs) {
+    const inUse = new Set()
+    for (const [s, other] of showing) if (s !== slot && other.t1 > tr.t0) inUse.add(other.vehicleKind)
+    const kind = RELAY_ROTATING_KINDS
+      .filter((k) => !inUse.has(k))
+      .sort((a, b) => lastUsed.get(a) - lastUsed.get(b))[0]
+    tr.vehicleKind = kind
+    lastUsed.set(kind, tr.t0)
+    showing.set(slot, tr)
+  }
 }
 
 // A simulated WEEK of tracks for a floor, as one flat list with absolute
