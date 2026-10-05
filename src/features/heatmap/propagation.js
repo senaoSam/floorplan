@@ -375,7 +375,15 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   // AP↔rx ray crosses zero slab boundaries.
   const sameFloorRay = slabCount === 0
   if (maxReflOrder >= 1 && sameFloorRay) {
+    // 57-13: a wall reflects only within its own height band. The reflection
+    // point's Z lies between apZM and rxZM, so a wall whose band misses that
+    // span can't reflect at all (cheap early-out — other floors' walls ride
+    // in `walls` for cross-floor penetration); the exact check on reflZM
+    // follows below. Mirrored in propagationGL.js.
+    const zSpanLo = Math.min(apZM, rxZM), zSpanHi = Math.max(apZM, rxZM)
     for (const w of walls) {
+      const hasZ = w.zLoM != null && w.zHiM != null
+      if (hasZ && (w.zHiM < zSpanLo || w.zLoM > zSpanHi)) continue
       const apImage = mirrorPoint(ap.pos, w.a, w.b)
       const hit = segSegIntersect(apImage, rx, w.a, w.b)
       if (!hit) continue
@@ -400,6 +408,7 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       const d1 = dist(ap.pos, reflPt)
       const d2 = dist(reflPt, rx)
       const reflZM = apZM + (rxZM - apZM) * (d1 / Math.max(d1 + d2, 1e-9))
+      if (hasZ && (reflZM < w.zLoM || reflZM > w.zHiM)) continue
       const leg1 = accumulateWallLoss(ap.pos, reflPt, walls, apZM, reflZM, fOver24, w)
       const leg2 = accumulateWallLoss(reflPt, rx, walls, reflZM, rxZM, fOver24, w)
       const dTot = d1 + d2

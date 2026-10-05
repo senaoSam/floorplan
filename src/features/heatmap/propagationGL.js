@@ -1099,10 +1099,16 @@ float rssiWithReflections(vec2 rx, float rxZ) {
   // drift is acceptable. Strict mode (uLosFastMode==0) keeps full parity.
   bool reflSkipByLos = (uLosFastMode == 1) && losClear;
   if (uReflEnabled == 1 && sameFloor && !reflSkipByLos && !cullByFloor) {
+    // 57-13: walls reflect only within their own height band — early-out on
+    // the AP↔rx Z span, exact test on reflZ below. Mirrors propagation.js.
+    // (Walls without Z data upload ±1e6, so they always pass.)
+    float zSpanLo = min(uApPos.z, rxZ);
+    float zSpanHi = max(uApPos.z, rxZ);
     for (int w = 0; w < uWallCount; w++) {
       vec2 wa, wb;
       float wLossDb, wLossB, wZLo, wZHi;
       readWall(w, wa, wb, wLossDb, wLossB, wZLo, wZHi);
+      if (wZHi < zSpanLo || wZLo > zSpanHi) continue;
       vec4 itu;
       float roughM;
       bool isMetal;
@@ -1149,6 +1155,7 @@ float rssiWithReflections(vec2 rx, float rxZ) {
       float d2 = length(rx - reflPt);
       float dTot = d1 + d2;
       float reflZ = uApPos.z + (rxZ - uApPos.z) * (d1 / max(dTot, 1e-9));
+      if (reflZ < wZLo || reflZ > wZHi) continue;
 
       float leg1 = accumulateWallLossExcept(uApPos.xy, uApPos.z, reflPt, reflZ, w);
       float leg2 = accumulateWallLossExcept(reflPt, reflZ, rx, rxZ, w);
