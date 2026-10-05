@@ -48,7 +48,7 @@
 
 ## 還沒做的事
 
-### Phase 57 熱圖演算法審查修正（2026-10-05 立項，尚未開工）
+### Phase 57 熱圖演算法審查修正（2026-10-05 立項；Tier 1 ✅ + 57-39 分塊 ✅，commit 70ac757）
 
 > **來由**：5 角色審查（天線 / 波傳遞 / AP / 程式正確性 / 效能）× 2 輪交叉驗證。
 > 結論：JS 引擎與 GLSL shader **公式逐條比對一致**；問題在幾何建模、頻道模型、單點查詢與熱圖情境不同、快取。
@@ -56,26 +56,29 @@
 > **教訓沿用（Phase 53）**：下表「位置」欄可信，「影響 / 修法」欄改碼前要先實測反證；dB 數字多數已由波傳角色用 Node 跑真引擎驗過。
 > **雙引擎**：凡改物理公式，`propagation.js` 與 `propagationGL.js` 必須同步改，並驗 parity。
 
-#### Tier 1 — 不影響畫面（一般場景輸出 bit-identical）
+#### Tier 1 — 不影響畫面（一般場景輸出 bit-identical）— ✅ 全部完成（2026-10-05，commit 70ac757；demo 熱圖雜湊改前後皆 `696de2bb`）
 
 | ID | 項目 | 位置 | 說明 |
 |---|---|---|---|
-| 57-1 | per-AP corner / mirror 貼圖改 4096 寬打包 | propagationGL.js:2974/2993 上傳、:1114/:1184 讀取 | 現在是 nC×1 / nW×1 單列，超過 MAX_TEXTURE_SIZE（UHD 770 = 16384）時 `texImage2D` 靜默失敗但 `uApGeoEnabled` 仍為 1 → 大 DXF 反射/繞射讀錯值。比照 wallsTex 的 4096 寬打包。一般場景不變 |
-| 57-2 | `outGridCache` 刪除 AP / ghost AP 時 evict | propagationGL.js:2338 | 目前只在牆/角/樓板變更才清，刪掉的 AP 與 auto-place ghost 一直佔記憶體（每筆最多 ~16 MB） |
-| 57-3 | 零長度牆 `mirrorPoint` NaN 防護 | propagationGL.js shader mirrorPoint（`apGeoEnabled=false` debug 路徑） | baked 路徑已有 `|| 1`，debug 路徑沒有；NaN 會穿過所有 `<` cull 進入加總 |
-| 57-4 | 刪除 `channelWidths.js` 沒人呼叫的 `channelRangeMHz` / `channelsOverlap` | constants/channelWidths.js:35-57 | 與 frequency.js 重複且全 src 無呼叫端（動手前再 grep 一次）。57-24 修頻道模型時只需改一份 |
-| 57-5 | 過時註解 | propagation.js:343（寫 concrete b=1.99，實為 0.6）、rfConstants.js:9（寫 1m→0.25dB，2.4G 實為 0.15） | 純註解 |
+| 57-1 ✅ | per-AP corner / mirror 貼圖改 4096 寬打包（驗：真牆/角落落在第 2~3 列 vs 第 1 列，208 格差 0 dB） | propagationGL.js:2974/2993 上傳、:1114/:1184 讀取 | 現在是 nC×1 / nW×1 單列，超過 MAX_TEXTURE_SIZE（UHD 770 = 16384）時 `texImage2D` 靜默失敗但 `uApGeoEnabled` 仍為 1 → 大 DXF 反射/繞射讀錯值。比照 wallsTex 的 4096 寬打包。一般場景不變 |
+| 57-2 ✅ | `outGridCache` 刪除 AP / ghost AP 時 evict（驗：刪 AP-05 後 key 消失；band filter 切換不誤刪） | propagationGL.js:2338 | 目前只在牆/角/樓板變更才清，刪掉的 AP 與 auto-place ghost 一直佔記憶體（每筆最多 ~16 MB） |
+| 57-3 ✅ | 零長度牆 `mirrorPoint` NaN 防護（**僅讀碼確認**：只在 debug `apGeoEnabled=false` 路徑可達，未實測） | propagationGL.js shader mirrorPoint（`apGeoEnabled=false` debug 路徑） | baked 路徑已有 `|| 1`，debug 路徑沒有；NaN 會穿過所有 `<` cull 進入加總 |
+| 57-4 ✅ | 刪除 `channelWidths.js` 沒人呼叫的 `channelRangeMHz` / `channelsOverlap` | constants/channelWidths.js:35-57 | 與 frequency.js 重複且全 src 無呼叫端（動手前再 grep 一次）。57-24 修頻道模型時只需改一份 |
+| 57-5 ✅ | 過時註解 | propagation.js:343（寫 concrete b=1.99，實為 0.6）、rfConstants.js:9（寫 1m→0.25dB，2.4G 實為 0.15） | 純註解 |
 
-#### Tier 2 — 純效能（輸出應不變；每條做完 before/after 熱圖像素比對確認一致）
+#### Tier 2 — 純效能（輸出應不變；每條做完 before/after 熱圖像素比對確認一致）— 57-6/7/9/11 ✅（2026-10-05，未 commit）；57-8 ❌ 使用者決定不做；57-10 ❌ 收益近零已撤回
+
+> **驗證**：新舊程式碼同輸入逐一比對，全部 SAME：demo 熱圖 RSSI/SINR/CCI 畫面雜湊、JS 引擎 rssi/sinr、50 AP per-AP 場 rssi/sinr/cci、模擬單 AP 拖曳放開後的場、auto-power 功率配置與 cost（demo / 50 AP / 120×90 m 放大樓層）、auto-place 放置座標與停止原因（5G / 2.4G / 放大樓層）。
+> **實測收益比審查報告預期小很多**：demo 規模下大多在誤差內；只有 auto-power 明顯（50 AP 355→245 ms、放大樓層 5719→3840 ms，約 −31~33%）。
 
 | ID | 項目 | 位置 | 說明 / 預期 |
 |---|---|---|---|
-| 57-6 | LOS / apGeo 改 lazy bake + 依時間淘汰 | propagationGL.js:2908、:3020-3026；sampleFieldGL.js:189-203、:398-409 | 單 AP 拖曳時 bake 只含該 AP，其餘 AP 的 LOS/geo 快取被清；放開後對**所有** AP 重 bake（geo bake 是 corners×walls 主執行緒暴力法，100AP/1000 牆 ≈ 1.5 億次線段測試）。per-AP 格點快取本身有保留（第二輪修正）。改為只對 cache miss 的 AP bake。S |
-| 57-7 | fold 熱迴圈預算查表 | sampleFieldGL.js:531、frequency.js:25-30 | 每格呼叫 `aggregateApContributions`，每次 `apsShareSpectrum` 配兩個陣列 + `Math.pow`（60k 格×200AP ≈ 2400 萬個暫時陣列）。改成 N×N spectrum-share 表 + 線性功率表 + typed array。S |
-| 57-8 | 3D 全樓層熱圖快取依牆簽名分 LRU | propagationGL.js:2443-2474、heatmapStack.js:138-168 | 各樓層牆清單不同 → `uploadWalls` 每層都 bump `wallsVersion` 清光 LOS/geo/grid 快取，樓層間互清、2D 也被清。只在開「全樓層熱圖」時發生。M |
-| 57-9 | auto-power `evaluate` 增量化 | autoPowerPlan.js:220-253 | 每步只改一台 AP 卻全量 cells×N 重算。改為每格記 best AP + 各頻譜組干擾和，O(cells)。預估 300AP 50s → 快 10–50×。**P95 要保持精確（不可改近似 histogram 讓結果變動）**，否則移 Tier 3。依賴 57-7 的查表。M |
-| 57-10 | auto-place 候選矩陣剪枝 | autoPlacePlan.js:202-208、:253-254 | 自由空間上界 RSSI < target−20 的 (候選,格) 對直接跳過（對增益與 tie-break 都沒貢獻）。驗證：放置結果與改前完全相同。S |
-| 57-11 | JS 反射路徑 `walls.filter` 改 index 排除 | propagation.js:394 | 每牆每接收點一次 filter = O(W²) 配置。只影響 JS 引擎/fallback。S |
+| 57-6 ✅ | LOS / apGeo 改 lazy bake（只在格點快取 miss 時 bake 該 AP，不再順手清別台）+ 閒置渲染依存活 AP 清理（LOS 尺寸老化規則保留）。輸出逐格相同；收益只在「牆多 + AP 多 + per-AP 路徑」的拖曳放開才看得到，demo 量不出來 | propagationGL.js:2908、:3020-3026；sampleFieldGL.js:189-203、:398-409 | 單 AP 拖曳時 bake 只含該 AP，其餘 AP 的 LOS/geo 快取被清；放開後對**所有** AP 重 bake（geo bake 是 corners×walls 主執行緒暴力法，100AP/1000 牆 ≈ 1.5 億次線段測試）。per-AP 格點快取本身有保留（第二輪修正）。改為只對 cache miss 的 AP bake。S |
+| 57-7 ✅ | fold 熱迴圈預算查表（`makeApAggregator` / `aggregateWithTables`，同運算同順序 → bit-identical；同步版 sampleFieldGL 未動）。demo/50 AP 量不出差異（GPU 時間主導） | sampleFieldGL.js:531、frequency.js:25-30 | 每格呼叫 `aggregateApContributions`，每次 `apsShareSpectrum` 配兩個陣列 + `Math.pow`（60k 格×200AP ≈ 2400 萬個暫時陣列）。改成 N×N spectrum-share 表 + 線性功率表 + typed array。S |
+| 57-8 ❌ 不做 | 3D 全樓層熱圖快取依牆簽名分 LRU — **2026-10-05 使用者決定不做：3D 每一層自己重算即可**。當時評估：多樓層快取並存時格點快取每個情境最多 ~72 MB（300 AP × 6 萬格），保留 8 層 ≈ 580 MB；且此處失效邏輯出過 53-G2 類 bug，改錯會顯示過期熱圖 | propagationGL.js:2443-2474、heatmapStack.js:138-168 | 各樓層牆清單不同 → `uploadWalls` 每層都 bump `wallsVersion` 清光 LOS/geo/grid 快取，樓層間互清、2D 也被清。只在開「全樓層熱圖」時發生。M |
+| 57-9 ✅（精確版） | auto-power `evaluate` 改用 57-7 同一套查表（每格不再呼叫 apsShareSpectrum 配陣列），結果逐位元相同，約 −31~33%。**增量版（O(cells)）未做**：干擾和「減舊加新」的浮點捨入與重算不同，會改變最佳化結果 → 若要做屬 Tier 3。原寫法說明： | autoPowerPlan.js:220-253 | 每步只改一台 AP 卻全量 cells×N 重算。改為每格記 best AP + 各頻譜組干擾和，O(cells)。預估 300AP 50s → 快 10–50×。**P95 要保持精確（不可改近似 histogram 讓結果變動）**，否則移 Tier 3。依賴 57-7 的查表。M |
+| 57-10 ❌ 已撤回 | auto-place 候選矩陣精確剪枝（2026-10-05 實作並驗證結果逐格相同後，因收益近零依使用者同意整條還原，程式碼未保留）：一次二分搜尋出「無牆上界 ≤ target−20」的半徑（5G 75 m / 2.4G 117 m / 6G 57 m），超過的配對直接跳過。結果逐格相同；但候選與評分格只在室內，建築 <~150 m 時幾乎剪不到，實測 4476→4442 ms。第一版逐對算上界反而慢 38%，已改掉。真正成本是 rssiFromAp 每次呼叫的固定開銷（N 頻點同調迴圈），單路徑可省掉但不是 bit-identical → Tier 3。原寫法說明： | autoPlacePlan.js:202-208、:253-254 | 自由空間上界 RSSI < target−20 的 (候選,格) 對直接跳過（對增益與 tie-break 都沒貢獻）。驗證：放置結果與改前完全相同。S |
+| 57-11 ✅ | JS 反射路徑 `walls.filter` 改成 accumulateWallLoss 的 `skip` 參數（同牆同順序，結果相同）。demo 量不出差異 | propagation.js:394 | 每牆每接收點一次 filter = O(W²) 配置。只影響 JS 引擎/fallback。S |
 
 #### Tier 3 — 影響畫面（一條一條做；每條「決定」欄由使用者看完取捨後填）
 
@@ -110,7 +113,7 @@
 | 57-36 | heatmapStack per-AP 門檻與 2D 不一致 | heatmapStack.js:146（舊的 walls×APs 1500/20000）vs heatmapAdapter.js:952-957（per-segment 比例） | 同一場景 2D 與 3D 走不同路徑（反射繞射開關不同）→ 顏色不同 | 3D 熱圖可能變 | ⬜ |
 | 57-37 | 共線線段接點重複計算 | geometry.js:56 | 射線剛好穿過兩共線段接點 → 兩段都算（實測多 19 dB）；但窗口只有微米寬，只影響個別格點（門框）。程式角色判定為 cleanup | 極小 | ⬜ |
 | 57-38 | 單 AP 物件只有一個 radio → `radios[]` 模型 | AP 資料模型全域 | 企業 AP 是雙/三頻同址；AP 數量、BOM、PoE、secondary 計數、auto-place 分頻放置都會錯。與 47-8b「單台三頻」backlog 同一件事。**規模大，若要做另立 Phase** | 資料模型大改 | ⬜ |
-| 57-39 | **缺絕對成本門檻 → 大場景 GPU 重置（黑畫面）** ⚠ 優先 | heatmapAdapter.js:952-957（只看 AP÷牆段比例）；propagationGL.js per-AP 反射/繞射迴圈；bakeApGeoOne:2943 | 現有降級門檻是「AP 密到關掉也看不出來」的**畫質判準**，不是成本上限 → 牆多 AP 少時比例永遠 <0.25，反射繞射永遠開。**2026-10-05 實測（UHD 770）：demo + 4200 道散佈小牆（共 4245 段）+ 只剩 1 台 AP + gridStep 2 m → 單次 per-AP draw 觸發 GPU Device lost / CONTEXT_LOST，PIXI 一起掛 → 整個畫面黑，熱圖退回 JS；連續兩次後 Chrome 封鎖整個 origin 的 WebGL（3D 也開不了），須重啟瀏覽器**。即大 DXF（數千段）匯入就會發生。修法方向：加絕對成本估算（如 walls×corners×APs×cells）超過就降級，或把單次 draw 切塊（tile）避免 TDR；CPU geo bake 也要切片。尚未用舊程式碼重現（瀏覽器被封鎖中斷），但第一次 5 AP 卡死時程式碼正是 stash 後的舊版 | 大場景畫面會失去反射繞射（或改 tile 則畫面不變）；**不修會整頁黑掉** | ⬜ |
+| 57-39 | **缺絕對成本門檻 → 大場景 GPU 重置（黑畫面）** ⚠ 優先 — **分塊 ✅（2026-10-05，commit 70ac757）**：牆+角落 ≥600 且開反射/繞射時，per-AP draw 切成自適應 tile（目標 200 ms/塊、可切到半列，每塊 fence 等完才送下一塊）；同規模場景改後無 context lost、約 6 s 算完；分塊 vs 一次畫完 744/744 格逐格相同。**剩：成本門檻（Tier 3 單獨決定）** | heatmapAdapter.js:952-957（只看 AP÷牆段比例）；propagationGL.js per-AP 反射/繞射迴圈；bakeApGeoOne:2943 | 現有降級門檻是「AP 密到關掉也看不出來」的**畫質判準**，不是成本上限 → 牆多 AP 少時比例永遠 <0.25，反射繞射永遠開。**2026-10-05 實測（UHD 770）：demo + 4200 道散佈小牆（共 4245 段）+ 只剩 1 台 AP + gridStep 2 m → 單次 per-AP draw 觸發 GPU Device lost / CONTEXT_LOST，PIXI 一起掛 → 整個畫面黑，熱圖退回 JS；連續兩次後 Chrome 封鎖整個 origin 的 WebGL（3D 也開不了），須重啟瀏覽器**。即大 DXF（數千段）匯入就會發生。修法方向：加絕對成本估算（如 walls×corners×APs×cells）超過就降級，或把單次 draw 切塊（tile）避免 TDR；CPU geo bake 也要切片。尚未用舊程式碼重現（瀏覽器被封鎖中斷），但第一次 5 AP 卡死時程式碼正是 stash 後的舊版 | 大場景畫面會失去反射繞射（或改 tile 則畫面不變）；**不修會整頁黑掉** | ⬜ |
 
 
 ---
@@ -1192,6 +1195,8 @@
 | Verkada Tier 3（多站 Sites/Subsites 導覽、Google Maps 地理定位） | 2026-07-02 使用者確定不做——本專案維持單站閉環畫布，不做導覽 IA / 地圖底圖級改動 |
 | **52-D6 熱圖套室內遮罩／室外淡化** | 2026-08-12 使用者決定不做。稽核回報「熱圖滿江紅，但紅的大多在草地/屋外空地，紅色面積比房子還大」，使用者第一反應誤判成網路很爛；`indoorMask.js` 與自動規劃的「僅室內放置」都已存在，技術上可行。**撤回理由：這會改變所有人看到的熱圖預設行為，且室內判定失準時會在圖上開破洞——代價高於誤讀風險。** 若日後重啟，優先考慮「室外淡化 alpha」而非「室外不畫」（資訊不刪，只是不搶戲） |
 | **52-D7 視窗 <1196px 佈局重疊 + resize 不重新 fit** | 2026-08-12 使用者決定不做。實測：1190px 時「設備規劃」面板 right=619 vs 工具列 left=616 重疊，1024px 重疊 86px 導致文字無法點擊（1280px 正常，斷點約 1196px）；另 1600→1024 resize 後 viewport scale/pan 不變，平面圖以 1085×809 畫在 764×552 canvas 裡，只看到放大的一角。**撤回理由：實際使用寬度都在斷點之上，不值得為此改動 Phase 39 的四角 stack 避讓體系。** 重啟扳機＝真的要在筆電/分割視窗使用。resize 自動 fit 若要做，只在「畫布明顯裝不下」時觸發，不可每次 resize 都拉回去（會覆蓋使用者刻意的縮放） |
+| **57-10 auto-place 候選矩陣剪枝** | 2026-10-05 實作後實測收益近零而撤回：剪枝半徑（無牆上界 ≤ target−20）5G 75 m / 2.4G 117 m / 6G 57 m，候選與評分格只在室內，建築 <~150 m 幾乎剪不到（4476→4442 ms）。auto-place 真正成本是 rssiFromAp 每次呼叫的固定開銷（N 頻點同調迴圈），不是牆數 |
+| **57-8 3D 全樓層熱圖多樓層快取** | 2026-10-05 使用者決定不做：3D 每一層自己重算即可。背景：各樓層牆清單不同，`uploadWalls` 每切一層就清空 LOS/geo/格點快取；要並存需記憶體上限（300 AP 每層 ~72 MB）且失效邏輯有 53-G2 前例風險 |
 | 51-12 EffectComposer 後製鏈（Outline / Bloom / SSAO） | 2026-08-10 實作後實測：300 AP 從 34.3ms(29fps) → **59.4ms(16.8fps)**，+25ms／1.73×，p95 201ms。SSAO 降解析度完全不省（成本在 depth/normal prepass）。另與 51-3 透明 canvas + CSS 天空漸層架構衝突。細節與量測陷阱見 Phase 51 該條 |
 
 ---
