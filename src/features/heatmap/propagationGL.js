@@ -180,7 +180,6 @@ uniform sampler2D uApWallMirror;
 uniform int uApGeoEnabled;
 
 const float PI = 3.14159265358979;
-const float SLAB_SEC_CAP = 3.5;
 // Catalog pattern sampling geometry — mirrors PATTERN_SAMPLES / STEP_DEG in
 // constants/antennaPatterns.js. Rows of uPatterns are [36 H samples][36 V].
 const int   PATTERN_SAMPLES  = 36;
@@ -326,15 +325,44 @@ vec2 segSegIntersect(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
 // (centerMHz/1000)/2.4. Final per-crossing dB = lossDb * fOver24^lossB * sec.
 // lossB == 0 short-circuits the pow() so wideband-flat materials (e.g. metal)
 // stay numerically identical to pre-F8.
-float wallLossOblique(vec2 a, vec2 b, vec2 rayDir, float lossDb, float lossB, float fOver24) {
+// 57-18: oblique-incidence terms -- mirrors obliqueTerms() in propagation.js.
+// x = sec(theta_t) (refracted path in the layer), y = extra Fresnel dB vs
+// normal incidence.
+const float OBLIQUE_COS_MIN = 0.05;
+const float SLAB_EPS_R = 5.24;
+vec2 obliqueTerms(float cosI, float epsR) {
+  float ci = max(cosI, OBLIQUE_COS_MIN);
+  float n = sqrt(max(epsR, 1.0));
+  float si = sqrt(max(0.0, 1.0 - ci * ci));
+  float st = si / n;
+  float ct = sqrt(max(1e-6, 1.0 - st * st));
+  float rs = (ci - n * ct) / (ci + n * ct); rs *= rs;
+  float rp = (ct - n * ci) / (ct + n * ci); rp *= rp;
+  float tIn = 1.0 - 0.5 * (rs + rp);
+  float r0 = (1.0 - n) / (1.0 + n); r0 *= r0;
+  return vec2(1.0 / ct, -20.0 * log(tIn / (1.0 - r0)) / log(10.0));
+}
+
+// 57-18: the wall's ITU-R P.2040 record (a, b, c, d); a < 0 = metal sentinel.
+vec4 readWallItu(int w) {
+  int t2 = w * 4 + 2;
+  return texelFetch(uWalls, ivec2(t2 % 4096, t2 / 4096), 0);
+}
+
+// 57-18: sec(theta_t) + Fresnel extra for dielectrics; metal keeps its
+// normal-incidence loss. Mirrors wallLossOblique in propagation.js.
+float wallLossOblique(vec2 a, vec2 b, vec2 rayDir, float lossDb, float lossB, float fOver24, vec4 itu) {
+  float fAdj = lossB == 0.0 ? 1.0 : pow(fOver24, lossB);
+  float base = lossDb * fAdj;
+  if (itu.x < 0.0) return base;
   vec2 t = b - a;
   vec2 n = normalize(vec2(-t.y, t.x));
   float rL = length(rayDir);
   vec2 rDir = rL > 1e-12 ? rayDir / rL : vec2(0.0);
   float cosI = abs(dot(rDir, n));
-  float sec = 1.0 / max(cosI, 0.2);
-  float fAdj = lossB == 0.0 ? 1.0 : pow(fOver24, lossB);
-  return lossDb * fAdj * min(sec, 3.5);
+  float epsR = itu.x * pow(fOver24 * 2.4, itu.y);
+  vec2 ob = obliqueTerms(cosI, epsR);
+  return base * ob.x + ob.y;
 }
 
 // Apply one wall hit: do segSegIntersect + Z filter, accumulate loss if hit.
@@ -362,7 +390,7 @@ bool applyWallContribution(int w, vec2 ap, float apZ, vec2 rx, float rxZ, vec2 r
   if (hit.y < tLo - TCELL_EPS || hit.y > tHi + TCELL_EPS) return false;
   float zAt = apZ + (rxZ - apZ) * hit.y;
   if (zAt < zLo || zAt > zHi) return true;
-  total += wallLossOblique(a, b, rayDir, lossDb, lossB, uFOver24);
+  total += wallLossOblique(a, b, rayDir, lossDb, lossB, uFOver24, readWallItu(w));
   return true;
 }
 
@@ -642,7 +670,7 @@ void processCellWithHits(int cx, int cy, vec2 ap, float apZ, vec2 rx, float rxZ,
     if (hit.x < 0.5) continue;
     float zAt = apZ + (rxZ - apZ) * hit.y;
     if (zAt < zLo || zAt > zHi) continue;
-    acc.x += wallLossOblique(a, b, rayDir, lossDb, lossB, uFOver24);
+    acc.x += wallLossOblique(a, b, rayDir, lossDb, lossB, uFOver24, readWallItu(wIdx));
     acc.y += 1.0;
   }
 }
@@ -774,7 +802,7 @@ float accumulateSlabLoss(vec2 ap, float apZ, vec2 rx, float rxZ) {
   vec2  d2 = rx - ap;
   float d3 = sqrt(d2.x * d2.x + d2.y * d2.y + dz * dz);
   float cosI = d3 > 1e-9 ? abs(dz) / d3 : 1.0;
-  float sec = 1.0 / max(cosI, 1.0 / SLAB_SEC_CAP);
+  vec2 slabOb = obliqueTerms(cosI, SLAB_EPS_R);   // 57-18
   float loss = 0.0;
 
   for (int s = 0; s < uSlabCount; s++) {
@@ -792,7 +820,7 @@ float accumulateSlabLoss(vec2 ap, float apZ, vec2 rx, float rxZ) {
     // per boundary now, so a hit on any ring bypasses the whole slab -- the
     // JS semantics the old multi-texel repack could not express.
     if (holeCount > 0 && pointInAnyPoly(cross, holeStart, holeCount)) bypassed = true;
-    if (!bypassed) loss += slabDb * sec;
+    if (!bypassed) loss += slabDb * slabOb.x + slabOb.y;
   }
   return loss;
 }
@@ -920,7 +948,7 @@ vec2 accumulateWallLossWithHitsBrute(vec2 ap, float apZ, vec2 rx, float rxZ) {
     if (hit.x < 0.5) continue;
     float zAt = apZ + (rxZ - apZ) * hit.y;
     if (zAt < zLo || zAt > zHi) continue;
-    acc.x += wallLossOblique(a, b, rayDir, lossDb, lossB, uFOver24);
+    acc.x += wallLossOblique(a, b, rayDir, lossDb, lossB, uFOver24, readWallItu(w));
     acc.y += 1.0;
   }
   return acc;
@@ -1370,7 +1398,6 @@ uniform ivec2 uMaskSize;
 uniform int uCascadeFactor;
 
 const float PI = 3.14159265358979;
-const float SLAB_SEC_CAP = 3.5;
 // Catalog pattern sampling geometry — mirrors PATTERN_SAMPLES / STEP_DEG in
 // constants/antennaPatterns.js. Rows of uPatterns are [36 H samples][36 V].
 const int   PATTERN_SAMPLES  = 36;
@@ -1411,15 +1438,44 @@ void readWall(int w, out vec2 a, out vec2 b, out float lossDb, out float lossB, 
   lossB  = e3.x;
 }
 
-float wallLossOblique(vec2 a, vec2 b, vec2 rayDir, float lossDb, float lossB, float fOver24) {
+// 57-18: oblique-incidence terms -- mirrors obliqueTerms() in propagation.js.
+// x = sec(theta_t) (refracted path in the layer), y = extra Fresnel dB vs
+// normal incidence.
+const float OBLIQUE_COS_MIN = 0.05;
+const float SLAB_EPS_R = 5.24;
+vec2 obliqueTerms(float cosI, float epsR) {
+  float ci = max(cosI, OBLIQUE_COS_MIN);
+  float n = sqrt(max(epsR, 1.0));
+  float si = sqrt(max(0.0, 1.0 - ci * ci));
+  float st = si / n;
+  float ct = sqrt(max(1e-6, 1.0 - st * st));
+  float rs = (ci - n * ct) / (ci + n * ct); rs *= rs;
+  float rp = (ct - n * ci) / (ct + n * ci); rp *= rp;
+  float tIn = 1.0 - 0.5 * (rs + rp);
+  float r0 = (1.0 - n) / (1.0 + n); r0 *= r0;
+  return vec2(1.0 / ct, -20.0 * log(tIn / (1.0 - r0)) / log(10.0));
+}
+
+// 57-18: the wall's ITU-R P.2040 record (a, b, c, d); a < 0 = metal sentinel.
+vec4 readWallItu(int w) {
+  int t2 = w * 4 + 2;
+  return texelFetch(uWalls, ivec2(t2 % 4096, t2 / 4096), 0);
+}
+
+// 57-18: sec(theta_t) + Fresnel extra for dielectrics; metal keeps its
+// normal-incidence loss. Mirrors wallLossOblique in propagation.js.
+float wallLossOblique(vec2 a, vec2 b, vec2 rayDir, float lossDb, float lossB, float fOver24, vec4 itu) {
+  float fAdj = lossB == 0.0 ? 1.0 : pow(fOver24, lossB);
+  float base = lossDb * fAdj;
+  if (itu.x < 0.0) return base;
   vec2 t = b - a;
   vec2 n = normalize(vec2(-t.y, t.x));
   float rL = length(rayDir);
   vec2 rDir = rL > 1e-12 ? rayDir / rL : vec2(0.0);
   float cosI = abs(dot(rDir, n));
-  float sec = 1.0 / max(cosI, 0.2);
-  float fAdj = lossB == 0.0 ? 1.0 : pow(fOver24, lossB);
-  return lossDb * fAdj * min(sec, 3.5);
+  float epsR = itu.x * pow(fOver24 * 2.4, itu.y);
+  vec2 ob = obliqueTerms(cosI, epsR);
+  return base * ob.x + ob.y;
 }
 
 // 57-15: count a crossing only inside its own grid cell; returns "settled"
@@ -1435,7 +1491,7 @@ bool applyWallContribution(int w, vec2 ap, float apZ, vec2 rx, float rxZ, vec2 r
   if (hit.y < tLo - TCELL_EPS || hit.y > tHi + TCELL_EPS) return false;
   float zAt = apZ + (rxZ - apZ) * hit.y;
   if (zAt < zLo || zAt > zHi) return true;
-  total += wallLossOblique(a, b, rayDir, lossDb, lossB, fOver24);
+  total += wallLossOblique(a, b, rayDir, lossDb, lossB, fOver24, readWallItu(w));
   return true;
 }
 
@@ -1617,7 +1673,7 @@ float accumulateSlabLossField(vec2 ap, float apZ, vec2 rx, float rxZ) {
   vec2  d2 = rx - ap;
   float d3 = sqrt(d2.x * d2.x + d2.y * d2.y + dz * dz);
   float cosI = d3 > 1e-9 ? abs(dz) / d3 : 1.0;
-  float sec = 1.0 / max(cosI, 1.0 / SLAB_SEC_CAP);
+  vec2 slabOb = obliqueTerms(cosI, SLAB_EPS_R);   // 57-18
   float loss = 0.0;
 
   for (int s = 0; s < uSlabCount; s++) {
@@ -1631,7 +1687,7 @@ float accumulateSlabLossField(vec2 ap, float apZ, vec2 rx, float rxZ) {
     vec2 cross = ap + d2 * t;
     bool bypassed = false;
     if (holeCount > 0 && pointInAnyPoly(cross, holeStart, holeCount)) bypassed = true;
-    if (!bypassed) loss += slabDb * sec;
+    if (!bypassed) loss += slabDb * slabOb.x + slabOb.y;
   }
   return loss;
 }

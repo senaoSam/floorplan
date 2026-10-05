@@ -20,8 +20,10 @@ function FormulaNote() {
       <section>
         <h4>2. 牆體穿透（斜入射放大）</h4>
         <p>
-          每道穿越的牆/門窗累加 <code>L_wall · sec(θ_i)</code>，
-          <code>θ_i</code> 為射線與牆面法線夾角，<code>sec</code> 上限 3.5（約 79°）避免掠射爆衝。
+          每道穿越的牆/門窗累加 <code>L_wall · sec(θ_t) + ΔL_Fresnel</code>：
+          射線進入牆體會折射，<code>sin θ_t = sin θ_i / √ε_r</code>（ε_r 取材質的 ITU-R P.2040 參數），
+          牆內路徑只隨折射角變長；<code>ΔL_Fresnel</code> 為斜入射時兩介面多出的反射損失（相對正向入射，TE/TM 平均）。
+          金屬 / Low-E 玻璃以反射為主，不做角度放大。
         </p>
         <p className="muted">L_wall 來自材質的 dbLoss（牆可逐面以「自訂衰減」覆寫 @2.4GHz anchor）；門窗則用 opening.material 的 dbLoss 取代該段牆。</p>
         <p className="muted">
@@ -165,9 +167,8 @@ function FormulaNote() {
           <li>
             <b>樓板衰減（Slab loss）</b>：射線從 Z_ap 到 Z_rx 垂直跨越的每一道樓板邊界都累加
             <code>floor.floorSlabAttenuationDb</code>（預設 concrete 12 dB），
-            並以斜入射放大：<code>L_slab · sec(θ_i)</code>，
-            <code>cos θ_i = |Δz| / d_3D</code>、<code>sec</code> 上限 3.5（與牆同）。
-            近乎水平的射線幾乎穿不出去。
+            並以斜入射修正：<code>L_slab · sec(θ_t) + ΔL_Fresnel</code>（與牆同，樓板以混凝土 ε_r = 5.24 計），
+            <code>cos θ_i = |Δz| / d_3D</code>。
           </li>
           <li>
             <b>FloorHole bypass</b>：射線穿越某道樓板邊界 y=b 時，求該 XY 交點

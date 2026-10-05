@@ -47,19 +47,48 @@ function pathLossDb(d, freqMhz) {
     + indoorLossPerMeter(freqMhz) * dEff
 }
 
+// 57-18: oblique-incidence terms for a dielectric layer of relative
+// permittivity epsR hit at cos(theta_i) = cosI. The wave refracts towards the
+// normal inside the layer, so the absorbing path grows with sec(theta_t),
+// not sec(theta_i) -- concrete at 75 deg is ~1.10x, not 3.5x. What does grow
+// at grazing angles is interface (Fresnel) reflection: the extra two-interface
+// transmission loss relative to normal incidence (TE/TM averaged; the normal
+// value is already inside the material's dB). Returns { secT, extraDb }.
+// Mirrored by obliqueTerms() in both shaders in propagationGL.js.
+const OBLIQUE_COS_MIN = 0.05
+function obliqueTerms(cosI, epsR) {
+  const ci = Math.max(cosI, OBLIQUE_COS_MIN)
+  const n = Math.sqrt(Math.max(epsR, 1))
+  const si = Math.sqrt(Math.max(0, 1 - ci * ci))
+  const st = si / n
+  const ct = Math.sqrt(Math.max(1e-6, 1 - st * st))
+  let rs = (ci - n * ct) / (ci + n * ct); rs *= rs
+  let rp = (ct - n * ci) / (ct + n * ci); rp *= rp
+  const tIn = 1 - 0.5 * (rs + rp)
+  let r0 = (1 - n) / (1 + n); r0 *= r0
+  return { secT: 1 / ct, extraDb: -20 * Math.log10(tIn / (1 - r0)) }
+}
+
 // HM-F8: per-AP centre frequency drives wall loss. lossDb is the 2.4 GHz
 // anchor (existing material constant), lossB is the ITU-R P.2040-3 frequency
 // exponent. fOver24 = fGhz / 2.4, computed once per AP by rssiFromAp and
 // threaded through the wall-loss path. Final per-crossing dB is
-//   lossDb * fOver24 ** lossB * sec(θ) (capped at 3.5).
+//   lossDb * fOver24 ** lossB * sec(theta_t) + Fresnel extra   (57-18)
+// with epsR from the material's ITU-R P.2040 parameters. Metal / Low-E (and
+// anything without ITU data) are reflection-dominated, not path-length
+// absorbers, so they keep their normal-incidence loss at every angle.
 // lossB === 0 (e.g. metal) bypasses the pow() so the existing wideband-flat
 // behaviour is preserved.
 function wallLossOblique(wall, rayDir, fOver24) {
+  const fAdj = wall.lossB ? Math.pow(fOver24, wall.lossB) : 1
+  const base = wall.lossDb * fAdj
+  const itu = wall.itu
+  if (!itu || itu.metal) return base
   const n = segmentNormal(wall.a, wall.b)
   const cosI = Math.abs(dot(norm(rayDir), n))
-  const sec = 1 / Math.max(cosI, 0.2)
-  const fAdj = wall.lossB ? Math.pow(fOver24, wall.lossB) : 1
-  return wall.lossDb * fAdj * Math.min(sec, 3.5)
+  const epsR = itu.a * Math.pow(fOver24 * 2.4, itu.b ?? 0)
+  const { secT, extraDb } = obliqueTerms(cosI, epsR)
+  return base * secT + extraDb
 }
 
 // When aZM/bZM are supplied, each wall hit's Z is interpolated along the ray
@@ -284,7 +313,9 @@ function pointInPolyFlat(x, y, pts) {
 // and the per-crossing loss is multiplied by sec(θ) clamped ≤ 3.5, matching
 // wallLossOblique. Near-horizontal rays therefore gain a lot of slab loss,
 // preventing unphysical "sneaking through the ceiling edge-on".
-const SLAB_SEC_CAP = 3.5
+// 57-18: slabs are treated as concrete for the refraction / Fresnel terms
+// (ITU-R P.2040 concrete eta' = 5.24) -- see obliqueTerms.
+const SLAB_EPS_R = 5.24
 function accumulateSlabLoss(apPos, apZM, rxPos, rxZM, boundaries) {
   if (!boundaries || boundaries.length === 0) return 0
   const zLo = Math.min(apZM, rxZM)
@@ -294,7 +325,7 @@ function accumulateSlabLoss(apPos, apZM, rxPos, rxZM, boundaries) {
   const dy = rxPos.y - apPos.y
   const d3 = Math.sqrt(dx * dx + dy * dy + dz * dz)
   const cosI = d3 > 1e-9 ? Math.abs(dz) / d3 : 1
-  const sec = 1 / Math.max(cosI, 1 / SLAB_SEC_CAP)
+  const { secT, extraDb } = obliqueTerms(cosI, SLAB_EPS_R)
   let loss = 0
   for (const b of boundaries) {
     if (!(b.yM > zLo && b.yM < zHi)) continue
@@ -306,7 +337,7 @@ function accumulateSlabLoss(apPos, apZM, rxPos, rxZM, boundaries) {
     for (const poly of (b.bypassHoles ?? [])) {
       if (pointInPolyFlat(xAt, yAt, poly)) { bypassed = true; break }
     }
-    if (!bypassed) loss += b.slabDb * sec
+    if (!bypassed) loss += b.slabDb * secT + extraDb
   }
   return loss
 }
