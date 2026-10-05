@@ -20,7 +20,7 @@
 
 import { buildScenario } from '@/features/heatmap/buildScenario'
 import { rssiFromAp } from '@/features/heatmap/propagation'
-import { channelCenterMHz } from '@/features/heatmap/frequency'
+import { channelBlockCenterMHz } from '@/features/heatmap/frequency'
 import { getDefaultTxPower } from '@/constants/apModels'
 import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
 import { allowedChannels } from '@/constants/regulatoryDomains'
@@ -76,7 +76,7 @@ function designApEntry(band, pos, opts) {
     frequency: band,
     channel: ch,
     channelWidth: DEFAULT_CHANNEL_WIDTH[band] ?? 20,
-    centerMHz: channelCenterMHz(band, ch),
+    centerMHz: channelBlockCenterMHz(band, ch, DEFAULT_CHANNEL_WIDTH[band] ?? 20),   // 57-16
     antennaMode: 'omni',
     azimuthDeg: 0,
     tiltDeg: 0,

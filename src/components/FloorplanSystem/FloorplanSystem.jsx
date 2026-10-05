@@ -235,7 +235,9 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
             let channel = defaultChannel
             if (editor.autoChannelOnPlace) {
               const existing = useAPStore.getState().apsByFloor[fid] ?? []
-              const probe = [...existing, { id: newId, x, y, frequency: band }]
+              // 57-16: carry the width the AP will be created with — the planner
+              // picks bonded blocks per width.
+              const probe = [...existing, { id: newId, x, y, frequency: band, channelWidth: width }]
               const assignments = greedyChannelAssign(probe, editor.regulatoryDomain)
               const picked = assignments.get(newId)
               if (picked) channel = picked.channel

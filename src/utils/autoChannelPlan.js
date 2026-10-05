@@ -1,9 +1,12 @@
 import { allowedChannels } from '@/constants/regulatoryDomains'
+import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
+import { channelBlockMembers, channelRangeMHz } from '@/features/heatmap/frequency'
 
 // Non-overlapping channel sets per band (20 MHz spacing).
 // 2.4 GHz: channels 1, 6, 11 are the classic non-overlapping trio.
 // 5 GHz / 6 GHz: every channel in the list is already 20 MHz apart (step 4),
-// so the full allowed list is used — no extra filtering needed.
+// so the full allowed list is used at 20 MHz. Wider channels pick one primary
+// per bonded block instead (candidatesForWidth, 57-16).
 const NON_OVERLAPPING_2_4 = [1, 6, 11]
 
 function getNonOverlappingChannels(domainId, band) {
@@ -13,6 +16,34 @@ function getNonOverlappingChannels(domainId, band) {
     return filtered.length > 0 ? filtered : allowed
   }
   return allowed
+}
+
+// 57-16: candidate primaries for a given width. 20 MHz keeps the list above;
+// wider channels get one primary (the block's lowest channel) per bonded
+// block whose every 20 MHz member is allowed in the domain -- picking 36 and
+// 40 for two 40 MHz neighbours would put both on the same 36+40 block.
+// Falls back to the 20 MHz list if the domain has no complete block.
+function candidatesForWidth(domainId, band, width) {
+  const base = getNonOverlappingChannels(domainId, band)
+  if (!width || width <= 20) return base
+  const allowed = allowedChannels(domainId, band)
+  const allowedSet = new Set(allowed)
+  const out = []
+  for (const ch of allowed) {
+    const members = channelBlockMembers(band, ch, width)
+    if (members.length !== width / 20 || members[0] !== ch) continue
+    if (members.every((m) => allowedSet.has(m))) out.push(ch)
+  }
+  return out.length > 0 ? out : base
+}
+
+// 57-16: do two (channel, width) assignments share spectrum? Bonded-block
+// ranges, so mixed widths and same-block primaries are caught (the old test
+// was channel-number equality).
+function spectraOverlap(band, chA, wA, chB, wB) {
+  const [loA, hiA] = channelRangeMHz(band, chA, wA)
+  const [loB, hiB] = channelRangeMHz(band, chB, wB)
+  return loA < hiB && loB < hiA
 }
 
 function dist2(a, b) {
@@ -44,8 +75,13 @@ export function greedyChannelAssign(aps, domainId, interferenceRadius = 300, fix
 
   for (const band of bands) {
     const bandAPs = aps.filter((a) => a.frequency === band)
-    const candidates = getNonOverlappingChannels(domainId, band)
-    if (candidates.length === 0) continue
+    if (getNonOverlappingChannels(domainId, band).length === 0) continue
+    const widthOf = (a) => a.channelWidth ?? DEFAULT_CHANNEL_WIDTH[band] ?? 20
+    const candCache = new Map()
+    const candidatesFor = (w) => {
+      if (!candCache.has(w)) candCache.set(w, candidatesForWidth(domainId, band, w))
+      return candCache.get(w)
+    }
 
     // Seed pre-assigned (fixed) APs first so the greedy loop counts their
     // overlap but never reassigns them.
@@ -66,14 +102,16 @@ export function greedyChannelAssign(aps, domainId, interferenceRadius = 300, fix
 
     for (const ap of sorted) {
       if (result.has(ap.id)) continue  // fixed — keep as-is
-      // Count how many already-assigned neighbours use each candidate channel.
-      const score = candidates.map((ch) => {
+      // Count how many already-assigned neighbours share spectrum with each
+      // candidate (57-16: bonded-block overlap, not channel equality).
+      const myW = widthOf(ap)
+      const score = candidatesFor(myW).map((ch) => {
         let overlap = 0
         for (const other of bandAPs) {
           if (other.id === ap.id) continue
           if (!result.has(other.id)) continue
           if (dist2(ap, other) > r2) continue
-          if (result.get(other.id).channel === ch) overlap++
+          if (spectraOverlap(band, ch, myW, result.get(other.id).channel, widthOf(other))) overlap++
         }
         return { ch, overlap }
       })

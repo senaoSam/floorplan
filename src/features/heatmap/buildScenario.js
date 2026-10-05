@@ -4,7 +4,7 @@
 // floor.scale is px/m. We convert here and flatten wall openings into their own
 // sub-segments so each sub-segment carries its own dB loss.
 
-import { channelCenterMHz } from './frequency'
+import { channelBlockCenterMHz } from './frequency'
 import { getDefaultTxPower, getAPAntennaGain } from '@/constants/apModels'
 import {
   makeAlignMatrixM,
@@ -236,7 +236,9 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
     frequency: ap.frequency ?? 5,
     channel: ap.channel ?? 36,
     channelWidth: ap.channelWidth ?? 20,
-    centerMHz: channelCenterMHz(ap.frequency ?? 5, ap.channel ?? 36),
+    // 57-16: bonded-block centre, not the primary channel's. The shader
+    // derives each AP's spectrum as centerMHz +- width/2 from this.
+    centerMHz: channelBlockCenterMHz(ap.frequency ?? 5, ap.channel ?? 36, ap.channelWidth ?? 20),
     antennaMode: ap.antennaMode ?? 'omni',
     azimuthDeg: ap.azimuth ?? 0,
     tiltDeg: ap.tilt ?? 0,
