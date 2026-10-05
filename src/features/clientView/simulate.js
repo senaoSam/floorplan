@@ -47,7 +47,12 @@ function effectiveRssi(downDbm, apTxDbm, clientTxDbm, linkDirection) {
 // candidate list of { ap, idx, downDbm, rssiDbm } (rssiDbm = effective).
 export function buildCandidates(scenario, rx, opts) {
   const { device, sixGHzOn, wifi7On, linkDirection, clientTxDbm, clientHeightM } = opts
-  const rxAbs = { ...rx, zM: clientHeightM ?? rx.zM ?? 0 }
+  // 57-17: clientHeightM is above the floor; the cross-floor scenario works in
+  // absolute Z, so lift it by the floor's elevation.
+  const rxAbs = {
+    ...rx,
+    zM: clientHeightM != null ? (scenario.floorElevationM ?? 0) + clientHeightM : (rx.zM ?? 0),
+  }
   const probe = probeAt(scenario, rxAbs, { reflections: false, diffraction: false })
   if (!probe) return { probe: null, candidates: [] }
 

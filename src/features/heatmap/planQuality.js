@@ -11,6 +11,7 @@
 // IMAGE-PX so the panel can recentre the viewport, matching CoveragePanel.
 
 import { buildScenario } from './buildScenario'
+import { buildFloorScenario } from './buildCrossFloor'
 import { sampleField } from './sampleField'
 import { apsShareSpectrum } from './frequency'
 
@@ -85,13 +86,32 @@ export function detectChannelConflicts(aps, scale) {
 // Returns null when there's nothing to measure (no floor scale / no APs), else:
 //   { coveragePct, blindPct, coveredAreaM2, blindAreaM2, apCount,
 //     channelConflicts: [...], biggestGap: {x,y}|null, thresholdDbm }
-export function computePlanQualityStats({ floor, walls, aps, scopes, thresholdDbm = -67 }) {
+// 57-17: pass `floors` (+ apsByFloor / wallsByFloor / holesByFloor) to sample
+// the same scenario the heatmap shows -- other floors' APs, walls and slabs,
+// receiver at 1.0 m. Without them it falls back to the old planar scenario
+// (floor-level receiver, this floor only). apCount / channel conflicts stay
+// per-floor either way.
+export function computePlanQualityStats({
+  floor, walls, aps, scopes, thresholdDbm = -67,
+  floors = null, apsByFloor = null, wallsByFloor = null, holesByFloor = null,
+}) {
   const apList = aps ?? []
-  const scenario = buildScenario(floor, walls ?? [], apList, scopes ?? [])
+  const scenario = floors
+    ? buildFloorScenario({
+        floors,
+        floorId: floor.id,
+        apsByFloor: apsByFloor ?? { [floor.id]: apList },
+        wallsByFloor: wallsByFloor ?? { [floor.id]: walls ?? [] },
+        holesByFloor: holesByFloor ?? {},
+        scopes: scopes ?? [],
+      })
+    : buildScenario(floor, walls ?? [], apList, scopes ?? [])
   if (!scenario) return null
 
   const channelConflicts = detectChannelConflicts(apList, floor.scale)
-  if (apList.length === 0) {
+  // Other floors' APs can cover this floor, so "no signal at all" means no
+  // AP in the scenario, not just none on this floor.
+  if (scenario.aps.length === 0) {
     return {
       coveragePct: 0,
       secondaryCoveragePct: 0,
@@ -108,7 +128,7 @@ export function computePlanQualityStats({ floor, walls, aps, scopes, thresholdDb
   // Sample RSSI with the coarse JS engine. Reflections/diffraction OFF keeps a
   // debounced full-floor sweep cheap; the panel is a coverage summary, not the
   // final heatmap, so first-order accuracy is plenty for a %.
-  const field = sampleField(scenario, fitQualityStep(scenario, apList.length), {
+  const field = sampleField(scenario, fitQualityStep(scenario, scenario.aps.length), {
     maxReflOrder: 0,
     enableDiffraction: false,
     redundancyThresholdDbm: thresholdDbm,   // 47-9: per-cell count of APs ≥ threshold

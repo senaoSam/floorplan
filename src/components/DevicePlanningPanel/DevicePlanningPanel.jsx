@@ -4,6 +4,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useScopeStore } from '@/store/useScopeStore'
+import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { getSceneRefs } from '@/render/sceneRegistry'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
@@ -45,6 +46,10 @@ function DevicePlanningPanel() {
 
   const walls  = useWallStore((s) => s.wallsByFloor[activeFloorId])
   const scopes = useScopeStore((s) => s.scopesByFloor[activeFloorId])
+  // 57-17: quality samples the cross-floor scenario, so other floors' walls /
+  // holes must retrigger it too.
+  const wallsByAll   = useWallStore((s) => s.wallsByFloor)
+  const holesByFloor = useFloorHoleStore((s) => s.floorHolesByFloor)
 
   // Coverage design target + threshold live on the panel (planning aid, not the
   // Client-View coverage semantics), defaulting to the -67 dBm industry target.
@@ -62,10 +67,17 @@ function DevicePlanningPanel() {
     if (collapsed || !floor || !hasScale) { setQuality(null); return }
     if (qualityTimerRef.current) clearTimeout(qualityTimerRef.current)
     qualityTimerRef.current = setTimeout(() => {
-      setQuality(computePlanQualityStats({ floor, walls: walls ?? [], aps, scopes: scopes ?? [], thresholdDbm }))
+      // 57-17: building maps → same cross-floor scenario as the heatmap.
+      setQuality(computePlanQualityStats({
+        floor, walls: walls ?? [], aps, scopes: scopes ?? [], thresholdDbm,
+        floors,
+        apsByFloor,
+        wallsByFloor: useWallStore.getState().wallsByFloor,
+        holesByFloor: useFloorHoleStore.getState().floorHolesByFloor,
+      }))
     }, QUALITY_DEBOUNCE_MS)
     return () => { if (qualityTimerRef.current) clearTimeout(qualityTimerRef.current) }
-  }, [collapsed, floor, hasScale, walls, aps, scopes, thresholdDbm])
+  }, [collapsed, floor, hasScale, walls, aps, scopes, thresholdDbm, floors, apsByFloor, wallsByAll, holesByFloor])
 
   // 52-D2: this was the button that froze the UI with zero feedback — the
   // tester hit it, saw nothing move for seconds, and assumed a crash.

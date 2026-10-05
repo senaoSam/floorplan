@@ -5,6 +5,7 @@ import { useCableStore, CAPACITY_PROFILES, getCapacityProfile } from '@/store/us
 import { useEditorStore } from '@/store/useEditorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useScopeStore } from '@/store/useScopeStore'
+import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { getCachedRoutes } from '@/features/cable/routesCache'
 import { computeTrayBOM } from '@/features/cable/computeTrayBOM'
 import { computeTrayCableLoads, computeTrayFill } from '@/features/cable/computeTrayFill'
@@ -82,6 +83,7 @@ function CableSummaryPanel() {
         // re-render this panel on every wall edit for no visible benefit.
         wallsByFloor: useWallStore.getState().wallsByFloor,
         scopesByFloor: useScopeStore.getState().scopesByFloor,
+        holesByFloor: useFloorHoleStore.getState().floorHolesByFloor,   // 57-17
         switchesByFloor,
         traysByFloor,
         risers,

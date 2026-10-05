@@ -447,6 +447,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useScopeStore,
         useHeatmapStore,
         useHoverReadoutStore,
+        useFloorHoleStore,
       })
       detachClientView = bindClientView({
         scene: s,
@@ -457,6 +458,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useScopeStore,
         useClientViewStore,
         useHeatmapStore,
+        useFloorHoleStore,
       })
       detachClientViewLayer = attachClientViewLayer({
         scene: s,

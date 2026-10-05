@@ -1,4 +1,4 @@
-import { buildScenario } from '@/features/heatmap/buildScenario'
+import { buildFloorScenario } from '@/features/heatmap/buildCrossFloor'
 import { getClientDeviceById } from '@/constants/clientDevices'
 import { simulateClient, buildCandidates } from './simulate'
 import { computeAssociationArea, computeSingleApArea } from './association'
@@ -28,6 +28,7 @@ export function bindClientView({
   useScopeStore,
   useClientViewStore,
   useHeatmapStore,
+  useFloorHoleStore = null,
 }) {
   const stage = scene.app.stage
   let cachedSig = ''
@@ -41,14 +42,21 @@ export function bindClientView({
     const { floors, activeFloorId } = useFloorStore.getState()
     const floor = floors.find((f) => f.id === activeFloorId)
     if (!floor || !floor.scale) return { scenario: null, floor: null }
-    const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
-    const aps = useAPStore.getState().apsByFloor[activeFloorId] ?? []
-    if (aps.length === 0) return { scenario: null, floor }
     const scopes = useScopeStore.getState().scopesByFloor?.[activeFloorId] ?? []
-    const sig = `${activeFloorId}::${walls.length}::${aps.length}::${scopes.length}::${floor.scale}`
-    if (sig === cachedSig && cachedScenario) return { scenario: cachedScenario, floor }
+    const sig = `${activeFloorId}`
+    if (sig === cachedSig && cachedScenario !== undefined) return { scenario: cachedScenario, floor }
     cachedSig = sig
-    cachedScenario = buildScenario(floor, walls, aps, scopes, null)
+    // 57-17: the heatmap's scenario (other floors' APs / walls / slabs too),
+    // not a planar single-floor one.
+    const sc = buildFloorScenario({
+      floors,
+      floorId: activeFloorId,
+      apsByFloor: useAPStore.getState().apsByFloor ?? {},
+      wallsByFloor: useWallStore.getState().wallsByFloor ?? {},
+      holesByFloor: useFloorHoleStore?.getState().floorHolesByFloor ?? {},
+      scopes,
+    })
+    cachedScenario = sc && sc.aps.length > 0 ? sc : null
     return { scenario: cachedScenario, floor }
   }
   const invalidate = () => { cachedSig = '' }
@@ -227,6 +235,10 @@ export function bindClientView({
   const unsubWall = useWallStore.subscribe(() => { invalidate(); if (isActive()) recompute() })
   const unsubScope = useScopeStore.subscribe(() => { invalidate(); if (isActive()) recompute() })
   const unsubFloor = useFloorStore.subscribe(() => { invalidate(); if (isActive()) recompute() })
+  // 57-17: floor holes feed the cross-floor scenario (slab bypass).
+  const unsubHole = useFloorHoleStore
+    ? useFloorHoleStore.subscribe(() => { invalidate(); if (isActive()) recompute() })
+    : () => {}
   // Restore the heatmap if association area had hidden it. Idempotent — clears
   // the remembered flag so a following reset()/toggle-off won't double-restore.
   const restoreHeatmapIfHidden = () => {
@@ -358,6 +370,7 @@ export function bindClientView({
     unsubWall()
     unsubScope()
     unsubFloor()
+    unsubHole()
     unsubCV()
     unsubMode()
   }

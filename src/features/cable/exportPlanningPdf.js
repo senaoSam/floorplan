@@ -154,6 +154,7 @@ export async function buildPlanningPdf({
   apsByFloor = {},
   wallsByFloor = {},
   scopesByFloor = {},
+  holesByFloor = {},
   switchesByFloor = {},
   traysByFloor = {},
   risers = [],
@@ -319,6 +320,8 @@ export async function buildPlanningPdf({
       aps,
       scopes: scopesByFloor[floor.id] ?? [],
       thresholdDbm,
+      // 57-17: same cross-floor scenario as the heatmap.
+      floors, apsByFloor, wallsByFloor, holesByFloor,
     })
     if (!q) {
       covRows.push([floorName(floor.id), String(aps.length), 'n/a', '-', '-', '-', 'NOT MEASURED'])

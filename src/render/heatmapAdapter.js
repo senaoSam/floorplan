@@ -1,5 +1,5 @@
 import { Sprite, Texture, Graphics, CanvasSource } from 'pixi.js'
-import { publishHeatmapFrame } from './heatmapFrameBus'
+import { publishHeatmapFrame, publishHeatmapField } from './heatmapFrameBus'
 import { createHeatmapGL } from '@/features/heatmap/heatmapGL'
 import { buildScenario } from '@/features/heatmap/buildScenario'
 import { sampleFieldGLAsync } from '@/features/heatmap/sampleFieldGL'
@@ -518,6 +518,7 @@ export function attachHeatmapLayer({
     if (sprite) sprite.visible = false
     if (snapSprite) snapSprite.visible = false
     publishHeatmapFrame(null)   // 3D plane follows the 2D sprite off
+    publishHeatmapField(null)   // 57-17: hover falls back to its own probe
   }
 
   // Render one scalar grid through heatmapGL and present it: PIXI texture
@@ -1138,6 +1139,12 @@ export function attachHeatmapLayer({
     const ctx = { ...ctxBase, blur: hm.blur, contours: hm.showContours, anchors: modeCfg.anchors }
     const present = (field, awaitingFine) => {
       const activeField = field[modeCfg.field] ?? field.rssi
+      // 57-17: hand the numbers behind this paint to the hover readout.
+      publishHeatmapField({
+        floorId: ctxBase.floorId, nx: field.nx, ny: field.ny,
+        stepM: field.gridStepM, originX: field.originX, originY: field.originY,
+        rssi: field.rssi, sinr: field.sinr, snr: field.snr, cci: field.cci,
+      })
       presentField({
         grid: activeField, nx: field.nx, ny: field.ny,
         stepM: field.gridStepM, originX: field.originX, originY: field.originY,

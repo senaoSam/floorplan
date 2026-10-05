@@ -359,5 +359,8 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
     scopeMaskFn,
     floorBoundaries,   // null when single-floor
     rxElevationM,      // null when single-floor
+    // 57-17: the floor's ground level (absolute Z), so callers with their own
+    // receiver height (Client View's device height) can place rx correctly.
+    floorElevationM: activeElevationM,
   }
 }

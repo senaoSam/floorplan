@@ -28,6 +28,21 @@ export function getHeatmapFrame() {
   return current
 }
 
+// 57-17: the field behind the last idle paint -- all four metric grids in
+// metres -- so the hover readout can report the numbers the colours were
+// drawn from instead of re-running the physics with different settings.
+//   { floorId, nx, ny, stepM, originX, originY, rssi, sinr, snr, cci }
+// null when no heatmap is shown.
+let currentField = null
+
+export function publishHeatmapField(field) {
+  currentField = field
+}
+
+export function getHeatmapField() {
+  return currentField
+}
+
 // Returns an unsubscribe function (usable directly as a React effect cleanup).
 export function subscribeHeatmapFrame(fn) {
   subscribers.add(fn)

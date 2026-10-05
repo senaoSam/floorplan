@@ -1,4 +1,5 @@
 import { computeFloorElevations } from '@/utils/floorStacking'
+import { buildScenario } from './buildScenario'
 
 // Cross-floor scenario assembly — extracted from heatmapAdapter (Phase 48)
 // so the 3D all-floors heatmap stack can build the same crossFloor input for
@@ -101,4 +102,29 @@ export function buildCrossFloorData({
     },
     excludedFloors,
   }
+}
+
+// 57-17: the scenario the 2D heatmap computes for a floor (cross-floor APs,
+// walls and slabs; receiver at 1.0 m), for the point readers -- hover,
+// Client View, planQuality -- so their numbers come from the same geometry as
+// the colours. Before this they built a planar scenario (rx at floor level,
+// no other floors).
+//   mapAps -- per-floor AP filter (e.g. the heatmap band filter); identity
+//             when omitted.
+// Returns null when the floor is missing.
+export function buildFloorScenario({
+  floors,
+  floorId,
+  apsByFloor = {},
+  wallsByFloor = {},
+  holesByFloor = {},
+  scopes = [],
+  mapAps = (list) => list,
+}) {
+  const floor = (floors ?? []).find((f) => f.id === floorId)
+  if (!floor) return null
+  const { crossFloor } = buildCrossFloorData({
+    floors, activeFloorId: floorId, apsByFloor, wallsByFloor, holesByFloor, mapAps,
+  })
+  return buildScenario(floor, wallsByFloor[floorId] ?? [], mapAps(apsByFloor[floorId] ?? []), scopes, crossFloor)
 }

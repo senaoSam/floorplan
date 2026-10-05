@@ -3,6 +3,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useScopeStore } from '@/store/useScopeStore'
+import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useCableStore } from '@/store/useCableStore'
 import { useEditorStore, VIEW_MODE } from '@/store/useEditorStore'
 import { showUiToast } from '@/store/useUiToastStore'
@@ -97,6 +98,7 @@ function ExportMenu() {
         apsByFloor: useAPStore.getState().apsByFloor,
         wallsByFloor: useWallStore.getState().wallsByFloor,
         scopesByFloor: useScopeStore.getState().scopesByFloor,
+        holesByFloor: useFloorHoleStore.getState().floorHolesByFloor,   // 57-17
         switchesByFloor: cable.switchesByFloor,
         traysByFloor: cable.traysByFloor,
         risers: cable.risers,
