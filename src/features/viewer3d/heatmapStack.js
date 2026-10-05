@@ -217,8 +217,13 @@ const ensureStackInner = async (fp) => {
     // has no data beyond it to fade into, and a ramp would just dim real
     // readings at the edge. Stacked floors are background context anyway; the
     // feather is for the floor being read.
+    // 57-12: the stack canvas spans exactly the plan rect (no padding).
     paintGL.render(
-      { rssi: grid, nx: field.nx, ny: field.ny },
+      {
+        rssi: grid, nx: field.nx, ny: field.ny,
+        spanX: (outW / f.scale) / field.gridStepM,
+        spanY: (outH / f.scale) / field.gridStepM,
+      },
       outW, outH, 1 / f.scale, hm.blur, hm.showContours,
       { anchors: modeCfg.anchors },
     )

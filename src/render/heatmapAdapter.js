@@ -505,7 +505,7 @@ export function attachHeatmapLayer({
     const a = anim
     if (a.raf) cancelAnimationFrame(a.raf)
     anim = null
-    if (finishToTarget) paintCanvas(a.base.grid, a.base.nx, a.base.ny, a.ctx)
+    if (finishToTarget) paintCanvas(a.base.grid, a.base.nx, a.base.ny, a.base.stepM, a.ctx)
   }
 
   const hide = () => {
@@ -523,8 +523,14 @@ export function attachHeatmapLayer({
   // Render one scalar grid through heatmapGL and present it: PIXI texture
   // update, sprite placement, floor-rect mask, on-demand render. Every paint —
   // drag frames, idle stages, animation frames — funnels through here.
-  const paintCanvas = (grid, nx, ny, ctx) => {
-    gl.render({ rssi: grid, nx, ny }, ctx.outW, ctx.outH, 1 / ctx.scale, ctx.blur, ctx.contours, {
+  // stepM: the field's grid step (m). 57-12: with the canvas spanning
+  // fullW/scale metres, total/step maps output uv onto sample positions.
+  const paintCanvas = (grid, nx, ny, stepM, ctx) => {
+    const span = {
+      spanX: (ctx.fullW / ctx.scale) / stepM,
+      spanY: (ctx.fullH / ctx.scale) / stepM,
+    }
+    gl.render({ rssi: grid, nx, ny, ...span }, ctx.outW, ctx.outH, 1 / ctx.scale, ctx.blur, ctx.contours, {
       anchors: ctx.anchors,
       edgeFeather: buildEdgeFeather(ctx),
     })
@@ -589,7 +595,7 @@ export function attachHeatmapLayer({
     // passes on the CPU — paint directly instead.
     if (useHeatmapStore.getState().isSoftwareRender) {
       cancelAnim(false)
-      paintCanvas(target.grid, target.nx, target.ny, ctx)
+      paintCanvas(target.grid, target.nx, target.ny, target.stepM, ctx)
       return
     }
     const now = performance.now()
@@ -623,7 +629,7 @@ export function attachHeatmapLayer({
         const d = (t - state.decayAt) / WOBBLE_DECAY_MS
         if (d >= 1) {
           anim = null
-          paintCanvas(state.base.grid, state.base.nx, state.base.ny, state.ctx)
+          paintCanvas(state.base.grid, state.base.nx, state.base.ny, state.base.stepM, state.ctx)
           return
         }
         amp *= (1 - d) * (1 - d)
@@ -634,7 +640,7 @@ export function attachHeatmapLayer({
       }
       wobbleInto(state.scratch, b.grid, amp, (t - state.t0) / 1000, state.lattice, state.latN,
         b.nx, b.ny, b.stepM, b.originX, b.originY)
-      paintCanvas(state.scratch, b.nx, b.ny, state.ctx)
+      paintCanvas(state.scratch, b.nx, b.ny, b.stepM, state.ctx)
       state.raf = requestAnimationFrame(tick)
     }
     tick()
@@ -703,7 +709,7 @@ export function attachHeatmapLayer({
         if (!field) continue
         if (!dragSessionOn) return
         const activeField = field[req.modeCfg.field] ?? field.rssi
-        paintCanvas(activeField, field.nx, field.ny, req.paintCtx)
+        paintCanvas(activeField, field.nx, field.ny, field.gridStepM, req.paintCtx)
         // Solo-AP: dim the frozen snapshot underneath to 0.3 so the single
         // moving AP reads clearly on top (oldSrc displayMode 'solo-ap').
         if (snapSprite) {
@@ -1052,7 +1058,7 @@ export function attachHeatmapLayer({
       if (hm.engine !== 'shader') {
         const field = sampleField(renderScenario, stepM, opts)
         const activeField = field[modeCfg.field] ?? field.rssi
-        paintCanvas(activeField, field.nx, field.ny, paintCtx)
+        paintCanvas(activeField, field.nx, field.ny, field.gridStepM, paintCtx)
         if (snapSprite) {
           if (isSoloAP && snapCanvas) {
             snapSprite.visible = true

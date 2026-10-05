@@ -47,6 +47,13 @@ precision highp float;
 in vec2 vUv;
 uniform sampler2D uField;
 uniform vec2 uFieldSize;      // (nx, ny)
+// 57-12: output uv → sample-index scale. Sample i sits at origin + i·step and
+// the canvas spans total metres, so uv·(total/step) is the sample coordinate
+// (integers = sample positions). uSampleOffset is 0 for that mapping; the
+// legacy texel-centre mapping (span = n, offset 0.5) remains as a fallback
+// for callers that don't pass a span.
+uniform vec2 uFieldSpan;
+uniform float uSampleOffset;
 out vec4 outColor;
 
 // Catmull-Rom basis weights for fractional offset t ∈ [0, 1] across the four
@@ -64,7 +71,7 @@ vec4 cubicWeights(float t) {
 
 float sampleCatmullRom(vec2 uv) {
   vec2 sz = uFieldSize;
-  vec2 f = uv * sz - 0.5;
+  vec2 f = uv * uFieldSpan - uSampleOffset;
   vec2 i = floor(f);
   vec2 t = f - i;
   vec4 wx = cubicWeights(t.x);
@@ -357,6 +364,10 @@ export function createHeatmapGL() {
     gl.bindTexture(gl.TEXTURE_2D, fieldTex);
     gl.uniform1i(gl.getUniformLocation(progSample, 'uField'), 0);
     gl.uniform2f(gl.getUniformLocation(progSample, 'uFieldSize'), field.nx, field.ny);
+    const hasSpan = field.spanX != null && field.spanY != null
+    gl.uniform2f(gl.getUniformLocation(progSample, 'uFieldSpan'),
+      hasSpan ? field.spanX : field.nx, hasSpan ? field.spanY : field.ny);
+    gl.uniform1f(gl.getUniformLocation(progSample, 'uSampleOffset'), hasSpan ? 0 : 0.5);
     drawQuad();
 
     let src = 0; // index into targets[] holding the latest result
