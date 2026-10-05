@@ -12,6 +12,7 @@ import { greedyChannelAssign } from '@/utils/autoChannelPlan'
 import { generateId } from '@/utils/id'
 import { DEFAULT_AP_MODEL_ID, getDefaultTxPower } from '@/constants/apModels'
 import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
+import { MATERIALS } from '@/constants/materials'
 import Icon from '@/components/Icon/Icon'
 import './DemoLoader.sass'
 
@@ -51,6 +52,57 @@ const DEMO_CAMERA_RANGE_M = 14
 // Shallow tilt: corner units watch the whole floor (long reach, small blind
 // ring right at the corner is fine).
 const DEMO_CAMERA_TILT_DEG = 20
+
+// Wall materials — every material on show, each where a real house of this
+// kind would use it. Walls are matched by their midpoint (example3.png pixel
+// space) rather than by import order, so a re-vectorized source.json still
+// lands; anything unmatched keeps the import default (concrete).
+const DEMO_WALL_MATCH_PX = 4
+const DEMO_WALL_MATERIALS = [
+  // Exterior shell (brick veneer) and the patio surround.
+  [MATERIALS.BRICK, [
+    [310, 183], [513, 183], [201, 201], [611, 201], [286, 414], [564, 414],
+    [181, 428], [411, 428], [495, 466], [414, 479], [140, 233], [262, 192],
+    [357, 160], [467, 160], [470, 473], [664, 308],
+  ]],
+  // Garage (fire separation), wet areas, home theatre (sound isolation).
+  [MATERIALS.CONCRETE, [
+    [136, 263.5], [22, 329], [147, 346],                  // garage
+    [187, 233], [214, 285], [250, 254],                   // bathroom, wc
+    [647, 287], [601, 254], [629, 297],                   // ensuite
+    [357, 407], [464, 381],                               // home theatre
+  ]],
+  // Interior partitions.
+  [MATERIALS.DRYWALL, [
+    [280, 306], [566, 306], [306, 334], [286, 372], [214, 381], [279, 393],
+    [292, 353], [346, 245], [558, 299],
+  ]],
+  // Joinery — walk-in linen, kitchen pantry.
+  [MATERIALS.WOOD, [[167, 287], [187, 311], [549, 287], [467, 297], [494, 297]]],
+  // Study nook glass partition onto the entry.
+  [MATERIALS.GLASS, [[539, 334], [519, 400]]],
+  // Full-height glazing from family/living out to the alfresco cabana.
+  [MATERIALS.LOW_E_GLASS, [[412, 137]]],
+  // Garage front — a roller door spans it (its door opening goes metal too).
+  [MATERIALS.METAL, [[85, 394]]],
+]
+
+function applyDemoWallMaterials(walls, W, H) {
+  const sx = W / 685, sy = H / 511
+  const targets = DEMO_WALL_MATERIALS.flatMap(([material, pts]) =>
+    pts.map(([x, y]) => ({ material, x: x * sx, y: y * sy })))
+  return walls.map((w) => {
+    const mx = (w.startX + w.endX) / 2, my = (w.startY + w.endY) / 2
+    const hit = targets.find((t) => Math.hypot(t.x - mx, t.y - my) <= DEMO_WALL_MATCH_PX * sx)
+    if (!hit) return w
+    if (hit.material !== MATERIALS.METAL) return { ...w, material: hit.material }
+    return {
+      ...w,
+      material: hit.material,
+      openings: (w.openings ?? []).map((o) => (o.type === 'door' ? { ...o, material: hit.material } : o)),
+    }
+  })
+}
 
 const loadImage = (src) =>
   new Promise((resolve, reject) => {
@@ -154,7 +206,7 @@ function DemoLoader() {
       )
 
       const { walls } = floorplanFromLines(lines)
-      setWalls(floor.id, walls)
+      setWalls(floor.id, applyDemoWallMaterials(walls, img.naturalWidth, img.naturalHeight))
       setAPs(floor.id, buildDemoAPs(img.naturalWidth, img.naturalHeight, regulatoryDomain))
 
       const W = img.naturalWidth, H = img.naturalHeight
