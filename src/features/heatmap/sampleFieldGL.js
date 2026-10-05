@@ -20,7 +20,7 @@
 //      Custom-pattern APs no longer force this path: the shader samples the
 //      catalog cuts from a texture (see propagationGL's uPatterns).
 
-import { aggregateApContributions } from './propagation'
+import { aggregateApContributions, makeApAggregator, aggregateWithTables } from './propagation'
 import { fitGridStep } from './sampleField'
 import { createPropagationGL } from './propagationGL'
 import {
@@ -395,18 +395,10 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
   }
 
   // ---- per-AP fallback (refl on or diff on) ----
+  // 57-6: LOS / AP-geometry bakes happen lazily per AP on a grid-cache miss
+  // (see the loop below) instead of for every AP up front.
   const losEnabled = opts.losEnabled !== false
-  const losMap = losEnabled
-    ? gl.bakeLos(
-        scenario.aps.map((ap, i) => ({ ap, key: ap.id ?? `_idx_${i}` })),
-        gridStepM, { x: originX, y: originY }, rxZM, nx, ny,
-        scenario.walls.length,
-      )
-    : null
   const apGeoEnabled = opts.apGeoEnabled !== false
-  const apGeoMap = apGeoEnabled
-    ? gl.bakeApGeo(scenario.aps.map((ap, i) => ({ ap, key: ap.id ?? `_idx_${i}` })))
-    : null
 
   const gridCacheOn =
     opts.gridCacheEnabled !== false &&
@@ -477,8 +469,10 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
       }
     }
 
-    const losEntry = losMap?.get(apKey)
-    const apGeoEntry = apGeoMap?.get(apKey)
+    const losEntry = losEnabled
+      ? gl.bakeLosFor(ap, apKey, gridStepM, { x: originX, y: originY }, rxZM, nx, ny, scenario.walls.length)
+      : null
+    const apGeoEntry = apGeoEnabled ? gl.bakeApGeoFor(ap, apKey) : null
     const apOpts = {
       ...opts,
       gridSize: { nx, ny },
@@ -526,6 +520,8 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
   if (gridCacheOn && opts.liveApIds && typeof gl.pruneCachedGrids === 'function') {
     gl.pruneCachedGrids(opts.liveApIds)
   }
+  // 57-6: same live set reclaims LOS / AP-geometry bakes of deleted APs.
+  if (opts.liveApIds) gl.pruneBakes(opts.liveApIds)
 
   return aggregateChunked(perApGrids, scenario, nx, ny, originX, originY, gridStepM, w, h, mask, isStale)
 }
@@ -539,6 +535,10 @@ async function aggregateChunked(perApGrids, scenario, nx, ny, originX, originY, 
   const cci  = new Float32Array(nx * ny)
   // Scopes clip on the PIXI sprite, not here (see sampleFieldGL sync path).
   const perApScratch = new Array(scenario.aps.length)
+  // 57-7: spectrum-share / noise tables built once, not per cell (identical
+  // output to aggregateApContributions — see makeApAggregator).
+  const aggTables = makeApAggregator(scenario.aps, NOISE_FLOOR_DBM)
+  const agg = {}
   let sliceStart = performance.now()
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
@@ -550,7 +550,7 @@ async function aggregateChunked(perApGrids, scenario, nx, ny, originX, originY, 
       for (let k = 0; k < scenario.aps.length; k++) {
         perApScratch[k] = perApGrids[k][idx]
       }
-      const agg = aggregateApContributions(perApScratch, scenario.aps, NOISE_FLOOR_DBM)
+      aggregateWithTables(aggTables, perApScratch, agg)
       rssi[idx] = agg.rssiDbm
       sinr[idx] = agg.sinrDb
       snr[idx]  = agg.snrDb

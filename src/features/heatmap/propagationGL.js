@@ -2927,6 +2927,45 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     return out
   }
 
+  // 57-6: lazy single-AP bakes for the async path. bakeLos / bakeApGeo bake
+  // every AP up front and evict whatever isn't in the call — a solo-AP drag
+  // (scenario = the dragged AP) therefore wiped every other AP's bakes, and
+  // the release recompute re-baked all of them even when their output grids
+  // were still cached. These bake one AP on a grid-cache miss and evict
+  // nothing; pruneBakes (idle renders, which know the live AP set) reclaims
+  // deleted APs and dead LOS grid sizes instead.
+  function bakeLosFor(ap, key, gridStepM, originM, rxZM, nx, ny, wallCount) {
+    wallsCountForLos = wallCount
+    const entry = bakeLosOne(ap, key, gridStepM, originM, rxZM, nx, ny)
+    entry.lastBake = losBakeCounter
+    return entry
+  }
+  function bakeApGeoFor(ap, key) {
+    return bakeApGeoOne(ap, key)
+  }
+  // `_idx_*` fallback keys aren't stable ids, so they're left alone (as in
+  // pruneCachedGrids).
+  function pruneBakes(liveKeys) {
+    losBakeCounter++
+    for (const k of [...losCache.keys()]) {
+      const e = losCache.get(k)
+      const apPart = k.slice(0, k.lastIndexOf('@@'))
+      const gone = !liveKeys.has(apPart) && !apPart.startsWith('_idx_')
+      if (gone || losBakeCounter - e.lastBake > LOS_STALE_BAKES) {
+        gl.deleteTexture(e.tex)
+        gl.deleteFramebuffer(e.fbo)
+        losCache.delete(k)
+      }
+    }
+    for (const k of [...apGeoCache.keys()]) {
+      if (liveKeys.has(k) || String(k).startsWith('_idx_')) continue
+      const e = apGeoCache.get(k)
+      gl.deleteTexture(e.cornersTex)
+      gl.deleteTexture(e.mirrorTex)
+      apGeoCache.delete(k)
+    }
+  }
+
   // HM-F5k: CPU-side AP→corner / AP→wall geometry bake. The data is purely
   // 2D scalar/point math, so a small JS pass per AP is faster than spinning
   // up another shader program + framebuffer + readPixels (and this runs at
@@ -3657,7 +3696,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     uploadWalls, uploadCorners, uploadSlabs, uploadAps, bakeLos, bakeApGeo,
     renderAp, renderField,
     renderFieldAsync, renderApSubmit, resolveApReads, discardApReads,
-    getWallsVersion, getCachedGrid, setCachedGrid, pruneCachedGrids, apDrawNeedsTiling, renderApSubmitTiled, setUseGrid, dispose, gl,
+    getWallsVersion, getCachedGrid, setCachedGrid, pruneCachedGrids, apDrawNeedsTiling, renderApSubmitTiled, bakeLosFor, bakeApGeoFor, pruneBakes, setUseGrid, dispose, gl,
     // 53-G4: true once the context is lost/restored (or reports itself lost).
     // Callers should drop this instance rather than keep dispatching into it.
     isDead,

@@ -2,7 +2,7 @@
 // buildScenario (to tag each AP with its centerMHz) and SINR aggregation
 // (to decide whether two APs' spectra actually overlap).
 //
-// Matches the simplified formulas in src/constants/channelWidths.js:
+// Simplified formulas:
 //   2.4 GHz: 2407 + 5·N   (ch1=2412, ch6=2437, ch11=2462)
 //   5   GHz: 5000 + 5·N   (ch36=5180, ch149=5745)
 //   6   GHz: 5950 + 5·N   (ch1=5955, ch5=5975, …)

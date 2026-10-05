@@ -59,7 +59,7 @@
 //     建快取那一次）。
 
 import { buildScenario } from '@/features/heatmap/buildScenario'
-import { rssiFromAp, aggregateApContributions } from '@/features/heatmap/propagation'
+import { rssiFromAp, makeApAggregator, aggregateWithTables } from '@/features/heatmap/propagation'
 import {
   getAPModelById,
   getDefaultTxPower,
@@ -195,6 +195,10 @@ function ensureFieldCache(baseScenario, opts) {
     txArr: new Float64Array(nAps),
     perAp: new Float64Array(nAps),
     gapRssiArr: new Float64Array(cellCount),
+    // 57-9: spectrum-share / noise tables — depend on band / channel / width
+    // only, so one build serves every evaluate (txDbm is what the search moves).
+    aggTables: makeApAggregator(baseAps),
+    agg: {},
   }
   return baseScenario.fieldCache
 }
@@ -204,7 +208,7 @@ function ensureFieldCache(baseScenario, opts) {
 function evaluate(baseScenario, aps, txMap, opts) {
   const { baseAps } = baseScenario
   const cache = ensureFieldCache(baseScenario, opts)
-  const { cellCount, base, txArr, perAp, gapRssiArr } = cache
+  const { cellCount, base, txArr, perAp, gapRssiArr, aggTables, agg } = cache
   const nAps = baseAps.length
   // txMap 涵蓋全部 AP（規劃中 + 固定），依 scenario.aps 同序展開。
   for (let i = 0; i < nAps; i++) {
@@ -220,7 +224,7 @@ function evaluate(baseScenario, aps, txMap, opts) {
   for (let k = 0; k < cellCount; k++) {
     const off = k * nAps
     for (let i = 0; i < nAps; i++) perAp[i] = base[off + i] + txArr[i]
-    const agg = aggregateApContributions(perAp, baseAps)
+    aggregateWithTables(aggTables, perAp, agg)
     const r = agg.rssiDbm
     if (Number.isNaN(r)) continue
     const gapR = Math.max(0, opts.targetRssiDbm - r)

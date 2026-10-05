@@ -67,12 +67,15 @@ function wallLossOblique(wall, rayDir, fOver24) {
 // skipped. This makes half-height partitions transparent to rays that pass
 // over the top between an AP and a low receiver. Rays with unknown Z (legacy
 // planar mode with no elevation data) bypass the filter and count every hit.
-function accumulateWallLoss(a, b, walls, aZM, bZM, fOver24) {
+// `skip` (optional) excludes one wall by identity — the reflecting wall
+// (57-11: replaces a per-reflection walls.filter copy; same walls, same order).
+function accumulateWallLoss(a, b, walls, aZM, bZM, fOver24, skip = null) {
   const rayDir = sub(b, a)
   const haveZ = aZM != null && bZM != null
   let totalLoss = 0
   let hits = 0
   for (const w of walls) {
+    if (w === skip) continue
     const hit = segSegIntersect(a, b, w.a, w.b)
     if (!hit) continue
     if (haveZ && w.zLoM != null && w.zHiM != null) {
@@ -391,15 +394,14 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       const magPara = Math.sqrt(gPara.re * gPara.re + gPara.im * gPara.im)
       if (Math.max(magPerp, magPara) * rough < 0.02) continue
 
-      const wallsExcl = walls.filter((x) => x !== w)
       // Image-source ray apImage→rx maps to the reflected ray ap→reflPt→rx
       // with matching path length. Reflection point's Z lies on that
       // straight line, so interpolate by its fraction of total path length.
       const d1 = dist(ap.pos, reflPt)
       const d2 = dist(reflPt, rx)
       const reflZM = apZM + (rxZM - apZM) * (d1 / Math.max(d1 + d2, 1e-9))
-      const leg1 = accumulateWallLoss(ap.pos, reflPt, wallsExcl, apZM, reflZM, fOver24)
-      const leg2 = accumulateWallLoss(reflPt, rx, wallsExcl, reflZM, rxZM, fOver24)
+      const leg1 = accumulateWallLoss(ap.pos, reflPt, walls, apZM, reflZM, fOver24, w)
+      const leg2 = accumulateWallLoss(reflPt, rx, walls, reflZM, rxZM, fOver24, w)
       const dTot = d1 + d2
 
       const plRef = pathLossDb(dTot, freqMhz) + leg1.totalLoss + leg2.totalLoss
@@ -505,4 +507,52 @@ export function aggregateApContributions(perApDbm, apList, noiseDbm = NOISE_FLOO
   const snrDb  = signalDb - effNoiseDbm
   const cciDbm = cciLin > 0 ? linToDb(cciLin) : -Infinity
   return { rssiDbm: signalDb, sinrDb, snrDb, cciDbm, bestApIndex: bestIdx }
+}
+
+// 57-7 / 57-9: table-driven aggregateApContributions for hot loops that fold
+// many cells against one fixed AP list. apsShareSpectrum allocates two arrays
+// per call and the noise widening calls Math.log10 — per AP pair, per cell.
+// makeApAggregator hoists both out of the cell loop; aggregateWithTables then
+// runs the exact same operations in the same order, so results are
+// bit-identical to aggregateApContributions. `out` is reused (no per-cell
+// allocation). Tables depend only on band / channel / width, not on txDbm.
+export function makeApAggregator(apList, noiseDbm = NOISE_FLOOR_DBM) {
+  const n = apList.length
+  const share = new Uint8Array(n * n)
+  const effNoiseDbm = new Float64Array(n)
+  const noiseLin = new Float64Array(n)
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      if (i !== j && apsShareSpectrum(apList[i], apList[j])) share[i * n + j] = 1
+    }
+    effNoiseDbm[i] = noiseDbm + widthNoiseDelta(apList[i].channelWidth ?? 20)
+    noiseLin[i] = dbToLin(effNoiseDbm[i])
+  }
+  return { n, share, effNoiseDbm, noiseLin }
+}
+
+export function aggregateWithTables(tables, perApDbm, out) {
+  const { n, share, effNoiseDbm, noiseLin } = tables
+  if (!n) {
+    out.rssiDbm = -120; out.sinrDb = -50; out.snrDb = -50; out.cciDbm = -Infinity; out.bestApIndex = -1
+    return out
+  }
+  let bestIdx = 0
+  for (let i = 1; i < n; i++) {
+    if (perApDbm[i] > perApDbm[bestIdx]) bestIdx = i
+  }
+  const signalDb = perApDbm[bestIdx]
+  const row = bestIdx * n
+  let cciLin = 0
+  for (let i = 0; i < n; i++) {
+    if (i === bestIdx) continue
+    if (!share[row + i]) continue
+    cciLin += dbToLin(perApDbm[i])
+  }
+  out.rssiDbm = signalDb
+  out.sinrDb = signalDb - linToDb(noiseLin[bestIdx] + cciLin)
+  out.snrDb = signalDb - effNoiseDbm[bestIdx]
+  out.cciDbm = cciLin > 0 ? linToDb(cciLin) : -Infinity
+  out.bestApIndex = bestIdx
+  return out
 }
