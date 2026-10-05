@@ -340,15 +340,30 @@ float wallLossOblique(vec2 a, vec2 b, vec2 rayDir, float lossDb, float lossB, fl
 // Apply one wall hit: do segSegIntersect + Z filter, accumulate loss if hit.
 // Splitting this out lets both the brute-force and the grid-traversal paths
 // share the same Z-filtered "did we cross this wall?" semantics.
-void applyWallContribution(int w, vec2 ap, float apZ, vec2 rx, float rxZ, vec2 rayDir, inout float total) {
+// 57-15: [tLo, tHi] is the ray-parameter span of the grid cell being
+// processed (brute force passes +-1e30). A crossing only counts in the cell
+// that actually contains it, so a wall listed in many cells (long / diagonal
+// walls are bucketed by AABB) is charged once even after it falls out of the
+// SEEN_BUF ring. TCELL_EPS absorbs DDA-vs-intersection rounding at cell
+// boundaries; the ring dedups the adjacent-cell case that creates.
+// Returns true when the wall's outcome for this ray is settled (no crossing,
+// crossing outside its Z band, or charged here) -- only then may the caller
+// put it in the ring. A crossing that lies in a LATER cell must stay
+// un-ringed, or that cell would skip it as a duplicate and it would never be
+// charged.
+const float TCELL_EPS = 1e-4;
+bool applyWallContribution(int w, vec2 ap, float apZ, vec2 rx, float rxZ, vec2 rayDir,
+                           float tLo, float tHi, inout float total) {
   vec2 a, b;
   float lossDb, lossB, zLo, zHi;
   readWall(w, a, b, lossDb, lossB, zLo, zHi);
   vec2 hit = segSegIntersect(ap, rx, a, b);
-  if (hit.x < 0.5) return;
+  if (hit.x < 0.5) return true;
+  if (hit.y < tLo - TCELL_EPS || hit.y > tHi + TCELL_EPS) return false;
   float zAt = apZ + (rxZ - apZ) * hit.y;
-  if (zAt < zLo || zAt > zHi) return;
+  if (zAt < zLo || zAt > zHi) return true;
   total += wallLossOblique(a, b, rayDir, lossDb, lossB, uFOver24);
+  return true;
 }
 
 // Brute-force: every wall, every fragment. O(N_walls). Used when no grid is
@@ -357,7 +372,7 @@ float accumulateWallLossBrute(vec2 ap, float apZ, vec2 rx, float rxZ) {
   float total = 0.0;
   vec2 rayDir = rx - ap;
   for (int w = 0; w < uWallCount; w++) {
-    applyWallContribution(w, ap, apZ, rx, rxZ, rayDir, total);
+    applyWallContribution(w, ap, apZ, rx, rxZ, rayDir, -1e30, 1e30, total);
   }
   return total;
 }
@@ -396,7 +411,7 @@ int readGridWallIdx(int i) {
 // and matches BVH-style watertight traversal accuracy in practice.
 const int SEEN_BUF = 16;
 void processCell(int cx, int cy, vec2 ap, float apZ, vec2 rx, float rxZ,
-                 vec2 rayDir, inout float total,
+                 vec2 rayDir, float tLo, float tHi, inout float total,
                  inout int seenBuf[SEEN_BUF], inout int seenWritePos) {
   int start, count;
   readGridCell(cx, cy, start, count);
@@ -407,9 +422,10 @@ void processCell(int cx, int cy, vec2 ap, float apZ, vec2 rx, float rxZ,
       if (seenBuf[j] == wIdx) { dup = true; break; }
     }
     if (dup) continue;
-    seenBuf[seenWritePos] = wIdx;
-    seenWritePos = (seenWritePos + 1) % SEEN_BUF;
-    applyWallContribution(wIdx, ap, apZ, rx, rxZ, rayDir, total);
+    if (applyWallContribution(wIdx, ap, apZ, rx, rxZ, rayDir, tLo, tHi, total)) {
+      seenBuf[seenWritePos] = wIdx;   // 57-15: ring only settled walls
+      seenWritePos = (seenWritePos + 1) % SEEN_BUF;
+    }
   }
 }
 
@@ -480,8 +496,13 @@ float accumulateWallLossGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
   int maxSteps = abs(cxEnd - cx) + abs(cyEnd - cy) + 4;
   for (int i = 0; i < 4096; i++) {
     if (i >= maxSteps) break;
-    processCell(cx, cy, ap, apZ, rx, rxZ, rayDir, total, seenBuf, seenWritePos);
-    if (cx == cxEnd && cy == cyEnd) break;
+    // 57-15: ray-parameter span of this cell (first cell open below, end
+    // cell open above).
+    bool lastCell = cx == cxEnd && cy == cyEnd;
+    float tLo = i == 0 ? -1e30 : tCur;
+    float tHi = lastCell ? 1e30 : min(tMaxX, tMaxY);
+    processCell(cx, cy, ap, apZ, rx, rxZ, rayDir, tLo, tHi, total, seenBuf, seenWritePos);
+    if (lastCell) break;
     // Step into the next cell along whichever boundary we hit first.
     if (tMaxX < tMaxY) {
       tCur = tMaxX;
@@ -512,7 +533,7 @@ float accumulateWallLoss(vec2 ap, float apZ, vec2 rx, float rxZ) {
 // reflPt→rx). The exclude check happens BEFORE dedup interaction so the
 // excluded wall doesn't waste a SEEN_BUF slot in dense-wall scenes.
 void processCellExcept(int cx, int cy, vec2 ap, float apZ, vec2 rx, float rxZ,
-                       vec2 rayDir, int excludeW, inout float total,
+                       vec2 rayDir, int excludeW, float tLo, float tHi, inout float total,
                        inout int seenBuf[SEEN_BUF], inout int seenWritePos) {
   int start, count;
   readGridCell(cx, cy, start, count);
@@ -524,9 +545,10 @@ void processCellExcept(int cx, int cy, vec2 ap, float apZ, vec2 rx, float rxZ,
       if (seenBuf[j] == wIdx) { dup = true; break; }
     }
     if (dup) continue;
-    seenBuf[seenWritePos] = wIdx;
-    seenWritePos = (seenWritePos + 1) % SEEN_BUF;
-    applyWallContribution(wIdx, ap, apZ, rx, rxZ, rayDir, total);
+    if (applyWallContribution(wIdx, ap, apZ, rx, rxZ, rayDir, tLo, tHi, total)) {
+      seenBuf[seenWritePos] = wIdx;   // 57-15: ring only settled walls
+      seenWritePos = (seenWritePos + 1) % SEEN_BUF;
+    }
   }
 }
 
@@ -576,8 +598,11 @@ float accumulateWallLossExceptGrid(vec2 ap, float apZ, vec2 rx, float rxZ, int e
   int maxSteps = abs(cxEnd - cx) + abs(cyEnd - cy) + 4;
   for (int i = 0; i < 4096; i++) {
     if (i >= maxSteps) break;
-    processCellExcept(cx, cy, ap, apZ, rx, rxZ, rayDir, excludeW, total, seenBuf, seenWritePos);
-    if (cx == cxEnd && cy == cyEnd) break;
+    bool lastCell = cx == cxEnd && cy == cyEnd;   // 57-15: see accumulateWallLossGrid
+    float tLo = i == 0 ? -1e30 : tCur;
+    float tHi = lastCell ? 1e30 : min(tMaxX, tMaxY);
+    processCellExcept(cx, cy, ap, apZ, rx, rxZ, rayDir, excludeW, tLo, tHi, total, seenBuf, seenWritePos);
+    if (lastCell) break;
     if (tMaxX < tMaxY) { tCur = tMaxX; tMaxX += tDeltaX; cx += stepX; }
     else               { tCur = tMaxY; tMaxY += tDeltaY; cy += stepY; }
     if (tCur > 1.0) break;
@@ -593,7 +618,7 @@ float accumulateWallLossExceptGrid(vec2 ap, float apZ, vec2 rx, float rxZ, int e
 // performs internally, so we re-derive it here to extract both the loss
 // and the boolean did-hit per wall.
 void processCellWithHits(int cx, int cy, vec2 ap, float apZ, vec2 rx, float rxZ,
-                         vec2 rayDir, inout vec2 acc,
+                         vec2 rayDir, float tLo, float tHi, inout vec2 acc,
                          inout int seenBuf[SEEN_BUF], inout int seenWritePos) {
   int start, count;
   readGridCell(cx, cy, start, count);
@@ -604,13 +629,16 @@ void processCellWithHits(int cx, int cy, vec2 ap, float apZ, vec2 rx, float rxZ,
       if (seenBuf[j] == wIdx) { dup = true; break; }
     }
     if (dup) continue;
-    seenBuf[seenWritePos] = wIdx;
-    seenWritePos = (seenWritePos + 1) % SEEN_BUF;
 
     vec2 a, b;
     float lossDb, lossB, zLo, zHi;
     readWall(wIdx, a, b, lossDb, lossB, zLo, zHi);
     vec2 hit = segSegIntersect(ap, rx, a, b);
+    // 57-15: a crossing in a later cell stays un-ringed (see
+    // applyWallContribution); every other outcome is settled.
+    if (hit.x > 0.5 && (hit.y < tLo - TCELL_EPS || hit.y > tHi + TCELL_EPS)) continue;
+    seenBuf[seenWritePos] = wIdx;
+    seenWritePos = (seenWritePos + 1) % SEEN_BUF;
     if (hit.x < 0.5) continue;
     float zAt = apZ + (rxZ - apZ) * hit.y;
     if (zAt < zLo || zAt > zHi) continue;
@@ -665,8 +693,11 @@ vec2 accumulateWallLossWithHitsGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
   int maxSteps = abs(cxEnd - cx) + abs(cyEnd - cy) + 4;
   for (int i = 0; i < 4096; i++) {
     if (i >= maxSteps) break;
-    processCellWithHits(cx, cy, ap, apZ, rx, rxZ, rayDir, acc, seenBuf, seenWritePos);
-    if (cx == cxEnd && cy == cyEnd) break;
+    bool lastCell = cx == cxEnd && cy == cyEnd;   // 57-15: see accumulateWallLossGrid
+    float tLo = i == 0 ? -1e30 : tCur;
+    float tHi = lastCell ? 1e30 : min(tMaxX, tMaxY);
+    processCellWithHits(cx, cy, ap, apZ, rx, rxZ, rayDir, tLo, tHi, acc, seenBuf, seenWritePos);
+    if (lastCell) break;
     if (tMaxX < tMaxY) { tCur = tMaxX; tMaxX += tDeltaX; cx += stepX; }
     else               { tCur = tMaxY; tMaxY += tDeltaY; cy += stepY; }
     if (tCur > 1.0) break;
@@ -778,7 +809,7 @@ float accumulateWallLossExceptBrute(vec2 ap, float apZ, vec2 rx, float rxZ, int 
   vec2 rayDir = rx - ap;
   for (int w = 0; w < uWallCount; w++) {
     if (w == excludeW) continue;
-    applyWallContribution(w, ap, apZ, rx, rxZ, rayDir, total);
+    applyWallContribution(w, ap, apZ, rx, rxZ, rayDir, -1e30, 1e30, total);
   }
   return total;
 }
@@ -1391,22 +1422,28 @@ float wallLossOblique(vec2 a, vec2 b, vec2 rayDir, float lossDb, float lossB, fl
   return lossDb * fAdj * min(sec, 3.5);
 }
 
-void applyWallContribution(int w, vec2 ap, float apZ, vec2 rx, float rxZ, vec2 rayDir, float fOver24, inout float total) {
+// 57-15: count a crossing only inside its own grid cell; returns "settled"
+// -- see the per-AP shader's applyWallContribution.
+const float TCELL_EPS = 1e-4;
+bool applyWallContribution(int w, vec2 ap, float apZ, vec2 rx, float rxZ, vec2 rayDir, float fOver24,
+                           float tLo, float tHi, inout float total) {
   vec2 a, b;
   float lossDb, lossB, zLo, zHi;
   readWall(w, a, b, lossDb, lossB, zLo, zHi);
   vec2 hit = segSegIntersect(ap, rx, a, b);
-  if (hit.x < 0.5) return;
+  if (hit.x < 0.5) return true;
+  if (hit.y < tLo - TCELL_EPS || hit.y > tHi + TCELL_EPS) return false;
   float zAt = apZ + (rxZ - apZ) * hit.y;
-  if (zAt < zLo || zAt > zHi) return;
+  if (zAt < zLo || zAt > zHi) return true;
   total += wallLossOblique(a, b, rayDir, lossDb, lossB, fOver24);
+  return true;
 }
 
 float accumulateWallLossBrute(vec2 ap, float apZ, vec2 rx, float rxZ, float fOver24) {
   float total = 0.0;
   vec2 rayDir = rx - ap;
   for (int w = 0; w < uWallCount; w++) {
-    applyWallContribution(w, ap, apZ, rx, rxZ, rayDir, fOver24, total);
+    applyWallContribution(w, ap, apZ, rx, rxZ, rayDir, fOver24, -1e30, 1e30, total);
   }
   return total;
 }
@@ -1478,6 +1515,10 @@ float accumulateWallLossGrid(vec2 ap, float apZ, vec2 rx, float rxZ, float fOver
   int maxSteps = abs(cxEnd - cx) + abs(cyEnd - cy) + 4;
   for (int i = 0; i < 4096; i++) {
     if (i >= maxSteps) break;
+    // 57-15: ray-parameter span of this cell.
+    bool lastCell = cx == cxEnd && cy == cyEnd;
+    float tLo = i == 0 ? -1e30 : tCur;
+    float tHi = lastCell ? 1e30 : min(tMaxX, tMaxY);
     int start, count;
     readGridCell(cx, cy, start, count);
     for (int k = 0; k < count; k++) {
@@ -1487,11 +1528,12 @@ float accumulateWallLossGrid(vec2 ap, float apZ, vec2 rx, float rxZ, float fOver
         if (seenBuf[j] == wIdx) { dup = true; break; }
       }
       if (dup) continue;
-      seenBuf[seenWritePos] = wIdx;
-      seenWritePos = (seenWritePos + 1) % SEEN_BUF;
-      applyWallContribution(wIdx, ap, apZ, rx, rxZ, rayDir, fOver24, total);
+      if (applyWallContribution(wIdx, ap, apZ, rx, rxZ, rayDir, fOver24, tLo, tHi, total)) {
+        seenBuf[seenWritePos] = wIdx;   // 57-15: ring only settled walls
+        seenWritePos = (seenWritePos + 1) % SEEN_BUF;
+      }
     }
-    if (cx == cxEnd && cy == cyEnd) break;
+    if (lastCell) break;
     if (tMaxX < tMaxY) {
       tCur = tMaxX;
       tMaxX += tDeltaX;
