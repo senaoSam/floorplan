@@ -394,6 +394,36 @@ bool applyWallContribution(int w, vec2 ap, float apZ, vec2 rx, float rxZ, vec2 r
   return true;
 }
 
+// 57-19: is p the corner a diffraction leg ends / starts on? (Mirrors
+// CORNER_EPS_M in propagation.js.)
+bool atCornerPt(vec2 p, vec2 c) {
+  return abs(p.x - c.x) < 1e-3 && abs(p.y - c.y) < 1e-3;
+}
+
+// 57-19: open-side test for bending around a corner -- mirrors cornerOpen()
+// in propagation.js. dirs holds up to four solid-wall directions (rad; > 90
+// = unused slot).
+const float TWO_PI_C = 6.28318530718;
+float ccwAngle(float from, float to) {
+  float d = mod(to - from, TWO_PI_C);
+  return d < 0.0 ? d + TWO_PI_C : d;
+}
+bool cornerOpen(vec4 dirs, vec2 c, vec2 ap, vec2 rx) {
+  float aAp = atan(ap.y - c.y, ap.x - c.x);
+  float aRx = atan(rx.y - c.y, rx.x - c.x);
+  float span = ccwAngle(aAp, aRx);
+  bool blockedA = false;
+  bool blockedB = false;
+  for (int k = 0; k < 4; k++) {
+    float d = dirs[k];
+    if (d > 90.0) continue;
+    float o = ccwAngle(aAp, d);
+    if (o > 0.0 && o < span) blockedA = true;
+    else if (o > span) blockedB = true;
+  }
+  return !blockedA || !blockedB;
+}
+
 // Brute-force: every wall, every fragment. O(N_walls). Used when no grid is
 // uploaded (small scenes / parity test path).
 float accumulateWallLossBrute(vec2 ap, float apZ, vec2 rx, float rxZ) {
@@ -646,7 +676,7 @@ float accumulateWallLossExceptGrid(vec2 ap, float apZ, vec2 rx, float rxZ, int e
 // performs internally, so we re-derive it here to extract both the loss
 // and the boolean did-hit per wall.
 void processCellWithHits(int cx, int cy, vec2 ap, float apZ, vec2 rx, float rxZ,
-                         vec2 rayDir, float tLo, float tHi, inout vec2 acc,
+                         vec2 rayDir, float tLo, float tHi, vec2 exclPt, inout vec2 acc,
                          inout int seenBuf[SEEN_BUF], inout int seenWritePos) {
   int start, count;
   readGridCell(cx, cy, start, count);
@@ -668,6 +698,7 @@ void processCellWithHits(int cx, int cy, vec2 ap, float apZ, vec2 rx, float rxZ,
     seenBuf[seenWritePos] = wIdx;
     seenWritePos = (seenWritePos + 1) % SEEN_BUF;
     if (hit.x < 0.5) continue;
+    if (atCornerPt(ap + (rx - ap) * hit.y, exclPt)) continue;   // 57-19
     float zAt = apZ + (rxZ - apZ) * hit.y;
     if (zAt < zLo || zAt > zHi) continue;
     acc.x += wallLossOblique(a, b, rayDir, lossDb, lossB, uFOver24, readWallItu(wIdx));
@@ -675,7 +706,7 @@ void processCellWithHits(int cx, int cy, vec2 ap, float apZ, vec2 rx, float rxZ,
   }
 }
 
-vec2 accumulateWallLossWithHitsGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
+vec2 accumulateWallLossWithHitsGrid(vec2 ap, float apZ, vec2 rx, float rxZ, vec2 exclPt) {
   vec2 acc = vec2(0.0);
   vec2 rayDir = rx - ap;
 
@@ -724,7 +755,7 @@ vec2 accumulateWallLossWithHitsGrid(vec2 ap, float apZ, vec2 rx, float rxZ) {
     bool lastCell = cx == cxEnd && cy == cyEnd;   // 57-15: see accumulateWallLossGrid
     float tLo = i == 0 ? -1e30 : tCur;
     float tHi = lastCell ? 1e30 : min(tMaxX, tMaxY);
-    processCellWithHits(cx, cy, ap, apZ, rx, rxZ, rayDir, tLo, tHi, acc, seenBuf, seenWritePos);
+    processCellWithHits(cx, cy, ap, apZ, rx, rxZ, rayDir, tLo, tHi, exclPt, acc, seenBuf, seenWritePos);
     if (lastCell) break;
     if (tMaxX < tMaxY) { tCur = tMaxX; tMaxX += tDeltaX; cx += stepX; }
     else               { tCur = tMaxY; tMaxY += tDeltaY; cy += stepY; }
@@ -937,7 +968,7 @@ float cornerDiffractionDb(vec2 tx, vec2 rx, vec2 corner, float wavelengthM) {
 // HM-F5i: dispatches to grid DDA when grid is present. SEEN_BUF dedup
 // guarantees each wall is counted at most once even when the ray crosses
 // multiple cells that all reference it.
-vec2 accumulateWallLossWithHitsBrute(vec2 ap, float apZ, vec2 rx, float rxZ) {
+vec2 accumulateWallLossWithHitsBrute(vec2 ap, float apZ, vec2 rx, float rxZ, vec2 exclPt) {
   vec2 acc = vec2(0.0);
   vec2 rayDir = rx - ap;
   for (int w = 0; w < uWallCount; w++) {
@@ -946,6 +977,7 @@ vec2 accumulateWallLossWithHitsBrute(vec2 ap, float apZ, vec2 rx, float rxZ) {
     readWall(w, a, b, lossDb, lossB, zLo, zHi);
     vec2 hit = segSegIntersect(ap, rx, a, b);
     if (hit.x < 0.5) continue;
+    if (atCornerPt(ap + (rx - ap) * hit.y, exclPt)) continue;   // 57-19
     float zAt = apZ + (rxZ - apZ) * hit.y;
     if (zAt < zLo || zAt > zHi) continue;
     acc.x += wallLossOblique(a, b, rayDir, lossDb, lossB, uFOver24, readWallItu(w));
@@ -954,9 +986,12 @@ vec2 accumulateWallLossWithHitsBrute(vec2 ap, float apZ, vec2 rx, float rxZ) {
   return acc;
 }
 
-vec2 accumulateWallLossWithHits(vec2 ap, float apZ, vec2 rx, float rxZ) {
-  if (uGridDims.x == 0) return accumulateWallLossWithHitsBrute(ap, apZ, rx, rxZ);
-  return accumulateWallLossWithHitsGrid(ap, apZ, rx, rxZ);
+// exclPt: crossings landing on this point are ignored (57-19 diffraction
+// legs pass their corner; NO_EXCL_PT disables it).
+const vec2 NO_EXCL_PT = vec2(1e30);
+vec2 accumulateWallLossWithHits(vec2 ap, float apZ, vec2 rx, float rxZ, vec2 exclPt) {
+  if (uGridDims.x == 0) return accumulateWallLossWithHitsBrute(ap, apZ, rx, rxZ, exclPt);
+  return accumulateWallLossWithHitsGrid(ap, apZ, rx, rxZ, exclPt);
 }
 
 // Relative sector taper (≤ 0 dB): flat inside half-beamwidth, linear fall to
@@ -1089,7 +1124,7 @@ float rssiWithReflections(vec2 rx, float rxZ) {
   // HM-F5i: grid DDA path with SEEN_BUF dedup is now used here (dispatched
   // inside accumulateWallLossWithHits when the grid is uploaded), giving
   // O(√N_walls) instead of O(N_walls).
-  vec2 dirScan = losClear ? vec2(0.0) : accumulateWallLossWithHits(uApPos.xy, uApPos.z, rx, rxZ);
+  vec2 dirScan = losClear ? vec2(0.0) : accumulateWallLossWithHits(uApPos.xy, uApPos.z, rx, rxZ, NO_EXCL_PT);
   float wallLossDir = dirScan.x;
   float dirHits     = dirScan.y;
   float slabLossDir = accumulateSlabLoss(uApPos.xy, uApPos.z, rx, rxZ);
@@ -1241,7 +1276,12 @@ float rssiWithReflections(vec2 rx, float rxZ) {
   if (uDiffEnabled == 1 && dirHits > 0.0 && sameFloor && !cullByFloor) {
     float wavelengthM = C_LIGHT / f;
     for (int ci = 0; ci < uCornerCount; ci++) {
-      vec2 corner = texelFetch(uCorners, ivec2(ci % 4096, ci / 4096), 0).xy;
+      // 57-19 / 57-40: two texels per corner -- (x, y, zLo, zHi) and up to
+      // four solid-wall directions (> 90 = unused; zLo > zHi = blocked).
+      int tc = ci * 2;
+      vec4 cGeo  = texelFetch(uCorners, ivec2(tc % 4096, tc / 4096), 0);
+      vec4 cDirs = texelFetch(uCorners, ivec2((tc + 1) % 4096, (tc + 1) / 4096), 0);
+      vec2 corner = cGeo.xy;
       // HM-F5k: pull AP→corner geometry from the precomputed texture when
       // baked. d1 is exact (deterministic per (AP, corner)); geomLos==1
       // means zero walls cross AP→corner geometrically, so the s1 DDA is
@@ -1270,12 +1310,14 @@ float rssiWithReflections(vec2 rx, float rxZ) {
       // for on cells that ultimately get culled.
       float diff = cornerDiffractionDb(uApPos.xy, rx, corner, wavelengthM);
       if (diff >= 1e29 || diff > 40.0) continue;
+      if (cZM < cGeo.z || cZM > cGeo.w) continue;                   // 57-40
+      if (!cornerOpen(cDirs, corner, uApPos.xy, rx)) continue;      // 57-19
 
       // Per-leg wall accumulation with hit count — JS culls if either leg
       // crosses more than one wall, since the corner is supposed to be the
       // single obstruction. >1 means the diffracted path is blocked too.
-      vec2 s1 = s1Skip ? vec2(0.0) : accumulateWallLossWithHits(uApPos.xy, uApPos.z, corner, cZM);
-      vec2 s2 = accumulateWallLossWithHits(corner, cZM, rx, rxZ);
+      vec2 s1 = s1Skip ? vec2(0.0) : accumulateWallLossWithHits(uApPos.xy, uApPos.z, corner, cZM, corner);
+      vec2 s2 = accumulateWallLossWithHits(corner, cZM, rx, rxZ, corner);
       if (s1.y > 1.0 || s2.y > 1.0) continue;
 
       float plDiff = pathLossDb(dTotC, uCenterMHz) + s1.x + s2.x + diff;
@@ -2646,14 +2688,23 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // stays valid; uCornerCount = 0 makes the shader skip the loop entirely.
   function uploadCorners(corners) {
     const n = corners?.length ?? 0
-    const totalTexels = Math.max(1, n)
+    // 57-19 / 57-40: two texels per corner -- (x, y, zLo, zHi) and four
+    // solid-wall directions (99 = unused). A corner the scenario marks
+    // blocked (dirs === null) gets an empty Z band so it never diffracts.
+    const totalTexels = Math.max(1, n * 2)
     const tw = Math.min(4096, totalTexels)
     const th = Math.ceil(totalTexels / 4096)
     const data = new Float32Array(tw * th * 4)
     for (let i = 0; i < n; i++) {
       const c = corners[i]
-      data[i * 4    ] = c.x
-      data[i * 4 + 1] = c.y
+      const o = i * 8
+      const blocked = c.dirs === null
+      data[o    ] = c.x
+      data[o + 1] = c.y
+      data[o + 2] = blocked ? 1e6 : (Number.isFinite(c.zLoM) ? c.zLoM : -1e6)
+      data[o + 3] = blocked ? -1e6 : (Number.isFinite(c.zHiM) ? c.zHiM : 1e6)
+      const dirs = c.dirs ?? []
+      for (let k = 0; k < 4; k++) data[o + 4 + k] = k < dirs.length ? dirs[k] : 99
     }
 
     // 任務 2 (C): skip the re-upload + apGeo/outGrid invalidation when the
@@ -3081,6 +3132,8 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     // Returns true iff the segment AP→corner crosses zero walls
     // *geometrically* (no Z filter). The JS check matches segSegIntersect's
     // padded admit rule so the shader's strict t/u test never disagrees.
+    // 57-19: crossings ON the corner (bx, by) are its own walls and don't
+    // count, matching the shader leg scan's exclPt.
     for (let i = 0; i < walls.length; i++) {
       const w = walls[i]
       const d1x = bx - ax, d1y = by - ay
@@ -3092,6 +3145,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       const u = (d1x * ry - d1y * rx) / denom
       if (t < 0 || t > 1 + BAKE_SEG_EPS) continue
       if (u < -BAKE_SEG_EPS || u > 1 + BAKE_SEG_EPS) continue
+      if (Math.abs(ax + d1x * t - bx) < 1e-3 && Math.abs(ay + d1y * t - by) < 1e-3) continue
       return false
     }
     return true

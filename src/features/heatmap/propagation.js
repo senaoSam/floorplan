@@ -98,7 +98,11 @@ function wallLossOblique(wall, rayDir, fOver24) {
 // planar mode with no elevation data) bypass the filter and count every hit.
 // `skip` (optional) excludes one wall by identity — the reflecting wall
 // (57-11: replaces a per-reflection walls.filter copy; same walls, same order).
-function accumulateWallLoss(a, b, walls, aZM, bZM, fOver24, skip = null) {
+// `exclPt` (optional, 57-19) ignores crossings that land on that point -- a
+// diffraction leg ends / starts at a corner, and the walls meeting there
+// would otherwise count as obstructions of their own edge.
+const CORNER_EPS_M = 1e-3
+function accumulateWallLoss(a, b, walls, aZM, bZM, fOver24, skip = null, exclPt = null) {
   const rayDir = sub(b, a)
   const haveZ = aZM != null && bZM != null
   let totalLoss = 0
@@ -107,6 +111,7 @@ function accumulateWallLoss(a, b, walls, aZM, bZM, fOver24, skip = null) {
     if (w === skip) continue
     const hit = segSegIntersect(a, b, w.a, w.b)
     if (!hit) continue
+    if (exclPt && Math.abs(hit.point.x - exclPt.x) < CORNER_EPS_M && Math.abs(hit.point.y - exclPt.y) < CORNER_EPS_M) continue
     if (haveZ && w.zLoM != null && w.zHiM != null) {
       const zAt = aZM + (bZM - aZM) * hit.t
       if (zAt < w.zLoM || zAt > w.zHiM) continue
@@ -115,6 +120,32 @@ function accumulateWallLoss(a, b, walls, aZM, bZM, fOver24, skip = null) {
     hits += 1
   }
   return { totalLoss, hits }
+}
+
+// 57-19: can a wave bend around this corner from the AP side to the rx side?
+// The solid segments meeting at the corner split the directions around it
+// into sectors; the bend needs one of the two arcs between dir(AP) and
+// dir(rx) to be free of them. A free wall end always passes; an L corner
+// passes only on its outside, never through the inside of the L; a T or a
+// straight wall's mid-joint never passes. Mirrors cornerOpen() in the shader.
+const TWO_PI = 2 * Math.PI
+function ccwAngle(from, to) {
+  const d = (to - from) % TWO_PI
+  return d < 0 ? d + TWO_PI : d
+}
+function cornerOpen(c, apPos, rx) {
+  if (!c.dirs) return false
+  if (c.dirs.length === 0) return true
+  const aAp = Math.atan2(apPos.y - c.y, apPos.x - c.x)
+  const aRx = Math.atan2(rx.y - c.y, rx.x - c.x)
+  const span = ccwAngle(aAp, aRx)
+  let blockedA = false, blockedB = false
+  for (const d of c.dirs) {
+    const o = ccwAngle(aAp, d)
+    if (o > 0 && o < span) blockedA = true
+    else if (o > span) blockedB = true
+  }
+  return !blockedA || !blockedB
 }
 
 function knifeEdgeLossDb(v) {
@@ -457,8 +488,13 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       const d1 = dist(ap.pos, c)
       const d2 = dist(c, rx)
       const cZM = apZM + (rxZM - apZM) * (d1 / Math.max(d1 + d2, 1e-9))
-      const s1 = accumulateWallLoss(ap.pos, c, walls, apZM, cZM, fOver24)
-      const s2 = accumulateWallLoss(c, rx, walls, cZM, rxZM, fOver24)
+      // 57-40: only where the corner's walls exist (other floors' corners
+      // never diffract here). 57-19: there must be an open side to bend
+      // around, and the corner's own walls don't obstruct its legs.
+      if (c.zLoM != null && (cZM < c.zLoM || cZM > c.zHiM)) continue
+      if (c.dirs !== undefined && !cornerOpen(c, ap.pos, rx)) continue
+      const s1 = accumulateWallLoss(ap.pos, c, walls, apZM, cZM, fOver24, null, c)
+      const s2 = accumulateWallLoss(c, rx, walls, cZM, rxZM, fOver24, null, c)
       if (s1.hits > 1 || s2.hits > 1) continue
       const diff = cornerDiffractionDb(ap.pos, rx, c, wavelength)
       if (!isFinite(diff) || diff > 40) continue

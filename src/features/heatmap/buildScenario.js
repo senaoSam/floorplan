@@ -117,15 +117,34 @@ function expandWall(wall, pxToM, elevationM) {
 }
 
 // Collect unique corner points (segment endpoints) for diffraction.
+// 57-19 / 57-40: each corner also carries what the diffraction test needs:
+//   dirs     -- directions (rad) from the corner along each SOLID segment
+//               that ends there (door / window openings are passable and left
+//               out), for the "is there an open side to bend around" test;
+//               null when more than 4 solid segments meet (treated as blocked).
+//   zLoM/zHiM -- union of the owning segments' height bands, so a corner only
+//               diffracts at heights where its walls exist (other floors'
+//               corners are inert on this floor).
 function collectCorners(segments) {
   const map = new Map()
   for (const s of segments) {
-    for (const p of [s.a, s.b]) {
+    for (const [p, q] of [[s.a, s.b], [s.b, s.a]]) {
       const k = `${p.x.toFixed(3)},${p.y.toFixed(3)}`
-      if (!map.has(k)) map.set(k, p)
+      let c = map.get(k)
+      if (!c) {
+        c = { x: p.x, y: p.y, dirs: [], zLoM: Infinity, zHiM: -Infinity }
+        map.set(k, c)
+      }
+      if (s.kind !== 'door' && s.kind !== 'window') {
+        c.dirs.push(Math.atan2(q.y - p.y, q.x - p.x))
+      }
+      c.zLoM = Math.min(c.zLoM, s.zLoM ?? -1e6)
+      c.zHiM = Math.max(c.zHiM, s.zHiM ?? 1e6)
     }
   }
-  return Array.from(map.values())
+  const out = Array.from(map.values())
+  for (const c of out) if (c.dirs.length > 4) c.dirs = null
+  return out
 }
 
 // Main entry. Takes main-system data in canvas-pixel space and returns the
