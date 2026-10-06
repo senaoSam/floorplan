@@ -1023,17 +1023,36 @@ float samplePatternCut(int slot, int cutBase, float offsetDeg) {
 // Phase 40: the same sector taper also applies to the vertical offset
 // (ray elevation − uAntTiltDeg), so a tilted directional AP loses gain
 // toward rays leaving its beamwidth cone vertically.
+// 57-20: H / V angular offsets (deg) of a ray in the antenna's own frame --
+// mirrors apGainDbi in propagation.js. Untilted keeps the original split
+// verbatim (bit-identical); tilted rotates the ray (undo azimuth, then tilt)
+// before splitting. .z = 1 when the target sits on the antenna (use peak).
+vec3 antennaOffsetsDeg(vec2 dxy, float dz, float azDeg, float tiltDeg) {
+  if (tiltDeg == 0.0) {
+    if (abs(dxy.x) < 1e-9 && abs(dxy.y) < 1e-9) return vec3(0.0, 0.0, 1.0);
+    float rayDeg = atan(dxy.y, dxy.x) * 180.0 / PI;
+    float off = mod(rayDeg - azDeg + 540.0, 360.0) - 180.0;
+    float elevDeg = atan(dz, length(dxy)) * 180.0 / PI;
+    return vec3(abs(off), abs(elevDeg), 0.0);
+  }
+  float A = azDeg * PI / 180.0;
+  float T = tiltDeg * PI / 180.0;
+  float x1 = dxy.x * cos(A) + dxy.y * sin(A);
+  float y1 = -dxy.x * sin(A) + dxy.y * cos(A);
+  float x2 = x1 * cos(T) + dz * sin(T);
+  float z2 = -x1 * sin(T) + dz * cos(T);
+  if (abs(x2) < 1e-9 && abs(y1) < 1e-9 && abs(z2) < 1e-9) return vec3(0.0, 0.0, 1.0);
+  return vec3(abs(atan(y1, x2)) * 180.0 / PI,
+              abs(atan(z2, sqrt(x2 * x2 + y1 * y1))) * 180.0 / PI, 0.0);
+}
+
 float apGainDbi(vec2 target, float targetZ) {
   if (uAntMode == 0) return uAntGainDbi;
   if (uAntMode == 2 && uAntPatternSlot < 0) return uAntGainDbi;   // unknown id → omni
-  vec2 dxy = target - uApPos.xy;
-  if (abs(dxy.x) < 1e-9 && abs(dxy.y) < 1e-9) return uAntGainDbi;
-  float rayDeg = atan(dxy.y, dxy.x) * 180.0 / PI;
-  float off = rayDeg - uAntAzimuthDeg;
-  off = mod(off + 540.0, 360.0) - 180.0;
-  float absOff = abs(off);
-  float elevDeg = atan(targetZ - uApPos.z, length(dxy)) * 180.0 / PI;
-  float vertOff = abs(elevDeg - uAntTiltDeg);
+  vec3 offs = antennaOffsetsDeg(target - uApPos.xy, targetZ - uApPos.z, uAntAzimuthDeg, uAntTiltDeg);
+  if (offs.z > 0.5) return uAntGainDbi;
+  float absOff = offs.x;
+  float vertOff = offs.y;
   if (uAntMode == 2) {
     // custom: Gh from the H cut, Gv from the V cut (2-cut split).
     return uAntGainDbi
@@ -1774,18 +1793,37 @@ float samplePatternCut(int slot, int cutBase, float offsetDeg) {
 // to mode 2. Matches apGainDbi in propagation.js.
 // Phase 40: sector taper applies to the vertical offset (ray elevation −
 // tiltDeg) as well as the horizontal one.
+// 57-20: H / V angular offsets (deg) of a ray in the antenna's own frame --
+// mirrors apGainDbi in propagation.js. Untilted keeps the original split
+// verbatim (bit-identical); tilted rotates the ray (undo azimuth, then tilt)
+// before splitting. .z = 1 when the target sits on the antenna (use peak).
+vec3 antennaOffsetsDeg(vec2 dxy, float dz, float azDeg, float tiltDeg) {
+  if (tiltDeg == 0.0) {
+    if (abs(dxy.x) < 1e-9 && abs(dxy.y) < 1e-9) return vec3(0.0, 0.0, 1.0);
+    float rayDeg = atan(dxy.y, dxy.x) * 180.0 / PI;
+    float off = mod(rayDeg - azDeg + 540.0, 360.0) - 180.0;
+    float elevDeg = atan(dz, length(dxy)) * 180.0 / PI;
+    return vec3(abs(off), abs(elevDeg), 0.0);
+  }
+  float A = azDeg * PI / 180.0;
+  float T = tiltDeg * PI / 180.0;
+  float x1 = dxy.x * cos(A) + dxy.y * sin(A);
+  float y1 = -dxy.x * sin(A) + dxy.y * cos(A);
+  float x2 = x1 * cos(T) + dz * sin(T);
+  float z2 = -x1 * sin(T) + dz * cos(T);
+  if (abs(x2) < 1e-9 && abs(y1) < 1e-9 && abs(z2) < 1e-9) return vec3(0.0, 0.0, 1.0);
+  return vec3(abs(atan(y1, x2)) * 180.0 / PI,
+              abs(atan(z2, sqrt(x2 * x2 + y1 * y1))) * 180.0 / PI, 0.0);
+}
+
 float apGainAt(vec2 apPos, float apZ, vec2 target, float targetZ, int mode,
                float gainDbi, float azDeg, float bwDeg, float tiltDeg, int patSlot) {
   if (mode == 0) return gainDbi;
   if (mode == 2 && patSlot < 0) return gainDbi;   // unknown pattern id → omni
-  vec2 dxy = target - apPos;
-  if (abs(dxy.x) < 1e-9 && abs(dxy.y) < 1e-9) return gainDbi;
-  float rayDeg = atan(dxy.y, dxy.x) * 180.0 / PI;
-  float off = rayDeg - azDeg;
-  off = mod(off + 540.0, 360.0) - 180.0;
-  float absOff = abs(off);
-  float elevDeg = atan(targetZ - apZ, length(dxy)) * 180.0 / PI;
-  float vertOff = abs(elevDeg - tiltDeg);
+  vec3 offs = antennaOffsetsDeg(target - apPos, targetZ - apZ, azDeg, tiltDeg);
+  if (offs.z > 0.5) return gainDbi;
+  float absOff = offs.x;
+  float vertOff = offs.y;
   if (mode == 2) {
     return gainDbi
       + samplePatternCut(patSlot, 0, absOff)

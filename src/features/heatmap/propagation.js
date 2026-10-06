@@ -287,17 +287,37 @@ function apGainDbi(ap, targetPoint, targetZM = 0) {
 
   const dx = targetPoint.x - ap.pos.x
   const dy = targetPoint.y - ap.pos.y
-  if (dx === 0 && dy === 0) return peak
-  const rayDeg = Math.atan2(dy, dx) * 180 / Math.PI
+  const dz = targetZM - (ap.zM ?? 0)
   const az = ap.azimuthDeg ?? 0
-  let off = rayDeg - az
-  off = ((off + 540) % 360) - 180   // wrap to [-180, 180]
-  const absOff = Math.abs(off)
-  // Vertical offset: ray elevation vs boresight tilt. Elevation ∈ [-90, 90]
-  // and tilt ∈ [-90, 90], so the difference needs no wrapping (|off| ≤ 180).
-  const dxy = Math.sqrt(dx * dx + dy * dy)
-  const elevDeg = Math.atan2(targetZM - (ap.zM ?? 0), dxy) * 180 / Math.PI
-  const vertOff = Math.abs(elevDeg - (ap.tiltDeg ?? 0))
+  const tilt = ap.tiltDeg ?? 0
+  let absOff, vertOff
+  if (tilt === 0) {
+    // Untilted: the horizontal / vertical split below IS the antenna frame
+    // (kept verbatim so untilted APs are bit-identical to before 57-20).
+    if (dx === 0 && dy === 0) return peak
+    const rayDeg = Math.atan2(dy, dx) * 180 / Math.PI
+    let off = rayDeg - az
+    off = ((off + 540) % 360) - 180   // wrap to [-180, 180]
+    absOff = Math.abs(off)
+    const dxy = Math.sqrt(dx * dx + dy * dy)
+    const elevDeg = Math.atan2(dz, dxy) * 180 / Math.PI
+    vertOff = Math.abs(elevDeg)
+  } else {
+    // 57-20: rotate the ray into the antenna's own frame -- undo azimuth
+    // (canvas frame: x right, y down, so azimuth is clockwise), then undo
+    // tilt (+up) -- and only then split into H / V offsets. Subtracting tilt
+    // from the elevation (the pre-57-20 rule) left the H cut in the world
+    // horizontal plane, so a ceiling patch at -90 put its back lobe on half
+    // the floor. Mirrored in both shaders' gain functions.
+    const A = az * Math.PI / 180, T = tilt * Math.PI / 180
+    const x1 = dx * Math.cos(A) + dy * Math.sin(A)
+    const y1 = -dx * Math.sin(A) + dy * Math.cos(A)
+    const x2 = x1 * Math.cos(T) + dz * Math.sin(T)
+    const z2 = -x1 * Math.sin(T) + dz * Math.cos(T)
+    if (x2 === 0 && y1 === 0 && z2 === 0) return peak
+    absOff = Math.abs(Math.atan2(y1, x2)) * 180 / Math.PI
+    vertOff = Math.abs(Math.atan2(z2, Math.sqrt(x2 * x2 + y1 * y1))) * 180 / Math.PI
+  }
 
   if (mode === 'custom') {
     const pattern = getPatternById(ap.patternId)

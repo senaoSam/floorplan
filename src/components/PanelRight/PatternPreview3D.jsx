@@ -18,8 +18,9 @@ import { wrapAzimuth } from '@/utils/angle'
 //     persisted), for inspecting the lobe from above / the side / below.
 //
 // Orientation matches the app convention: azimuth 0 = +x (right), clockwise.
-// The lobe surface renders the exact engine formula r = Gh(az) + Gv(el − tilt)
-// so what the user sees is what apGainDbi computes.
+// The lobe surface renders the engine formula r = Gh(az) + Gv(el) in the
+// ANTENNA frame, then rotates it by tilt and azimuth (57-20) -- the same
+// rotation apGainDbi applies -- so what the user sees is what it computes.
 const SIZE = 120
 const MAX_R = 46
 const MIN_DB = -25          // matches APLayer3D CUSTOM_MIN_DB
@@ -116,18 +117,26 @@ function drawPreview(canvas, pattern, color, azimuthDeg, tiltDeg, pitchDeg) {
 
   // ── Lobe surface: vertex grid → painter-sorted shaded quads ──
   const verts = []   // (EL_SEGS+1) × (AZ_SEGS+1) rows of [x, y, z]
+  const cosT = Math.cos(tiltRad), sinT = Math.sin(tiltRad)
+  const cosA = Math.cos(azRad), sinA = Math.sin(azRad)
   for (let j = 0; j <= EL_SEGS; j++) {
     const el = -Math.PI / 2 + (j / EL_SEGS) * Math.PI
-    const gv = sampleGainV(pattern, el - tiltRad)
+    const gv = sampleGainV(pattern, el)
     for (let i = 0; i <= AZ_SEGS; i++) {
       const az = (i / AZ_SEGS) * 2 * Math.PI
       const db = Math.max(sampleGain(pattern, az) + gv, MIN_DB)
       const r = ((db - MIN_DB) / -MIN_DB) * MAX_R
-      const world = az + azRad
+      // Antenna frame (forward, side, up) → tilt about the side axis →
+      // azimuth around the vertical (world X right, Y up, Z screen-bottom).
+      const f = Math.cos(el) * Math.cos(az)
+      const sd = Math.cos(el) * Math.sin(az)
+      const u = Math.sin(el)
+      const h = f * cosT - u * sinT
+      const up = f * sinT + u * cosT
       verts.push([
-        r * Math.cos(el) * Math.cos(world),
-        r * Math.sin(el),
-        r * Math.cos(el) * Math.sin(world),
+        r * (h * cosA - sd * sinA),
+        r * up,
+        r * (h * sinA + sd * cosA),
       ])
     }
   }
