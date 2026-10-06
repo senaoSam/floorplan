@@ -4,7 +4,7 @@ import { useFrame } from '@react-three/fiber'
 import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
-import { getPatternById, sampleGain, sampleGainV } from '@/constants/antennaPatterns'
+import { getPatternById, sampleGain, sampleGainV, patternBackFloorDb } from '@/constants/antennaPatterns'
 import Label3D from './Label3D'
 
 // 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
@@ -48,27 +48,33 @@ const LOBE_EL_SEGS = 32
 // Volumetric antenna lobe: a spherical parametric surface where the radius at
 // (azimuth, elevation) is the normalized combined gain. The catalog authors a
 // horizontal cut and a separate vertical cut (`samplesV`), combined in dB space:
-//   r(az, el) = normalize(Gh(az) + Gv(el − tilt)) · peakRadius
-// tiltDeg (Phase 40) shifts the vertical cut so the surface matches the exact
-// engine formula in apGainDbi — baked into the geometry rather than a rigid
-// group rotation, because the engine's Gv depends only on el − tilt (the back
-// lobe rises WITH the boresight, unlike a rigid rotation).
+//   r(az, el) = normalize(max(Gh(az) + Gv(el), floor)) · peakRadius
+// built in the ANTENNA frame and then pitched by tiltDeg about the side axis --
+// the same rotation apGainDbi applies since 57-20 (it used to shift the V cut
+// by el − tilt, which this surface mirrored). floor = the pattern's
+// front-to-back ratio (57-21).
 // Local axes: boresight (az 0) = +X, canvas +Y = local +Z, elevation on ±Y.
 function buildCustomLobeGeometry(pattern, peakRadius, minDb, tiltDeg) {
   const tiltRad = (tiltDeg ?? 0) * Math.PI / 180
+  const cosT = Math.cos(tiltRad), sinT = Math.sin(tiltRad)
+  const floorDb = patternBackFloorDb(pattern)
   const positions = new Float32Array((LOBE_EL_SEGS + 1) * (LOBE_AZ_SEGS + 1) * 3)
   let p = 0
   for (let j = 0; j <= LOBE_EL_SEGS; j++) {
     const el = -Math.PI / 2 + (j / LOBE_EL_SEGS) * Math.PI
-    const gv = sampleGainV(pattern, el - tiltRad)
+    const gv = sampleGainV(pattern, el)
     for (let i = 0; i <= LOBE_AZ_SEGS; i++) {
       const az = i * (2 * Math.PI / LOBE_AZ_SEGS)
-      const db = Math.max(sampleGain(pattern, az) + gv, minDb)
+      const db = Math.max(sampleGain(pattern, az) + gv, floorDb, minDb)
       // Normalize [-minDb, 0] → [0, peakRadius].
       const r = ((db - minDb) / -minDb) * peakRadius
-      positions[p++] = r * Math.cos(el) * Math.cos(az)
-      positions[p++] = r * Math.sin(el)
-      positions[p++] = r * Math.cos(el) * Math.sin(az)
+      // Antenna frame (forward +X, side +Z, up +Y) pitched by tilt about Z.
+      const f = Math.cos(el) * Math.cos(az)
+      const sd = Math.cos(el) * Math.sin(az)
+      const u = Math.sin(el)
+      positions[p++] = r * (f * cosT - u * sinT)
+      positions[p++] = r * (f * sinT + u * cosT)
+      positions[p++] = r * sd
     }
   }
   const indices = []

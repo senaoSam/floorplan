@@ -184,6 +184,7 @@ const float PI = 3.14159265358979;
 // constants/antennaPatterns.js. Rows of uPatterns are [36 H samples][36 V].
 const int   PATTERN_SAMPLES  = 36;
 const float PATTERN_STEP_DEG = 10.0;
+const int   PATTERN_FLOOR_COL = 72;   // 57-21: patternBackFloorDb after the two cuts
 const float DIRECTIONAL_BACK_DB = 20.0;
 const float DIRECTIONAL_EDGE_DEG = 15.0;
 const float EPS0 = 8.854187817e-12;
@@ -1055,12 +1056,13 @@ float apGainDbi(vec2 target, float targetZ) {
   float vertOff = offs.y;
   if (uAntMode == 2) {
     // custom: Gh from the H cut, Gv from the V cut (2-cut split).
-    return uAntGainDbi
-      + samplePatternCut(uAntPatternSlot, 0, absOff)
-      + samplePatternCut(uAntPatternSlot, PATTERN_SAMPLES, vertOff);
+    // 57-21: H + V sum clamped at the pattern's front-to-back ratio.
+    return uAntGainDbi + max(
+      samplePatternCut(uAntPatternSlot, 0, absOff) + samplePatternCut(uAntPatternSlot, PATTERN_SAMPLES, vertOff),
+      texelFetch(uPatterns, ivec2(PATTERN_FLOOR_COL, uAntPatternSlot), 0).r);
   }
   float halfBw = uAntBeamwidthDeg * 0.5;
-  return uAntGainDbi + sectorTaperDb(absOff, halfBw) + sectorTaperDb(vertOff, halfBw);
+  return uAntGainDbi + max(sectorTaperDb(absOff, halfBw) + sectorTaperDb(vertOff, halfBw), -DIRECTIONAL_BACK_DB);
 }
 
 // Cap on the number of frequency samples in the band-sweep coherent sum.
@@ -1463,6 +1465,7 @@ const float PI = 3.14159265358979;
 // constants/antennaPatterns.js. Rows of uPatterns are [36 H samples][36 V].
 const int   PATTERN_SAMPLES  = 36;
 const float PATTERN_STEP_DEG = 10.0;
+const int   PATTERN_FLOOR_COL = 72;   // 57-21: patternBackFloorDb after the two cuts
 const float DIRECTIONAL_BACK_DB = 20.0;
 const float DIRECTIONAL_EDGE_DEG = 15.0;
 
@@ -1825,12 +1828,13 @@ float apGainAt(vec2 apPos, float apZ, vec2 target, float targetZ, int mode,
   float absOff = offs.x;
   float vertOff = offs.y;
   if (mode == 2) {
-    return gainDbi
-      + samplePatternCut(patSlot, 0, absOff)
-      + samplePatternCut(patSlot, PATTERN_SAMPLES, vertOff);
+    // 57-21: H + V sum clamped at the pattern's front-to-back ratio.
+    return gainDbi + max(
+      samplePatternCut(patSlot, 0, absOff) + samplePatternCut(patSlot, PATTERN_SAMPLES, vertOff),
+      texelFetch(uPatterns, ivec2(PATTERN_FLOOR_COL, patSlot), 0).r);
   }
   float halfBw = bwDeg * 0.5;
-  return gainDbi + sectorTaperDb(absOff, halfBw) + sectorTaperDb(vertOff, halfBw);
+  return gainDbi + max(sectorTaperDb(absOff, halfBw) + sectorTaperDb(vertOff, halfBw), -DIRECTIONAL_BACK_DB);
 }
 
 float dbToLin(float db) { return pow(10.0, db * 0.1); }

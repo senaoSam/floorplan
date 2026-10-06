@@ -29,7 +29,7 @@ import {
 } from './geometry.js'
 import { apsShareSpectrum } from './frequency'
 import { widthNoiseDelta } from '@/constants/channelWidths'
-import { getPatternById, sampleGain, sampleGainV, sectorTaperDb } from '@/constants/antennaPatterns'
+import { getPatternById, sampleGain, sampleGainV, sectorTaperDb, patternBackFloorDb, DIRECTIONAL_BACK_DB } from '@/constants/antennaPatterns'
 
 const C = 299792458
 const dbToLin = (db) => Math.pow(10, db / 10)
@@ -321,14 +321,18 @@ function apGainDbi(ap, targetPoint, targetZM = 0) {
 
   if (mode === 'custom') {
     const pattern = getPatternById(ap.patternId)
-    const relDb = sampleGain(pattern, absOff * Math.PI / 180)
-      + sampleGainV(pattern, vertOff * Math.PI / 180)
+    // 57-21: clamp the H + V sum at the pattern's front-to-back ratio.
+    const relDb = Math.max(
+      sampleGain(pattern, absOff * Math.PI / 180) + sampleGainV(pattern, vertOff * Math.PI / 180),
+      patternBackFloorDb(pattern),
+    )
     return peak + relDb
   }
 
   // directional (built-in sector approximation, same cone both planes)
   const half = (ap.beamwidthDeg ?? 60) / 2
-  return peak + sectorTaperDb(absOff, half) + sectorTaperDb(vertOff, half)
+  // 57-21: both planes bottom at -DIRECTIONAL_BACK_DB; so does their sum.
+  return peak + Math.max(sectorTaperDb(absOff, half) + sectorTaperDb(vertOff, half), -DIRECTIONAL_BACK_DB)
 }
 
 // Pick frequency sample count for the channel-wide coherent sum.

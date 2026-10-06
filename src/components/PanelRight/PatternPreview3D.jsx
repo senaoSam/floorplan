@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { sampleGain, sampleGainV } from '@/constants/antennaPatterns'
+import { sampleGain, sampleGainV, patternBackFloorDb } from '@/constants/antennaPatterns'
 import { wrapAzimuth } from '@/utils/angle'
 
 // 3D preview of a custom antenna pattern — the same volumetric lobe the 3D
@@ -124,7 +124,8 @@ function drawPreview(canvas, pattern, color, azimuthDeg, tiltDeg, pitchDeg) {
     const gv = sampleGainV(pattern, el)
     for (let i = 0; i <= AZ_SEGS; i++) {
       const az = (i / AZ_SEGS) * 2 * Math.PI
-      const db = Math.max(sampleGain(pattern, az) + gv, MIN_DB)
+      // 57-21: same front-to-back floor as the engine.
+      const db = Math.max(sampleGain(pattern, az) + gv, patternBackFloorDb(pattern), MIN_DB)
       const r = ((db - MIN_DB) / -MIN_DB) * MAX_R
       // Antenna frame (forward, side, up) → tilt about the side axis →
       // azimuth around the vertical (world X right, Y up, Z screen-bottom).

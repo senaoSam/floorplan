@@ -173,6 +173,23 @@ export function sampleGainV(pattern, offsetRad) {
   return sampleCut(pattern.samplesV ?? pattern.samples, offsetRad)
 }
 
+// 57-21: floor on the combined Gh + Gv loss. Summing the two cuts in dB is
+// fine near boresight, but behind / beside the antenna both cuts describe the
+// same back lobe and adding them double-counts it (sector-90 reached -53 dB
+// against its stated ~-30). Following 3GPP TR 38.901's A_max, the sum is
+// clamped -- here at the pattern's own front-to-back ratio, i.e. the lowest
+// H-cut sample (patch / sector-120 -25, sector-90 -30; a buildDirectionalPattern
+// cut bottoms at -DIRECTIONAL_BACK_DB). Memoized: patterns are static.
+const backFloorCache = new WeakMap()
+export function patternBackFloorDb(pattern) {
+  let v = backFloorCache.get(pattern)
+  if (v === undefined) {
+    v = Math.min(...pattern.samples)
+    backFloorCache.set(pattern, v)
+  }
+  return v
+}
+
 // ── GPU upload support ─────────────────────────────────────────
 // The WebGL engine uploads every catalog pattern into one shared texture and
 // addresses a pattern by its SLOT (row index). The slot must be stable for the
@@ -195,18 +212,21 @@ export function getPatternSlot(id) {
 // Row stride is PATTERN_SAMPLES * 2. The shader reads it as an R32F texture of
 // width (PATTERN_SAMPLES * 2) and height (pattern count).
 export const PATTERN_ROW_FLOATS = PATTERN_SAMPLES * 2
+// 57-21: one extra texel per row after the two cuts holds patternBackFloorDb.
+const PATTERN_TEX_WIDTH = PATTERN_ROW_FLOATS + 1
 
 export function buildPatternTextureData() {
   const rows = ANTENNA_PATTERN_LIST.length
-  const data = new Float32Array(rows * PATTERN_ROW_FLOATS)
+  const data = new Float32Array(rows * PATTERN_TEX_WIDTH)
   ANTENNA_PATTERN_LIST.forEach((p, r) => {
-    const base = r * PATTERN_ROW_FLOATS
+    const base = r * PATTERN_TEX_WIDTH
     for (let k = 0; k < PATTERN_SAMPLES; k++) {
       data[base + k] = p.samples[k]
       data[base + PATTERN_SAMPLES + k] = (p.samplesV ?? p.samples)[k]
     }
+    data[base + PATTERN_ROW_FLOATS] = patternBackFloorDb(p)
   })
-  return { data, width: PATTERN_ROW_FLOATS, height: rows }
+  return { data, width: PATTERN_TEX_WIDTH, height: rows }
 }
 
 export { PATTERN_SAMPLES, STEP_DEG }
