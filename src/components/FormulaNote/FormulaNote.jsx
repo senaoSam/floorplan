@@ -66,11 +66,11 @@ function FormulaNote() {
       </section>
 
       <section>
-        <h4>5. 多路徑寬頻相干疊加（雙極化通道）</h4>
+        <h4>5. 多路徑功率疊加（雙極化通道）</h4>
         <p>
           為了保留正交極化的獨立性，把 scalar 通道拆成兩個互相獨立的極化通道
-          <code>H_⊥(f)</code>、<code>H_∥(f)</code>。每條路徑在兩通道各自攜帶複數增益
-          <code>aₙ,⊥</code>、<code>aₙ,∥</code> 與共同延遲 <code>τₙ = dₙ / c</code>：
+          ⊥、∥。每條路徑在兩通道各自攜帶複數增益
+          <code>aₙ,⊥</code>、<code>aₙ,∥</code>：
         </p>
         <ul>
           <li>
@@ -83,18 +83,13 @@ function FormulaNote() {
             <code>Γ_p</code> 取第 3 點的 Fresnel 複數係數（p 為 ⊥ 或 ∥）。
           </li>
         </ul>
+        <p>各路徑在功率域相加（不計相位，即 local mean）：</p>
         <p>
-          在 channel 有效頻寬（BW × 0.9，避開 guard band）內取 N 個等距頻點，
-          兩通道各自相干疊加後在功率域合成：
-        </p>
-        <p>
-          <code>H_p(fᵢ) = Σ aₙ,p · e^(−j·2π·fᵢ·τₙ)</code>，
-          <code>P(fᵢ) = |H_⊥(fᵢ)|² + |H_∥(fᵢ)|²</code><br />
-          <code>RSSI = 10·log₁₀( (1/N)·Σᵢ P(fᵢ) )</code>
+          <code>RSSI = 10·log₁₀( Σₙ ( |aₙ,⊥|² + |aₙ,∥|² ) )</code>
         </p>
         <p className="muted">
-          N = max(5, ⌈BW_MHz / 4⌉)，Δf ≲ 4 MHz 足以涵蓋室內典型延遲擴展 (~125 ns)。
-          頻域取樣避免窄頻 null 被當作整個 channel 的黑洞；
+          多路徑干涉的明暗週期約 λ/2（5 GHz 約 3 cm），遠小於熱圖格點（0.5 m），
+          逐點相干疊加只會取樣出位置隨機的假衰落斑；規劃上採用數個波長範圍內的平均功率。
           雙通道合成是 polarization-agnostic receiver 的近似，
           不代表特定單極化天線的瞬時複數通道。
         </p>
@@ -203,7 +198,7 @@ function FormulaNote() {
         (1) 路徑損失採純 Friis（不再與 ITU-R P.1238 取 max，避免重複計算牆損）；
         (2) 頻率 per-AP（<code>ap.centerMHz</code>，缺值 fallback 5190 MHz）；
         (3) 反射採 ITU-R P.2040-3 材質係數 + 複數 Fresnel，並拆成兩個正交極化通道在功率域合成；
-        (4) 多路徑在整個 channel 頻寬內取 N 個頻點做寬頻平均；
+        (4) 多路徑在功率域相加（local mean，不呈現小尺度衰落）；
         (5) SINR 只累計頻譜重疊的 AP；
         (6) 多樓層：所有樓層 AP 共用同一套 propagation，直射加 slab loss，
         FloorHole 可 bypass；所有樓層的牆都參與（靠 Z 範圍過濾自動選中射線穿過的高度）；

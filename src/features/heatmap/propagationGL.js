@@ -2,9 +2,9 @@
 //
 // Two render entry points:
 //   renderAp(ap, ...)       — per-AP RSSI grid (R32F). Reflection / diffraction
-//                             path stays here because each fragment already
-//                             carries an NMAX coherent-sum array; multiplying
-//                             that by N_AP would explode register pressure.
+//                             path stays here: its per-fragment wall-mirror /
+//                             corner loops multiplied by N_AP would be too
+//                             slow in one draw.
 //   renderField(scenario...) — HM-F5g. all-AP loop in shader, RGBA32F output =
 //                             (rssi, sinr, snr, cci). Scalar path only (Friis
 //                             + walls + slab + openings + antenna gain).
@@ -112,11 +112,9 @@ uniform int   uGridListWidth;
 
 // HM-F5c step 2: image-source reflection on/off. When 0 the shader stays on
 // the F5a scalar-dB path (RSSI = txDbm + gain - pathLoss). When 1 we switch
-// to a coherent-sum path: direct + reflected complex amplitudes accumulated
-// in (Hperp, Hpara), final power = |Hperp|^2 + |Hpara|^2.
-// freqOverrideN matches the JS opts.freqOverrideN; step 2 always uses N=1.
+// to the multipath path: direct + reflected + diffracted powers summed over
+// both polarization channels (57-22: power sum, no phase).
 uniform int uReflEnabled;
-uniform int uFreqOverrideN;
 
 // HM-F5c step 3: knife-edge diffraction around corners.
 // uCorners packs one (x, y, 0, 0) texel per corner, similar to walls.
@@ -1065,51 +1063,14 @@ float apGainDbi(vec2 target, float targetZ) {
   return uAntGainDbi + max(sectorTaperDb(absOff, halfBw) + sectorTaperDb(vertOff, halfBw), -DIRECTIONAL_BACK_DB);
 }
 
-// Cap on the number of frequency samples in the band-sweep coherent sum.
-// JS chooseFreqSamples is max(5, ceil(bwMhz/4)); 160 MHz → 40 samples is the
-// realistic ceiling. NMAX=40 gives shader its array size; runtime N is the
-// uniform uFreqN (always ≤ NMAX or the host clamps it).
-const int NMAX = 40;
-
-// Add one path's contribution to all N coherent-sum H accumulators. Mirrors
-// the inner-loop body of propagation.js's H(f_i) sweep: each f_i sees the
-// same path complex amplitude (Fresnel/material/roughness all use the
-// channel's centre frequency, JS-style), only the phase ph_i = -2π·f_i·tau
-// differs per sample.
-//
-// CRITICAL: f·tau spans 1000+ cycles for typical Friis distances. fp32 wrap-
-// to-(-π, π] alone is not enough — when paths interfere in narrow
-// destructive bands, the residual phase noise (~ULP·1300 = 0.001 rad) lets
-// some grid cells diverge ~30 dB from the JS reference. We instead phase-
-// reference every path against a shared tauRef (chosen as the direct
-// path's tau), so cycles = f·(tau-tauRef) stays small (typically < 50)
-// for all reasonable scenes. Multiplying every H by a global phase doesn't
-// change |H|², so power is invariant.
-void addPathHN(int N, float startHz, float stepHz, float tau, float tauRef,
-               vec2 perpC, vec2 paraC,
-               inout vec2 Hperp[NMAX], inout vec2 Hpara[NMAX]) {
-  float dtau = tau - tauRef;
-  for (int i = 0; i < NMAX; i++) {
-    if (i >= N) break;
-    float f = startHz + float(i) * stepHz;
-    float cycles = f * dtau;
-    float frac = cycles - floor(cycles);
-    if (frac > 0.5) frac -= 1.0;
-    float ph = -2.0 * PI * frac;
-    float cs = cos(ph), sn = sin(ph);
-    Hperp[i] += vec2(perpC.x * cs - perpC.y * sn, perpC.x * sn + perpC.y * cs);
-    Hpara[i] += vec2(paraC.x * cs - paraC.y * sn, paraC.x * sn + paraC.y * cs);
-  }
-}
-
 float dbToLin(float db) { return pow(10.0, db * 0.1); }
 float linToDb(float lin) { return 10.0 * log(max(lin, 1e-30)) / log(10.0); }
 const float SQRT2 = 1.4142135623730951;
 const float C_LIGHT = 299792458.0;
 
-// Reflection-aware RSSI in dBm. uReflEnabled gates the entire complex path;
-// when 0 the caller takes the F5a scalar fast path. Step 2 hard-codes N=1
-// (single tone at centre frequency); multi-frequency averaging lands in step 4.
+// Reflection-aware RSSI in dBm. uReflEnabled / uDiffEnabled gate this path;
+// when both are 0 the caller takes the F5a scalar fast path. 57-22: path
+// powers are summed (local mean) -- mirrors rssiFromAp in propagation.js.
 float rssiWithReflections(vec2 rx, float rxZ) {
   // ---- direct path ----
   vec2 dxy = rx - uApPos.xy;
@@ -1167,41 +1128,13 @@ float rssiWithReflections(vec2 rx, float rxZ) {
     }
   }
 
-  // Direct path → complex H. amp = sqrt(rxLin) / sqrt(2); perp = para = (amp, 0).
+  // 57-22: power sum over paths. Direct path is polarization-neutral, so its
+  // two channels (amp / sqrt(2) each) add back to the full received power.
   float rxDbDir = uTxDbm + apGainDbi(rx, rxZ) + uRxGainDbi - plDir;
-  float ampDir = sqrt(dbToLin(rxDbDir)) / SQRT2;
-  float tauDir = dDir / C_LIGHT;
-  vec2  perpDir = vec2(ampDir, 0.0);
-  vec2  paraDir = vec2(ampDir, 0.0);
+  float powerSum = dbToLin(rxDbDir);
 
-  // Frequency-sweep parameters. JS chooseFreqSamples = max(5, ceil(bwMhz/4));
-  // when uFreqOverrideN > 0 the caller pins it (debug N=1 path). N=1 collapses
-  // to centre frequency only (matches propagation.js's startHz = centerHz
-  // branch). N≥2 sweeps the band edge-to-edge with uniform spacing.
-  float bwMhz   = uChannelWidthMHz > 0.0 ? uChannelWidthMHz : 20.0;
-  float bwHz    = bwMhz * 1e6 * 0.9;        // 5% guard each edge
-  float centerHz = uCenterMHz * 1e6;
-  int N = uFreqOverrideN > 0
-            ? max(1, uFreqOverrideN)
-            : max(5, int(ceil(bwMhz / 4.0)));
-  if (N > NMAX) N = NMAX;
-  float startHz = N > 1 ? centerHz - bwHz * 0.5 : centerHz;
-  float stepHz  = N > 1 ? bwHz / float(N - 1)   : 0.0;
-
-  vec2 Hperp[NMAX];
-  vec2 Hpara[NMAX];
-  for (int i = 0; i < NMAX; i++) { Hperp[i] = vec2(0.0); Hpara[i] = vec2(0.0); }
-
-  // Material/Fresnel etc. still use centre frequency (JS does the same:
-  // wavelength = C / (freqMhz * 1e6) is computed once before the band
-  // sweep). Only phase varies across samples.
-  float f = centerHz;
-  // Direct-path tau is the shared phase reference for all paths in this
-  // fragment, so cycles=f·(tau-tauRef) stays small and fp32 round-off
-  // doesn't poison destructive interference points (~30 dB outliers).
-  float tauRef = tauDir;
-
-  addPathHN(N, startHz, stepHz, tauDir, tauRef, perpDir, paraDir, Hperp, Hpara);
+  // Material/Fresnel etc. use the centre frequency (same as JS).
+  float f = uCenterMHz * 1e6;
 
   // ---- 1st-order image-source reflections ----
   // uReflEnabled gates the loop separately from uDiffEnabled so the JS
@@ -1244,7 +1177,7 @@ float rssiWithReflections(vec2 rx, float rxZ) {
       // Degenerate "AP sits on the wall's infinite line" makes mirror = AP
       // and reflPt = AP, so inDir = (0, 0). JS's norm() handles that as zero
       // (l ||= 1 guard); GLSL normalize() returns NaN, which would silently
-      // poison the coherent sum (NaN amp → NaN H → power → -300 dBm sentinel).
+      // poison the power sum (NaN amp → NaN power → -300 dBm sentinel).
       // Match JS behaviour: zero-length inDir → cosI = 0 → cull by threshold.
       vec2 inVec = reflPt - uApPos.xy;
       float inLen = length(inVec);
@@ -1276,13 +1209,10 @@ float rssiWithReflections(vec2 rx, float rxZ) {
       float leg2 = accumulateWallLossExcept(reflPt, reflZ, rx, rxZ, w);
       float plRef = pathLossDb(dTot, uCenterMHz) + leg1 + leg2;
 
+      // |amp·rough·Γ_p|² per channel, amp² = P_rx / 2.
       float rxDbRef = uTxDbm + apGainDbi(reflPt, reflZ) + uRxGainDbi - plRef;
-      float ampRef = sqrt(dbToLin(rxDbRef)) / SQRT2;
-      vec2  baseR = vec2(ampRef * rough, 0.0);
-      vec2  perpR = cmul(baseR, gPerp);
-      vec2  paraR = cmul(baseR, gPara);
-      float tauR  = dTot / C_LIGHT;
-      addPathHN(N, startHz, stepHz, tauR, tauRef, perpR, paraR, Hperp, Hpara);
+      powerSum += dbToLin(rxDbRef) * 0.5 * rough * rough
+                * (magPerp * magPerp + magPara * magPara);
     }
   }
 
@@ -1343,22 +1273,11 @@ float rssiWithReflections(vec2 rx, float rxZ) {
 
       float plDiff = pathLossDb(dTotC, uCenterMHz) + s1.x + s2.x + diff;
       float rxDbD  = uTxDbm + apGainDbi(corner, cZM) + uRxGainDbi - plDiff;
-      float ampD   = sqrt(dbToLin(rxDbD)) / SQRT2;
-      vec2  perpD  = vec2(ampD, 0.0);
-      vec2  paraD  = vec2(ampD, 0.0);
-      float tauD   = dTotC / C_LIGHT;
-      addPathHN(N, startHz, stepHz, tauD, tauRef, perpD, paraD, Hperp, Hpara);
+      powerSum += dbToLin(rxDbD);
     }
   }
 
-  // Power = (1/N) Σ (|H_perp(f_i)|² + |H_para(f_i)|²). The factor 1/N matches
-  // propagation.js's powerSum / N for an unbiased band-average.
-  float powerSum = 0.0;
-  for (int i = 0; i < NMAX; i++) {
-    if (i >= N) break;
-    powerSum += dot(Hperp[i], Hperp[i]) + dot(Hpara[i], Hpara[i]);
-  }
-  return linToDb(powerSum / float(N));
+  return linToDb(powerSum);
 }
 
 void main() {
@@ -1373,7 +1292,7 @@ void main() {
   vec2 rx = uOriginM + vec2(float(gpx.x), float(gpx.y)) * uGridStepM;
   float rxZ = uRxZM;
 
-  // Refl OR diff routes through the complex coherent-sum path; the loops
+  // Refl OR diff routes through the multipath power-sum path; the loops
   // inside are gated separately so refl=off/diff=on stays independent
   // from refl=on/diff=off.
   if (uReflEnabled == 1 || uDiffEnabled == 1) {
@@ -1381,7 +1300,7 @@ void main() {
     return;
   }
 
-  // F5a fast path — scalar dB only, no complex coherent sum. Bit-for-bit
+  // F5a fast path — scalar dB only, direct path alone. Bit-for-bit
   // identical to pre-step-2 behaviour.
   vec2 dxy = rx - uApPos.xy;
   float dxyLen = max(length(dxy), 0.25);
@@ -1414,8 +1333,8 @@ void main() {
 // contribute to this fragment. If that's below uCullFloorDbm we skip the AP
 // entirely — saves the wall-loss DDA, which is the per-AP bottleneck.
 //
-// Reflection/diffraction NOT supported here: the coherent NMAX array per
-// fragment × per AP would explode register pressure. Host falls back to the
+// Reflection/diffraction NOT supported here: the per-fragment wall-mirror /
+// corner loops × per AP would be too slow in one draw. Host falls back to the
 // per-AP renderAp dispatch when refl or diff is on.
 const FS_FIELD = `#version 300 es
 precision highp float;
@@ -3456,12 +3375,10 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.uniform2f(gl.getUniformLocation(prog, 'uGridOriginM'), gridOriginX, gridOriginY)
     gl.uniform1i(gl.getUniformLocation(prog, 'uGridListWidth'), gridListWidth)
 
-    // HM-F5c step 2: reflection toggle + frequency-sample override.
-    // refl=on switches the shader to coherent-sum H accumulation. step 2 only
-    // supports N=1; real multi-frequency averaging lands in step 4.
+    // HM-F5c step 2: reflection toggle. refl=on switches the shader to the
+    // multipath power-sum path (57-22).
     gl.uniform1i(gl.getUniformLocation(prog, 'uReflEnabled'),
       opts.maxReflOrder && opts.maxReflOrder > 0 ? 1 : 0)
-    gl.uniform1i(gl.getUniformLocation(prog, 'uFreqOverrideN'), opts.freqOverrideN ?? 0)
     // HM-F5l: same cull floor the aggregated path uses. Default -120 dBm
     // matches JS aggregateApContributions's "below this is no signal".
     gl.uniform1f(gl.getUniformLocation(prog, 'uCullFloorDbm'), opts.cullFloorDbm ?? -120)

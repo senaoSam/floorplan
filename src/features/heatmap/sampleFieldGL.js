@@ -15,8 +15,8 @@
 //
 //   2. Per-AP fallback (HM-F5a..F5d) — original behaviour. Each AP renders
 //      its own R32F grid, then `aggregateApContributions` folds them into the
-//      4 fields on the CPU. Used when refl/diff is on — the per-fragment NMAX
-//      coherent-sum + N_AP loop would explode register pressure on the GPU.
+//      4 fields on the CPU. Used when refl/diff is on — the per-fragment
+//      wall-mirror / corner loops × N_AP would be too slow in one draw.
 //      Custom-pattern APs no longer force this path: the shader samples the
 //      catalog cuts from a texture (see propagationGL's uPatterns).
 
@@ -95,7 +95,6 @@ function buildGeomSig(gl, scenario, boundaries, opts, {
     rxZM, gridStepM, nx, ny, originX, originY,
     opts.maxReflOrder ?? 0,
     opts.enableDiffraction ? 1 : 0,
-    opts.freqOverrideN ?? 0,
     opts.cullFloorDbm ?? '',
     opts.losFastMode ? 1 : 0,
     // 53-G2 (23c): the three debug flags below exist SO THAT the JS/GL parity

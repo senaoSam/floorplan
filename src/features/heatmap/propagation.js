@@ -232,27 +232,26 @@ function fresnelGamma(cosI, epsC) {
 }
 
 // Build a polarization-neutral path (direct / diffraction).
-// a_perp = a_para = (1/sqrt(2)) * sqrt(P_rx). Real-valued scalar; phase comes
-// from tau_n when H(f) is evaluated. The 1/sqrt(2) encodes equal-power
-// excitation of two orthogonal polarization basis channels.
-function makeScalarPath(txPowerDbm, apGainDbi, totalLossDb, distanceM) {
+// a_perp = a_para = (1/sqrt(2)) * sqrt(P_rx). Real-valued scalar. The
+// 1/sqrt(2) encodes equal-power excitation of two orthogonal polarization
+// basis channels.
+function makeScalarPath(txPowerDbm, apGainDbi, totalLossDb) {
   const rxPowerDb = txPowerDbm + apGainDbi + RX_ANT_GAIN_DBI - totalLossDb
   const amp = Math.sqrt(dbToLin(rxPowerDb)) / Math.SQRT2
   const a = { re: amp, im: 0 }
-  return { perp: a, para: a, tau: distanceM / C }
+  return { perp: a, para: a }
 }
 
 // Build a reflected path: same 1/sqrt(2) excitation, but each polarization
 // picks up its own complex Fresnel coefficient plus the shared roughness
 // attenuation factor.
-function makeReflectedPath(txPowerDbm, apGainDbi, pathLossDb, distanceM, gammaPerp, gammaPara, roughness) {
+function makeReflectedPath(txPowerDbm, apGainDbi, pathLossDb, gammaPerp, gammaPara, roughness) {
   const rxPowerDb = txPowerDbm + apGainDbi + RX_ANT_GAIN_DBI - pathLossDb
   const amp = Math.sqrt(dbToLin(rxPowerDb)) / Math.SQRT2
   const base = { re: amp * roughness, im: 0 }
   return {
     perp: cmul(base, gammaPerp),
     para: cmul(base, gammaPara),
-    tau: distanceM / C,
   }
 }
 
@@ -335,13 +334,6 @@ function apGainDbi(ap, targetPoint, targetZM = 0) {
   return peak + Math.max(sectorTaperDb(absOff, half) + sectorTaperDb(vertOff, half), -DIRECTIONAL_BACK_DB)
 }
 
-// Pick frequency sample count for the channel-wide coherent sum.
-// df <= 4 MHz keeps aliasing safe up to ~125 ns delay spread (typical indoor
-// upper bound). Minimum 5 points so even 20 MHz channels get useful averaging.
-function chooseFreqSamples(bwMhz) {
-  return Math.max(5, Math.ceil(bwMhz / 4))
-}
-
 // Point-in-polygon for a flat [x, y, x, y, ...] polygon (ray-casting).
 function pointInPolyFlat(x, y, pts) {
   const n = pts.length / 2
@@ -421,10 +413,6 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   const maxReflOrder = opts.maxReflOrder ?? 1
   const enableDiffraction = opts.enableDiffraction ?? true
   const boundaries = opts.floorBoundaries ?? null
-  // Debug-only: pin the frequency-sample count to a fixed N (typically 1) so
-  // JS and shader can be diffed under matched opts during HM-F5c+d porting.
-  // Production code never sets this — chooseFreqSamples picks N adaptively.
-  const freqOverrideN = opts.freqOverrideN ?? null
 
   const freqMhz = ap.centerMHz || 5190
   const wavelength = C / (freqMhz * 1e6)
@@ -452,7 +440,7 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   const dDir   = Math.sqrt(dxyDir * dxyDir + dzDir * dzDir)
   const wallScan = accumulateWallLoss(ap.pos, rx, walls, apZM, rxZM, fOver24)
   const plDir = pathLossDb(dDir, freqMhz) + wallScan.totalLoss + slabLossDirect
-  paths.push(makeScalarPath(ap.txDbm, apGainDbi(ap, rx, rxZM), plDir, dDir))
+  paths.push(makeScalarPath(ap.txDbm, apGainDbi(ap, rx, rxZM), plDir))
 
   // 1st-order image-source reflections with per-polarization Fresnel.
   // Cross-floor APs skip reflections — walls are 2D in this iteration and
@@ -500,7 +488,7 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       const dTot = d1 + d2
 
       const plRef = pathLossDb(dTot, freqMhz) + leg1.totalLoss + leg2.totalLoss
-      paths.push(makeReflectedPath(ap.txDbm, apGainDbi(ap, reflPt, reflZM), plRef, dTot, gPerp, gPara, rough))
+      paths.push(makeReflectedPath(ap.txDbm, apGainDbi(ap, reflPt, reflZM), plRef, gPerp, gPara, rough))
     }
   }
 
@@ -524,42 +512,23 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       if (!isFinite(diff) || diff > 40) continue
       const dTot = d1 + d2
       const plDiff = pathLossDb(dTot, freqMhz) + s1.totalLoss + s2.totalLoss + diff
-      paths.push(makeScalarPath(ap.txDbm, apGainDbi(ap, c, cZM), plDiff, dTot))
+      paths.push(makeScalarPath(ap.txDbm, apGainDbi(ap, c, cZM), plDiff))
     }
   }
 
-  // Evaluate two polarization channels H_perp(f), H_para(f) at N frequency
-  // samples across the channel bandwidth, then power-sum:
-  //   P(f) = |H_perp(f)|^2 + |H_para(f)|^2
-  // The 1/sqrt(2) excitation factor lives in each path's complex gain, so
-  // the two-channel sum reconstructs total RX power (no extra /2 needed).
-  const bwMhz = ap.channelWidth || 20
-  const bwHz = bwMhz * 1e6 * 0.9          // drop 5% guard on each edge
-  const centerHz = freqMhz * 1e6
-  const N = freqOverrideN != null ? Math.max(1, freqOverrideN | 0) : chooseFreqSamples(bwMhz)
-  // N=1 collapses to a single tone at centre frequency (matches shader's
-  // single-frequency path during the F5c+d port). N≥2 sweeps the band so the
-  // edges sit at centerHz ± bwHz/2 with uniform stepHz spacing.
-  const startHz = N > 1 ? centerHz - bwHz / 2 : centerHz
-  const stepHz  = N > 1 ? bwHz / (N - 1)      : 0
-
+  // 57-22: power sum (local mean) over paths and both polarization channels:
+  //   P = Σ_n ( |a_n,perp|^2 + |a_n,para|^2 )
+  // The paths used to be summed coherently (phase -2π·f·τ_n, averaged over N
+  // samples across the channel), but the interference pattern repeats every
+  // ~λ/2 (3 cm at 5 GHz) and the 0.5 m grid only aliased it into fake fading
+  // spots; planning tools show the local mean. The 1/sqrt(2) excitation
+  // factor in each path's gain makes the two-channel sum total RX power.
   let powerSum = 0
-  for (let i = 0; i < N; i++) {
-    const f = startHz + i * stepHz
-    const twoPiF = 2 * Math.PI * f
-    let HpRe = 0, HpIm = 0      // H_perp
-    let HqRe = 0, HqIm = 0      // H_para
-    for (const p of paths) {
-      const ph = -twoPiF * p.tau
-      const cs = Math.cos(ph), sn = Math.sin(ph)
-      HpRe += p.perp.re * cs - p.perp.im * sn
-      HpIm += p.perp.re * sn + p.perp.im * cs
-      HqRe += p.para.re * cs - p.para.im * sn
-      HqIm += p.para.re * sn + p.para.im * cs
-    }
-    powerSum += HpRe * HpRe + HpIm * HpIm + HqRe * HqRe + HqIm * HqIm
+  for (const p of paths) {
+    powerSum += p.perp.re * p.perp.re + p.perp.im * p.perp.im
+      + p.para.re * p.para.re + p.para.im * p.para.im
   }
-  const rssiDbm = linToDb(powerSum / N)
+  const rssiDbm = linToDb(powerSum)
   return { rssiDbm, pathsUsed: paths.length }
 }
 
