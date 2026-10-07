@@ -190,6 +190,48 @@ export function patternBackFloorDb(pattern) {
   return v
 }
 
+// 57-23: directivity (dBi) of a relative pattern -- the peak gain it has when
+// the transmitted power is conserved: D = 4π / ∮ 10^(G(az, el)/10) dΩ, with G
+// the exact relative gain apGainDbi uses (H + V cuts, 57-21 floor). 1° grid;
+// memoized, the patterns are static.
+function integrateDirectivityDbi(relDb) {
+  const STEP = Math.PI / 180
+  let sum = 0
+  for (let i = 0; i < 360; i++) {
+    const az = -Math.PI + (i + 0.5) * STEP
+    for (let j = 0; j < 180; j++) {
+      const el = -Math.PI / 2 + (j + 0.5) * STEP
+      sum += Math.pow(10, relDb(az, el) / 10) * Math.cos(el) * STEP * STEP
+    }
+  }
+  return 10 * Math.log10(4 * Math.PI / sum)
+}
+
+const directivityCache = new WeakMap()
+export function patternDirectivityDbi(pattern) {
+  let v = directivityCache.get(pattern)
+  if (v === undefined) {
+    const floor = patternBackFloorDb(pattern)
+    v = integrateDirectivityDbi((az, el) =>
+      Math.max(sampleGain(pattern, az) + sampleGainV(pattern, el), floor))
+    directivityCache.set(pattern, v)
+  }
+  return v
+}
+
+const directionalDirectivityCache = new Map()
+export function directionalDirectivityDbi(beamwidthDeg) {
+  let v = directionalDirectivityCache.get(beamwidthDeg)
+  if (v === undefined) {
+    const half = beamwidthDeg / 2
+    v = integrateDirectivityDbi((az, el) => Math.max(
+      sectorTaperDb(Math.abs(az) * 180 / Math.PI, half) + sectorTaperDb(Math.abs(el) * 180 / Math.PI, half),
+      -DIRECTIONAL_BACK_DB))
+    directionalDirectivityCache.set(beamwidthDeg, v)
+  }
+  return v
+}
+
 // ── GPU upload support ─────────────────────────────────────────
 // The WebGL engine uploads every catalog pattern into one shared texture and
 // addresses a pattern by its SLOT (row index). The slot must be stable for the

@@ -10,7 +10,7 @@ import { useHistoryStore } from '@/store/useHistoryStore'
 import { floorplanFromLines } from '@/utils/floorplanFromLines'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
 import { generateId } from '@/utils/id'
-import { DEFAULT_AP_MODEL_ID, getDefaultTxPower } from '@/constants/apModels'
+import { AP_MODELS, DEFAULT_AP_MODEL_ID, getDefaultTxPower } from '@/constants/apModels'
 import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
 import { MATERIALS } from '@/constants/materials'
 import Icon from '@/components/Icon/Icon'
@@ -150,7 +150,8 @@ function buildDemoAPs(canvasWidth, canvasHeight, regulatoryDomain) {
       beamwidth: 60,
       patternId: null,
       mountType: 'ceiling',
-      modelId: DEFAULT_AP_MODEL_ID,
+      // The Generic model is dual-band, so the 6 GHz units need a tri-band one.
+      modelId: band === 6 ? AP_MODELS.CISCO_C9166.id : DEFAULT_AP_MODEL_ID,
       color: '#4fc3f7',
       // Demo: pin AP-03 offline so the stats view always shows an offline unit
       // (grey 離線 badge + ring + an alert). Real cloud status overrides this.
@@ -230,6 +231,8 @@ function DemoLoader() {
           model: 'POE-24-port',
           portCount: 24,
           poeBudget: 370,
+          // The tri-band 6 GHz demo APs draw 802.3bt power.
+          poePortStd: '3bt',
           uplinkTo: idfSwId,
           cableType: 'auto',
         },

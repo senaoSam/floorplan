@@ -10,6 +10,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
+import { useEditorStore } from '@/store/useEditorStore'
 
 // 3D all-floors heatmap stack (Phase 48+, strategy A: compute ON DEMAND).
 //
@@ -79,7 +80,7 @@ export function __setNullFieldForFloor(fn) { __nullFieldForFloor = fn }
 const FP_KEYS = [
   'activeFloorId', 'floors', 'wallsAll', 'apsAll', 'holes',
   'mode', 'engine', 'gridStepM', 'blur', 'contours',
-  'reflections', 'diffraction', 'bandFilter',
+  'reflections', 'diffraction', 'bandFilter', 'regulatoryDomain',
 ]
 const fpEqual = (a, b) => FP_KEYS.every((k) => a[k] === b[k])
 
@@ -96,6 +97,8 @@ const buildFingerprint = () => {
     blur: hm.blur, contours: hm.showContours,
     reflections: hm.reflections, diffraction: hm.diffraction,
     bandFilter: hm.bandFilter,
+    // 57-23: sets each AP's EIRP-capped TX power.
+    regulatoryDomain: useEditorStore.getState().regulatoryDomain,
   }
 }
 
@@ -261,6 +264,7 @@ export function attachHeatmapStackDriver() {
     useAPStore.subscribe(schedule),
     useFloorHoleStore.subscribe(schedule),
     useHeatmapStore.subscribe(schedule),
+    useEditorStore.subscribe((s, p) => { if (s.regulatoryDomain !== p.regulatoryDomain) schedule() }),
   ]
   return () => {
     if (ensureTimer) { clearTimeout(ensureTimer); ensureTimer = 0 }

@@ -5,7 +5,8 @@
 // sub-segments so each sub-segment carries its own dB loss.
 
 import { channelBlockCenterMHz } from './frequency'
-import { getDefaultTxPower, getAPAntennaGain } from '@/constants/apModels'
+import { resolveApRadiation } from './apRadiation'
+import { useEditorStore } from '@/store/useEditorStore'
 import {
   makeAlignMatrixM,
   applyAlignMatrix,
@@ -241,29 +242,37 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
   // crossFloor is supplied, the caller hands us pre-computed AP entries that
   // already carry per-AP elevation — we use those instead so upstairs /
   // downstairs APs are modelled with their correct absolute Z.
-  const buildApEntry = (ap, posMeters, elevationM) => ({
-    id: ap.id,
-    name: ap.name ?? ap.id,
-    pos: posMeters,
-    // Absolute Z of the AP = its floor's elevation + its install height.
-    // 0 when no cross-floor data is in play (single-floor planar mode).
-    zM: (elevationM ?? 0) + (ap.z ?? 0),
-    txDbm: ap.txPower ?? getDefaultTxPower(ap.frequency ?? 5),
-    // 47-10 — per-model per-band antenna gain. undefined when the model
-    // doesn't list this band; both engines then fall back to AP_ANT_GAIN_DBI.
-    antGainDbi: getAPAntennaGain(ap),
-    frequency: ap.frequency ?? 5,
-    channel: ap.channel ?? 36,
-    channelWidth: ap.channelWidth ?? 20,
-    // 57-16: bonded-block centre, not the primary channel's. The shader
-    // derives each AP's spectrum as centerMHz +- width/2 from this.
-    centerMHz: channelBlockCenterMHz(ap.frequency ?? 5, ap.channel ?? 36, ap.channelWidth ?? 20),
-    antennaMode: ap.antennaMode ?? 'omni',
-    azimuthDeg: ap.azimuth ?? 0,
-    tiltDeg: ap.tilt ?? 0,
-    beamwidthDeg: ap.beamwidth ?? 60,
-    patternId: ap.patternId ?? null,
-  })
+  // 57-23: peak gain + EIRP-capped TX for the current regulatory domain. Read
+  // from the editor store here (not a parameter) so every scenario reader --
+  // heatmap, hover, Client View, planners -- applies the same cap.
+  const domainId = useEditorStore.getState().regulatoryDomain
+  const buildApEntry = (ap, posMeters, elevationM) => {
+    const rad = resolveApRadiation(ap, domainId)
+    return {
+      id: ap.id,
+      name: ap.name ?? ap.id,
+      pos: posMeters,
+      // Absolute Z of the AP = its floor's elevation + its install height.
+      // 0 when no cross-floor data is in play (single-floor planar mode).
+      zM: (elevationM ?? 0) + (ap.z ?? 0),
+      txDbm: rad.txDbm,
+      // 47-10 — per-model per-band antenna gain (omni, AP_ANT_GAIN_DBI when the
+      // model doesn't list the band); 57-23 — directivity / user peak gain for
+      // directional and custom antennas.
+      antGainDbi: rad.peakGainDbi,
+      frequency: ap.frequency ?? 5,
+      channel: ap.channel ?? 36,
+      channelWidth: ap.channelWidth ?? 20,
+      // 57-16: bonded-block centre, not the primary channel's. The shader
+      // derives each AP's spectrum as centerMHz +- width/2 from this.
+      centerMHz: channelBlockCenterMHz(ap.frequency ?? 5, ap.channel ?? 36, ap.channelWidth ?? 20),
+      antennaMode: ap.antennaMode ?? 'omni',
+      azimuthDeg: ap.azimuth ?? 0,
+      tiltDeg: ap.tilt ?? 0,
+      beamwidthDeg: ap.beamwidth ?? 60,
+      patternId: ap.patternId ?? null,
+    }
+  }
 
   let apList
   if (crossFloor && crossFloor.apsByFloor) {

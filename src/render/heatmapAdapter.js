@@ -1109,6 +1109,8 @@ export function attachHeatmapLayer({
       // 47-8a: the band filter changes which APs feed the field, so a filter
       // switch must invalidate the fingerprint and force a recompute.
       bandFilter: hm.bandFilter,
+      // 57-23: the regulatory domain sets each AP's EIRP-capped TX power.
+      regulatoryDomain: useEditorStore ? useEditorStore.getState().regulatoryDomain : null,
       forceAggregated,
     }
     if (lastIdleInputs && idleInputsEqual(idleInputs, lastIdleInputs)) return

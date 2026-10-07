@@ -35,6 +35,7 @@ export function bindHeatmapHover({
   useHeatmapStore,
   useHoverReadoutStore,
   useFloorHoleStore = null,
+  useEditorStore = null,
 }) {
   const stage = scene.app.stage
   let lastFireAt = 0
@@ -52,7 +53,9 @@ export function bindHeatmapHover({
       ? (useScopeStore.getState().scopesByFloor?.[activeFloorId] ?? [])
       : []
     const bandFilter = useHeatmapStore.getState().bandFilter || 'all'
-    const sig = `${activeFloorId}::${bandFilter}`
+    // 57-23: the regulatory domain sets each AP's EIRP-capped TX power.
+    const domainId = useEditorStore?.getState().regulatoryDomain ?? ''
+    const sig = `${activeFloorId}::${bandFilter}::${domainId}`
     if (sig === cachedSig && cachedScenario !== undefined) return cachedScenario
     cachedSig = sig
     const sc = buildFloorScenario({

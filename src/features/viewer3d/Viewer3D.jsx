@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { useFloorStore, getPxPerM, getFloorHeight } from '@/store/useFloorStore'
 import { useEditorStore, VIEW_MODE, EDITOR_MODE } from '@/store/useEditorStore'
+import { resolveApRadiation } from '@/features/heatmap/apRadiation'
 import { useViewportStore } from '@/store/useViewportStore'
 import { getSceneRefs } from '@/render/sceneRegistry'
 import { SWITCH_KINDS, getSwitchKindColor } from '@/store/useCableStore'
@@ -758,7 +759,11 @@ function buildReadoutContent(type, d) {
     const channelLabel = d.channel != null
       ? `Ch ${d.channel}${d.channelWidth ? `/${d.channelWidth}MHz` : ''}`
       : null
-    const txLabel = d.txPower != null ? `${d.txPower} dBm` : null
+    // 57-23: when the EIRP cap derates the TX power, show set → actual.
+    const rad = resolveApRadiation(d, useEditorStore.getState().regulatoryDomain)
+    const txLabel = d.txPower == null ? null
+      : rad.capped ? `${rad.setTxDbm}→${Math.round(rad.txDbm * 10) / 10} dBm`
+      : `${d.txPower} dBm`
     const mountLabel = d.z != null ? `掛 ${Number(d.z).toFixed(1)} m` : null
     const mode = d.antennaMode ?? 'omni'
     const antennaLabel = mode === 'omni' ? '全向'

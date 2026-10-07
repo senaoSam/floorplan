@@ -6,7 +6,8 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { getCachedRoutes } from '@/features/cable/routesCache'
 import { AP_MODEL_LIST, DEFAULT_AP_MODEL_ID, getAPModelById } from '@/constants/apModels'
 import { ANTENNA_PATTERN_LIST, DEFAULT_PATTERN_ID, getPatternById, buildDirectionalPattern } from '@/constants/antennaPatterns'
-import { channelEntries, isChannelAllowed, allowedChannels } from '@/constants/regulatoryDomains'
+import { channelEntries, isChannelAllowed, allowedChannels, getDomain } from '@/constants/regulatoryDomains'
+import { resolveApRadiation } from '@/features/heatmap/apRadiation'
 import { CHANNEL_WIDTHS, DEFAULT_CHANNEL_WIDTH, allowedWidthsForBand } from '@/constants/channelWidths'
 import PatternPreview3D from './PatternPreview3D'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
@@ -155,6 +156,9 @@ function APPanel({ floorId, apId }) {
   if (!ap) return null
 
   const maxTxForBand = model.maxTxPower[ap.frequency] ?? 23
+  // 57-23: peak gain + EIRP-capped TX, exactly what the heatmap uses.
+  const rad = resolveApRadiation(ap, domainId)
+  const fmtDb = (v) => (Math.round(v * 10) / 10).toString()
   const freqColor = FREQ_OPTIONS.find((f) => f.value === ap.frequency)?.color ?? '#4fc3f7'
 
   return (
@@ -288,6 +292,15 @@ function APPanel({ floorId, apId }) {
             onChange={(v) => handleNumber('txPower', v)}
           />
         </PanelField>
+        <div className="ap-panel__hint">
+          EIRP {fmtDb(rad.eirpDbm)} dBm
+          {rad.eirpLimitDbm != null && `（${getDomain(domainId).label}上限 ${fmtDb(rad.eirpLimitDbm)} dBm）`}
+        </div>
+        {rad.capped && (
+          <div className="ap-panel__hint" style={{ color: '#ef4444' }}>
+            ⚠ 超過法規 EIRP 上限，實際發射功率降為 {fmtDb(rad.txDbm)} dBm
+          </div>
+        )}
         <PanelField label="安裝高度">
           {/* 52-B4: cap at this floor's ceiling — an AP mounted at 999999 m
               feeds the same absurd cable-length estimate into the BOM that the
@@ -349,6 +362,20 @@ function APPanel({ floorId, apId }) {
                   unit="度"
                   width={70}
                   onChange={(v) => { if (!isNaN(v)) updateAP(floorId, apId, { azimuth: v }) }}
+                />
+              </PanelField>
+
+              <PanelField
+                label="峰值增益"
+                hint={`空白＝依方向圖自動 ${fmtDb(rad.autoPeakGainDbi)} dBi`}
+              >
+                <NumberInput
+                  value={Number.isFinite(ap.antennaPeakGainDbi) ? ap.antennaPeakGainDbi : null}
+                  placeholder={fmtDb(rad.autoPeakGainDbi)}
+                  step={0.5}
+                  unit="dBi"
+                  width={70}
+                  onChange={(v) => updateAP(floorId, apId, { antennaPeakGainDbi: isNaN(v) ? null : v })}
                 />
               </PanelField>
 

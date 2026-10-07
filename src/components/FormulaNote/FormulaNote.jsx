@@ -119,9 +119,10 @@ function FormulaNote() {
       <section>
         <h4>7. 天線方向性（發射端增益）</h4>
         <p>
-          每條離開 AP 的射線（直射終點、反射點、繞射 corner）依其水平離軸角
-          <code>|Δθ|</code> 與垂直離軸角 <code>|Δε|</code>（射線仰角 − 俯仰角
-          <code>tilt</code>，仰角由高度差與水平距離算出）取天線增益：
+          每條離開 AP 的射線（直射終點、反射點、繞射 corner）先轉進天線自己的座標系
+          （先抵銷方位角 <code>azimuth</code>，再抵銷俯仰角 <code>tilt</code>），
+          再取水平離軸角 <code>|Δθ|</code> 與垂直離軸角 <code>|Δε|</code> 查天線增益
+          （<code>tilt = 0</code> 時即射線方位差與仰角）：
         </p>
         <ul>
           <li>
@@ -130,16 +131,28 @@ function FormulaNote() {
           </li>
           <li>
             Directional：水平與垂直各套同一組扇區錐 —— 半波瓣寬 <code>φ/2</code>
-            內為 0 dB，外側 15° 線性跌到 <code>−20 dB</code> 背瓣，兩者相加。
+            內為 0 dB，外側 15° 線性跌到 <code>−20 dB</code> 背瓣，兩者相加，
+            總和下限 <code>−20 dB</code>。
           </li>
           <li>
             Custom pattern：<code>G_tx = 峰值 + sampleGain(pattern, |Δθ|) +
             sampleGainV(pattern, |Δε|)</code>。水平切面用 pattern 自帶的 36 個
             10° 取樣（cos² / 扇區）；垂直切面用 3GPP TR 38.901 元件方向圖
             <code>A_v(θ) = −min[12(θ/θ₃dB)², SLA]</code>（θ₃dB = 65°）另外生成，
-            不再重用水平取樣（bore-sight = 0 dB）
+            不再重用水平取樣（bore-sight = 0 dB）。兩切面相加後以方向圖自身的
+            前後比為下限（水平切面最低值，類 3GPP <code>A_max</code>），避免背瓣重複扣損
           </li>
         </ul>
+        <p>
+          Directional / Custom 的峰值 = 方向圖的方向性
+          <code>D = 4π / ∮ 10^(G/10) dΩ</code>（能量守恆：波束越窄峰值越高），
+          或使用者在 AP 面板輸入的天線峰值增益；不再沿用型號的 omni 增益。
+        </p>
+        <p>
+          EIRP 上限：實際發射功率 <code>P_tx = min(設定值, EIRP_max − G_peak)</code>，
+          <code>EIRP_max</code> 依國家頻段與頻道所在子頻段（6 GHz LPI 依 PSD × 頻寬）查
+          <code>regulatoryDomains.js</code>（實務近似，非法規原文）。
+        </p>
         <p className="muted">
           方位角 <code>azimuth</code> 用 canvas 座標（+x = 0°、+y = 90°），與 APLayer 顯示一致。
           俯仰角 <code>tilt</code>（−90°~+90°，+上仰，預設 0）。

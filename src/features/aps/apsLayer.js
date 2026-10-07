@@ -10,6 +10,7 @@ import { computeFocusedDevices, FOCUS_HALO_COLOR, FOCUS_HALO_ALPHA, FOCUS_HALO_W
 import { perfOn, probe, probeEvent } from '@/features/cable/perfProbe'
 import { getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
 import { getModeCapability } from '@/render/modeCapabilities'
+import { resolveApRadiation } from '@/features/heatmap/apRadiation'
 
 // AP markers adapter — per-AP interactive Container with click select,
 // drag, hover, right-click context menu, frequency-colored marker, and
@@ -375,7 +376,12 @@ export function attachAPsLayer({
     // Info pill — dark rounded rect bg + 3-line text including name +
     // freq/channel/width + tx power. Visible only when showAPInfo is on.
     const freqLabel = FREQ_LABEL_LONG[ap.frequency] ?? `${ap.frequency}G`
-    infoText.text = `${ap.name ?? ''}\n${freqLabel} CH${ap.channel ?? '—'}/${ap.channelWidth ?? 20}\n${ap.txPower ?? '—'} dBm`
+    // 57-23: when the EIRP cap derates the TX power, show set → actual.
+    const rad = resolveApRadiation(ap, editorState.regulatoryDomain)
+    const txLabel = rad.capped
+      ? `${rad.setTxDbm}→${Math.round(rad.txDbm * 10) / 10}`
+      : `${ap.txPower ?? '—'}`
+    infoText.text = `${ap.name ?? ''}\n${freqLabel} CH${ap.channel ?? '—'}/${ap.channelWidth ?? 20}\n${txLabel} dBm`
     const showInfo = !!editorState.showAPInfo
     infoText.visible = showInfo
     infoBg.clear()
@@ -620,6 +626,7 @@ export function attachAPsLayer({
   // the full redraw cost on every set.
   let lastShowAPBand = useEditorStore.getState().showAPBand
   let lastShowAPInfo = useEditorStore.getState().showAPInfo
+  let lastDomain = useEditorStore.getState().regulatoryDomain
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
   let lastSelectedItems = useEditorStore.getState().selectedItems
@@ -636,9 +643,11 @@ export function attachAPsLayer({
         else drawAP(entry)
       }
     }
-    if (s.showAPBand !== lastShowAPBand || s.showAPInfo !== lastShowAPInfo) {
+    // 57-23: the domain changes the EIRP-capped TX shown in the info pill.
+    if (s.showAPBand !== lastShowAPBand || s.showAPInfo !== lastShowAPInfo || s.regulatoryDomain !== lastDomain) {
       lastShowAPBand = s.showAPBand
       lastShowAPInfo = s.showAPInfo
+      lastDomain = s.regulatoryDomain
       for (const entry of containers.values()) {
         const drag = useDragOverlayStore.getState().ap
         if (drag && drag.id === entry.ap.id) {

@@ -43,7 +43,8 @@ export function bindClientView({
     const floor = floors.find((f) => f.id === activeFloorId)
     if (!floor || !floor.scale) return { scenario: null, floor: null }
     const scopes = useScopeStore.getState().scopesByFloor?.[activeFloorId] ?? []
-    const sig = `${activeFloorId}`
+    // 57-23: the regulatory domain sets each AP's EIRP-capped TX power.
+    const sig = `${activeFloorId}::${useEditorStore.getState().regulatoryDomain}`
     if (sig === cachedSig && cachedScenario !== undefined) return { scenario: cachedScenario, floor }
     cachedSig = sig
     // 57-17: the heatmap's scenario (other floors' APs / walls / slabs too),
@@ -235,6 +236,15 @@ export function bindClientView({
   const unsubWall = useWallStore.subscribe(() => { invalidate(); if (isActive()) recompute() })
   const unsubScope = useScopeStore.subscribe(() => { invalidate(); if (isActive()) recompute() })
   const unsubFloor = useFloorStore.subscribe(() => { invalidate(); if (isActive()) recompute() })
+  // 57-23: a regulatory-domain change re-caps every AP's TX power.
+  let prevDomain = useEditorStore.getState().regulatoryDomain
+  const unsubDomain = useEditorStore.subscribe(() => {
+    const d = useEditorStore.getState().regulatoryDomain
+    if (d === prevDomain) return
+    prevDomain = d
+    invalidate()
+    if (isActive()) recompute()
+  })
   // 57-17: floor holes feed the cross-floor scenario (slab bypass).
   const unsubHole = useFloorHoleStore
     ? useFloorHoleStore.subscribe(() => { invalidate(); if (isActive()) recompute() })
@@ -371,6 +381,7 @@ export function bindClientView({
     unsubScope()
     unsubFloor()
     unsubHole()
+    unsubDomain()
     unsubCV()
     unsubMode()
   }
