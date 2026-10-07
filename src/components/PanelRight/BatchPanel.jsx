@@ -15,6 +15,7 @@ import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
 import PatternPreview from './PatternPreview'
 import { PanelShell, PanelHeader } from './_shared/PanelShell'
 import { wrapAzimuth } from '@/utils/angle'
+import { tiltPatchForModeChange, tiltPatchForMountChange } from '@/utils/apMount'
 import './_shared/shared.sass'
 import './BatchPanel.sass'
 
@@ -162,6 +163,7 @@ function BatchPanel() {
       if ((mode === 'directional' || mode === 'custom') && a.azimuth == null) patch.azimuth = 0
       if (mode === 'directional' && a.beamwidth == null) patch.beamwidth = 60
       if (mode === 'custom' && a.patternId == null) patch.patternId = 'patch'
+      Object.assign(patch, tiltPatchForModeChange(a, mode))   // 57-27
       updateAPs(activeFloorId, [a.id], patch)
     })
   }, [activeFloorId, selectedAPs, updateAPs])
@@ -220,8 +222,11 @@ function BatchPanel() {
   }, [activeFloorId, wallIds, updateWalls])
 
   const handleAPMount = useCallback((value) => {
-    updateAPs(activeFloorId, apIds, { mountType: value })
-  }, [activeFloorId, apIds, updateAPs])
+    // 57-27: per AP -- each one's tilt follows the mount only if untouched.
+    selectedAPs.forEach((a) => {
+      updateAPs(activeFloorId, [a.id], { mountType: value, ...tiltPatchForMountChange(a, value) })
+    })
+  }, [activeFloorId, selectedAPs, updateAPs])
 
   // Channel section: disabled when APs span multiple bands (they share one dropdown).
   const channelEntriesForBand = apFreq && apFreq !== MIXED

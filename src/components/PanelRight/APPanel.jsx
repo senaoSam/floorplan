@@ -13,6 +13,7 @@ import PatternPreview3D from './PatternPreview3D'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { TextInput, NumberInput, Select } from './_shared/PanelControls'
 import { wrapAzimuth } from '@/utils/angle'
+import { tiltPatchForModeChange, tiltPatchForMountChange } from '@/utils/apMount'
 import './_shared/shared.sass'
 import './APPanel.sass'
 
@@ -143,6 +144,7 @@ function APPanel({ floorId, apId }) {
     if (mode === 'custom' && ap.patternId == null) {
       patch.patternId = DEFAULT_PATTERN_ID
     }
+    Object.assign(patch, tiltPatchForModeChange(ap, mode))   // 57-27
     updateAP(floorId, apId, patch)
   }, [floorId, apId, ap, updateAP])
 
@@ -321,7 +323,7 @@ function APPanel({ floorId, apId }) {
               <button
                 key={o.value}
                 className={`ap-panel__pill${ap.mountType === o.value ? ' ap-panel__pill--active' : ''}`}
-                onClick={() => updateAP(floorId, apId, { mountType: o.value })}
+                onClick={() => updateAP(floorId, apId, { mountType: o.value, ...tiltPatchForMountChange(ap, o.value) })}
               >
                 {o.label}
               </button>
