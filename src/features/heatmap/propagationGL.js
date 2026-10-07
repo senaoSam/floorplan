@@ -1207,7 +1207,8 @@ float rssiWithReflections(vec2 rx, float rxZ) {
 
       float leg1 = accumulateWallLossExcept(uApPos.xy, uApPos.z, reflPt, reflZ, w);
       float leg2 = accumulateWallLossExcept(reflPt, reflZ, rx, rxZ, w);
-      float plRef = pathLossDb(dTot, uCenterMHz) + leg1 + leg2;
+      // 57-24: 3D length of the unfolded path (mirrors propagation.js).
+      float plRef = pathLossDb(length(vec2(dTot, uApPos.z - rxZ)), uCenterMHz) + leg1 + leg2;
 
       // |amp·rough·Γ_p|² per channel, amp² = P_rx / 2.
       float rxDbRef = uTxDbm + apGainDbi(reflPt, reflZ) + uRxGainDbi - plRef;
@@ -1271,7 +1272,8 @@ float rssiWithReflections(vec2 rx, float rxZ) {
       vec2 s2 = accumulateWallLossWithHits(corner, cZM, rx, rxZ, corner);
       if (s1.y > 1.0 || s2.y > 1.0) continue;
 
-      float plDiff = pathLossDb(dTotC, uCenterMHz) + s1.x + s2.x + diff;
+      // 57-24: 3D length of the path over the corner (mirrors propagation.js).
+      float plDiff = pathLossDb(length(vec2(dTotC, uApPos.z - rxZ)), uCenterMHz) + s1.x + s2.x + diff;
       float rxDbD  = uTxDbm + apGainDbi(corner, cZM) + uRxGainDbi - plDiff;
       powerSum += dbToLin(rxDbD);
     }

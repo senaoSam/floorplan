@@ -485,7 +485,10 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       if (hasZ && (reflZM < w.zLoM || reflZM > w.zHiM)) continue
       const leg1 = accumulateWallLoss(ap.pos, reflPt, walls, apZM, reflZM, fOver24, w)
       const leg2 = accumulateWallLoss(reflPt, rx, walls, reflZM, rxZM, fOver24, w)
-      const dTot = d1 + d2
+      // 57-24: the unfolded (image-source) path is a straight 3D line --
+      // horizontal length d1 + d2, vertical apZM - rxZM -- same as the direct
+      // path's 3D distance.
+      const dTot = Math.hypot(d1 + d2, apZM - rxZM)
 
       const plRef = pathLossDb(dTot, freqMhz) + leg1.totalLoss + leg2.totalLoss
       paths.push(makeReflectedPath(ap.txDbm, apGainDbi(ap, reflPt, reflZM), plRef, gPerp, gPara, rough))
@@ -510,7 +513,9 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       if (s1.hits > 1 || s2.hits > 1) continue
       const diff = cornerDiffractionDb(ap.pos, rx, c, wavelength)
       if (!isFinite(diff) || diff > 40) continue
-      const dTot = d1 + d2
+      // 57-24: 3D length of the path over the corner (cZM lies on the
+      // unfolded straight line, as for reflections).
+      const dTot = Math.hypot(d1 + d2, apZM - rxZM)
       const plDiff = pathLossDb(dTot, freqMhz) + s1.totalLoss + s2.totalLoss + diff
       paths.push(makeScalarPath(ap.txDbm, apGainDbi(ap, c, cZM), plDiff))
     }
