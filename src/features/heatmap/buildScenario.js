@@ -246,7 +246,10 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
   // from the editor store here (not a parameter) so every scenario reader --
   // heatmap, hover, Client View, planners -- applies the same cap.
   const domainId = useEditorStore.getState().regulatoryDomain
-  const buildApEntry = (ap, posMeters, elevationM) => {
+  // azOffsetDeg (57-26): rotation of the AP's floor relative to the active
+  // floor, so a cross-floor directional AP keeps pointing where it does on
+  // its own plan (its position already goes through the same transform).
+  const buildApEntry = (ap, posMeters, elevationM, azOffsetDeg = 0) => {
     const rad = resolveApRadiation(ap, domainId)
     return {
       id: ap.id,
@@ -267,7 +270,7 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
       // derives each AP's spectrum as centerMHz +- width/2 from this.
       centerMHz: channelBlockCenterMHz(ap.frequency ?? 5, ap.channel ?? 36, ap.channelWidth ?? 20),
       antennaMode: ap.antennaMode ?? 'omni',
-      azimuthDeg: ap.azimuth ?? 0,
+      azimuthDeg: (ap.azimuth ?? 0) + azOffsetDeg,
       tiltDeg: ap.tilt ?? 0,
       beamwidthDeg: ap.beamwidth ?? 60,
       patternId: ap.patternId ?? null,
@@ -282,7 +285,10 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
       let pos = { x: ap.posPx.x * apPxToM, y: ap.posPx.y * apPxToM }
       const t = relAlignM(ap.floorRef, apPxToM)
       if (t) pos = applyAlignMatrix(t, pos.x, pos.y)
-      return buildApEntry(ap, pos, ap.elevationM)
+      // t is a similarity (a, b) = s·(cos θ, sin θ); canvas azimuth (+x = 0°,
+      // +y = 90°) rotates by the same θ.
+      const azOffsetDeg = t ? Math.atan2(t.b, t.a) * 180 / Math.PI : 0
+      return buildApEntry(ap, pos, ap.elevationM, azOffsetDeg)
     })
   } else {
     // Planar path: every AP lives on the supplied `floor`.
