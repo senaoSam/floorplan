@@ -363,7 +363,7 @@ function pointInPolyFlat(x, y, pts) {
 // 57-18: slabs are treated as concrete for the refraction / Fresnel terms
 // (ITU-R P.2040 concrete eta' = 5.24) -- see obliqueTerms.
 const SLAB_EPS_R = 5.24
-function accumulateSlabLoss(apPos, apZM, rxPos, rxZM, boundaries) {
+function accumulateSlabLoss(apPos, apZM, rxPos, rxZM, boundaries, fOver24 = 1) {
   if (!boundaries || boundaries.length === 0) return 0
   const zLo = Math.min(apZM, rxZM)
   const zHi = Math.max(apZM, rxZM)
@@ -384,7 +384,10 @@ function accumulateSlabLoss(apPos, apZM, rxPos, rxZM, boundaries) {
     for (const poly of (b.bypassHoles ?? [])) {
       if (pointInPolyFlat(xAt, yAt, poly)) { bypassed = true; break }
     }
-    if (!bypassed) loss += b.slabDb * secT + extraDb
+    // 57-25: slabDb is the 2.4 GHz anchor, scaled by the slab material's
+    // lossB exactly like wallLossOblique (metal: lossB 0, flat).
+    const fAdj = b.slabLossB ? Math.pow(fOver24, b.slabLossB) : 1
+    if (!bypassed) loss += b.slabDb * fAdj * secT + extraDb
   }
   return loss
 }
@@ -424,7 +427,7 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   // Absolute Z of AP / rx; 0 when caller didn't provide elevation data.
   const apZM = ap.zM ?? 0
   const rxZM = rx.zM ?? 0
-  const slabLossDirect = accumulateSlabLoss(ap.pos, apZM, rx, rxZM, boundaries)
+  const slabLossDirect = accumulateSlabLoss(ap.pos, apZM, rx, rxZM, boundaries, fOver24)
   // Geometry-only same-floor test: "no slab between AP and rx". Distinct
   // from slabLossDirect === 0, which would also be true when all slabs
   // happen to have 0 dB attenuation.

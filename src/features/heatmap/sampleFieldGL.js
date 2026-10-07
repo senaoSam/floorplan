@@ -85,7 +85,7 @@ function buildGeomSig(gl, scenario, boundaries, opts, {
     boundaries.length,
     // boundary elevations + slab dB (count alone is insufficient: same
     // count, different elevation/attenuation changes the cross-floor leg).
-    boundaries.map((b) => `${b.elevationM ?? b.yM ?? 0}:${b.slabDb ?? b.slabAttenuationDb ?? 0}`).join(','),
+    boundaries.map((b) => `${b.elevationM ?? b.yM ?? 0}:${b.slabDb ?? b.slabAttenuationDb ?? 0}:${b.slabLossB ?? 0}`).join(','),
     // 53-G2 (P1-8): floor-slab hole polygons are a real physical input — a
     // crossing inside a hole skips the slab loss entirely. Without them here,
     // moving/adding/deleting a FloorHole left the heatmap completely

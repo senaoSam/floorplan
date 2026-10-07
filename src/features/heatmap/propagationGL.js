@@ -52,8 +52,9 @@ void main() {
 //                   the material is wideband-flat (e.g. metal) — shader
 //                   short-circuits the pow().
 //
-// Slab boundary layout in `uSlabs` (RGBA32F, 1 texel per boundary):
-//   .rgba = (yM, slabDb, holeStart, holeCount)
+// Slab boundary layout in `uSlabs` (RGBA32F, 1 column per boundary, 2 rows):
+//   row 0 .rgba = (yM, slabDb, holeStart, holeCount)
+//   row 1 .r    = slabLossB (57-25: frequency exponent of the slab material)
 //   holeStart/holeCount index into uHolePoly (RGBA32F, points stored as
 //   (x, y, _, _) with -1 sentinel between polygons).
 //
@@ -826,6 +827,7 @@ bool pointInAnyPoly(vec2 q, int start, int count) {
 // Slab loss on the AP→rx ray, with FloorHole bypass and sec(θ) magnification.
 float accumulateSlabLoss(vec2 ap, float apZ, vec2 rx, float rxZ) {
   if (uSlabCount == 0) return 0.0;
+  float fOver24 = (uCenterMHz / 1000.0) / 2.4;   // 57-25
   float zLo = min(apZ, rxZ);
   float zHi = max(apZ, rxZ);
   float dz = rxZ - apZ;
@@ -850,7 +852,10 @@ float accumulateSlabLoss(vec2 ap, float apZ, vec2 rx, float rxZ) {
     // per boundary now, so a hit on any ring bypasses the whole slab -- the
     // JS semantics the old multi-texel repack could not express.
     if (holeCount > 0 && pointInAnyPoly(cross, holeStart, holeCount)) bypassed = true;
-    if (!bypassed) loss += slabDb * slabOb.x + slabOb.y;
+    // 57-25: slabDb is the 2.4 GHz anchor, scaled by the slab material's lossB.
+    float lossB = texelFetch(uSlabs, ivec2(s, 1), 0).r;
+    float fAdj = lossB == 0.0 ? 1.0 : pow(fOver24, lossB);
+    if (!bypassed) loss += slabDb * fAdj * slabOb.x + slabOb.y;
   }
   return loss;
 }
@@ -1650,7 +1655,7 @@ bool pointInAnyPoly(vec2 q, int start, int count) {
   return inside;
 }
 
-float accumulateSlabLossField(vec2 ap, float apZ, vec2 rx, float rxZ) {
+float accumulateSlabLossField(vec2 ap, float apZ, vec2 rx, float rxZ, float fOver24) {
   if (uSlabCount == 0) return 0.0;
   float zLo = min(apZ, rxZ);
   float zHi = max(apZ, rxZ);
@@ -1672,7 +1677,10 @@ float accumulateSlabLossField(vec2 ap, float apZ, vec2 rx, float rxZ) {
     vec2 cross = ap + d2 * t;
     bool bypassed = false;
     if (holeCount > 0 && pointInAnyPoly(cross, holeStart, holeCount)) bypassed = true;
-    if (!bypassed) loss += slabDb * slabOb.x + slabOb.y;
+    // 57-25: slabDb is the 2.4 GHz anchor, scaled by the slab material's lossB.
+    float lossB = texelFetch(uSlabs, ivec2(s, 1), 0).r;
+    float fAdj = lossB == 0.0 ? 1.0 : pow(fOver24, lossB);
+    if (!bypassed) loss += slabDb * fAdj * slabOb.x + slabOb.y;
   }
   return loss;
 }
@@ -1840,7 +1848,7 @@ void main() {
 
     float fOver24 = (centerMHz / 1000.0) / 2.4;
     float wallLoss = accumulateWallLossField(apPos.xy, apPos.z, rx, rxZ, fOver24);
-    float slabLoss = accumulateSlabLossField(apPos.xy, apPos.z, rx, rxZ);
+    float slabLoss = accumulateSlabLossField(apPos.xy, apPos.z, rx, rxZ, fOver24);
     float gain = apGainAt(apPos.xy, apPos.z, rx, rxZ, antMode, antGain, azDeg, bwDeg, tiltDeg, patSlot);
     float pl = pathLossDbField(dDir, centerMHz) + wallLoss + slabLoss;
     float rxDb = txDbm + gain + uRxGainDbi - pl;
@@ -1906,7 +1914,7 @@ void main() {
 
     float fOver24 = (centerMHz / 1000.0) / 2.4;
     float wallLoss = accumulateWallLossField(apPos.xy, apPos.z, rx, rxZ, fOver24);
-    float slabLoss = accumulateSlabLossField(apPos.xy, apPos.z, rx, rxZ);
+    float slabLoss = accumulateSlabLossField(apPos.xy, apPos.z, rx, rxZ, fOver24);
     float gain = apGainAt(apPos.xy, apPos.z, rx, rxZ, antMode, antGain, azDeg, bwDeg, tiltDeg, patSlot);
     float pl = pathLossDbField(dDir, centerMHz) + wallLoss + slabLoss;
     float rxDb = txDbm + gain + uRxGainDbi - pl;
@@ -2819,9 +2827,10 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gridListWidth = listWidth
   }
 
-  // boundaries: [{ yM, slabDb, bypassHoles: [flatPolyArray, …] }]
+  // boundaries: [{ yM, slabDb, slabLossB, bypassHoles: [flatPolyArray, …] }]
   //
-  // ONE slab texel per boundary: [yM, slabDb, vertStart, vertCount], where
+  // ONE slab column per boundary: row 0 [yM, slabDb, vertStart, vertCount],
+  // row 1 [slabLossB, 0, 0, 0] (57-25), where
   // (vertStart, vertCount) spans ALL of that boundary's hole vertices packed
   // back-to-back in uHolePoly. Each vertex texel is (x, y, ringId, _) — the
   // ringId lets the shader tell one polygon from the next inside a single
@@ -2837,7 +2846,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // 61.24 dB divergence from JS across 44 cells, while a single hole matched
   // at 0.000 dB.
   function uploadSlabs(boundaries) {
-    const slabRecords = []   // each: [yM, slabDb, vertStart, vertCount]
+    const slabRecords = []   // each: [yM, slabDb, vertStart, vertCount, slabLossB]
     const polyValues = []    // RGBA32F payload: (x, y, ringId, 0)
 
     let cursor = 0
@@ -2849,19 +2858,20 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
         polyValues.push(...verts)
         vertCount += polys[p].length / 2
       }
-      slabRecords.push([b.yM, b.slabDb ?? 0, cursor, vertCount])
+      slabRecords.push([b.yM, b.slabDb ?? 0, cursor, vertCount, b.slabLossB ?? 0])
       cursor += vertCount
     }
 
     // ---- slabs texture ----
-    const slabFlat = new Float32Array(Math.max(1, slabRecords.length) * 4)
+    const slabW = Math.max(1, slabRecords.length)
+    const slabFlat = new Float32Array(slabW * 2 * 4)   // 2 rows (57-25)
     for (let i = 0; i < slabRecords.length; i++) {
       slabFlat[i * 4    ] = slabRecords[i][0]
       slabFlat[i * 4 + 1] = slabRecords[i][1]
       slabFlat[i * 4 + 2] = slabRecords[i][2]
       slabFlat[i * 4 + 3] = slabRecords[i][3]
+      slabFlat[(slabW + i) * 4] = slabRecords[i][4]
     }
-    const slabW = Math.max(1, slabRecords.length)
 
     // ---- hole polygon vertices ----
     const polyFlat = new Float32Array(Math.max(1, polyValues.length / 4) * 4)
@@ -2891,7 +2901,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     slabsSig = sig
 
     gl.bindTexture(gl.TEXTURE_2D, slabsTex)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, slabW, 1, 0, gl.RGBA, gl.FLOAT, slabFlat)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, slabW, 2, 0, gl.RGBA, gl.FLOAT, slabFlat)
     gl.bindTexture(gl.TEXTURE_2D, holePolyTex)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, polyW, polyH, 0, gl.RGBA, gl.FLOAT, padded)
 

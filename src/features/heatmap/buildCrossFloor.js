@@ -1,4 +1,5 @@
 import { computeFloorElevations } from '@/utils/floorStacking'
+import { MATERIAL_LIST, DEFAULT_FLOOR_SLAB_MATERIAL_ID } from '@/constants/materials'
 import { buildScenario } from './buildScenario'
 
 // Cross-floor scenario assembly — extracted from heatmapAdapter (Phase 48)
@@ -53,6 +54,9 @@ export function buildCrossFloorData({
     id: f.id,
     elevationM: elevations[f.id] ?? 0,
     slabDb: f.floorSlabAttenuationDb ?? 0,
+    // 57-25: the slab material's ITU frequency exponent -- slabDb is the
+    // 2.4 GHz anchor and scales like a wall of the same material.
+    slabLossB: MATERIAL_LIST.find((m) => m.id === (f.floorSlabMaterialId ?? DEFAULT_FLOOR_SLAB_MATERIAL_ID))?.lossB ?? 0,
     scale: f.scale,
     floorRef: f,
     holes: (f.scale ? (holesByFloor[f.id] ?? []) : []).map((h) => ({

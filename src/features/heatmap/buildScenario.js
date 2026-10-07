@@ -373,6 +373,7 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
       floorBoundaries.push({
         yM: stack[i + 1].elevationM,
         slabDb: stack[i].slabDb ?? 0,
+        slabLossB: stack[i].slabLossB ?? 0,   // 57-25
         bypassHoles,
       })
     }
