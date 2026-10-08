@@ -14,10 +14,11 @@ import { buildScenario } from './buildScenario'
 import { buildFloorScenario } from './buildCrossFloor'
 import { sampleField } from './sampleField'
 import { apsShareSpectrum } from './frequency'
+import { rssiFromAp } from './propagation'
+import { DEFAULT_MIN_INTERFERING_RSSI_DBM } from './rfConstants'
 
 const GRID_STEP_M = 1.0   // coarse enough to run debounced without a GPU
 const GAP_GRID = 8        // 8×8 coarse cells to locate the densest blind area
-const CONFLICT_DIST_M = 12   // physical interference radius (metres)
 
 // 52-C6: cost is cells × APs, and this runs SYNCHRONOUSLY on the main thread —
 // it never joined the async pipeline Phase 46 built for the heatmap. A fixed
@@ -57,27 +58,28 @@ function fitQualityStep(scenario, apCount) {
 
 // Detect co-channel conflicts: two APs whose spectra overlap (same band AND
 // intersecting frequency ranges — so ch36@80 vs ch44@20 counts, not just exact
-// channel matches) and that sit within CONFLICT_DIST_M metres of each other.
-// Distance uses the floor scale (px/m) so the radius tracks the plan's scale
-// instead of a fixed canvas-px number. (A,B) pairs are de-duped — each
-// unordered pair is reported once.
-export function detectChannelConflicts(aps, scale) {
-  const list = aps ?? []
+// channel matches) and that HEAR each other. 57-33: "hear" is the engine's
+// AP-to-AP RSSI (walls, slabs, antenna pattern, TX / EIRP cap; direct path),
+// the louder of the two directions, at or above the min interfering RSSI --
+// the same -82 dBm rule the heatmap's SINR / CCI and Client View use. It used
+// to be a fixed 12 m radius that ignored walls. Only `apIds` (this floor's APs)
+// are paired; each unordered pair is reported once.
+export function detectChannelConflicts(scenario, apIds) {
+  const thr = scenario.rf?.minInterfDbm ?? DEFAULT_MIN_INTERFERING_RSSI_DBM
+  const list = scenario.aps.filter((a) => apIds.has(a.id))
+  const opts = { maxReflOrder: 0, enableDiffraction: false, floorBoundaries: scenario.floorBoundaries ?? null }
+  const hear = (from, to) => rssiFromAp(from, { x: to.pos.x, y: to.pos.y, zM: to.zM ?? 0 },
+    scenario.walls, scenario.corners, opts).rssiDbm
   const conflicts = []
-  // scale is px per metre; fall back to a pure-px radius when unset so the
-  // check still runs before a scale is calibrated.
-  const distPx = scale ? CONFLICT_DIST_M * scale : 300
-  const r2 = distPx * distPx
   for (let i = 0; i < list.length; i++) {
     for (let j = i + 1; j < list.length; j++) {
       const a = list[i]
       const b = list[j]
       if (a.channel == null || b.channel == null) continue
       if (!apsShareSpectrum(a, b)) continue
-      const dx = a.x - b.x
-      const dy = a.y - b.y
-      if (dx * dx + dy * dy > r2) continue
-      conflicts.push({ apA: a.id, apB: b.id, band: a.frequency, channel: a.channel })
+      const rssiDbm = Math.max(hear(a, b), hear(b, a))
+      if (rssiDbm < thr) continue
+      conflicts.push({ apA: a.id, apB: b.id, band: a.frequency, channel: a.channel, rssiDbm })
     }
   }
   return conflicts
@@ -91,9 +93,13 @@ export function detectChannelConflicts(aps, scale) {
 // receiver at 1.0 m. Without them it falls back to the old planar scenario
 // (floor-level receiver, this floor only). apCount / channel conflicts stay
 // per-floor either way.
+// 57-33: `bandFilter` ('all' | '2.4' | '5' | '6') restricts the coverage /
+// secondary statistics to the heatmap's band, so the numbers match the map the
+// user is looking at. Channel conflicts always cover every band.
 export function computePlanQualityStats({
   floor, walls, aps, scopes, thresholdDbm = -67,
   floors = null, apsByFloor = null, wallsByFloor = null, holesByFloor = null,
+  bandFilter = 'all',
 }) {
   const apList = aps ?? []
   const scenario = floors
@@ -108,7 +114,10 @@ export function computePlanQualityStats({
     : buildScenario(floor, walls ?? [], apList, scopes ?? [])
   if (!scenario) return null
 
-  const channelConflicts = detectChannelConflicts(apList, floor.scale)
+  const channelConflicts = detectChannelConflicts(scenario, new Set(apList.map((a) => a.id)))
+  if (bandFilter && bandFilter !== 'all') {
+    scenario.aps = scenario.aps.filter((a) => String(a.frequency) === bandFilter)
+  }
   // Other floors' APs can cover this floor, so "no signal at all" means no
   // AP in the scenario, not just none on this floor.
   if (scenario.aps.length === 0) {

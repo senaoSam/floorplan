@@ -5,6 +5,8 @@ import { useAPStore } from '@/store/useAPStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
+import { useHeatmapStore } from '@/store/useHeatmapStore'
+import { useClientViewStore } from '@/store/useClientViewStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { getSceneRefs } from '@/render/sceneRegistry'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
@@ -50,6 +52,10 @@ function DevicePlanningPanel() {
   // holes must retrigger it too.
   const wallsByAll   = useWallStore((s) => s.wallsByFloor)
   const holesByFloor = useFloorHoleStore((s) => s.floorHolesByFloor)
+  // 57-33: stats follow the heatmap's band; conflicts use Client View's min
+  // interfering RSSI (read via the scenario), so both retrigger the sweep.
+  const bandFilter   = useHeatmapStore((s) => s.bandFilter) || 'all'
+  const minInterf    = useClientViewStore((s) => s.minInterferingRssiDbm)
 
   // Coverage design target + threshold live on the panel (planning aid, not the
   // Client-View coverage semantics), defaulting to the -67 dBm industry target.
@@ -74,10 +80,11 @@ function DevicePlanningPanel() {
         apsByFloor,
         wallsByFloor: useWallStore.getState().wallsByFloor,
         holesByFloor: useFloorHoleStore.getState().floorHolesByFloor,
+        bandFilter,
       }))
     }, QUALITY_DEBOUNCE_MS)
     return () => { if (qualityTimerRef.current) clearTimeout(qualityTimerRef.current) }
-  }, [collapsed, floor, hasScale, walls, aps, scopes, thresholdDbm, floors, apsByFloor, wallsByAll, holesByFloor])
+  }, [collapsed, floor, hasScale, walls, aps, scopes, thresholdDbm, floors, apsByFloor, wallsByAll, holesByFloor, bandFilter, minInterf])
 
   // 52-D2: this was the button that froze the UI with zero feedback — the
   // tester hit it, saw nothing move for seconds, and assumed a crash.
@@ -193,7 +200,8 @@ function DevicePlanningPanel() {
                   <span className={`device-planning__hero-num${meetsTarget ? '' : ' device-planning__hero-num--fail'}`}>
                     {fmtPct(quality.coveragePct)}
                   </span>
-                  <span className="device-planning__hero-label">已涵蓋（≥ {thresholdDbm} dBm）</span>
+                  {/* 57-33: stats follow the heatmap's band filter. */}
+                  <span className="device-planning__hero-label">已涵蓋（≥ {thresholdDbm} dBm{bandFilter !== 'all' ? `，${bandFilter} GHz` : ''}）</span>
                 </div>
 
                 <div className="device-planning__bar" title={`已涵蓋 ${fmtPct(quality.coveragePct)}、盲區 ${fmtPct(quality.blindPct)}`}>
@@ -229,7 +237,7 @@ function DevicePlanningPanel() {
                     <span>雙重涵蓋（≥2 台）</span>
                     <b>{fmtPct(quality.secondaryCoveragePct ?? 0)}</b>
                   </div>
-                  <div className="device-planning__row" title="同頻段、頻譜重疊、且距離過近的 AP 對數">
+                  <div className="device-planning__row" title={`同頻段、頻譜重疊、且彼此聽得到（AP 間訊號 ≥ ${minInterf} dBm，即 Client View 的最小干擾 RSSI）的 AP 對數`}>
                     <span>頻道衝突</span>
                     <b className={conflictCount > 0 ? 'device-planning__val--warn' : ''}>{conflictCount} 對</b>
                   </div>
