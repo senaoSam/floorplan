@@ -14,7 +14,7 @@ import { buildScenario } from './buildScenario'
 import { buildFloorScenario } from './buildCrossFloor'
 import { sampleField } from './sampleField'
 import { apsShareSpectrum } from './frequency'
-import { rssiFromAp } from './propagation'
+import { apToApRssiDbm } from './apHearing'
 import { DEFAULT_MIN_INTERFERING_RSSI_DBM } from './rfConstants'
 
 const GRID_STEP_M = 1.0   // coarse enough to run debounced without a GPU
@@ -67,9 +67,6 @@ function fitQualityStep(scenario, apCount) {
 export function detectChannelConflicts(scenario, apIds) {
   const thr = scenario.rf?.minInterfDbm ?? DEFAULT_MIN_INTERFERING_RSSI_DBM
   const list = scenario.aps.filter((a) => apIds.has(a.id))
-  const opts = { maxReflOrder: 0, enableDiffraction: false, floorBoundaries: scenario.floorBoundaries ?? null }
-  const hear = (from, to) => rssiFromAp(from, { x: to.pos.x, y: to.pos.y, zM: to.zM ?? 0 },
-    scenario.walls, scenario.corners, opts).rssiDbm
   const conflicts = []
   for (let i = 0; i < list.length; i++) {
     for (let j = i + 1; j < list.length; j++) {
@@ -77,7 +74,7 @@ export function detectChannelConflicts(scenario, apIds) {
       const b = list[j]
       if (a.channel == null || b.channel == null) continue
       if (!apsShareSpectrum(a, b)) continue
-      const rssiDbm = Math.max(hear(a, b), hear(b, a))
+      const rssiDbm = apToApRssiDbm(scenario, a, b)
       if (rssiDbm < thr) continue
       conflicts.push({ apA: a.id, apB: b.id, band: a.frequency, channel: a.channel, rssiDbm })
     }

@@ -11,6 +11,7 @@ import { useViewportStore } from '@/store/useViewportStore'
 import { getSceneRefs } from '@/render/sceneRegistry'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
 import { computePlanQualityStats } from '@/features/heatmap/planQuality'
+import { storeChannelNeighbors } from '@/features/heatmap/channelNeighbors'
 import { NumberInput } from '@/components/PanelRight/_shared/PanelControls'
 import Icon from '@/components/Icon/Icon'
 import { COVERAGE_THRESHOLD_DBM, COVERAGE_TARGET_PCT } from '@/constants/coverage'
@@ -107,7 +108,8 @@ function DevicePlanningPanel() {
     setChannelBusy(true)
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
     try {
-      const assignments = greedyChannelAssign(aps, regulatoryDomain)
+      // 57-34: neighbours = APs that hear each other (not a canvas-px radius).
+      const assignments = greedyChannelAssign(aps, regulatoryDomain, storeChannelNeighbors(activeFloorId, aps))
       const updated = aps.map((ap) => {
         const a = assignments.get(ap.id)
         return a ? { ...ap, channel: a.channel } : ap

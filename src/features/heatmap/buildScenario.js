@@ -180,7 +180,19 @@ function collectCorners(segments) {
 //          When crossFloor is provided, aps includes all floors' APs with
 //          absoluteZ baked in, and floorStack lets propagation compute how
 //          many slabs a given ray crosses.
-export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null) {
+// 57-34: the regulatory domain and the RF settings (noise floor / min
+// interfering RSSI) normally come from the editor / Client View stores. A Web
+// Worker has its own (default) store instances, so planners running there pass
+// them in as `env` -- captured on the main thread with currentScenarioEnv().
+export function currentScenarioEnv() {
+  const cv = useClientViewStore.getState()
+  return {
+    regulatoryDomain: useEditorStore.getState().regulatoryDomain,
+    rf: { noiseByBand: { ...cv.noiseFloor }, minInterfDbm: cv.minInterferingRssiDbm },
+  }
+}
+
+export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null, env = null) {
   if (!floor || !floor.scale || !floor.imageWidth || !floor.imageHeight) return null
   const pxToM = 1 / floor.scale
 
@@ -246,7 +258,7 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
   // 57-23: peak gain + EIRP-capped TX for the current regulatory domain. Read
   // from the editor store here (not a parameter) so every scenario reader --
   // heatmap, hover, Client View, planners -- applies the same cap.
-  const domainId = useEditorStore.getState().regulatoryDomain
+  const domainId = env?.regulatoryDomain ?? useEditorStore.getState().regulatoryDomain
   // azOffsetDeg (57-26): rotation of the AP's floor relative to the active
   // floor, so a cross-floor directional AP keeps pointing where it does on
   // its own plan (its position already goes through the same transform).
@@ -402,7 +414,7 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
     floorElevationM: activeElevationM,
     // 57-28: noise floor per band + min interfering RSSI for SINR/SNR/CCI --
     // the Client View settings, so the heatmap and Client View agree.
-    rf: {
+    rf: env?.rf ?? {
       noiseByBand: { ...useClientViewStore.getState().noiseFloor },
       minInterfDbm: useClientViewStore.getState().minInterferingRssiDbm,
     },

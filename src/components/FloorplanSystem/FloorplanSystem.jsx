@@ -5,6 +5,7 @@ import { attachModeAdapter } from '@/render/modeAdapter'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { collectMarqueeHits } from '@/features/marquee/marqueeHits'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
+import { storeChannelNeighbors } from '@/features/heatmap/channelNeighbors'
 import { attachFloorImageLayer } from '@/features/floorImage/floorImageLayer'
 import { attachWallsLayer } from '@/features/walls/wallsLayer'
 import { attachAPsLayer } from '@/features/aps/apsLayer'
@@ -237,8 +238,11 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
               const existing = useAPStore.getState().apsByFloor[fid] ?? []
               // 57-16: carry the width the AP will be created with — the planner
               // picks bonded blocks per width.
-              const probe = [...existing, { id: newId, x, y, frequency: band, channelWidth: width }]
-              const assignments = greedyChannelAssign(probe, editor.regulatoryDomain)
+              // 57-34: plus the install height / TX it will get, for the
+              // hearing-based neighbour test.
+              const probe = [...existing, { id: newId, x, y, z: 2.4, txPower: getDefaultTxPower(band), frequency: band, channelWidth: width }]
+              // 57-34: neighbours = APs that hear each other.
+              const assignments = greedyChannelAssign(probe, editor.regulatoryDomain, storeChannelNeighbors(fid, probe))
               const picked = assignments.get(newId)
               if (picked) channel = picked.channel
             }

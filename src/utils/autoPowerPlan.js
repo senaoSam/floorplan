@@ -112,8 +112,10 @@ function maxTxFor(ap) {
 
 // 建立 scenario 一次（walls / corners / scope mask 不會隨 tx 改變）。
 // 回傳 { scenario, baseAps } — baseAps 是 scenario.aps 同序的快照。
-function buildBaseScenario(floor, walls, aps, scopes) {
-  const scenario = buildScenario(floor, walls, aps, scopes, null)
+// 57-34: env = regulatory domain + RF settings from the main thread (this
+// runs in a worker, whose own stores only hold defaults).
+function buildBaseScenario(floor, walls, aps, scopes, env) {
+  const scenario = buildScenario(floor, walls, aps, scopes, null, env)
   if (!scenario) return null
   // scenario.aps 跟 aps 同序（buildScenario 走 map）。保留參考供 evaluate 改 txDbm。
   return { scenario, baseAps: scenario.aps }
@@ -446,6 +448,7 @@ export async function runAutoPowerPlan({
   apIdsToPlan,
   userOpts = {},
   onProgress = null,
+  env = null,
 }) {
   const opts = { ...DEFAULTS, ...userOpts }
   const planSet = new Set(apIdsToPlan)
@@ -460,7 +463,7 @@ export async function runAutoPowerPlan({
 
   // 三個起點：max / mid / min。walls / corners / scope 不隨 tx 改變 —
   // baseScenario（含 in-scope 格子快取）建一次、三個起點共用。
-  const baseScenario = buildBaseScenario(floor, walls, aps, scopes)
+  const baseScenario = buildBaseScenario(floor, walls, aps, scopes, env)
   if (!baseScenario) {
     return { aborted: false, error: 'invalid-floor', txMap: null, score: null }
   }

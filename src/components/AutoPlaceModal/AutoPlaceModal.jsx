@@ -6,6 +6,8 @@ import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useAutoPlaceStore } from '@/store/useAutoPlaceStore'
+import { useFloorHoleStore } from '@/store/useFloorHoleStore'
+import { currentScenarioEnv } from '@/features/heatmap/buildScenario'
 import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
 import './AutoPlaceModal.sass'
 
@@ -192,6 +194,14 @@ function AutoPlaceModal({ open, onClose }) {
           domainId: regulatoryDomain,
           indoorOnly,
         },
+        // 57-34: same cross-floor scenario as the heatmap (image data stripped
+        // -- the engine needs geometry only), plus the main thread's
+        // regulatory / RF settings (the worker's stores hold defaults).
+        floors: useFloorStore.getState().floors.map(({ imageUrl, ...f }) => f),
+        apsByFloor: useAPStore.getState().apsByFloor,
+        wallsByFloor: useWallStore.getState().wallsByFloor,
+        holesByFloor: useFloorHoleStore.getState().floorHolesByFloor,
+        env: currentScenarioEnv(),
       },
     })
   }, [floor, walls, aps, scopes, mode, band, targetRssi, targetCoverage, apCount,

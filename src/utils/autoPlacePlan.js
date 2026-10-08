@@ -19,6 +19,9 @@
 // 評分格與 scope clip 與 autoPowerPlan 同款（自己 clip，引擎不排除 scope 外）。
 
 import { buildScenario } from '@/features/heatmap/buildScenario'
+import { buildFloorScenario } from '@/features/heatmap/buildCrossFloor'
+import { resolveApRadiation } from '@/features/heatmap/apRadiation'
+import { makeApHearingFn } from '@/features/heatmap/apHearing'
 import { rssiFromAp } from '@/features/heatmap/propagation'
 import { channelBlockCenterMHz } from '@/features/heatmap/frequency'
 import { getDefaultTxPower } from '@/constants/apModels'
@@ -32,6 +35,9 @@ const DEFAULTS = {
   mode: 'fresh',          // 'fresh' | 'fixed' | 'fill'
   band: 5,
   apCount: 4,             // fixed 模式的 N
+  // 57-34: -65 on purpose -- 2 dB above the -67 coverage target the panels
+  // use (constants/coverage), as design margin; it is also Hamina's default
+  // "High" (pass) threshold. The modal lets the user change it.
   targetRssiDbm: -65,
   targetCoverage: 0.95,   // fresh / fill 的停止門檻（in-scope 格子比例）
   maxAPs: 60,             // fresh / fill 安全上限（避免 targetCoverage 物理上達不到時失控）
@@ -65,14 +71,20 @@ function candidateOk(x, y, maskFn) {
 }
 
 // 候選/現有 AP 的 scenario 端 entry（meter 空間，鏡照 buildScenario.buildApEntry）。
-function designApEntry(band, pos, opts) {
+// 57-34: TX / gain resolved exactly like the AP this candidate becomes (Generic
+// model gain, EIRP cap), and mounted at the floor's absolute elevation + 2.4 m.
+function designApEntry(band, pos, opts, floorElevationM = 0) {
   const ch = allowedChannels(opts.domainId, band)[0] ?? (band === 5 ? 36 : 1)
+  const rad = resolveApRadiation({
+    frequency: band, channel: ch, channelWidth: DEFAULT_CHANNEL_WIDTH[band] ?? 20,
+    txPower: getDefaultTxPower(band), antennaMode: 'omni', modelId: null,
+  }, opts.domainId)
   return {
     id: 'cand',
     pos,
-    zM: 2.4,
-    txDbm: getDefaultTxPower(band),
-    antGainDbi: undefined,
+    zM: floorElevationM + 2.4,
+    txDbm: rad.txDbm,
+    antGainDbi: rad.peakGainDbi,
     frequency: band,
     channel: ch,
     channelWidth: DEFAULT_CHANNEL_WIDTH[band] ?? 20,
@@ -97,6 +109,14 @@ export async function runAutoPlacePlan({
   scopes,
   userOpts = {},
   onProgress = null,
+  // 57-34: building data -> the same cross-floor scenario as the heatmap /
+  // plan-quality panel (receiver 1.0 m, other floors' APs / walls / slabs);
+  // env -> regulatory domain + RF settings from the main thread.
+  floors = null,
+  apsByFloor = null,
+  wallsByFloor = null,
+  holesByFloor = null,
+  env = null,
 }) {
   const opts = { ...DEFAULTS, ...userOpts }
   const band = opts.band
@@ -106,10 +126,29 @@ export async function runAutoPlacePlan({
   const existingSameBand = (aps ?? []).filter((a) => (a.frequency ?? 5) === band)
   // scenario 帶現有同頻段 AP 建：牆/corners/scope mask 共用，
   // scenario.aps 直接是 fill 模式初始覆蓋要用的 entries。
-  const scenario = buildScenario(floor, walls, existingSameBand, scopes, null)
+  const sameBand = (list) => (list ?? []).filter((a) => (a.frequency ?? 5) === band)
+  const buildFor = (thisFloorAps) => floors
+    ? buildFloorScenario({
+        floors, floorId: floor.id,
+        apsByFloor: { ...(apsByFloor ?? {}), [floor.id]: thisFloorAps },
+        wallsByFloor: { ...(wallsByFloor ?? {}), [floor.id]: walls ?? [] },
+        holesByFloor: holesByFloor ?? {},
+        scopes, mapAps: sameBand, env,
+      })
+    : buildScenario(floor, walls, thisFloorAps, scopes, null, env)
+  const scenario = buildFor(existingSameBand)
   if (!scenario) {
     return { aborted: false, error: 'invalid-floor' }
   }
+  // 57-34: receiver height / slabs / AP mount elevation of that scenario.
+  const rxZ = scenario.rxElevationM ?? 0
+  const fieldOpts = { ...FIELD_OPTS, floorBoundaries: scenario.floorBoundaries ?? null }
+  // Initial coverage: other floors' same-band APs always stay; this floor's
+  // existing ones only in fill mode (fresh / fixed replace them).
+  const thisFloorIds = new Set(existingSameBand.map((a) => a.id))
+  const initialSources = opts.mode === 'fill'
+    ? scenario.aps
+    : scenario.aps.filter((e) => !thisFloorIds.has(e.id))
   const scopeMaskFn = scenario.scopeMaskFn ?? (() => true)
   const { w, h } = scenario.size
   const pxToM = 1 / floor.scale
@@ -123,7 +162,9 @@ export async function runAutoPlacePlan({
   // indoor.ok=false（沒牆 / 牆沒接好導致 flood fill 漏光）時 indoorFn 恆真，
   // 等同退回未過濾行為；indoorFallback 讓 UI 能提示這件事。
   const indoor = opts.indoorOnly
-    ? buildIndoorMask(scenario.walls, scenario.size)
+    // 57-34: this floor's walls only -- the cross-floor scenario also carries
+    // other floors' walls, which would corrupt the flood fill.
+    ? buildIndoorMask(floors ? buildScenario(floor, walls, [], scopes, null, env).walls : scenario.walls, scenario.size)
     : { ok: false, indoorFn: () => true, ratio: 1 }
   const indoorFallback = opts.indoorOnly && !indoor.ok
   const maskFn = (x, y) => scopeMaskFn(x, y) && indoor.indoorFn(x, y)
@@ -182,12 +223,12 @@ export async function runAutoPlacePlan({
   // ---- 初始覆蓋（fill：現有同頻段 AP 的實際場；fresh / fixed：全未覆蓋）----
   const covered = new Uint8Array(nCells)
   let coverageBefore = 0
-  if (opts.mode === 'fill' && scenario.aps.length > 0) {
+  if (initialSources.length > 0) {
     for (let k = 0; k < nCells; k++) {
-      const rx = { x: cellX[k], y: cellY[k], zM: 0 }
+      const rx = { x: cellX[k], y: cellY[k], zM: rxZ }
       let best = -Infinity
-      for (const entry of scenario.aps) {
-        const { rssiDbm } = rssiFromAp(entry, rx, scenario.walls, scenario.corners, FIELD_OPTS)
+      for (const entry of initialSources) {
+        const { rssiDbm } = rssiFromAp(entry, rx, scenario.walls, scenario.corners, fieldOpts)
         if (rssiDbm > best) best = rssiDbm
       }
       if (best >= opts.targetRssiDbm) covered[k] = 1
@@ -200,11 +241,11 @@ export async function runAutoPlacePlan({
   // 記憶體：nCands × nCells × 4B（300 × 650 ≈ 780 KB）。
   const candRssi = new Float32Array(nCands * nCells)
   for (let c = 0; c < nCands; c++) {
-    const entry = designApEntry(band, candPos[c], opts)
+    const entry = designApEntry(band, candPos[c], opts, scenario.floorElevationM ?? 0)
     const off = c * nCells
     for (let k = 0; k < nCells; k++) {
-      const rx = { x: cellX[k], y: cellY[k], zM: 0 }
-      candRssi[off + k] = rssiFromAp(entry, rx, scenario.walls, scenario.corners, FIELD_OPTS).rssiDbm
+      const rx = { x: cellX[k], y: cellY[k], zM: rxZ }
+      candRssi[off + k] = rssiFromAp(entry, rx, scenario.walls, scenario.corners, fieldOpts).rssiDbm
     }
     if (c % 4 === 3 || c === nCands - 1) {
       const cont = await progress('fields', { pct: (c + 1) / nCands })
@@ -224,7 +265,7 @@ export async function runAutoPlacePlan({
   // 給定「其餘已選候選 + 初始覆蓋」重算 covered（relocate 用）。
   const rebuildCovered = (skipCand) => {
     covered.fill(0)
-    if (opts.mode === 'fill' && scenario.aps.length > 0) {
+    if (initialSources.length > 0) {
       // 初始覆蓋重算太貴 — 快取一份。
       covered.set(coveredInitial)
     }
@@ -391,7 +432,12 @@ export async function runAutoPlacePlan({
   const fixedChannels = stayingExisting.length > 0
     ? new Map(stayingExisting.map((a) => [a.id, a.channel]))
     : null
-  const assigned = greedyChannelAssign(channelPool, opts.domainId, 300, fixedChannels)
+  // 57-34: neighbours = APs that hear each other (scenario with this floor =
+  // the planned pool; unassigned APs probed on the band's first channel).
+  const firstCh = allowedChannels(opts.domainId, band)[0] ?? (band === 5 ? 36 : 1)
+  const poolScenario = buildFor(channelPool.map((a) => (a.channel == null ? { ...a, channel: firstCh } : a)))
+  const assigned = greedyChannelAssign(channelPool, opts.domainId,
+    poolScenario ? makeApHearingFn(poolScenario) : 300, fixedChannels)
   for (const ap of proposed) {
     ap.channel = assigned.get(ap.id)?.channel
       ?? (allowedChannels(opts.domainId, band)[0] ?? (band === 5 ? 36 : 1))

@@ -9,6 +9,7 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { floorplanFromLines } from '@/utils/floorplanFromLines'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
+import { storeChannelNeighbors } from '@/features/heatmap/channelNeighbors'
 import { generateId } from '@/utils/id'
 import { AP_MODELS, DEFAULT_AP_MODEL_ID, getDefaultTxPower } from '@/constants/apModels'
 import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
@@ -132,7 +133,7 @@ function nextDemoName(floors) {
 // below, so only the band + width matter here.
 const DEMO_AP_BANDS = [2.4, 6, 5, 5, 6]
 
-function buildDemoAPs(canvasWidth, canvasHeight, regulatoryDomain) {
+function buildDemoAPs(canvasWidth, canvasHeight, regulatoryDomain, floorId) {
   const aps = DEMO_AP_POSITIONS_NORM.map((p, i) => {
     const band = DEMO_AP_BANDS[i] ?? 5
     return {
@@ -158,7 +159,9 @@ function buildDemoAPs(canvasWidth, canvasHeight, regulatoryDomain) {
       ...(i === 2 ? { mockStatus: 'offline' } : {}),
     }
   })
-  const assignments = greedyChannelAssign(aps, regulatoryDomain)
+  // 57-34: neighbours = APs that hear each other (walls are already in the
+  // store when this runs).
+  const assignments = greedyChannelAssign(aps, regulatoryDomain, storeChannelNeighbors(floorId, aps))
   return aps.map((ap) => {
     const picked = assignments.get(ap.id)
     return picked ? { ...ap, channel: picked.channel } : ap
@@ -208,7 +211,7 @@ function DemoLoader() {
 
       const { walls } = floorplanFromLines(lines)
       setWalls(floor.id, applyDemoWallMaterials(walls, img.naturalWidth, img.naturalHeight))
-      setAPs(floor.id, buildDemoAPs(img.naturalWidth, img.naturalHeight, regulatoryDomain))
+      setAPs(floor.id, buildDemoAPs(img.naturalWidth, img.naturalHeight, regulatoryDomain, floor.id))
 
       const W = img.naturalWidth, H = img.naturalHeight
       addTray(floor.id, {

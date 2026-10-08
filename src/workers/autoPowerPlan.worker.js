@@ -26,7 +26,7 @@ self.addEventListener('message', async (e) => {
   if (!msg || msg.type !== 'run') return
 
   try {
-    const { floor, walls, aps, scopes, apIdsToPlan, userOpts } = msg.payload
+    const { floor, walls, aps, scopes, apIdsToPlan, userOpts, env } = msg.payload
     const r = await runAutoPowerPlan({
       floor,
       walls,
@@ -34,6 +34,7 @@ self.addEventListener('message', async (e) => {
       scopes,
       apIdsToPlan,
       userOpts,
+      env,   // 57-34
       onProgress: (st) => {
         self.postMessage({ type: 'progress', state: st })
         return true

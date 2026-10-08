@@ -20,13 +20,14 @@ self.addEventListener('message', async (e) => {
   if (!msg || msg.type !== 'run') return
 
   try {
-    const { floor, walls, aps, scopes, userOpts } = msg.payload
+    const { floor, walls, aps, scopes, userOpts, floors, apsByFloor, wallsByFloor, holesByFloor, env } = msg.payload
     const r = await runAutoPlacePlan({
       floor,
       walls,
       aps,
       scopes,
       userOpts,
+      floors, apsByFloor, wallsByFloor, holesByFloor, env,   // 57-34
       onProgress: (st) => {
         self.postMessage({ type: 'progress', state: st })
         return true

@@ -60,14 +60,19 @@ function dist2(a, b) {
 // Parameters:
 //   aps              — array of AP objects (must have id, x, y, frequency)
 //   domainId         — regulatory domain id ('TW', 'US', …)
-//   interferenceRadius — canvas-px radius within which two APs can interfere
+//   interferenceRadius — 57-34: a function (apA, apB) => boolean "these two
+//                      hear each other" (features/heatmap/apHearing), or the
+//                      legacy canvas-px radius when no scale / scenario exists
 //   fixedChannels    — optional Map<apId, channel>：這些 AP 的頻道視為已定，
 //                      不重新指派、但計入鄰居重疊（Phase 49 fill 模式：
 //                      新 AP 繞著現有 AP 的頻道排）
 //
 // Returns: Map<apId, { channel }>（含 fixed 的 AP，方便呼叫端統一讀）
 export function greedyChannelAssign(aps, domainId, interferenceRadius = 300, fixedChannels = null) {
-  const r2 = interferenceRadius * interferenceRadius
+  const r2 = typeof interferenceRadius === 'number' ? interferenceRadius * interferenceRadius : 0
+  const near = typeof interferenceRadius === 'function'
+    ? interferenceRadius
+    : (a, b) => dist2(a, b) <= r2
   const result = new Map()
 
   // Group APs by frequency band
@@ -95,8 +100,8 @@ export function greedyChannelAssign(aps, domainId, interferenceRadius = 300, fix
 
     // Sort: APs with more neighbours first so they get first pick.
     const sorted = [...bandAPs].sort((a, b) => {
-      const na = bandAPs.filter((x) => x.id !== a.id && dist2(x, a) <= r2).length
-      const nb = bandAPs.filter((x) => x.id !== b.id && dist2(x, b) <= r2).length
+      const na = bandAPs.filter((x) => x.id !== a.id && near(x, a)).length
+      const nb = bandAPs.filter((x) => x.id !== b.id && near(x, b)).length
       return nb - na
     })
 
@@ -110,7 +115,7 @@ export function greedyChannelAssign(aps, domainId, interferenceRadius = 300, fix
         for (const other of bandAPs) {
           if (other.id === ap.id) continue
           if (!result.has(other.id)) continue
-          if (dist2(ap, other) > r2) continue
+          if (!near(ap, other)) continue
           if (spectraOverlap(band, ch, myW, result.get(other.id).channel, widthOf(other))) overlap++
         }
         return { ch, overlap }

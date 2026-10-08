@@ -124,11 +124,12 @@ export function buildFloorScenario({
   holesByFloor = {},
   scopes = [],
   mapAps = (list) => list,
+  env = null,   // 57-34: see buildScenario's currentScenarioEnv
 }) {
   const floor = (floors ?? []).find((f) => f.id === floorId)
   if (!floor) return null
   const { crossFloor } = buildCrossFloorData({
     floors, activeFloorId: floorId, apsByFloor, wallsByFloor, holesByFloor, mapAps,
   })
-  return buildScenario(floor, wallsByFloor[floorId] ?? [], mapAps(apsByFloor[floorId] ?? []), scopes, crossFloor)
+  return buildScenario(floor, wallsByFloor[floorId] ?? [], mapAps(apsByFloor[floorId] ?? []), scopes, crossFloor, env)
 }

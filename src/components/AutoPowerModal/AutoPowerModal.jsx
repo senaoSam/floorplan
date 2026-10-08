@@ -5,6 +5,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { getDefaultTxPower } from '@/constants/apModels'
+import { currentScenarioEnv } from '@/features/heatmap/buildScenario'
 import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
 import './AutoPowerModal.sass'
 
@@ -170,6 +171,8 @@ function AutoPowerModal({ open, apIds, onClose }) {
         scopes,
         apIdsToPlan: targetIds,
         userOpts: { targetRssiDbm: rssiClamped, targetSinrDb: sinrClamped },
+        // 57-34: the worker's stores only hold defaults.
+        env: currentScenarioEnv(),
       },
     })
   }, [floor, walls, aps, scopes, targetIds, targetRssi, targetSinr])
