@@ -182,6 +182,8 @@ const WOBBLE_OCTAVES = [
 ]
 const WOBBLE_DECAY_MS = 900    // amplitude ramp-down once the final field is in
 const WOBBLE_HOLD_MAX_MS = 4000 // safety cap if the fine stage never lands
+// 57-35: ripple frames render at this fraction of the output resolution.
+const RIPPLE_LOD_SCALE = 0.5
 
 // Wrapped-bilinear sample of a latN×latN random lattice, output ≈ [-1, 1].
 function latticeSample(lat, latN, u, v) {
@@ -642,7 +644,17 @@ export function attachHeatmapLayer({
       }
       wobbleInto(state.scratch, b.grid, amp, (t - state.t0) / 1000, state.lattice, state.latN,
         b.nx, b.ny, b.stepM, b.originX, b.originY)
-      paintCanvas(state.scratch, b.nx, b.ny, b.stepM, state.ctx)
+      // 57-35: ripple frames paint at half resolution on every plan (measured
+      // on UHD 770: 3000x2000 35 -> 7 ms, 6000x4000 126 -> 28 ms per frame;
+      // the softer, bolder look also reads as "changing"). The settled frame
+      // above is always full resolution.
+      const c = state.ctx
+      paintCanvas(state.scratch, b.nx, b.ny, b.stepM, {
+        ...c,
+        outW: Math.max(1, Math.round(c.outW * RIPPLE_LOD_SCALE)),
+        outH: Math.max(1, Math.round(c.outH * RIPPLE_LOD_SCALE)),
+        blur: Math.round(c.blur * RIPPLE_LOD_SCALE),
+      })
       state.raf = requestAnimationFrame(tick)
     }
     tick()
