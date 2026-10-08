@@ -5,6 +5,7 @@ import { buildCrossFloorData } from '@/features/heatmap/buildCrossFloor'
 import { sampleFieldGLAsync } from '@/features/heatmap/sampleFieldGL'
 import { sampleField } from '@/features/heatmap/sampleField'
 import { getModeConfig } from '@/features/heatmap/modes'
+import { shouldSimplifyScene } from '@/features/heatmap/largeScene'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
@@ -159,10 +160,10 @@ const ensureStackInner = async (fp) => {
     const scenario = buildScenario(f, walls, aps, [], crossFloor)
     if (!scenario) continue
 
-    // Mirror the adapter's large-scene downgrade (same PLACEHOLDER
-    // thresholds — see heatmapAdapter 任務 4).
-    const threshold = hm.isSoftwareRender ? 1500 : 20000
-    const forceAggregated = walls.length * scenario.aps.length > threshold
+    // 57-36: the 2D adapter's large-scene downgrade, same function (it used
+    // to keep the old wall×AP product, so a floor could get different physics
+    // in 3D than in 2D).
+    const forceAggregated = shouldSimplifyScene(scenario, hm.isSoftwareRender)
     const opts = {
       maxReflOrder: forceAggregated ? 0 : (hm.reflections ? 1 : 0),
       enableDiffraction: forceAggregated ? false : hm.diffraction,
