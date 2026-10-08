@@ -24,7 +24,7 @@ import { aggregateApContributions, makeApAggregator, aggregateWithTables } from 
 import { fitGridStep } from './sampleField'
 import { createPropagationGL } from './propagationGL'
 import {
-  AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, NOISE_FLOOR_DBM,
+  AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, DEFAULT_RF,
 } from './rfConstants.js'
 
 const CCI_MIN_DBM = -120
@@ -158,7 +158,7 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
     gl.uploadAps(apsForGL)
     const out = gl.renderField(scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta, {
       _rxGainDbi: RX_ANT_GAIN_DBI,
-      noiseDbm: NOISE_FLOOR_DBM,
+      rf: scenario.rf ?? DEFAULT_RF,   // 57-28
       cullFloorDbm: opts.cullFloorDbm ?? CULL_FLOOR_DBM,
       rssiOnly: !!opts.rssiOnly,
       gridSize: { nx, ny },
@@ -295,7 +295,7 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
       for (let k = 0; k < scenario.aps.length; k++) {
         perApScratch[k] = perApGrids[k][idx]
       }
-      const agg = aggregateApContributions(perApScratch, scenario.aps, NOISE_FLOOR_DBM)
+      const agg = aggregateApContributions(perApScratch, scenario.aps, scenario.rf ?? DEFAULT_RF)
       rssi[idx] = agg.rssiDbm
       sinr[idx] = agg.sinrDb
       snr[idx]  = agg.snrDb
@@ -377,7 +377,7 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
     gl.uploadAps(apsForGL)
     const out = await gl.renderFieldAsync(scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta, {
       _rxGainDbi: RX_ANT_GAIN_DBI,
-      noiseDbm: NOISE_FLOOR_DBM,
+      rf: scenario.rf ?? DEFAULT_RF,   // 57-28
       cullFloorDbm: opts.cullFloorDbm ?? CULL_FLOOR_DBM,
       rssiOnly: !!opts.rssiOnly,
       gridSize: { nx, ny },
@@ -536,7 +536,7 @@ async function aggregateChunked(perApGrids, scenario, nx, ny, originX, originY, 
   const perApScratch = new Array(scenario.aps.length)
   // 57-7: spectrum-share / noise tables built once, not per cell (identical
   // output to aggregateApContributions — see makeApAggregator).
-  const aggTables = makeApAggregator(scenario.aps, NOISE_FLOOR_DBM)
+  const aggTables = makeApAggregator(scenario.aps, scenario.rf ?? DEFAULT_RF)
   const agg = {}
   let sliceStart = performance.now()
   for (let j = 0; j < ny; j++) {

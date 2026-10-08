@@ -87,7 +87,7 @@ export function sampleField(scenario, gridStepM = 0.5, opts = {}) {
         cci[idx]  = CCI_MIN_DBM
         continue
       }
-      const agg = aggregateApContributions(perAp, scenario.aps)
+      const agg = aggregateApContributions(perAp, scenario.aps, scenario.rf)   // 57-28
       rssi[idx] = agg.rssiDbm
       sinr[idx] = agg.sinrDb
       snr[idx]  = agg.snrDb

@@ -255,6 +255,7 @@ export function attachHeatmapLayer({
   useDragOverlayStore,
   useEditorStore,
   useAutoPlaceStore,   // Phase 49（選用）：ghost 預覽 AP 併入場計算（what-if 熱圖）
+  useClientViewStore = null,   // 57-28（選用）：雜訊底 / 最小干擾 RSSI 設定
 }) {
   const layer = scene.layers.heatmap
 
@@ -1111,6 +1112,9 @@ export function attachHeatmapLayer({
       bandFilter: hm.bandFilter,
       // 57-23: the regulatory domain sets each AP's EIRP-capped TX power.
       regulatoryDomain: useEditorStore ? useEditorStore.getState().regulatoryDomain : null,
+      // 57-28: noise floor / min interfering RSSI feed SINR, SNR and CCI.
+      noiseFloor: useClientViewStore ? useClientViewStore.getState().noiseFloor : null,
+      minInterf: useClientViewStore ? useClientViewStore.getState().minInterferingRssiDbm : null,
       forceAggregated,
     }
     if (lastIdleInputs && idleInputsEqual(idleInputs, lastIdleInputs)) return
@@ -1279,6 +1283,13 @@ export function attachHeatmapLayer({
   // field. Without this subscription the heatmap would stay frozen until some
   // other store changed.
   const unsubEditor = useEditorStore ? useEditorStore.subscribe(scheduleCompute) : () => {}
+  // 57-28: only the two RF settings -- the client position etc. must not
+  // trigger a heatmap recompute.
+  const unsubRf = useClientViewStore
+    ? useClientViewStore.subscribe((st, prev) => {
+      if (st.noiseFloor !== prev.noiseFloor || st.minInterferingRssiDbm !== prev.minInterferingRssiDbm) scheduleCompute()
+    })
+    : () => {}
 
   // Independent mask maintenance: the vector sprite clip (plan rect ∩ scopes)
   // is rebuilt ONLY when scopes or the active floor change — NOT on heatmap
@@ -1304,6 +1315,7 @@ export function attachHeatmapLayer({
     unsubHole()
     unsubDrag()
     unsubEditor()
+    unsubRf()
     unsubMaskScope()
     unsubMaskFloor()
     if (pendingComputeId !== 0) { clearTimeout(pendingComputeId); pendingComputeId = 0 }

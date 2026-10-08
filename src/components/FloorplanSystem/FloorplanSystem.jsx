@@ -400,6 +400,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useDragOverlayStore,
         useEditorStore,
         useAutoPlaceStore,
+        useClientViewStore,
       })
       detachGhostAPs = attachGhostAPsLayer({
         scene: s,
@@ -449,6 +450,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useHoverReadoutStore,
         useFloorHoleStore,
         useEditorStore,
+        useClientViewStore,
       })
       detachClientView = bindClientView({
         scene: s,

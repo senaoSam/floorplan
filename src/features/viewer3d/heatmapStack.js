@@ -11,6 +11,7 @@ import { useAPStore } from '@/store/useAPStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useEditorStore } from '@/store/useEditorStore'
+import { useClientViewStore } from '@/store/useClientViewStore'
 
 // 3D all-floors heatmap stack (Phase 48+, strategy A: compute ON DEMAND).
 //
@@ -81,6 +82,7 @@ const FP_KEYS = [
   'activeFloorId', 'floors', 'wallsAll', 'apsAll', 'holes',
   'mode', 'engine', 'gridStepM', 'blur', 'contours',
   'reflections', 'diffraction', 'bandFilter', 'regulatoryDomain',
+  'noiseFloor', 'minInterf',
 ]
 const fpEqual = (a, b) => FP_KEYS.every((k) => a[k] === b[k])
 
@@ -99,6 +101,9 @@ const buildFingerprint = () => {
     bandFilter: hm.bandFilter,
     // 57-23: sets each AP's EIRP-capped TX power.
     regulatoryDomain: useEditorStore.getState().regulatoryDomain,
+    // 57-28: noise floor / min interfering RSSI feed SINR, SNR and CCI.
+    noiseFloor: useClientViewStore.getState().noiseFloor,
+    minInterf: useClientViewStore.getState().minInterferingRssiDbm,
   }
 }
 
@@ -265,6 +270,9 @@ export function attachHeatmapStackDriver() {
     useFloorHoleStore.subscribe(schedule),
     useHeatmapStore.subscribe(schedule),
     useEditorStore.subscribe((s, p) => { if (s.regulatoryDomain !== p.regulatoryDomain) schedule() }),
+    useClientViewStore.subscribe((s, p) => {
+      if (s.noiseFloor !== p.noiseFloor || s.minInterferingRssiDbm !== p.minInterferingRssiDbm) schedule()
+    }),
   ]
   return () => {
     if (ensureTimer) { clearTimeout(ensureTimer); ensureTimer = 0 }

@@ -197,7 +197,7 @@ function ensureFieldCache(baseScenario, opts) {
     gapRssiArr: new Float64Array(cellCount),
     // 57-9: spectrum-share / noise tables — depend on band / channel / width
     // only, so one build serves every evaluate (txDbm is what the search moves).
-    aggTables: makeApAggregator(baseAps),
+    aggTables: makeApAggregator(baseAps, scenario.rf),   // 57-28
     agg: {},
   }
   return baseScenario.fieldCache

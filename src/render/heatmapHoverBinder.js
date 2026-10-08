@@ -36,6 +36,7 @@ export function bindHeatmapHover({
   useHoverReadoutStore,
   useFloorHoleStore = null,
   useEditorStore = null,
+  useClientViewStore = null,
 }) {
   const stage = scene.app.stage
   let lastFireAt = 0
@@ -55,7 +56,10 @@ export function bindHeatmapHover({
     const bandFilter = useHeatmapStore.getState().bandFilter || 'all'
     // 57-23: the regulatory domain sets each AP's EIRP-capped TX power.
     const domainId = useEditorStore?.getState().regulatoryDomain ?? ''
-    const sig = `${activeFloorId}::${bandFilter}::${domainId}`
+    // 57-28: noise floor / min interfering RSSI live in the scenario's `rf`.
+    const cv = useClientViewStore?.getState()
+    const rfSig = cv ? `${JSON.stringify(cv.noiseFloor)}::${cv.minInterferingRssiDbm}` : ''
+    const sig = `${activeFloorId}::${bandFilter}::${domainId}::${rfSig}`
     if (sig === cachedSig && cachedScenario !== undefined) return cachedScenario
     cachedSig = sig
     const sc = buildFloorScenario({

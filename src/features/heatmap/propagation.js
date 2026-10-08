@@ -21,7 +21,7 @@
 //     band + overlapping frequency range).
 
 import {
-  AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, NOISE_FLOOR_DBM, indoorLossPerMeter,
+  AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, DEFAULT_RF, indoorLossPerMeter,
 } from './rfConstants.js'
 import {
   sub, dot, len, dist, norm, segSegIntersect,
@@ -556,7 +556,14 @@ export const __debug = {
 //   - sinrDb:  S / (N + ΣI_co-channel)
 //   - snrDb:   S / N, ignores interferers (no-interference upper bound)
 //   - cciDbm:  10·log10(ΣI_co-channel linear), or -Infinity if none
-export function aggregateApContributions(perApDbm, apList, noiseDbm = NOISE_FLOOR_DBM) {
+// 57-28: rf = { noiseByBand, minInterfDbm } (scenario.rf). Noise is the
+// serving AP's band floor; co-channel APs weaker than minInterfDbm are not
+// counted as interference (Client View's rule).
+function servingNoiseDbm(rf, ap) {
+  return (rf.noiseByBand?.[ap.frequency ?? 5] ?? -95) + widthNoiseDelta(ap.channelWidth ?? 20)
+}
+
+export function aggregateApContributions(perApDbm, apList, rf = DEFAULT_RF) {
   if (!perApDbm.length) {
     return { rssiDbm: -120, sinrDb: -50, snrDb: -50, cciDbm: -Infinity, bestApIndex: -1 }
   }
@@ -573,12 +580,13 @@ export function aggregateApContributions(perApDbm, apList, noiseDbm = NOISE_FLOO
   for (let i = 0; i < perApDbm.length; i++) {
     if (i === bestIdx) continue
     if (!apsShareSpectrum(signalAp, apList[i])) continue
+    if (perApDbm[i] < rf.minInterfDbm) continue   // 57-28
     cciLin += dbToLin(perApDbm[i])
   }
   // Widen the noise floor for the serving AP's channel bandwidth — a 160 MHz
   // receiver admits ~9 dB more thermal noise than 20 MHz. Kept in sync with the
   // clientView SNR path and the GLSL aggregate shader.
-  const effNoiseDbm = noiseDbm + widthNoiseDelta(signalAp.channelWidth ?? 20)
+  const effNoiseDbm = servingNoiseDbm(rf, signalAp)
   const noiseLin = dbToLin(effNoiseDbm)
   const sinrDb = signalDb - linToDb(noiseLin + cciLin)
   const snrDb  = signalDb - effNoiseDbm
@@ -593,7 +601,7 @@ export function aggregateApContributions(perApDbm, apList, noiseDbm = NOISE_FLOO
 // runs the exact same operations in the same order, so results are
 // bit-identical to aggregateApContributions. `out` is reused (no per-cell
 // allocation). Tables depend only on band / channel / width, not on txDbm.
-export function makeApAggregator(apList, noiseDbm = NOISE_FLOOR_DBM) {
+export function makeApAggregator(apList, rf = DEFAULT_RF) {
   const n = apList.length
   const share = new Uint8Array(n * n)
   const effNoiseDbm = new Float64Array(n)
@@ -602,14 +610,14 @@ export function makeApAggregator(apList, noiseDbm = NOISE_FLOOR_DBM) {
     for (let j = 0; j < n; j++) {
       if (i !== j && apsShareSpectrum(apList[i], apList[j])) share[i * n + j] = 1
     }
-    effNoiseDbm[i] = noiseDbm + widthNoiseDelta(apList[i].channelWidth ?? 20)
+    effNoiseDbm[i] = servingNoiseDbm(rf, apList[i])
     noiseLin[i] = dbToLin(effNoiseDbm[i])
   }
-  return { n, share, effNoiseDbm, noiseLin }
+  return { n, share, effNoiseDbm, noiseLin, minInterfDbm: rf.minInterfDbm }
 }
 
 export function aggregateWithTables(tables, perApDbm, out) {
-  const { n, share, effNoiseDbm, noiseLin } = tables
+  const { n, share, effNoiseDbm, noiseLin, minInterfDbm } = tables
   if (!n) {
     out.rssiDbm = -120; out.sinrDb = -50; out.snrDb = -50; out.cciDbm = -Infinity; out.bestApIndex = -1
     return out
@@ -624,6 +632,7 @@ export function aggregateWithTables(tables, perApDbm, out) {
   for (let i = 0; i < n; i++) {
     if (i === bestIdx) continue
     if (!share[row + i]) continue
+    if (perApDbm[i] < minInterfDbm) continue   // 57-28
     cciLin += dbToLin(perApDbm[i])
   }
   out.rssiDbm = signalDb

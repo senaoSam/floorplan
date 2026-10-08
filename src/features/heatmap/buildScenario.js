@@ -7,6 +7,7 @@
 import { channelBlockCenterMHz } from './frequency'
 import { resolveApRadiation } from './apRadiation'
 import { useEditorStore } from '@/store/useEditorStore'
+import { useClientViewStore } from '@/store/useClientViewStore'
 import {
   makeAlignMatrixM,
   applyAlignMatrix,
@@ -397,5 +398,11 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
     // 57-17: the floor's ground level (absolute Z), so callers with their own
     // receiver height (Client View's device height) can place rx correctly.
     floorElevationM: activeElevationM,
+    // 57-28: noise floor per band + min interfering RSSI for SINR/SNR/CCI --
+    // the Client View settings, so the heatmap and Client View agree.
+    rf: {
+      noiseByBand: { ...useClientViewStore.getState().noiseFloor },
+      minInterfDbm: useClientViewStore.getState().minInterferingRssiDbm,
+    },
   }
 }

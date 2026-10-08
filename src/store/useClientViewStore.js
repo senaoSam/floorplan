@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { DEFAULT_CLIENT_DEVICE_ID } from '@/constants/clientDevices'
 import { COVERAGE_THRESHOLD_DBM } from '@/constants/coverage'
+import { DEFAULT_NOISE_FLOOR_BY_BAND, DEFAULT_MIN_INTERFERING_RSSI_DBM } from '@/features/heatmap/rfConstants'
 
 // Client View ("see the network from a client's perspective") UI + simulation
 // state. Kept isolated from the heatmap store so toggling Client View never
@@ -50,8 +51,9 @@ export const useClientViewStore = create((set) => ({
   clientTxDbm: 10,
   // Defaults match Hamina's pane (lower noise as frequency rises is unusual but
   // mirrors their reference figures; users adjust per environment).
-  noiseFloor: { 2.4: -92, 5: -95, 6: -96 },
-  minInterferingRssiDbm: -82,
+  // 57-28: the heatmap reads these too (via buildScenario's `rf`).
+  noiseFloor: { ...DEFAULT_NOISE_FLOOR_BY_BAND },
+  minInterferingRssiDbm: DEFAULT_MIN_INTERFERING_RSSI_DBM,
   // Association-area COVERAGE threshold (dBm). A point is "covered" (blue) when
   // the strongest usable AP's RSSI is at/above this. Blue = GOOD-SIGNAL area
   // (signal strong enough for normal use), NOT "can/can't associate" — devices

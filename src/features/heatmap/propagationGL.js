@@ -1355,7 +1355,8 @@ uniform vec2 uOriginM;
 uniform float uGridStepM;
 uniform float uRxZM;
 uniform float uRxGainDbi;
-uniform float uNoiseDbm;
+uniform vec3  uNoiseByBand;    // 57-28: 20 MHz noise floor for band 2.4 / 5 / 6 GHz
+uniform float uMinInterfDbm;   // 57-28: weaker co-channel APs are not interference
 uniform float uCullFloorDbm;   // skip AP when its free-space-only RSSI is below this
 uniform int   uRssiOnly;       // 1 = skip CCI/SINR loop, write sentinels into those channels
 
@@ -1878,7 +1879,9 @@ void main() {
   // Widen the noise floor for the serving AP's channel bandwidth: a 160 MHz
   // receiver admits ~9 dB more thermal noise than 20 MHz. 10·log10(W/20).
   // Mirrors widthNoiseDelta in channelWidths.js / propagation.js.
-  float effNoiseDbm = uNoiseDbm + 10.0 * log(bestBw / 20.0) / log(10.0);
+  // 57-28: the serving AP's band floor (bestBand 1 / 2 / 3 = 2.4 / 5 / 6 GHz).
+  float bandNoiseDbm = bestBand < 1.5 ? uNoiseByBand.x : (bestBand < 2.5 ? uNoiseByBand.y : uNoiseByBand.z);
+  float effNoiseDbm = bandNoiseDbm + 10.0 * log(bestBw / 20.0) / log(10.0);
 
   if (uRssiOnly == 1) {
     float snrDbFast = bestDb - effNoiseDbm;
@@ -1910,7 +1913,9 @@ void main() {
     float dz = apPos.z - rxZ;
     float dDir = sqrt(dxyDir*dxyDir + dz*dz);
     float fsBest = txDbm + antGain + uRxGainDbi - pathLossDbField(dDir, centerMHz);
-    if (fsBest < uCullFloorDbm) continue;
+    // 57-28: free-space RSSI is an upper bound -- below the interference
+    // threshold this AP can't count, so skip its wall / slab scan too.
+    if (fsBest < max(uCullFloorDbm, uMinInterfDbm)) continue;
 
     float fOver24 = (centerMHz / 1000.0) / 2.4;
     float wallLoss = accumulateWallLossField(apPos.xy, apPos.z, rx, rxZ, fOver24);
@@ -1919,6 +1924,7 @@ void main() {
     float pl = pathLossDbField(dDir, centerMHz) + wallLoss + slabLoss;
     float rxDb = txDbm + gain + uRxGainDbi - pl;
 
+    if (rxDb < uMinInterfDbm) continue;   // 57-28
     cciLin += dbToLin(rxDb);
   }
 
@@ -3616,7 +3622,13 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.uniform1f(gl.getUniformLocation(progField, 'uGridStepM'), gridStepM)
     gl.uniform1f(gl.getUniformLocation(progField, 'uRxZM'), rxZM)
     gl.uniform1f(gl.getUniformLocation(progField, 'uRxGainDbi'), opts._rxGainDbi ?? 0)
-    gl.uniform1f(gl.getUniformLocation(progField, 'uNoiseDbm'), opts.noiseDbm ?? -95)
+    {
+      // 57-28: per-band noise floor + interference threshold (scenario.rf).
+      const rf = opts.rf ?? {}
+      const nb = rf.noiseByBand ?? {}
+      gl.uniform3f(gl.getUniformLocation(progField, 'uNoiseByBand'), nb[2.4] ?? -92, nb[5] ?? -95, nb[6] ?? -96)
+      gl.uniform1f(gl.getUniformLocation(progField, 'uMinInterfDbm'), rf.minInterfDbm ?? -82)
+    }
     gl.uniform1f(gl.getUniformLocation(progField, 'uCullFloorDbm'), opts.cullFloorDbm ?? -120)
     gl.uniform1i(gl.getUniformLocation(progField, 'uRssiOnly'), opts.rssiOnly ? 1 : 0)
 

@@ -20,6 +20,6 @@ export function probeAt(scenario, rx, opts = {}) {
       floorBoundaries: scenario.floorBoundaries ?? null,
     }).rssiDbm,
   )
-  const agg = aggregateApContributions(perAp, scenario.aps)
+  const agg = aggregateApContributions(perAp, scenario.aps, scenario.rf)   // 57-28
   return { at: rx, perAp, ...agg, apList: scenario.aps }
 }
