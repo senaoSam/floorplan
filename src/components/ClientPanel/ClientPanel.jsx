@@ -206,7 +206,8 @@ function ClientPanel() {
             <b>SNR</b><span>{fmt(reading.snrDb, 'dB', 1)}</span>
           </div>
           <div className="client-panel__row">
-            <b>SINR</b><span>{fmt(reading.sinrDb, 'dB', 1)}</span>
+            {/* 57-29: an uplink SINR has no interference term (not modelled). */}
+            <b>SINR{reading.sinrSource === 'up' ? '（上行，未含干擾）' : ''}</b><span>{fmt(reading.sinrDb, 'dB', 1)}</span>
           </div>
           <div className="client-panel__sep" />
           <div className="client-panel__row">

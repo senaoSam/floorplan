@@ -20,7 +20,7 @@ import { DEFAULT_NOISE_FLOOR_BY_BAND, DEFAULT_MIN_INTERFERING_RSSI_DBM } from '@
 //                changes (a different device may not even support the band).
 //   reading    — latest simulation result for the panel. Shape:
 //                { servingApId, servingApName, distanceM, rssiDbm, snrDb,
-//                  sinrDb, band, channelWidth, mcs, mcsLabel, phyRateMbps,
+//                  sinrDb, sinrSource, band, channelWidth, mcs, mcsLabel, phyRateMbps,
 //                  spatialStreams, candidates:[{id,name,rssiDbm}] }
 //                null when no client is placed / nothing in range.
 //   showAssociationArea — when true, the layer paints the "stays-associated"

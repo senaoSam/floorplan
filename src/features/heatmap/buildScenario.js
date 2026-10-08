@@ -275,6 +275,8 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null)
       tiltDeg: ap.tilt ?? 0,
       beamwidthDeg: ap.beamwidth ?? 60,
       patternId: ap.patternId ?? null,
+      // 57-29: Client View caps PHY / spatial streams by the AP model.
+      modelId: ap.modelId ?? null,
     }
   }
 

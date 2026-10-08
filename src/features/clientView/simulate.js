@@ -21,7 +21,8 @@ import { probeAt } from '@/features/heatmap/hoverProbe'
 import { effectiveBands } from '@/constants/clientDevices'
 import { apsShareSpectrum } from '@/features/heatmap/frequency'
 import { widthNoiseDelta } from '@/constants/channelWidths'
-import { estimateDataRate } from './dataRate'
+import { estimateDataRate, minPhy, phyOnBand } from './dataRate'
+import { getAPModelById } from '@/constants/apModels'
 import { ROAM_HYSTERESIS_DB, ROAM_CANDIDATE_WINDOW_DB } from '@/store/useClientViewStore'
 
 // Usable-link floor — below this effective RSSI we treat the AP as "can't
@@ -99,6 +100,14 @@ function effectivePhy(device, wifi7On) {
   return device.phy
 }
 
+// 57-29: the AP model's PHY generation (Wi-Fi 6 / 6E → 11ax, 7 → 11be).
+function apPhy(model) {
+  const gen = model.wifiGen ?? ''
+  if (gen.startsWith('Wi-Fi 7')) return '11be'
+  if (gen.startsWith('Wi-Fi 5')) return '11ac'
+  return '11ax'
+}
+
 // Run one Client View simulation.
 // Args:
 //   scenario — buildScenario() output (meters)
@@ -135,9 +144,12 @@ export function simulateClient(scenario, rx, opts) {
   const rssiDbm = serving.rssiDbm           // effective (link-direction-aware)
   const band = servingAp.frequency
 
-  // Effective channel width / streams = min(AP, client). Wi-Fi 7 off → 11ax ladder.
+  // Effective channel width / streams / PHY = min(AP, client) (57-29: the AP
+  // side comes from its model). Wi-Fi 7 off → 11ax ladder; 11ac on 2.4 → 11n.
+  const apModel = getAPModelById(servingAp.modelId)
   const channelWidth = Math.min(servingAp.channelWidth ?? 20, device.maxChannelWidth ?? 160)
-  const spatialStreams = Math.max(1, device.spatialStreams ?? 1)
+  const spatialStreams = Math.max(1, Math.min(device.spatialStreams ?? 1, apModel.streamCount?.[band] ?? 1))
+  const linkPhy = phyOnBand(minPhy(effectivePhy(device, wifi7On), apPhy(apModel)), band)
 
   // Noise floor = per-band base + bandwidth widening. A wider receiver admits
   // proportionally more thermal noise (+10·log10(W/20) dB), so 160 MHz sits
@@ -152,16 +164,30 @@ export function simulateClient(scenario, rx, opts) {
   // OTHER APs that share spectrum AND whose downlink RSSI is at/above the
   // min-interfering threshold (weaker APs are ignored, per Hamina). Compared
   // on downlink RSSI (interference is what the receiver actually hears).
+  // 57-29: taken from EVERY AP in the probe (same rule as the heatmap), not
+  // the usable-candidate list -- that one is filtered on the link-direction
+  // RSSI, which dropped real downlink interferers in up / worst mode.
   let cciLin = 0
-  for (const c of candidates) {
-    if (c.ap.id === servingAp.id) continue
-    if (!apsShareSpectrum(servingAp, c.ap)) continue
-    if (c.downDbm < (minInterferingRssiDbm ?? -82)) continue
-    cciLin += dbToLin(c.downDbm)
+  for (let i = 0; i < probe.apList.length; i++) {
+    const ap = probe.apList[i]
+    if (ap.id === servingAp.id) continue
+    if (!apsShareSpectrum(servingAp, ap)) continue
+    if (probe.perAp[i] < (minInterferingRssiDbm ?? -82)) continue
+    cciLin += dbToLin(probe.perAp[i])
   }
-  const sinrDb = rssiDbm - linToDb(dbToLin(noiseDbm) + cciLin)
+  // 57-29: SINR per direction, signal and interference from the same side.
+  // Downlink: AP signal vs what the client hears. Uplink: AP-side
+  // interference (other clients) isn't modelled, so it is the uplink SNR.
+  // Worst link: the weaker of the two.
+  const sinrDown = serving.downDbm - linToDb(dbToLin(noiseDbm) + cciLin)
+  const snrUp = effectiveRssi(serving.downDbm, servingAp.txDbm, opts.clientTxDbm, 'up') - noiseDbm
+  let sinrDb, sinrSource
+  if (linkDirection === 'down') { sinrDb = sinrDown; sinrSource = 'down' }
+  else if (linkDirection === 'up') { sinrDb = snrUp; sinrSource = 'up' }
+  else if (sinrDown <= snrUp) { sinrDb = sinrDown; sinrSource = 'down' }
+  else { sinrDb = snrUp; sinrSource = 'up' }
 
-  const dr = estimateDataRate(snrDb, effectivePhy(device, wifi7On), channelWidth, spatialStreams)
+  const dr = estimateDataRate(snrDb, linkPhy, channelWidth, spatialStreams)
 
   const distanceM = Math.hypot(rx.x - servingAp.pos.x, rx.y - servingAp.pos.y)
 
@@ -178,6 +204,7 @@ export function simulateClient(scenario, rx, opts) {
     rssiDbm,
     snrDb,
     sinrDb,
+    sinrSource,   // 57-29: 'down' | 'up' (uplink = SNR, interference not modelled)
     band,
     channelWidth,
     spatialStreams,
