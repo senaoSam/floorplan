@@ -512,8 +512,9 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       if (c.zLoM != null && (cZM < c.zLoM || cZM > c.zHiM)) continue
       if (c.dirs !== undefined && !cornerOpen(c, ap.pos, rx)) continue
       const s1 = accumulateWallLoss(ap.pos, c, walls, apZM, cZM, fOver24, null, c)
+      if (s1.hits > 1) continue   // 57-39: skip the s2 scan once s1 culls
       const s2 = accumulateWallLoss(c, rx, walls, cZM, rxZM, fOver24, null, c)
-      if (s1.hits > 1 || s2.hits > 1) continue
+      if (s2.hits > 1) continue
       const diff = cornerDiffractionDb(ap.pos, rx, c, wavelength)
       if (!isFinite(diff) || diff > 40) continue
       // 57-24: 3D length of the path over the corner (cZM lies on the

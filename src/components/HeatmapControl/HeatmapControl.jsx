@@ -44,6 +44,7 @@ function HeatmapControl() {
   // 任務 4: when the active scene's wall×AP exceeds the downgrade threshold,
   // heatmapAdapter forces reflections/diffraction off for the whole compute.
   const simplifiedLargeScene = useHeatmapStore((s) => s.simplifiedLargeScene)
+  const budgetQuality = useHeatmapStore((s) => s.budgetQuality)
   // Frozen while drawing walls — the field shown is from before the draw.
   const drawWallFrozen = useHeatmapStore((s) => s.drawWallFrozen)
   // Frozen while aligning floors — drag-align writes the floor store every
@@ -251,6 +252,14 @@ function HeatmapControl() {
           {simplifiedLargeScene && (
             <div className="heatmap-control__notice">
               ⚡ 大場景已簡化：暫時關閉反射 / 繞射以維持效能（縮小場景後自動恢復）
+            </div>
+          )}
+          {/* 57-39: the fine render ran over its 5 s budget and stepped down. */}
+          {!simplifiedLargeScene && budgetQuality && (
+            <div className="heatmap-control__notice">
+              {budgetQuality === 'noDiffraction'
+                ? '⚡ 計算量過大：已關閉繞射以維持效能（修改牆面或設定後重試）'
+                : '⚡ 計算量過大：已關閉反射 / 繞射以維持效能（修改牆面或設定後重試）'}
             </div>
           )}
           <label className="heatmap-control__line">

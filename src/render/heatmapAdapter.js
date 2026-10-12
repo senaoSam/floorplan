@@ -5,7 +5,10 @@ import { buildScenario } from '@/features/heatmap/buildScenario'
 import { sampleFieldGLAsync } from '@/features/heatmap/sampleFieldGL'
 import { sampleField } from '@/features/heatmap/sampleField'
 import { getModeConfig } from '@/features/heatmap/modes'
-import { shouldSimplifyScene } from '@/features/heatmap/largeScene'
+import {
+  shouldSimplifyScene, FINE_BUDGET_MS, DRAG_BUDGET_MS, QUALITY,
+  qualityTiers, makeTimeBudget, jsFallbackOpts,
+} from '@/features/heatmap/largeScene'
 import { buildCrossFloorData } from '@/features/heatmap/buildCrossFloor'
 import { EDITOR_MODE } from '@/store/useEditorStore'
 
@@ -312,6 +315,21 @@ export function attachHeatmapLayer({
   let dragPending = null      // latest coalesced drag render request
   let dragLoopRunning = false
   let dragSessionOn = false   // false = released; in-flight results are dropped
+
+  // 57-39: the quality tier a time budget settled on is remembered per scene
+  // (walls + refl/diff settings), so the next compute -- an AP moved -- starts
+  // there instead of paying the over-budget attempt again. A wall edit or a
+  // settings change retries full quality. Drag and fine renders keep separate
+  // tiers (different grids, different budgets).
+  let fineTierMemo = null     // { sig, tier }
+  let dragTierMemo = null
+  const tierSceneSig = (floorId, hm) => ({
+    floorId,
+    walls: useWallStore.getState().wallsByFloor,
+    refl: hm.reflections, diff: hm.diffraction, step: hm.gridStepM,
+  })
+  const sameTierScene = (a, b) => a.floorId === b.floorId && a.walls === b.walls &&
+    a.refl === b.refl && a.diff === b.diff && a.step === b.step
   // The padded sample grid extends past the floor image extent. Without
   // a clip the padded region bleeds into the canvas background outside
   // the floor plan, which looked wrong to the user. mask is a Graphics
@@ -711,18 +729,48 @@ export function attachHeatmapLayer({
       while (dragPending) {
         const req = dragPending
         dragPending = null
+        // 57-39: DRAG_BUDGET_MS per frame. Over it, the frame is redone one
+        // quality tier lower (no diffraction, then direct only) and the scene
+        // keeps that tier for later frames and drags.
+        const tiers = qualityTiers(req.opts)
+        if (!dragTierMemo || !sameTierScene(dragTierMemo.sig, req.tierSig)) {
+          // A scene whose fine render already stepped down starts there: the
+          // first full-quality attempt pays the diffraction bake (corners ×
+          // walls, synchronous, ~0.2 s on 2588 segments) before the budget
+          // can cut it.
+          const fineTier = fineTierMemo && sameTierScene(fineTierMemo.sig, req.tierSig) ? fineTierMemo.tier : 0
+          dragTierMemo = { sig: req.tierSig, tier: fineTier }
+        }
         let field = null
-        try {
-          field = await sampleFieldGLAsync(req.renderScenario, req.stepM, {
-            ...req.opts,
-            isStale: () => !dragSessionOn,
-          })
-        } catch (e) {
-          console.warn('[heatmap] async drag engine failed, falling back to JS:', e.message)
-          try { field = sampleField(req.renderScenario, req.stepM, req.opts) } catch (_) { field = null }
+        for (;;) {
+          const tier = Math.min(dragTierMemo.tier, tiers.length - 1)
+          const last = tier === tiers.length - 1
+          const budget = last ? null : makeTimeBudget(DRAG_BUDGET_MS, { project: false })
+          const t0 = performance.now()
+          try {
+            field = await sampleFieldGLAsync(req.renderScenario, req.stepM, {
+              ...tiers[tier].opts,
+              tileTargetMs: DRAG_BUDGET_MS,
+              isStale: () => !dragSessionOn || (budget !== null && budget.exceeded()),
+            })
+          } catch (e) {
+            console.warn('[heatmap] async drag engine failed, falling back to JS:', e.message)
+            const jsOpts = jsFallbackOpts(req.renderScenario, req.stepM, tiers[tier].opts)
+            try { field = sampleField(req.renderScenario, req.stepM, jsOpts) } catch (_) { field = null }
+          }
+          if (!dragSessionOn) return
+          if (field === null && budget !== null && budget.exceeded()) {
+            dragTierMemo.tier = tier + 1
+            continue
+          }
+          // An un-tiled draw can't be cut mid-way: if it ran over, start the
+          // next frame one tier lower.
+          if (field !== null && !last && performance.now() - t0 > DRAG_BUDGET_MS) {
+            dragTierMemo.tier = tier + 1
+          }
+          break
         }
         if (!field) continue
-        if (!dragSessionOn) return
         const activeField = field[req.modeCfg.field] ?? field.rssi
         paintCanvas(activeField, field.nx, field.ny, field.gridStepM, req.paintCtx)
         // Solo-AP: dim the frozen snapshot underneath to 0.3 so the single
@@ -759,6 +807,7 @@ export function attachHeatmapLayer({
       // 任務 4: clear the large-scene notice when the heatmap is off so it
       // can't linger stale into the next enable.
       useHeatmapStore.getState().setSimplifiedLargeScene(false)
+      useHeatmapStore.getState().setBudgetQuality(null)
       // Also clear the draw-wall / align freeze notices — heatmap off,
       // nothing frozen.
       useHeatmapStore.getState().setDrawWallFrozen(false)
@@ -1062,7 +1111,10 @@ export function attachHeatmapLayer({
       // Shader engine: coalesce into the async drag pipeline (latest wins) —
       // no sync readPixels stall on the drag path. See runDragLoop.
       dragSessionOn = true
-      dragPending = { renderScenario, stepM, opts, modeCfg, paintCtx, isSoloAP }
+      dragPending = {
+        renderScenario, stepM, opts, modeCfg, paintCtx, isSoloAP,
+        tierSig: tierSceneSig(activeFloorId, hm),
+      }
       if (!dragLoopRunning) {
         dragLoopRunning = true
         runDragLoop()
@@ -1145,12 +1197,16 @@ export function attachHeatmapLayer({
     }
     // `sc` lets the coarse stage run against a thinned scenario; the fine
     // stage always passes the real one.
-    const stage = async (stepM, opts, sc = scenario) => {
+    // `overBudget` (57-39) aborts the stage like a stale generation does.
+    const stage = async (stepM, opts, sc = scenario, overBudget = null) => {
       try {
-        return await sampleFieldGLAsync(sc, stepM, { ...opts, isStale })
+        return await sampleFieldGLAsync(sc, stepM, {
+          ...opts,
+          isStale: overBudget ? () => isStale() || overBudget() : isStale,
+        })
       } catch (e) {
         console.warn('[heatmap] async shader engine failed, falling back to JS:', e.message)
-        return sampleField(sc, stepM, opts)
+        return sampleField(sc, stepM, jsFallbackOpts(sc, stepM, opts))
       }
     }
     try {
@@ -1161,6 +1217,7 @@ export function attachHeatmapLayer({
         if (isStale()) return
         present(field, false)
         lastIdleInputs = idleInputs
+        useHeatmapStore.getState().setBudgetQuality(null)
         return
       }
       // The coarse stage exists to put SOMETHING on screen within a frame or
@@ -1187,16 +1244,40 @@ export function attachHeatmapLayer({
       present(coarse, fineNeeded)
       if (!fineNeeded) {
         lastIdleInputs = idleInputs
+        useHeatmapStore.getState().setBudgetQuality(null)
         return
       }
       // Task boundary so the first ripple frames paint before the fine
       // stage's (small) synchronous command encoding runs.
       await new Promise((r) => setTimeout(r, 0))
       if (isStale()) return
-      const fine = await stage(hm.gridStepM, baseOpts)
-      if (fine === null || isStale()) return
+      // 57-39: FINE_BUDGET_MS shared across quality tiers. A tier that runs
+      // (or projects) over it is dropped for the next one down.
+      const tiers = qualityTiers(baseOpts)
+      const sig = tierSceneSig(ctxBase.floorId, hm)
+      if (!fineTierMemo || !sameTierScene(fineTierMemo.sig, sig)) fineTierMemo = { sig, tier: 0 }
+      const budgetStart = performance.now()
+      let tier = Math.min(fineTierMemo.tier, tiers.length - 1)
+      let fine = null
+      for (;;) {
+        const last = tier === tiers.length - 1
+        const budget = last ? null : makeTimeBudget(FINE_BUDGET_MS, {
+          startMs: budgetStart, settleFrac: 1 / Math.max(1, scenario.aps.length),
+        })
+        const opts = budget ? { ...tiers[tier].opts, onProgress: budget.onProgress } : tiers[tier].opts
+        fine = await stage(hm.gridStepM, opts, scenario, budget ? budget.exceeded : null)
+        if (isStale()) return
+        if (fine !== null) break
+        if (!budget || !budget.exceeded()) return
+        tier++
+      }
+      fineTierMemo.tier = tier
       present(fine, false)
       lastIdleInputs = idleInputs
+      // Set last: a heatmap-store change re-enters compute(), which finds
+      // these inputs already done and returns.
+      useHeatmapStore.getState().setBudgetQuality(
+        tiers[tier].level === QUALITY.FULL ? null : tiers[tier].level)
     } catch (e) {
       console.warn('[heatmap] idle compute failed:', e.message)
     }

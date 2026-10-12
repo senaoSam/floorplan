@@ -167,6 +167,9 @@ uniform float uCullFloorDbm;
 //     guaranteed no-op for every fragment, so we skip it. When 0.0 we still
 //     must run the scan because the Z filter (which depends on cZM, a
 //     fragment-local quantity) may rescue some hits.
+//     .b = s1Blocked (57-39: 1.0 = AP→corner is crossed by ≥2 walls that the
+//          s1 scan counts for EVERY fragment, so the s1.y > 1 cull always
+//          fires and the corner is skipped before any work)
 //   uApWallMirror (RGBA32F, N_walls packed 4096 wide): per wall
 //     .rg = apImg.xy = mirrorPoint(AP, wall.a, wall.b)
 //     The reflection loop reads this instead of recomputing mirrorPoint per
@@ -1248,6 +1251,7 @@ float rssiWithReflections(vec2 rx, float rxZ) {
       bool s1Skip = false;
       if (uApGeoEnabled == 1) {
         vec4 g = texelFetch(uApCornersGeo, ivec2(ci % 4096, ci / 4096), 0);
+        if (g.b > 0.5) continue;   // 57-39: s1 would cull it on every fragment
         d1 = g.r;
         s1Skip = g.g > 0.5;
       } else {
@@ -1274,8 +1278,9 @@ float rssiWithReflections(vec2 rx, float rxZ) {
       // crosses more than one wall, since the corner is supposed to be the
       // single obstruction. >1 means the diffracted path is blocked too.
       vec2 s1 = s1Skip ? vec2(0.0) : accumulateWallLossWithHits(uApPos.xy, uApPos.z, corner, cZM, corner);
+      if (s1.y > 1.0) continue;   // 57-39: skip the s2 scan once s1 culls
       vec2 s2 = accumulateWallLossWithHits(corner, cZM, rx, rxZ, corner);
-      if (s1.y > 1.0 || s2.y > 1.0) continue;
+      if (s2.y > 1.0) continue;
 
       // 57-24: 3D length of the path over the corner (mirrors propagation.js).
       float plDiff = pathLossDb(length(vec2(dTotC, uApPos.z - rxZ)), uCenterMHz) + s1.x + s2.x + diff;
@@ -2580,7 +2585,10 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     if (sig === wallsSig) return
     wallsSig = sig
 
-    bakeWalls = walls.map((w) => ({ ax: w.a.x, ay: w.a.y, bx: w.b.x, by: w.b.y }))
+    bakeWalls = walls.map((w) => ({
+      ax: w.a.x, ay: w.a.y, bx: w.b.x, by: w.b.y,
+      zLo: w.zLoM ?? -1e6, zHi: w.zHiM ?? 1e6,   // same defaults as the texture
+    }))
     const { data, w, h } = pack4096(flat)
     gl.bindTexture(gl.TEXTURE_2D, wallsTex)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, data)
@@ -3075,8 +3083,8 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     entry.lastBake = losBakeCounter
     return entry
   }
-  function bakeApGeoFor(ap, key) {
-    return bakeApGeoOne(ap, key)
+  function bakeApGeoFor(ap, key, rxZM, withCorners = true) {
+    return bakeApGeoOne(ap, key, rxZM, withCorners)
   }
   // `_idx_*` fallback keys aren't stable ids, so they're left alone (as in
   // pruneCachedGrids).
@@ -3107,15 +3115,28 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // most once per AP per wall-edit, not per frame). See SEG_HIT_EPS in
   // geometry.js for the matching JS-side admit-pad rule.
   const BAKE_SEG_EPS = 1e-6
-  function geomLosClear(ax, ay, bx, by, walls) {
-    // Returns true iff the segment AP→corner crosses zero walls
-    // *geometrically* (no Z filter). The JS check matches segSegIntersect's
-    // padded admit rule so the shader's strict t/u test never disagrees.
-    // 57-19: crossings ON the corner (bx, by) are its own walls and don't
-    // count, matching the shader leg scan's exclPt.
+  // 57-39: a "certain" crossing keeps this far (metres) from every edge the
+  // shader's fp32 test could flip on: the AP, the corner's 1e-3 exclusion
+  // box, both wall ends; and the two segments must not be near-parallel.
+  const CERTAIN_MARGIN_M = 2e-3
+  const CERTAIN_MIN_SIN = 1e-3
+  function scanApCornerLeg(ax, ay, bx, by, walls, zSpanLo, zSpanHi) {
+    // Returns [los, blocked]:
+    //   los     -- the segment AP→corner crosses zero walls *geometrically*
+    //              (no Z filter). The JS check matches segSegIntersect's
+    //              padded admit rule so the shader's strict t/u test never
+    //              disagrees. 57-19: crossings ON the corner (bx, by) are its
+    //              own walls and don't count, matching the shader's exclPt.
+    //   blocked -- 57-39: ≥2 walls cross it that the shader's s1 scan counts
+    //              for every fragment: crossing clear of every epsilon edge,
+    //              and a height band covering the whole Z span the leg can
+    //              take (the corner's Z lies between AP and rx height).
+    const d1x = bx - ax, d1y = by - ay
+    const len1 = Math.hypot(d1x, d1y)
+    let los = true
+    let certain = 0
     for (let i = 0; i < walls.length; i++) {
       const w = walls[i]
-      const d1x = bx - ax, d1y = by - ay
       const d2x = w.bx - w.ax, d2y = w.by - w.ay
       const denom = d1x * d2y - d1y * d2x
       if (Math.abs(denom) < 1e-12) continue   // parallel
@@ -3125,24 +3146,35 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       if (t < 0 || t > 1 + BAKE_SEG_EPS) continue
       if (u < -BAKE_SEG_EPS || u > 1 + BAKE_SEG_EPS) continue
       if (Math.abs(ax + d1x * t - bx) < 1e-3 && Math.abs(ay + d1y * t - by) < 1e-3) continue
-      return false
+      los = false
+      if (w.zLo > zSpanLo || w.zHi < zSpanHi) continue
+      const len2 = Math.hypot(d2x, d2y)
+      if (Math.abs(denom) < CERTAIN_MIN_SIN * len1 * len2) continue
+      if (t * len1 < CERTAIN_MARGIN_M || (1 - t) * len1 < CERTAIN_MARGIN_M) continue
+      if (u * len2 < CERTAIN_MARGIN_M || (1 - u) * len2 < CERTAIN_MARGIN_M) continue
+      if (++certain >= 2) break
     }
-    return true
+    return [los, certain >= 2]
   }
 
-  function bakeApGeoOne(ap, apKey) {
+  function bakeApGeoOne(ap, apKey, rxZM = 0, withCorners = true) {
     // Hash combines per-AP geometry (pos) with the wall topology version.
     // Antenna gain, frequency, channel — none affect mirrorPoint or the
-    // geometric LOS test, so they don't bust the cache.
+    // geometric LOS test, so they don't bust the cache. AP / rx height feed
+    // the 57-39 s1Blocked flag.
+    // 57-39: withCorners=false (diffraction off) skips the corners pass --
+    // corners × walls on the main thread, ~0.3 s per AP on a 4288-segment
+    // plan -- since only the diffraction loop reads it.
     const apX = ap.pos.x, apY = ap.pos.y
-    const hash = `${apX},${apY},${wallsVersion},${bakeCorners.length},${bakeWalls.length}`
+    const apZ = ap.zM ?? 0
+    const hash = `${apX},${apY},${apZ},${rxZM},${wallsVersion},${bakeCorners.length},${bakeWalls.length}`
     const cached = apGeoCache.get(apKey)
-    if (cached && cached.hash === hash) return cached
+    if (cached && cached.hash === hash && (cached.withCorners || !withCorners)) return cached
 
     // Allocate or resize textures. Layout (57-1: packed 4096 wide like
     // wallsTex / uCorners — a single row overflows MAX_TEXTURE_SIZE on big
     // DXF imports and texImage2D fails silently; ≤4096 entries is unchanged):
-    //   cornersTex: N_corners texels, RGBA32F, .rg = (d1, geomLos)
+    //   cornersTex: N_corners texels, RGBA32F, .rgb = (d1, geomLos, s1Blocked)
     //   mirrorTex:  N_walls texels,   RGBA32F, .rg = (apImg.x, apImg.y)
     let entry = cached
     if (!entry) {
@@ -3158,24 +3190,29 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-      entry = { cornersTex, mirrorTex, hash: '', cornerCount: 0, wallCount: 0 }
+      entry = { cornersTex, mirrorTex, hash: '', cornerCount: 0, wallCount: 0, withCorners: false }
       apGeoCache.set(apKey, entry)
     }
 
     // ---- corners pass ----
-    const nC = Math.max(1, bakeCorners.length)
-    const cW = Math.min(nC, 4096), cH = Math.ceil(nC / 4096)
-    const cData = new Float32Array(cW * cH * 4)
-    for (let i = 0; i < bakeCorners.length; i++) {
-      const c = bakeCorners[i]
-      const dx = c.x - apX, dy = c.y - apY
-      const d1 = Math.sqrt(dx * dx + dy * dy)
-      const los = geomLosClear(apX, apY, c.x, c.y, bakeWalls) ? 1.0 : 0.0
-      cData[i * 4    ] = d1
-      cData[i * 4 + 1] = los
+    if (withCorners) {
+      const nC = Math.max(1, bakeCorners.length)
+      const cW = Math.min(nC, 4096), cH = Math.ceil(nC / 4096)
+      const cData = new Float32Array(cW * cH * 4)
+      const zSpanLo = Math.min(apZ, rxZM), zSpanHi = Math.max(apZ, rxZM)
+      for (let i = 0; i < bakeCorners.length; i++) {
+        const c = bakeCorners[i]
+        const dx = c.x - apX, dy = c.y - apY
+        const d1 = Math.sqrt(dx * dx + dy * dy)
+        const [los, blocked] = scanApCornerLeg(apX, apY, c.x, c.y, bakeWalls, zSpanLo, zSpanHi)
+        cData[i * 4    ] = d1
+        cData[i * 4 + 1] = los ? 1.0 : 0.0
+        cData[i * 4 + 2] = blocked ? 1.0 : 0.0
+      }
+      gl.bindTexture(gl.TEXTURE_2D, entry.cornersTex)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, cW, cH, 0, gl.RGBA, gl.FLOAT, cData)
     }
-    gl.bindTexture(gl.TEXTURE_2D, entry.cornersTex)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, cW, cH, 0, gl.RGBA, gl.FLOAT, cData)
+    entry.withCorners = withCorners
 
     // ---- wall-mirror pass ----
     const nW = Math.max(1, bakeWalls.length)
@@ -3204,12 +3241,12 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // Mirrors bakeLos's lifetime semantics — caller passes a stable per-AP
   // key, stale entries are evicted, returned Map gives renderAp the texture
   // handles via opts.apGeoEntry.
-  function bakeApGeo(apEntries) {
+  function bakeApGeo(apEntries, rxZM, withCorners = true) {
     const seen = new Set()
     const out = new Map()
     for (const { ap, key } of apEntries) {
       seen.add(key)
-      out.set(key, bakeApGeoOne(ap, key))
+      out.set(key, bakeApGeoOne(ap, key, rxZM, withCorners))
     }
     for (const k of [...apGeoCache.keys()]) {
       if (!seen.has(k)) {
@@ -3494,6 +3531,10 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   const TILE_GEOM_MIN = 600
   // 200 ms keeps ~10× headroom under the ~2 s watchdog while making the
   // ramp-up short; growth is capped at ×8 per tile.
+  // 57-39: smaller tiles would let PIXI frames (same GPU) in sooner, but a
+  // heavy refl/diff fragment costs ms, so a small tile can't fill the GPU:
+  // on the UHD 770 baseline 50 / 100 ms tiles took > 35 s where 200 ms took
+  // 5–13 s. The heatmap time budget (heatmapAdapter) bounds the stutter.
   const TILE_TARGET_MS = 200
   const TILE_START_FRAGS = 4
   let tileHint = null // { key, msPerFrag }
@@ -3509,9 +3550,15 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     const ny = opts.gridSize?.ny ?? (Math.ceil(scenario.size.h / gridStepM) + 1)
     const startVersion = wallsVersion
     const hintKey = `${wallsVersion}|${cornerCount}|${opts.maxReflOrder > 0 ? 1 : 0}|${opts.enableDiffraction ? 1 : 0}`
+    // 57-39: a drag render passes its frame budget as the target, so its
+    // first tile can't hold the GPU (and the PIXI frame behind it) for 200 ms
+    // before the budget gets a chance to cut it.
+    // It also skips the previous AP's rate hint: per-AP cost varies ~15×, so
+    // a hint from a cheap AP made a 250+ ms first tile for an expensive one.
+    const targetMs = opts.tileTargetMs ?? TILE_TARGET_MS
     // Half the target on the first tile when reusing a hint: APs differ in cost.
-    let frags = (tileHint && tileHint.key === hintKey)
-      ? Math.floor((TILE_TARGET_MS * 0.5) / tileHint.msPerFrag)
+    let frags = (tileHint && tileHint.key === hintKey && opts.tileTargetMs == null)
+      ? Math.floor((targetMs * 0.5) / tileHint.msPerFrag)
       : TILE_START_FRAGS
     const out = new Float32Array(nx * ny)
     let x0 = 0, y0 = 0
@@ -3548,9 +3595,10 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       const done = w * h
       const msPerFrag = dt / done
       tileHint = { key: hintKey, msPerFrag }
-      frags = Math.min(done * 8, Math.floor(TILE_TARGET_MS / msPerFrag))
+      frags = Math.min(done * 8, Math.floor(targetMs / msPerFrag))
       x0 += w
       if (h > 1 || x0 >= nx) { y0 += h; x0 = 0 }
+      opts.onTileProgress?.((y0 * nx + x0) / (nx * ny))   // 57-39: time budget
     }
     return { data: out, nx, ny }
   }

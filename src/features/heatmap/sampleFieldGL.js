@@ -199,7 +199,7 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
   // callers turn this off (debug parity check vs unbaked path).
   const apGeoEnabled = opts.apGeoEnabled !== false
   const apGeoMap = apGeoEnabled
-    ? gl.bakeApGeo(scenario.aps.map((ap, i) => ({ ap, key: ap.id ?? `_idx_${i}` })))
+    ? gl.bakeApGeo(scenario.aps.map((ap, i) => ({ ap, key: ap.id ?? `_idx_${i}` })), rxZM, !!opts.enableDiffraction)
     : null
 
   // 任務 2 (C): per-AP output-grid cache. The cache container + invalidation
@@ -315,6 +315,9 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
 // opts.isStale — optional callback polled after every await; when it returns
 // true the compute aborts and resolves null (the caller's generation moved
 // on, so finishing the work would only waste time and PBOs).
+// opts.onProgress — optional (fraction 0..1) callback on the per-AP path, fed
+// as APs resolve and tiles land; lets a caller project the total time and
+// abort early through isStale (57-39 time budget).
 //
 // Duplication note: the grid/mask/aggregate logic intentionally mirrors the
 // sync path above rather than sharing one parameterised body — the sync path
@@ -421,6 +424,10 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
   const SUBMIT_BATCH = 4
   const perApGrids = new Array(scenario.aps.length)
   const pending = [] // { k, apKey, hash, handle }
+  let apsDone = 0
+  const reportProgress = (partial = 0) => {
+    if (opts.onProgress) opts.onProgress((apsDone + partial) / Math.max(1, scenario.aps.length))
+  }
 
   const flushPending = async () => {
     if (pending.length === 0) return true
@@ -436,6 +443,8 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
       if (gridCacheOn) gl.setCachedGrid(apKey, hash, grid, nx, ny)
       perApGrids[k] = grid
     }
+    apsDone += batch.length
+    reportProgress()
     return true
   }
 
@@ -464,6 +473,8 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
       const cached = gl.getCachedGrid(apKey, hash)
       if (cached) {
         perApGrids[k] = cached.grid
+        apsDone++
+        reportProgress()
         continue
       }
     }
@@ -471,13 +482,14 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
     const losEntry = losEnabled
       ? gl.bakeLosFor(ap, apKey, gridStepM, { x: originX, y: originY }, rxZM, nx, ny, scenario.walls.length)
       : null
-    const apGeoEntry = apGeoEnabled ? gl.bakeApGeoFor(ap, apKey) : null
+    const apGeoEntry = apGeoEnabled ? gl.bakeApGeoFor(ap, apKey, rxZM, !!opts.enableDiffraction) : null
     const apOpts = {
       ...opts,
       gridSize: { nx, ny },
       losTex: losEntry?.tex,
       losFastMode: opts.losFastMode === true,
       apGeoEntry,
+      onTileProgress: reportProgress,
     }
     // 57-39: heavy geometry → strip-by-strip render so no single GPU
     // submission trips the watchdog. Drain the pending batch first so the

@@ -66,6 +66,11 @@ export const useHeatmapStore = create((set) => ({
   // "large scene simplified" notice so the user knows the field is approximate.
   simplifiedLargeScene: false,
 
+  // 57-39: set by heatmapAdapter when the fine render ran over its time
+  // budget and stepped down: null (full quality) | 'noDiffraction' | 'direct'.
+  // HeatmapControl surfaces it next to the large-scene notice.
+  budgetQuality: null,
+
   // 52-C3: WebGL2 could not be initialised at all (no support, or context
   // creation refused). Previously there was no channel for this: the toggle
   // stayed on, nothing drew, and the user had no idea why. Sibling notices
@@ -113,6 +118,7 @@ export const useHeatmapStore = create((set) => ({
   // 任務 4 (b): adapter calls this each compute; guarded to a no-op when the
   // value is unchanged so it never triggers an extra subscriber recompute loop.
   setSimplifiedLargeScene: (v) => set((s) => (s.simplifiedLargeScene === v ? s : { simplifiedLargeScene: v })),
+  setBudgetQuality: (v) => set((s) => (s.budgetQuality === v ? s : { budgetQuality: v })),
   setGlUnavailable: (v) => set((s) => (s.glUnavailable === v ? s : { glUnavailable: v })),
   // Same no-op-when-unchanged guard: adapter calls it every compute, but the
   // heatmap store is one of its own compute triggers, so an unconditional set
