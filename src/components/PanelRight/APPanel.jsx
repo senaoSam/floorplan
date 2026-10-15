@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react'
+import React, { useCallback, useMemo, useRef } from 'react'
 import { useAPStore } from '@/store/useAPStore'
 import { useCableStore } from '@/store/useCableStore'
 import { useFloorStore, MAX_FLOOR_HEIGHT_M, DEFAULT_FLOOR_HEIGHT_M } from '@/store/useFloorStore'
@@ -6,12 +6,14 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { getCachedRoutes } from '@/features/cable/routesCache'
 import { AP_MODEL_LIST, DEFAULT_AP_MODEL_ID, getAPModelById } from '@/constants/apModels'
 import { ANTENNA_PATTERN_LIST, DEFAULT_PATTERN_ID, getPatternById, buildDirectionalPattern } from '@/constants/antennaPatterns'
-import { channelEntries, isChannelAllowed, allowedChannels, getDomain } from '@/constants/regulatoryDomains'
+import { channelEntries, isChannelAllowed, getDomain } from '@/constants/regulatoryDomains'
 import { resolveApRadiation } from '@/features/heatmap/apRadiation'
+import { assignNewRadioChannels } from '@/features/heatmap/channelNeighbors'
 import { CHANNEL_WIDTHS, DEFAULT_CHANNEL_WIDTH, allowedWidthsForBand } from '@/constants/channelWidths'
+import { apRadios, radiosForModel, patchRadio, radioView, highestEnabledBand, DEFAULT_CHANNEL_BY_BAND } from '@/utils/apRadios'
 import PatternPreview3D from './PatternPreview3D'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
-import { TextInput, NumberInput, Select } from './_shared/PanelControls'
+import { TextInput, NumberInput, Select, Checkbox } from './_shared/PanelControls'
 import { wrapAzimuth } from '@/utils/angle'
 import { tiltPatchForModeChange, tiltPatchForMountChange } from '@/utils/apMount'
 import './_shared/shared.sass'
@@ -22,8 +24,8 @@ const FREQ_OPTIONS = [
   { value: 5,   label: '5 GHz',   color: '#4fc3f7' },
   { value: 6,   label: '6 GHz',   color: '#a855f7' },
 ]
-
-const DEFAULT_CHANNEL = { 2.4: 1, 5: 36, 6: 1 }
+const bandColor = (band) => FREQ_OPTIONS.find((f) => f.value === band)?.color ?? '#4fc3f7'
+const NO_RADIO_COLOR = '#9aa3ad'
 
 const ANTENNA_OPTIONS = [
   { value: 'omni',        label: '全向' },
@@ -71,66 +73,67 @@ function APPanel({ floorId, apId }) {
 
   const model = getAPModelById(ap?.modelId ?? DEFAULT_AP_MODEL_ID)
 
-  // Pick the first domain-allowed channel for a band; fall back to the historical default.
-  const firstAllowedChannel = useCallback((band) => {
-    const allowed = allowedChannels(domainId, band)
-    return allowed[0] ?? DEFAULT_CHANNEL[band] ?? 1
-  }, [domainId])
+  // 58-15: TX floor per band = min(0, lowest TX seen while this AP is
+  // selected). It only moves down, so a stray keystroke or spinner step
+  // above a negative auto-power value can still be undone.
+  const txFloorRef = useRef({ apId: null, byBand: {} })
+  if (txFloorRef.current.apId !== apId) txFloorRef.current = { apId, byBand: {} }
+  const txFloor = (band, cur) => {
+    const f = Math.min(0, cur ?? 0, txFloorRef.current.byBand[band] ?? 0)
+    txFloorRef.current.byBand[band] = f
+    return f
+  }
 
+  // 58: a model change rebuilds the radio list -- kept bands keep their
+  // settings (TX clamped to the new model), new bands get defaults.
+  // 58-9: radios of newly supported bands get channels like a placed AP's.
   const handleModel = useCallback((modelId) => {
-    const newModel = getAPModelById(modelId)
-    const patch = { modelId }
-    // If current frequency unsupported, switch to first supported band.
-    const freq = ap.frequency
-    const bandOk = newModel.supportedBands.includes(freq)
-    const targetFreq = bandOk ? freq : newModel.supportedBands[0]
-    if (!bandOk) {
-      patch.frequency = targetFreq
-      patch.channel = firstAllowedChannel(targetFreq)
-      patch.channelWidth = DEFAULT_CHANNEL_WIDTH[targetFreq]
+    let radios = radiosForModel(modelId, apRadios(ap), domainId)
+    if (useEditorStore.getState().autoChannelOnPlace) {
+      const prev = useAPStore.getState().apsByFloor[floorId] ?? []
+      const next = prev.map((a) => (a.id === apId ? { ...a, modelId, radios } : a))
+      radios = assignNewRadioChannels(floorId, next, prev, domainId).find((a) => a.id === apId)?.radios ?? radios
     }
-    // Clamp txPower to new model's max for the target band.
-    const maxTx = newModel.maxTxPower[targetFreq] ?? 23
-    if (ap.txPower > maxTx) patch.txPower = maxTx
-    updateAP(floorId, apId, patch)
-  }, [floorId, apId, ap, updateAP, firstAllowedChannel])
+    updateAP(floorId, apId, { modelId, radios })
+  }, [floorId, apId, ap, updateAP, domainId])
 
   const handleField = useCallback((field, value) => {
-    if (field === 'frequency') {
-      if (!model.supportedBands.includes(value)) return
-      const maxTx = model.maxTxPower[value] ?? 23
-      const patch = {
-        frequency: value,
-        channel: firstAllowedChannel(value),
-        channelWidth: DEFAULT_CHANNEL_WIDTH[value],
-      }
-      if (ap.txPower > maxTx) patch.txPower = maxTx
-      updateAP(floorId, apId, patch)
-    } else {
-      updateAP(floorId, apId, { [field]: value })
-    }
-  }, [floorId, apId, ap, updateAP, model, firstAllowedChannel])
+    updateAP(floorId, apId, { [field]: value })
+  }, [floorId, apId, updateAP])
+
+  // 58: per-radio edits.
+  const handleRadio = useCallback((band, patch) => {
+    updateAP(floorId, apId, { radios: patchRadio(ap, band, patch) })
+  }, [floorId, apId, ap, updateAP])
+
+  const handleRadioTx = useCallback((band, num) => {
+    if (isNaN(num)) return
+    // 53-G10 (P3-21): clamp instead of rejecting so the displayed value and
+    // the stored value always agree. 58-15: the floor is min(0, current) so a
+    // negative TX set by auto power (high-gain antenna) stays editable.
+    const curTx = apRadios(ap).find((r) => r.band === band)?.txPower
+    const minTx = txFloor(band, curTx)
+    if (num < minTx) num = minTx
+    const maxTx = model.maxTxPower[band] ?? 23
+    const txPower = Math.min(num, maxTx)
+    // A clamp back to the stored value is a no-op -- no store write, so no
+    // empty undo step (the controlled input re-shows the stored value).
+    if (txPower === curTx) return
+    handleRadio(band, { txPower })
+  }, [ap, model, handleRadio])
 
   const handleNumber = useCallback((field, num) => {
     if (isNaN(num)) return
-    // 53-G10 (P3-21): a negative entry used to `return`, silently keeping the
-    // previous value — the field showed what the user typed but the store held
-    // something else, with no feedback that the input was rejected. Clamp to 0
-    // instead so the displayed value and the stored value always agree.
     if (num < 0) num = 0
-    if (field === 'txPower') {
-      const maxTx = model.maxTxPower[ap.frequency] ?? 23
-      updateAP(floorId, apId, { txPower: Math.min(num, maxTx) })
-    } else if (field === 'z') {
-      // 52-B4: the `max` prop is only a native attribute — typing bypasses it,
-      // exactly as it did for the floor height. Clamp here like txPower does.
+    if (field === 'z') {
+      // 52-B4: the `max` prop is only a native attribute — typing bypasses it.
       // Bound by THIS floor's ceiling: an AP mounted above its own ceiling is
       // what made computeRoutes emit a kilometre-long drop into the BOM.
       updateAP(floorId, apId, { z: Math.min(num, maxMountHeight) })
     } else {
       updateAP(floorId, apId, { [field]: num })
     }
-  }, [floorId, apId, ap, updateAP, model, maxMountHeight])
+  }, [floorId, apId, updateAP, maxMountHeight])
 
   const handleAntennaMode = useCallback((mode) => {
     const patch = { antennaMode: mode }
@@ -157,11 +160,11 @@ function APPanel({ floorId, apId }) {
 
   if (!ap) return null
 
-  const maxTxForBand = model.maxTxPower[ap.frequency] ?? 23
-  // 57-23: peak gain + EIRP-capped TX, exactly what the heatmap uses.
-  const rad = resolveApRadiation(ap, domainId)
   const fmtDb = (v) => (Math.round(v * 10) / 10).toString()
-  const freqColor = FREQ_OPTIONS.find((f) => f.value === ap.frequency)?.color ?? '#4fc3f7'
+  // 58-10: every radio off -> the 2D marker's grey (apsLayer FALLBACK_COLOR).
+  const noRadio = highestEnabledBand(ap) == null
+  const freqColor = noRadio ? NO_RADIO_COLOR : bandColor(highestEnabledBand(ap))
+  const shaped = ap.antennaMode === 'directional' || ap.antennaMode === 'custom'
 
   return (
     <PanelShell accent="ap">
@@ -170,14 +173,14 @@ function APPanel({ floorId, apId }) {
         meta={
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: freqColor }} />
-            AP 屬性
+            AP 屬性{noRadio && ' · 無射頻'}
           </span>
         }
         onDelete={handleDelete}
       />
 
       <PanelSection title="識別">
-        <PanelField label="型號" hint={`最大 ${maxTxForBand} dBm`}>
+        <PanelField label="型號">
           <Select
             value={ap.modelId ?? DEFAULT_AP_MODEL_ID}
             onChange={handleModel}
@@ -207,102 +210,9 @@ function APPanel({ floorId, apId }) {
         </PanelField>
       </PanelSection>
 
-      <PanelSection title="頻段">
-        <div className="ap-panel__pill-row">
-          {FREQ_OPTIONS.map((f) => {
-            const supported = model.supportedBands.includes(f.value)
-            const active = ap.frequency === f.value
-            return (
-              <button
-                key={f.value}
-                className={`ap-panel__pill${active ? ' ap-panel__pill--active' : ''}${supported ? '' : ' ap-panel__pill--disabled'}`}
-                style={active ? { borderColor: f.color, color: f.color } : {}}
-                onClick={() => handleField('frequency', f.value)}
-                disabled={!supported}
-                title={supported ? '' : `${model.vendor} ${model.name} 不支援此頻段`}
-              >
-                {f.label}
-              </button>
-            )
-          })}
-        </div>
-      </PanelSection>
-
-      {/* 頻道 */}
-      {(() => {
-        const entries = channelEntries(domainId, ap.frequency)
-        const curCh = ap.channel ?? DEFAULT_CHANNEL[ap.frequency] ?? 1
-        const curAllowed = isChannelAllowed(domainId, ap.frequency, curCh)
-        const chanOptions = []
-        if (!curAllowed) chanOptions.push({ value: String(curCh), label: `Ch ${curCh}（不允許）` })
-        for (const c of entries) {
-          chanOptions.push({
-            value: String(c.ch),
-            label: `Ch ${c.ch}${c.dfs ? '（DFS）' : ''}${c.indoorOnly ? '（室內）' : ''}`,
-          })
-        }
-        return (
-          <PanelSection title={`頻道${!curAllowed ? '（當前國家不支援）' : ''}`}>
-            <Select
-              value={String(curCh)}
-              onChange={(v) => handleField('channel', Number(v))}
-              options={chanOptions}
-            />
-          </PanelSection>
-        )
-      })()}
-
-      {/* 頻寬 */}
-      {(() => {
-        const allowedWidths = allowedWidthsForBand(ap.frequency)
-        const curWidth = ap.channelWidth ?? DEFAULT_CHANNEL_WIDTH[ap.frequency] ?? 20
-        return (
-          <PanelSection title="頻寬">
-            <div className="ap-panel__pill-row">
-              {CHANNEL_WIDTHS.map((w) => {
-                const supported = allowedWidths.includes(w)
-                const active = curWidth === w
-                return (
-                  <button
-                    key={w}
-                    className={`ap-panel__pill${active ? ' ap-panel__pill--active' : ''}${supported ? '' : ' ap-panel__pill--disabled'}`}
-                    onClick={() => supported && handleField('channelWidth', w)}
-                    disabled={!supported}
-                    title={supported ? '' : `${ap.frequency} GHz 不建議使用 ${w} MHz`}
-                  >
-                    {w}
-                  </button>
-                )
-              })}
-            </div>
-            <div className="ap-panel__hint">
-              Cisco 建議：2.4G 固定 20、5G 多用 20/40、6G 可開 80
-            </div>
-          </PanelSection>
-        )
-      })()}
-
+      {/* 58-14: 安裝 + 天線 (device fields) come before the radio sections, so
+          the 峰值增益 rows that 天線模式 reveals appear below its control. */}
       <PanelSection title="安裝">
-        <PanelField label="發射功率" hint={`上限 ${maxTxForBand} dBm`}>
-          <NumberInput
-            value={ap.txPower}
-            min={0}
-            max={maxTxForBand}
-            step={1}
-            unit="dBm"
-            width={70}
-            onChange={(v) => handleNumber('txPower', v)}
-          />
-        </PanelField>
-        <div className="ap-panel__hint">
-          EIRP {fmtDb(rad.eirpDbm)} dBm
-          {rad.eirpLimitDbm != null && `（${getDomain(domainId).label}上限 ${fmtDb(rad.eirpLimitDbm)} dBm）`}
-        </div>
-        {rad.capped && (
-          <div className="ap-panel__hint" style={{ color: '#ef4444' }}>
-            ⚠ 超過法規 EIRP 上限，實際發射功率降為 {fmtDb(rad.txDbm)} dBm
-          </div>
-        )}
         <PanelField label="安裝高度">
           {/* 52-B4: cap at this floor's ceiling — an AP mounted at 999999 m
               feeds the same absurd cable-length estimate into the BOM that the
@@ -345,7 +255,7 @@ function APPanel({ floorId, apId }) {
           ))}
         </div>
 
-        {(ap.antennaMode === 'directional' || ap.antennaMode === 'custom') && (() => {
+        {shaped && (() => {
           const rawAz = ap.azimuth ?? DEFAULT_AZIMUTH
           const effAz = wrapAzimuth(rawAz)
           const azChanged = effAz !== rawAz
@@ -364,20 +274,6 @@ function APPanel({ floorId, apId }) {
                   unit="度"
                   width={70}
                   onChange={(v) => { if (!isNaN(v)) updateAP(floorId, apId, { azimuth: v }) }}
-                />
-              </PanelField>
-
-              <PanelField
-                label="峰值增益"
-                hint={`空白＝依方向圖自動 ${fmtDb(rad.autoPeakGainDbi)} dBi`}
-              >
-                <NumberInput
-                  value={Number.isFinite(ap.antennaPeakGainDbi) ? ap.antennaPeakGainDbi : null}
-                  placeholder={fmtDb(rad.autoPeakGainDbi)}
-                  step={0.5}
-                  unit="dBi"
-                  width={70}
-                  onChange={(v) => updateAP(floorId, apId, { antennaPeakGainDbi: isNaN(v) ? null : v })}
                 />
               </PanelField>
 
@@ -458,6 +354,116 @@ function APPanel({ floorId, apId }) {
           )
         })()}
       </PanelSection>
+
+      {/* 58: one section per radio of the model. */}
+      {apRadios(ap).map((r, i, radios) => {
+        const band = r.band
+        const maxTx = model.maxTxPower[band] ?? 23
+        // 57-23: peak gain + EIRP-capped TX, exactly what the heatmap uses.
+        const rad = resolveApRadiation(radioView(ap, r), domainId)
+        const entries = channelEntries(domainId, band)
+        const curCh = r.channel ?? DEFAULT_CHANNEL_BY_BAND[band] ?? 1
+        const curAllowed = isChannelAllowed(domainId, band, curCh)
+        const chanOptions = []
+        if (!curAllowed) chanOptions.push({ value: String(curCh), label: `Ch ${curCh}（不允許）` })
+        for (const c of entries) {
+          chanOptions.push({
+            value: String(c.ch),
+            label: `Ch ${c.ch}${c.dfs ? '（DFS）' : ''}${c.indoorOnly ? '（室內）' : ''}`,
+          })
+        }
+        const allowedWidths = allowedWidthsForBand(band)
+        const curWidth = r.channelWidth ?? DEFAULT_CHANNEL_WIDTH[band] ?? 20
+        return (
+          <PanelSection key={band} title={`${band}G 射頻`}>
+            <PanelField label="啟用">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: bandColor(band) }} />
+                <Checkbox checked={!!r.enabled} onChange={(v) => handleRadio(band, { enabled: v })} />
+                {!r.enabled && <span className="ap-panel__hint">已關閉</span>}
+              </span>
+            </PanelField>
+            {/* 58-14: an off radio keeps a one-line summary of the settings it
+                comes back with. */}
+            {!r.enabled && (
+              <div className="ap-panel__hint">
+                保留設定：CH {curCh}/{curWidth} · {r.txPower ?? '—'} dBm
+              </div>
+            )}
+            {r.enabled && (
+              <>
+                <PanelField label={`頻道${!curAllowed ? '（當前國家不支援）' : ''}`}>
+                  <Select
+                    value={String(curCh)}
+                    onChange={(v) => handleRadio(band, { channel: Number(v) })}
+                    options={chanOptions}
+                  />
+                </PanelField>
+                <PanelField label="頻寬">
+                  <div className="ap-panel__pill-row" style={{ flex: 1 }}>
+                    {CHANNEL_WIDTHS.map((w) => {
+                      const supported = allowedWidths.includes(w)
+                      const active = curWidth === w
+                      return (
+                        <button
+                          key={w}
+                          className={`ap-panel__pill${active ? ' ap-panel__pill--active' : ''}${supported ? '' : ' ap-panel__pill--disabled'}`}
+                          onClick={() => supported && handleRadio(band, { channelWidth: w })}
+                          disabled={!supported}
+                          title={supported ? '' : `${band} GHz 不建議使用 ${w} MHz`}
+                        >
+                          {w}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </PanelField>
+                <PanelField label="發射功率" hint={`上限 ${maxTx} dBm`}>
+                  <NumberInput
+                    value={r.txPower}
+                    min={txFloor(band, r.txPower)}
+                    max={maxTx}
+                    step={1}
+                    unit="dBm"
+                    width={70}
+                    onChange={(v) => handleRadioTx(band, v)}
+                  />
+                </PanelField>
+                {shaped && (
+                  <PanelField
+                    label="峰值增益"
+                    hint={`空白＝依方向圖自動 ${fmtDb(rad.autoPeakGainDbi)} dBi`}
+                  >
+                    <NumberInput
+                      value={Number.isFinite(r.antennaPeakGainDbi) ? r.antennaPeakGainDbi : null}
+                      placeholder={fmtDb(rad.autoPeakGainDbi)}
+                      step={0.5}
+                      unit="dBi"
+                      width={70}
+                      onChange={(v) => handleRadio(band, { antennaPeakGainDbi: isNaN(v) ? null : v })}
+                    />
+                  </PanelField>
+                )}
+                <div className="ap-panel__hint">
+                  EIRP {fmtDb(rad.eirpDbm)} dBm
+                  {rad.eirpLimitDbm != null && `（${getDomain(domainId).label}上限 ${fmtDb(rad.eirpLimitDbm)} dBm）`}
+                </div>
+                {rad.capped && (
+                  <div className="ap-panel__hint" style={{ color: '#ef4444' }}>
+                    ⚠ 超過法規 EIRP 上限，實際發射功率降為 {fmtDb(rad.txDbm)} dBm
+                  </div>
+                )}
+              </>
+            )}
+            {/* 58-14: inside the last radio section so it takes the section's padding. */}
+            {i === radios.length - 1 && (
+              <div className="ap-panel__hint">
+                Cisco 建議頻寬：2.4G 固定 20、5G 多用 20/40、6G 可開 80
+              </div>
+            )}
+          </PanelSection>
+        )
+      })}
 
       {route && (
         <PanelSection title="狀態 / 線纜">

@@ -68,8 +68,7 @@ export const useEditorStore = create((set, get) => ({
   selectedItems: [],
 
   // Toolbar place-mode sub-types — Editor2D / placeModeBinder reads these to
-  // know which AP band / switch kind to drop on the next click.
-  placeApBand: 5,
+  // know which switch kind to drop on the next click.
   placeSwitchKind: 'switch',
   // Draw-wall defaults — the WallDefaultsPanel (canvas top-left, DRAW_WALL
   // only) is the UI for both. Tab cycling used to set the material with no
@@ -202,7 +201,6 @@ export const useEditorStore = create((set, get) => ({
     return s.selectedItems.some((it) => it.id === id)
   },
 
-  setPlaceApBand: (band) => set({ placeApBand: band }),
   setPlaceSwitchKind: (kind) => set({ placeSwitchKind: kind }),
   setWallMaterial: (mat) => set({ wallMaterial: mat }),
   setWallThickness: (m) => set({ wallThickness: m }),

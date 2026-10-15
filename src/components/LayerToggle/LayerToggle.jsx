@@ -42,10 +42,11 @@ const SWITCH_KINDS_UI = [
   { kind: 'router', label: 'Router' },
 ]
 
-function VisibilityRow({ visible, label, onClick, indent = false, dim = false }) {
+function VisibilityRow({ visible, label, onClick, indent = false, dim = false, title }) {
   return (
     <button
       type="button"
+      title={title}
       className={
         'layer-toggle__row' +
         (indent ? ' layer-toggle__row--indent' : '') +
@@ -154,6 +155,8 @@ function LayerToggle() {
                   indent
                   dim={!s.showAPs}
                   onClick={() => toggleAPBand(b.band)}
+                  // 58-7: these only hide icons; the heatmap band is its own control.
+                  title="只影響圖示；熱圖頻段請用熱圖列的頻段按鈕"
                 />
               ))}
               <VisibilityRow

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useRef, useState } from 'react'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
@@ -9,8 +9,10 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { MATERIAL_LIST } from '@/constants/materials'
 import { AP_MODEL_LIST, getAPModelById } from '@/constants/apModels'
 import { ANTENNA_PATTERN_LIST, getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
-import { allowedChannels, channelEntries } from '@/constants/regulatoryDomains'
-import { CHANNEL_WIDTHS, DEFAULT_CHANNEL_WIDTH, allowedWidthsForBand } from '@/constants/channelWidths'
+import { channelEntries } from '@/constants/regulatoryDomains'
+import { CHANNEL_WIDTHS, allowedWidthsForBand } from '@/constants/channelWidths'
+import { assignNewRadioChannels } from '@/features/heatmap/channelNeighbors'
+import { BANDS, apRadio, apRadios, patchRadio, radiosForModel } from '@/utils/apRadios'
 import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
 import PatternPreview from './PatternPreview'
 import { PanelShell, PanelHeader } from './_shared/PanelShell'
@@ -46,7 +48,6 @@ const MOUNT_OPTIONS = [
   { value: 'wall',    label: '牆面' },
 ]
 
-const DEFAULT_CHANNEL = { 2.4: 1, 5: 36, 6: 1 }
 const MIXED = '__mixed__'
 const MIN_BEAMWIDTH = 10
 const MAX_BEAMWIDTH = 180
@@ -66,6 +67,13 @@ function BatchPanel() {
   const domainId      = useEditorStore((s) => s.regulatoryDomain)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
   const [autoPowerOpen, setAutoPowerOpen] = useState(false)
+  // 58: which band's radios the radio fields edit.
+  const [editBand, setEditBand] = useState(null)
+  // 58-14: bumped on every TX commit so the uncontrolled input re-reads the
+  // stored (model-clamped) value even when the store did not change.
+  const [txCommit, setTxCommit] = useState(0)
+  // 58-15: per band, per device lowest TX seen for the current AP selection.
+  const txFloorRef = useRef({ key: null, byBand: {} })
 
   const removeWalls      = useWallStore((s) => s.removeWalls)
   const updateWalls      = useWallStore((s) => s.updateWalls)
@@ -73,6 +81,7 @@ function BatchPanel() {
   const walls            = useWallStore((s) => s.wallsByFloor[activeFloorId] ?? EMPTY)
   const removeAPs        = useAPStore((s) => s.removeAPs)
   const updateAPs        = useAPStore((s) => s.updateAPs)
+  const setAPs           = useAPStore((s) => s.setAPs)
   const scopes           = useScopeStore((s) => s.scopesByFloor[activeFloorId] ?? EMPTY)
   const removeScopes     = useScopeStore((s) => s.removeScopes)
   const updateScopes     = useScopeStore((s) => s.updateScopes)
@@ -98,12 +107,36 @@ function BatchPanel() {
 
   // Resolve selected objects for "mixed value" detection in dropdowns.
   const selectedAPs = aps.filter((a) => apIds.includes(a.id))
-  const apFreq     = uniformValue(selectedAPs, 'frequency')
-  const apChannel  = uniformValue(selectedAPs, 'channel')
-  const apWidth    = uniformValue(selectedAPs, 'channelWidth')
   const apMode     = uniformValue(selectedAPs, 'antennaMode')
   const apModel    = uniformValue(selectedAPs, 'modelId')
-  const apTxPower  = uniformValue(selectedAPs, 'txPower')
+  // 58: radio fields edit one band at a time, across the selected devices
+  // that have that band.
+  const bandsPresent = BANDS.filter((b) => selectedAPs.some((a) => apRadio(a, b)))
+  const band = bandsPresent.includes(editBand) ? editBand : (bandsPresent[0] ?? null)
+  const bandAPs    = band == null ? [] : selectedAPs.filter((a) => apRadio(a, band))
+  const bandRadios = bandAPs.map((a) => apRadio(a, band))
+  const apEnabled  = uniformValue(bandRadios, 'enabled')
+  const apChannel  = uniformValue(bandRadios, 'channel')
+  const apWidth    = uniformValue(bandRadios, 'channelWidth')
+  const apTxPower  = uniformValue(bandRadios, 'txPower')
+  // 58-14: TX limits of the selected models on this band.
+  const txCaps = bandAPs.map((a) => getAPModelById(a.modelId).maxTxPower[band] ?? 23)
+  const txCapMin = txCaps.length ? Math.min(...txCaps) : 23
+  const txCapMax = txCaps.length ? Math.max(...txCaps) : 23
+  // 58-15: floor is min(0, current) so a negative TX set by auto power stays
+  // valid. Like the AP panel's txFloorRef, each device's floor is the lowest
+  // TX seen while this AP set is selected -- it only moves down, so setting
+  // -1 over a -2 device can still be undone by typing -2.
+  const selKey = [...apIds].sort().join(',')
+  if (txFloorRef.current.key !== selKey) txFloorRef.current = { key: selKey, byBand: {} }
+  const deviceTxFloor = (a) => {
+    const seen = (txFloorRef.current.byBand[band] ??= {})
+    const f = Math.min(0, apRadio(a, band)?.txPower ?? 0, seen[a.id] ?? 0)
+    seen[a.id] = f
+    return f
+  }
+  const txMin = Math.min(0, ...bandAPs.map(deviceTxFloor))
+  const mixedLabel = (v) => (v === MIXED ? '多個值' : (v ?? '—'))
   const apAzimuth  = uniformValue(selectedAPs, 'azimuth')
   const apBeam     = uniformValue(selectedAPs, 'beamwidth')
   const apPattern  = uniformValue(selectedAPs, 'patternId')
@@ -137,24 +170,35 @@ function BatchPanel() {
     updateScopes(activeFloorId, scopeIds, { type })
   }, [activeFloorId, scopeIds, updateScopes])
 
-  const handleAPFrequency = useCallback((freq) => {
-    const allowed = allowedChannels(domainId, freq)
-    const ch = allowed[0] ?? DEFAULT_CHANNEL[freq] ?? 1
-    updateAPs(activeFloorId, apIds, {
-      frequency: freq,
-      channel: ch,
-      channelWidth: DEFAULT_CHANNEL_WIDTH[freq],
+  // 58: patch the `band` radio of every selected device that has it.
+  // `patch` may be a function of the device (per-model TX clamp).
+  // One store write for the whole selection; 58-14: none at all when no
+  // selected radio would change (no empty undo step).
+  const patchBandRadios = useCallback((patch) => {
+    const ids = new Set(bandAPs.map((a) => a.id))
+    let changed = false
+    const next = aps.map((a) => {
+      if (!ids.has(a.id)) return a
+      const p = typeof patch === 'function' ? patch(a) : patch
+      const cur = apRadio(a, band)
+      if (!cur || Object.keys(p).some((k) => cur[k] !== p[k])) changed = true
+      return { ...a, radios: patchRadio(a, band, p) }
     })
-  }, [activeFloorId, apIds, updateAPs, domainId])
+    if (changed) setAPs(activeFloorId, next)
+  }, [activeFloorId, aps, bandAPs, band, setAPs])
+
+  const handleAPEnabled = useCallback((enabled) => {
+    patchBandRadios({ enabled })
+  }, [patchBandRadios])
 
   const handleAPChannel = useCallback((raw) => {
     if (raw === MIXED || raw === '') return
-    updateAPs(activeFloorId, apIds, { channel: Number(raw) })
-  }, [activeFloorId, apIds, updateAPs])
+    patchBandRadios({ channel: Number(raw) })
+  }, [patchBandRadios])
 
   const handleAPChannelWidth = useCallback((width) => {
-    updateAPs(activeFloorId, apIds, { channelWidth: width })
-  }, [activeFloorId, apIds, updateAPs])
+    patchBandRadios({ channelWidth: width })
+  }, [patchBandRadios])
 
   const handleAPAntennaMode = useCallback((mode) => {
     // Patch per-AP with mode-specific defaults if missing.
@@ -170,29 +214,33 @@ function BatchPanel() {
 
   const handleAPModel = useCallback((modelId) => {
     if (modelId === MIXED || modelId === '') return
-    const newModel = getAPModelById(modelId)
-    // Per-AP patch: clamp txPower to the new model's max for each AP's band,
-    // and switch band+channel when the AP's current band isn't supported.
-    selectedAPs.forEach((a) => {
-      const patch = { modelId }
-      const bandOk = newModel.supportedBands.includes(a.frequency)
-      const targetFreq = bandOk ? a.frequency : newModel.supportedBands[0]
-      if (!bandOk) {
-        patch.frequency = targetFreq
-        const allowed = allowedChannels(domainId, targetFreq)
-        patch.channel = allowed[0] ?? DEFAULT_CHANNEL[targetFreq] ?? 1
-        patch.channelWidth = DEFAULT_CHANNEL_WIDTH[targetFreq]
-      }
-      const maxTx = newModel.maxTxPower[targetFreq] ?? 23
-      if (a.txPower > maxTx) patch.txPower = maxTx
-      updateAPs(activeFloorId, [a.id], patch)
-    })
-  }, [activeFloorId, selectedAPs, updateAPs, domainId])
+    // 58: per AP -- the new model's radios, keeping the settings of bands it
+    // still supports (TX clamped to the new model). One store write; 58-9:
+    // radios of newly supported bands get channels like a placed AP's.
+    const ids = new Set(selectedAPs.map((a) => a.id))
+    let next = aps.map((a) => (ids.has(a.id)
+      ? { ...a, modelId, radios: radiosForModel(modelId, apRadios(a), domainId) }
+      : a))
+    if (useEditorStore.getState().autoChannelOnPlace) {
+      next = assignNewRadioChannels(activeFloorId, next, aps, domainId)
+    }
+    setAPs(activeFloorId, next)
+  }, [activeFloorId, aps, selectedAPs, setAPs, domainId])
 
   const handleAPTxPower = useCallback((raw) => {
     const num = parseFloat(raw)
-    if (!isNaN(num) && num >= 0) updateAPs(activeFloorId, apIds, { txPower: num })
-  }, [activeFloorId, apIds, updateAPs])
+    // Bumping txCommit remounts the uncontrolled input, so a rejected value
+    // reverts to the displayed one (or the 多個值 placeholder).
+    if (isNaN(num) || num < txMin) { setTxCommit((n) => n + 1); return }
+    // Clamped per device to its model's limit on this band, and (58-15) to
+    // its own sticky floor -- same rule as the single-AP panel.
+    const floors = txFloorRef.current.byBand[band] ?? {}
+    patchBandRadios((a) => {
+      const floor = Math.min(0, apRadio(a, band)?.txPower ?? 0, floors[a.id] ?? 0)
+      return { txPower: Math.min(Math.max(num, floor), getAPModelById(a.modelId).maxTxPower[band] ?? 23) }
+    })
+    setTxCommit((n) => n + 1)
+  }, [patchBandRadios, band, txMin])
 
   const handleAPAzimuth = useCallback((raw) => {
     const num = parseFloat(raw)
@@ -228,10 +276,7 @@ function BatchPanel() {
     })
   }, [activeFloorId, selectedAPs, updateAPs])
 
-  // Channel section: disabled when APs span multiple bands (they share one dropdown).
-  const channelEntriesForBand = apFreq && apFreq !== MIXED
-    ? channelEntries(domainId, apFreq)
-    : []
+  const channelEntriesForBand = band != null ? channelEntries(domainId, band) : []
 
   return (
     <PanelShell accent="batch" className="batch-panel">
@@ -345,43 +390,74 @@ function BatchPanel() {
                   </p>
                 )}
                 {apModel === MIXED && (
-                  <p className="batch-panel__hint-block">切換型號時，若原頻段不支援會自動改為首個支援頻段，並 clamp 發射功率</p>
+                  <p className="batch-panel__hint-block">切換型號時，射頻依新型號支援頻段重建（保留仍支援頻段的設定），並 clamp 發射功率</p>
                 )}
               </section>
             )
           })()}
 
-          {/* 頻段 */}
+          {/* 58: 射頻（依頻段批次） */}
           <section className="batch-panel__section">
-            <p className="batch-panel__label">AP 頻段（批次變更）</p>
+            <p className="batch-panel__label">射頻頻段（選擇要批次編輯的頻段）</p>
             <div className="batch-panel__btn-group">
-              {FREQ_OPTIONS.map((f) => {
-                const active = apFreq === f.value
+              {FREQ_OPTIONS.filter((f) => bandsPresent.includes(f.value)).map((f) => {
+                const active = band === f.value
                 return (
                   <button
                     key={f.value}
                     className={`batch-panel__btn${active ? ' batch-panel__btn--active' : ''}`}
                     style={active ? { borderColor: f.color, color: f.color } : {}}
-                    onClick={() => handleAPFrequency(f.value)}
+                    onClick={() => setEditBand(f.value)}
                   >
                     {f.label}
                   </button>
                 )
               })}
             </div>
+            {band != null && (
+              <p className="batch-panel__hint-block">
+                {bandAPs.length} / {selectedAPs.length} 台 AP 有 {band} GHz 射頻
+              </p>
+            )}
           </section>
 
+          {band != null && (<>
+          {/* 啟用 */}
+          <section className="batch-panel__section">
+            <p className="batch-panel__label">
+              {band} GHz 射頻啟用（批次變更）
+              {apEnabled === MIXED && <span className="batch-panel__hint">多個值</span>}
+            </p>
+            <div className="batch-panel__btn-group">
+              {[{ v: true, label: '開' }, { v: false, label: '關' }].map((o) => (
+                <button
+                  key={o.label}
+                  className={`batch-panel__btn${apEnabled === o.v ? ' batch-panel__btn--active' : ''}`}
+                  onClick={() => handleAPEnabled(o.v)}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            {/* 58-14: same as the AP panel -- an off band shows a summary of
+                the settings it keeps instead of its editors. */}
+            {apEnabled === false && (
+              <p className="batch-panel__hint-block">
+                已關閉 · 保留設定：CH {mixedLabel(apChannel)}/{mixedLabel(apWidth)} · {mixedLabel(apTxPower)} dBm
+              </p>
+            )}
+          </section>
+
+          {apEnabled !== false && (<>
           {/* 頻道 */}
           <section className="batch-panel__section">
             <p className="batch-panel__label">
-              AP 頻道（批次變更）
-              {apFreq === MIXED && <span className="batch-panel__hint">所選 AP 頻段不一致，請先統一</span>}
+              {band} GHz 頻道（批次變更）
             </p>
             <select
               className="batch-panel__input batch-panel__select"
               value={apChannel === MIXED ? MIXED : (apChannel ?? '')}
               onChange={(e) => handleAPChannel(e.target.value)}
-              disabled={apFreq === MIXED}
             >
               {apChannel === MIXED && <option value={MIXED}>— 多個值 —</option>}
               {channelEntriesForBand.map((c) => (
@@ -395,13 +471,12 @@ function BatchPanel() {
           {/* 頻寬 */}
           <section className="batch-panel__section">
             <p className="batch-panel__label">
-              AP 頻寬（批次變更）
-              {apFreq === MIXED && <span className="batch-panel__hint">所選 AP 頻段不一致，請先統一</span>}
-              {apFreq !== MIXED && apWidth === MIXED && <span className="batch-panel__hint">多個值</span>}
+              {band} GHz 頻寬（批次變更）
+              {apWidth === MIXED && <span className="batch-panel__hint">多個值</span>}
             </p>
             <div className="batch-panel__btn-group">
               {CHANNEL_WIDTHS.map((w) => {
-                const supported = apFreq !== MIXED && allowedWidthsForBand(apFreq).includes(w)
+                const supported = allowedWidthsForBand(band).includes(w)
                 const active = apWidth === w
                 return (
                   <button
@@ -418,35 +493,45 @@ function BatchPanel() {
             </div>
           </section>
 
+          </>)}
+
           {/* 發射功率 */}
           <section className="batch-panel__section">
+            {apEnabled !== false && (<>
             <p className="batch-panel__label">
-              AP 發射功率（批次變更）
+              {band} GHz 發射功率（批次變更）
               {apTxPower === MIXED && <span className="batch-panel__hint">多個值</span>}
             </p>
             <div className="batch-panel__number-row">
               <input
                 className="batch-panel__input"
                 type="number"
-                min="0"
-                max="33"
+                min={txMin}
+                max={txCapMax}
                 step="1"
                 defaultValue={apTxPower === MIXED ? '' : (apTxPower ?? '')}
-                key={`tx-${apTxPower}`}
+                key={`tx-${apTxPower}-${txCommit}`}
                 placeholder={apTxPower === MIXED ? '多個值，Enter 套用' : ''}
                 onBlur={(e) => e.target.value !== '' && handleAPTxPower(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && e.target.value !== '') handleAPTxPower(e.target.value) }}
               />
               <span className="batch-panel__unit">dBm</span>
             </div>
+            <p className="batch-panel__hint-block">
+              {txCapMin === txCapMax
+                ? `上限 ${txCapMax} dBm`
+                : `上限 ${txCapMin}–${txCapMax} dBm（依型號上限截斷）`}
+            </p>
+            </>)}
             <button
               className="batch-panel__btn batch-panel__btn--auto-power"
               onClick={() => setAutoPowerOpen(true)}
               style={{ marginTop: 8 }}
             >
-              ⚡ 自動規劃功率
+              ⚡ 自動規劃功率（所有頻段）
             </button>
           </section>
+          </>)}
 
           {/* 安裝高度（批次變更） */}
           <section className="batch-panel__section">
@@ -569,11 +654,8 @@ function BatchPanel() {
                   {apMode === 'custom' && (() => {
                     const previewPatternId = apPattern === MIXED ? null : (apPattern ?? DEFAULT_PATTERN_ID)
                     const previewPattern = previewPatternId ? getPatternById(previewPatternId) : null
-                    // Use first AP's band color when uniform, else neutral.
-                    const freqColor = apFreq === 2.4 ? '#f39c12'
-                      : apFreq === 5 ? '#4fc3f7'
-                      : apFreq === 6 ? '#a855f7'
-                      : '#4fc3f7'
+                    // 58: the band being edited.
+                    const freqColor = FREQ_OPTIONS.find((f) => f.value === band)?.color ?? '#4fc3f7'
                     const previewAz = apAzimuth === MIXED ? 0 : wrapAzimuth(apAzimuth ?? 0)
                     return (
                       <>

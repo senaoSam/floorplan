@@ -4,7 +4,9 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
+import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { getDefaultTxPower } from '@/constants/apModels'
+import { apRadios, enabledRadios, radioKey, applyRadioResults, deviceIdOf } from '@/utils/apRadios'
 import { currentScenarioEnv } from '@/features/heatmap/buildScenario'
 import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
 import './AutoPowerModal.sass'
@@ -21,7 +23,7 @@ const EMPTY = Object.freeze([])
 
 // HM-F4 — Auto power plan modal.
 // Lets the user pick a target RSSI / scope, runs greedy multi-start search,
-// previews resulting txPower per AP, then commits via updateAPs.
+// previews resulting txPower per AP radio, then commits via one setAPs.
 //
 // Props:
 //   open         - boolean
@@ -48,6 +50,20 @@ const fmtPct = (x) => x == null || !isFinite(x) ? '—' : `${(x * 100).toFixed(1
 const START_KIND_LABELS = { max: '高功率', mid: '中功率', min: '低功率' }
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
+
+// 58-15 (D1): the TX at or below which a radio's planned value means "off" --
+// per radio (a radio whose legal max is <= the TX floor stays on at it).
+const offTxOf = (opts, key) => opts?.offTxByRadio?.get(key) ?? opts?.txMinDbm ?? 0
+
+// 58-15 (decision 6): whether radio `r` of `ap` is on once the plan is
+// applied -- a planned radio above its off level is on (a disabled one is
+// switched back on), at or below it off; an unplanned radio keeps its state.
+function onAfterPlan(result, ap, r) {
+  const key = radioKey(ap.id, r.band)
+  const next = result.txMap.get(key)
+  return next == null ? r.enabled : next > offTxOf(result.opts, key)
+}
+
 function AutoPowerModal({ open, apIds, onClose }) {
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
   const floors = useFloorStore((s) => s.floors)
@@ -55,12 +71,15 @@ function AutoPowerModal({ open, apIds, onClose }) {
   const walls = useWallStore((s) => s.wallsByFloor[activeFloorId] ?? EMPTY)
   const aps = useAPStore((s) => s.apsByFloor[activeFloorId] ?? EMPTY)
   const scopes = useScopeStore((s) => s.scopesByFloor[activeFloorId] ?? EMPTY)
-  const updateAPs = useAPStore((s) => s.updateAPs)
+  const setAPs = useAPStore((s) => s.setAPs)
 
   const [targetRssi, setTargetRssi] = useState(-65)
   const [targetSinr, setTargetSinr] = useState(20)
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState(null)
+  // 58-14: shown fill of the overall bar -- null until the first finite
+  // estimate (indeterminate until then), then only ever grows within a run.
+  const [fillPct, setFillPct] = useState(null)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   // Active worker instance — null when idle. Held in a ref so cancel/cleanup
@@ -118,6 +137,7 @@ function AutoPowerModal({ open, apIds, onClose }) {
     setError(null)
     setResult(null)
     setProgress(null)
+    setFillPct(null)
 
     // Spin up a fresh worker per run so a previously-terminated worker can't
     // leak state into this one.
@@ -129,6 +149,15 @@ function AutoPowerModal({ open, apIds, onClose }) {
       if (!msg || !msg.type) return
       if (msg.type === 'progress') {
         setProgress(msg.state)
+        const elapsed = msg.state?.elapsedMs
+        const eta = msg.state?.etaMs
+        if (eta != null) {
+          const pct = (elapsed / (elapsed + eta)) * 100
+          if (isFinite(pct)) {
+            const p = Math.max(0, Math.min(100, pct))
+            setFillPct((prev) => (prev == null ? p : Math.max(prev, p)))
+          }
+        }
       } else if (msg.type === 'done') {
         const r = msg.result
         if (r.aborted) {
@@ -140,7 +169,7 @@ function AutoPowerModal({ open, apIds, onClose }) {
           setResult({
             aborted: r.aborted,
             txMap: r.txMapEntries ? new Map(r.txMapEntries) : null,
-            score: r.score,
+            scoresByBand: r.scoresByBand,   // 58: per band
             opts: r.opts,
           })
         }
@@ -173,25 +202,36 @@ function AutoPowerModal({ open, apIds, onClose }) {
         userOpts: { targetRssiDbm: rssiClamped, targetSinrDb: sinrClamped },
         // 57-34: the worker's stores only hold defaults.
         env: currentScenarioEnv(),
+        // 58-15: same cross-floor scenario as the heatmap (image data
+        // stripped -- the engine needs geometry only).
+        floors: useFloorStore.getState().floors.map(({ imageUrl, ...f }) => f),
+        apsByFloor: useAPStore.getState().apsByFloor,
+        wallsByFloor: useWallStore.getState().wallsByFloor,
+        holesByFloor: useFloorHoleStore.getState().floorHolesByFloor,
       },
     })
   }, [floor, walls, aps, scopes, targetIds, targetRssi, targetSinr])
 
   const handleApply = useCallback(() => {
     if (!result || !result.txMap) return
-    // 依新 tx 值分桶，逐桶 batch update（updateAPs 一次只能套同一 patch）。
-    const buckets = new Map()  // tx → ids[]
-    targetAPs.forEach((a) => {
-      const tx = result.txMap.get(a.id)
-      if (tx == null) return
-      if (!buckets.has(tx)) buckets.set(tx, [])
-      buckets.get(tx).push(a.id)
-    })
-    buckets.forEach((ids, tx) => {
-      updateAPs(activeFloorId, ids, { txPower: tx })
-    })
+    // 58: txMap is keyed per radio -- write the devices' radios back in one
+    // store write (only target devices are in txMap's planned keys).
+    const targetIds = new Set(targetAPs.map((a) => a.id))
+    const floorAps = useAPStore.getState().apsByFloor[activeFloorId] ?? []
+    // 58: a radio the search drove to the TX floor is switched off rather than
+    // left radiating at it (planning tools disable surplus radios the same way).
+    // 58-15 (D1): the floor is per radio -- resolved here (null = off).
+    // 58-15 (decision 6): a disabled radio planned on is switched back on; one
+    // that stays off is left untouched (keeps its stored TX).
+    const wasOff = new Set(floorAps.flatMap((ap) => apRadios(ap)
+      .filter((r) => !r.enabled).map((r) => radioKey(ap.id, r.band))))
+    const planned = new Map([...result.txMap].filter(([k]) => targetIds.has(deviceIdOf(k)))
+      .map(([k, tx]) => [k, tx <= offTxOf(result.opts, k) ? null : tx])
+      .filter(([k, tx]) => !(tx == null && wasOff.has(k))))
+    setAPs(activeFloorId, applyRadioResults(floorAps, planned,
+      (tx) => (tx == null ? { enabled: false } : { enabled: true, txPower: tx })))
     onClose()
-  }, [result, targetAPs, updateAPs, activeFloorId, onClose])
+  }, [result, targetAPs, setAPs, activeFloorId, onClose])
 
   const handleCancel = useCallback(() => {
     if (running) {
@@ -235,14 +275,12 @@ function AutoPowerModal({ open, apIds, onClose }) {
 
         {/* 整體進度條：執行中才顯示。
             起點 1 期間 etaMs=null → indeterminate（左右掃）動畫；
-            起點 2 起 etaMs 有值 → 變成依時間百分比的填充。 */}
+            起點 2 起 etaMs 有值 → 變成依時間百分比的填充。
+            58-14: elapsedMs / etaMs 是整次規劃（所有頻段）的值，換頻段不重來；
+            填充只增不減（fillPct 取最大值），算不出有限值前維持 indeterminate。 */}
         {running && (() => {
-          const elapsed = progress?.elapsedMs ?? 0
-          const eta = progress?.etaMs
-          const isCalibrating = eta == null
-          const pct = isCalibrating
-            ? 0
-            : Math.max(0, Math.min(100, (elapsed / (elapsed + eta)) * 100))
+          const isCalibrating = fillPct == null
+          const pct = fillPct
           return (
             <div className={`auto-power-modal__progressbar${isCalibrating ? ' auto-power-modal__progressbar--indeterminate' : ''}`}>
               <div
@@ -310,6 +348,13 @@ function AutoPowerModal({ open, apIds, onClose }) {
             <p className="auto-power-modal__label">規劃中…</p>
             {progress && (
               <div className="auto-power-modal__progress">
+                {/* 58: bands are planned one after another. */}
+                {progress.band != null && (
+                  <div className="auto-power-modal__progress-row">
+                    <span>頻段</span>
+                    <span>{progress.band} GHz（{(progress.bandIdx ?? 0) + 1} / {progress.totalBands ?? 1}）</span>
+                  </div>
+                )}
                 <div className="auto-power-modal__progress-row">
                   <span>起點</span>
                   <span>{(progress.startIdx ?? 0) + 1} / {progress.totalStarts ?? 3}（{START_KIND_LABELS[progress.startKind] ?? progress.startKind}）</span>
@@ -357,59 +402,108 @@ function AutoPowerModal({ open, apIds, onClose }) {
         {result && result.txMap && (
           <section className="auto-power-modal__section">
             <p className="auto-power-modal__label">規劃結果（目標 RSSI {targetRssi} dBm / SINR {targetSinr} dB）</p>
-            <div className="auto-power-modal__progress">
-              <div className="auto-power-modal__progress-row auto-power-modal__progress-row--score">
-                <span>規劃品質</span>
-                <span>
-                  <strong>{qualityScore(result.score.cost) ?? '—'}</strong> / 100
-                </span>
+            {/* 58: one block per band -- each band is planned on its own. */}
+            {Object.entries(result.scoresByBand ?? {}).sort(([a], [b]) => Number(a) - Number(b)).map(([band, score]) => (
+              <div key={band} className="auto-power-modal__progress" style={{ marginTop: 8 }}>
+                <div className="auto-power-modal__progress-row auto-power-modal__progress-row--score">
+                  <span>{band} GHz 規劃品質</span>
+                  <span>
+                    <strong>{qualityScore(score.cost) ?? '—'}</strong> / 100
+                  </span>
+                </div>
+                <div className="auto-power-modal__progress-row">
+                  <span>覆蓋率（≥ {targetRssi} dBm）</span>
+                  <span>{fmtPct(score.coverage)}</span>
+                </div>
+                {score.terms && (
+                  <>
+                    <div className="auto-power-modal__progress-row">
+                      <span>死角嚴重度（P95 RSSI 缺）</span>
+                      <span>{fmtPct(score.terms.L_outlier)}</span>
+                    </div>
+                    <div className="auto-power-modal__progress-row">
+                      <span>已覆蓋區品質缺口</span>
+                      <span>{fmtPct(score.terms.L_quality)}</span>
+                    </div>
+                    <div className="auto-power-modal__progress-row">
+                      <span>過量發射</span>
+                      <span>{fmtPct(score.terms.L_excess)}</span>
+                    </div>
+                  </>
+                )}
               </div>
-              <div className="auto-power-modal__progress-row">
-                <span>覆蓋率（≥ {targetRssi} dBm）</span>
-                <span>{fmtPct(result.score.coverage)}</span>
-              </div>
-              {result.score.terms && (
-                <>
-                  <div className="auto-power-modal__progress-row">
-                    <span>死角嚴重度（P95 RSSI 缺）</span>
-                    <span>{fmtPct(result.score.terms.L_outlier)}</span>
-                  </div>
-                  <div className="auto-power-modal__progress-row">
-                    <span>已覆蓋區品質缺口</span>
-                    <span>{fmtPct(result.score.terms.L_quality)}</span>
-                  </div>
-                  <div className="auto-power-modal__progress-row">
-                    <span>過量發射</span>
-                    <span>{fmtPct(result.score.terms.L_excess)}</span>
-                  </div>
-                </>
-              )}
-            </div>
+            ))}
             <p className="auto-power-modal__label" style={{ marginTop: 12 }}>各 AP 功率變更</p>
             <div className="auto-power-modal__changes">
-              {targetAPs.map((a) => {
-                const next = result.txMap.get(a.id)
+              {targetAPs.flatMap((ap) => apRadios(ap).map((r) => ({ ap, r, key: radioKey(ap.id, r.band) }))).map(({ ap: a, r, key }) => {
+                const next = result.txMap.get(key)
                 // 開啟後第一幀可能還帶著上一輪的 result（reset effect 在
                 // render 後才跑）— txMap 對不上當前 AP 就跳過該列，避免
                 // 渲染出 NaN。
                 if (next == null) return null
+                // 58-15 (decision 6): a disabled radio -- listed only when the
+                // plan switches it back on; one that stays off is unchanged.
+                if (!r.enabled) {
+                  if (next <= offTxOf(result.opts, key)) return null
+                  return (
+                    <div key={key} className="auto-power-modal__change-row">
+                      <span className="auto-power-modal__ap-name">{a.name ?? a.id} · {r.band} GHz</span>
+                      <span className="auto-power-modal__tx-next" style={{ gridColumn: '2 / -1' }}>建議開啟（原本關閉）· {next} dBm</span>
+                    </div>
+                  )
+                }
                 // txPower 未設時退回 per-band 預設 — 跟引擎建模值同源，
                 // 也避免顯示「undefined dBm」/ delta NaN。
-                const cur = a.txPower ?? getDefaultTxPower(a.frequency ?? 5)
+                const cur = r.txPower ?? getDefaultTxPower(r.band)
                 const delta = next - cur
+                // 58: driven to the TX floor → applied as "radio off".
+                const off = next <= offTxOf(result.opts, key)
                 return (
-                  <div key={a.id} className="auto-power-modal__change-row">
-                    <span className="auto-power-modal__ap-name">{a.name ?? a.id}</span>
+                  <div key={key} className="auto-power-modal__change-row">
+                    <span className="auto-power-modal__ap-name">{a.name ?? a.id} · {r.band} GHz</span>
                     <span className="auto-power-modal__tx-cur">{cur} dBm</span>
                     <span className="auto-power-modal__tx-arrow">→</span>
-                    <span className="auto-power-modal__tx-next">{next} dBm</span>
-                    <span className={`auto-power-modal__tx-delta auto-power-modal__tx-delta--${delta > 0 ? 'up' : delta < 0 ? 'down' : 'zero'}`}>
-                      {delta > 0 ? `+${delta}` : delta}
+                    <span className="auto-power-modal__tx-next">{off ? '建議關閉' : `${next} dBm`}</span>
+                    <span className={`auto-power-modal__tx-delta auto-power-modal__tx-delta--${off || delta < 0 ? 'down' : delta > 0 ? 'up' : 'zero'}`}>
+                      {off ? '關' : delta > 0 ? `+${delta}` : delta}
                     </span>
                   </div>
                 )
               })}
             </div>
+            {/* 58-9: devices every radio of which would be switched off --
+                one line for all of them, names cut after 10.
+                58-15 (decision 6): off after apply counts every radio (a
+                disabled one switched back on keeps the device on); a device
+                already all off is not listed. */}
+            {(() => {
+              const names = targetAPs.filter((ap) => enabledRadios(ap).length > 0
+                && apRadios(ap).every((r) => !onAfterPlan(result, ap, r))).map((ap) => ap.name ?? ap.id)
+              if (names.length === 0) return null
+              return (
+                <p className="auto-power-modal__hint">
+                  {names.length === 1
+                    ? `${names[0]} 所有射頻都將關閉，可考慮移除此 AP`
+                    : `共 ${names.length} 台所有射頻都將關閉，可考慮移除：${names.slice(0, 10).join('、')}${names.length > 10 ? `…等 ${names.length} 台` : ''}`}
+                </p>
+              )
+            })()}
+            {/* Left out of the plan: a band off on every radio of this floor
+                stays off; a disabled radio whose channel the regulatory
+                domain does not allow cannot come back on. */}
+            {(result.opts?.skippedBands ?? []).map((band) => (
+              <p key={band} className="auto-power-modal__hint">{band} GHz：整層皆關閉，未規劃</p>
+            ))}
+            {(() => {
+              const list = result.opts?.skippedRadios ?? []
+              if (list.length === 0) return null
+              const names = list.map((x) => `${x.name} · ${x.band} GHz`)
+              return (
+                <p className="auto-power-modal__hint">
+                  {`${list.length} 個已關閉的射頻頻道不符目前國家頻段，未納入規劃：${names.slice(0, 5).join('、')}${names.length > 5 ? `…等 ${names.length} 個` : ''}`}
+                </p>
+              )
+            })()}
           </section>
         )}
 

@@ -85,6 +85,25 @@
         border-color: rgba(255, 255, 255, 0.18)
         background: rgba(30, 41, 59, 0.85)
 
+  // 58-7: read-only heatmap band badge. Same pill as __floors-btn but no
+  // border, so it doesn't read as a button.
+  &__band-badge
+    display: inline-flex
+    align-items: center
+    gap: 5px
+    height: 34px
+    padding: 0 10px
+    border-radius: 17px
+    color: $text-secondary
+    font-size: 12px
+    white-space: nowrap
+    cursor: default
+
+  &__band-badge-dot
+    width: 8px
+    height: 8px
+    border-radius: 50%
+
   &__preset-btn
     pointer-events: auto
     height: 30px

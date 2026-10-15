@@ -1,6 +1,7 @@
 import { probeAt } from '@/features/heatmap/hoverProbe'
 import { buildFloorScenario } from '@/features/heatmap/buildCrossFloor'
 import { getHeatmapField } from './heatmapFrameBus'
+import { withOnlyBand } from '@/utils/apRadios'
 
 // 57-17: bilinear read of one metric grid at (x, y) metres; NaN neighbours
 // fall back to the nearest sample. Returns undefined outside the grid.
@@ -69,7 +70,7 @@ export function bindHeatmapHover({
       wallsByFloor: useWallStore.getState().wallsByFloor ?? {},
       holesByFloor: useFloorHoleStore?.getState().floorHolesByFloor ?? {},
       scopes,
-      mapAps: (list) => bandFilter === 'all' ? list : list.filter((a) => String(a.frequency) === bandFilter),
+      mapAps: (list) => bandFilter === 'all' ? list : list.map((a) => withOnlyBand(a, bandFilter)).filter(Boolean),
     })
     cachedScenario = sc && sc.aps.length > 0 ? sc : null
     return cachedScenario
@@ -124,7 +125,16 @@ export function bindHeatmapHover({
   const unsubAP = useAPStore.subscribe(invalidate)
   const unsubScope = useScopeStore ? useScopeStore.subscribe(invalidate) : () => {}
   const unsubHole = useFloorHoleStore ? useFloorHoleStore.subscribe(invalidate) : () => {}
-  const unsubHeatmap = useHeatmapStore.subscribe(invalidate)   // band filter
+  // 58-7: a band switch also drops the reading -- its per-band rows belong
+  // to the old band until the pointer moves again.
+  let lastBand = useHeatmapStore.getState().bandFilter
+  const unsubHeatmap = useHeatmapStore.subscribe((s) => {
+    invalidate()
+    if (s.bandFilter !== lastBand) {
+      lastBand = s.bandFilter
+      if (useHoverReadoutStore.getState().reading) useHoverReadoutStore.getState().setReading(null)
+    }
+  })
 
   stage.on('pointermove', onMove)
 

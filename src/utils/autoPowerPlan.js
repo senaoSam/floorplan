@@ -58,7 +58,11 @@
 //     O(格子 × N)，整體搜尋從 O(N³·牆段) 降為 O(N³)（射線追蹤只跑
 //     建快取那一次）。
 
-import { buildScenario } from '@/features/heatmap/buildScenario'
+import { buildFloorScenario } from '@/features/heatmap/buildCrossFloor'
+import { resolveApRadiation } from '@/features/heatmap/apRadiation'
+import { useEditorStore } from '@/store/useEditorStore'
+import { expandRadios, apRadios, radioView } from '@/utils/apRadios'
+import { isChannelAllowed } from '@/constants/regulatoryDomains'
 import { rssiFromAp, makeApAggregator, aggregateWithTables } from '@/features/heatmap/propagation'
 import {
   getAPModelById,
@@ -110,15 +114,63 @@ function maxTxFor(ap) {
   return model.maxTxPower[ap.frequency] ?? 23
 }
 
+// 58-9: a planned radio at or below the TX floor is evaluated as switched
+// off -- apply turns such radios off ("建議關閉"), so the score must be the
+// score of that configuration. Far below any target / minInterfDbm.
+const OFF_TX_DBM = -1000
+
+// 58-15 (D1): the TX at or below which a planned radio counts as off -- the
+// TX floor, unless the radio's legal maximum is at or below it (antenna peak
+// gain >= the band's EIRP limit, e.g. a 20 dBi panel at 2.4 GHz in EU): then
+// one step under its maximum, so the maximum itself -- full legal EIRP --
+// stays an "on" level the search can evaluate. TX may go negative; the
+// propagation model takes it as a plain dB offset.
+function offTxFor(maxTx, txMinDbm) {
+  return Math.min(txMinDbm, maxTx - 1)
+}
+
 // 建立 scenario 一次（walls / corners / scope mask 不會隨 tx 改變）。
-// 回傳 { scenario, baseAps } — baseAps 是 scenario.aps 同序的快照。
+// 回傳 { scenario, baseAps, aps } — baseAps 是 scenario.aps，aps 是同序的
+// radio view（evaluate / txMap 以它的 id 對位）。
 // 57-34: env = regulatory domain + RF settings from the main thread (this
 // runs in a worker, whose own stores only hold defaults).
-function buildBaseScenario(floor, walls, aps, scopes, env) {
-  const scenario = buildScenario(floor, walls, aps, scopes, null, env)
+// 58-15: the heatmap's scenario (buildFloorScenario, as planQuality and
+// auto-place use it): other floors' radios of this band through the slab --
+// fixed, never planned -- and the receiver at 1.0 m. Built even for a single
+// floor, like the heatmap; the planar path put the receiver at 0 m.
+//   aps   -- this floor's radio views of the band
+//   cross -- { floors, apsByFloor, wallsByFloor, holesByFloor }; floors
+//            omitted -> this floor alone
+function buildBaseScenario(floor, walls, aps, scopes, env, band, cross, txMinDbm) {
+  const floors = cross.floors?.some((f) => f.id === floor.id) ? cross.floors : [floor]
+  const sameBand = (list) => expandRadios(list).filter((a) => a.frequency === band)
+  const apsByFloor = { ...(cross.apsByFloor ?? {}), [floor.id]: aps }
+  const scenario = buildFloorScenario({
+    floors,
+    floorId: floor.id,
+    apsByFloor,
+    wallsByFloor: { ...(cross.wallsByFloor ?? {}), [floor.id]: walls ?? [] },
+    holesByFloor: cross.holesByFloor ?? {},
+    scopes,
+    mapAps: sameBand,
+    env,
+  })
   if (!scenario) return null
-  // scenario.aps 跟 aps 同序（buildScenario 走 map）。保留參考供 evaluate 改 txDbm。
-  return { scenario, baseAps: scenario.aps }
+  // scenario.aps holds every floor's radios in floor-stack order; line the
+  // radio views up with it (evaluate indexes both by position).
+  const byId = new Map()
+  for (const f of floors) for (const a of sameBand(apsByFloor[f.id] ?? [])) byId.set(a.id, a)
+  for (const a of aps) byId.set(a.id, a)
+  const evalAps = scenario.aps.map((e) => byId.get(e.id))
+  // 58-9: the regulatory EIRP cap, as buildScenario applies it -- the TX
+  // resolveApRadiation leaves for an unbounded set TX (Infinity = no cap).
+  // evaluate clamps every radio's TX to it; the search stops at it.
+  const domainId = env?.regulatoryDomain ?? useEditorStore.getState().regulatoryDomain
+  const capTx = evalAps.map((a) => resolveApRadiation({ ...a, txPower: Infinity }, domainId).txDbm)
+  const searchMaxTx = new Map(evalAps.map((a, i) => [a.id, Math.min(maxTxFor(a), Math.floor(capTx[i] + 1e-9))]))
+  // 58-15 (D1): per-radio off level (see offTxFor); the search's lower bound.
+  const offTx = new Map([...searchMaxTx].map(([id, maxTx]) => [id, offTxFor(maxTx, txMinDbm)]))
+  return { scenario, baseAps: scenario.aps, aps: evalAps, capTx, searchMaxTx, offTx }
 }
 
 // nth-percentile (0..1) on an in-place sortable array. Uses linear-interp
@@ -151,7 +203,7 @@ const EVAL_FIELD_OPTS = { maxReflOrder: 0, enableDiffraction: false }
 // 每條 path 都以 txDbm 作 dB 偏移 → rssi(tx) = base + tx 精確成立，
 // 之後 evaluate 完全不再做射線追蹤。
 // 記憶體：cells × N × 4 bytes（50 AP × ~650 格 ≈ 130 KB）。
-function ensureFieldCache(baseScenario, opts) {
+function ensureFieldCache(baseScenario, opts, aps, txMap) {
   if (baseScenario.fieldCache) return baseScenario.fieldCache
   const { scenario, baseAps } = baseScenario
   const step = opts.gridStepM
@@ -190,32 +242,92 @@ function ensureFieldCache(baseScenario, opts) {
   }
   for (let i = 0; i < nAps; i++) baseAps[i].txDbm = savedTx[i]
 
+  // 58-15: drop fixed radios (not planned -> TX never moves) that stay below
+  // both minInterfDbm and the coverage target in every cell -- typically
+  // other floors' radios several slabs away. Such a radio is never counted
+  // as interference, and where it is the strongest the cell is uncovered
+  // (no SINR read), so only its RSSI matters: kept as a per-cell max
+  // (prunedMax). Scores stay bit-identical; the hot loop runs over the
+  // remaining radios only. Skipped when a field value is NaN.
+  const minInterf = scenario.rf?.minInterfDbm
+  const pruneBelow = Math.min(minInterf, opts.targetRssiDbm)
+  const keep = []
+  const pruned = []
+  for (let i = 0; i < nAps; i++) {
+    const tx = opts.planSet?.has(aps[i].id) ? null : fixedTxAt(baseScenario, aps, txMap, i)
+    if (tx == null || !(pruneBelow > -Infinity)) { keep.push(i); continue }
+    let below = true
+    for (let k = 0; k < cellCount; k++) {
+      if (!(base[k * nAps + i] + tx < pruneBelow)) { below = false; break }
+    }
+    if (below) pruned.push([i, tx])
+    else keep.push(i)
+  }
+  let anyNaN = false
+  for (let n = 0; n < base.length; n++) if (Number.isNaN(base[n])) { anyNaN = true; break }
+
+  let keptBase = base
+  let keepIdx = null
+  let prunedMax = null
+  if (pruned.length && !anyNaN) {
+    const nKeep = keep.length
+    keptBase = new Float32Array(cellCount * nKeep)
+    prunedMax = new Float64Array(cellCount).fill(-Infinity)
+    for (let k = 0; k < cellCount; k++) {
+      const off = k * nAps
+      for (let j = 0; j < nKeep; j++) keptBase[k * nKeep + j] = base[off + keep[j]]
+      let pm = -Infinity
+      for (const [i, tx] of pruned) {
+        const v = base[off + i] + tx
+        if (v > pm) pm = v
+      }
+      prunedMax[k] = pm
+    }
+    keepIdx = Int32Array.from(keep)
+  }
+  const nEval = keepIdx ? keepIdx.length : nAps
+
   baseScenario.fieldCache = {
     cellCount,
-    base,
+    base: keptBase,
+    nEval,
+    keepIdx,     // null -> every radio kept (identity)
+    prunedMax,   // null -> nothing pruned
     // 每次 evaluate 重複使用的暫存（避免熱迴圈裡配置）。
-    txArr: new Float64Array(nAps),
-    perAp: new Float64Array(nAps),
+    txArr: new Float64Array(nEval),
+    perAp: new Float64Array(nEval),
     gapRssiArr: new Float64Array(cellCount),
     // 57-9: spectrum-share / noise tables — depend on band / channel / width
     // only, so one build serves every evaluate (txDbm is what the search moves).
-    aggTables: makeApAggregator(baseAps, scenario.rf),   // 57-28
+    aggTables: makeApAggregator(keepIdx ? keep.map((i) => baseAps[i]) : baseAps, scenario.rf),   // 57-28
     agg: {},
   }
   return baseScenario.fieldCache
 }
 
+// evaluate's TX for radio i (scenario order). 58-9: EIRP-capped like the
+// heatmap; planned radios at the floor are off. A fixed radio's TX is the
+// same in every txMap the search builds (planOneBand sets it once per start
+// from the radio itself), which is what lets ensureFieldCache prune on it.
+function fixedTxAt(baseScenario, aps, txMap, i) {
+  const tx = txMap.get(aps[i].id)
+  return tx == null ? baseScenario.baseAps[i].txDbm : Math.min(tx, baseScenario.capTx[i])
+}
+
 // 給定 baseScenario + tx override map 評分（快取場 + tx 平移，零射線追蹤）。
 // 回傳 { cost, terms, coverage, sampledCells } — terms 是四項細節給 UI 用。
 function evaluate(baseScenario, aps, txMap, opts) {
-  const { baseAps } = baseScenario
-  const cache = ensureFieldCache(baseScenario, opts)
-  const { cellCount, base, txArr, perAp, gapRssiArr, aggTables, agg } = cache
-  const nAps = baseAps.length
-  // txMap 涵蓋全部 AP（規劃中 + 固定），依 scenario.aps 同序展開。
-  for (let i = 0; i < nAps; i++) {
+  const cache = ensureFieldCache(baseScenario, opts, aps, txMap)
+  const { cellCount, base, nEval, keepIdx, prunedMax, txArr, perAp, gapRssiArr, aggTables, agg } = cache
+  // txMap 涵蓋全部 AP（規劃中 + 固定），依 scenario.aps 同序展開
+  // （58-15: 只展開未被 prune 的）。
+  // 58-9: EIRP-capped like the heatmap; planned radios at the floor are off.
+  for (let j = 0; j < nEval; j++) {
+    const i = keepIdx ? keepIdx[j] : j
     const tx = txMap.get(aps[i].id)
-    txArr[i] = tx != null ? tx : baseAps[i].txDbm
+    txArr[j] = tx != null && opts.planSet?.has(aps[i].id) && tx <= baseScenario.offTx.get(aps[i].id)
+      ? OFF_TX_DBM
+      : fixedTxAt(baseScenario, aps, txMap, i)
   }
 
   // Single pass: accumulate gap_rssi (for in-scope), gap_sinr (for covered),
@@ -224,10 +336,11 @@ function evaluate(baseScenario, aps, txMap, opts) {
   let covered = 0
   let gapSinrCoveredSum = 0
   for (let k = 0; k < cellCount; k++) {
-    const off = k * nAps
-    for (let i = 0; i < nAps; i++) perAp[i] = base[off + i] + txArr[i]
+    const off = k * nEval
+    for (let i = 0; i < nEval; i++) perAp[i] = base[off + i] + txArr[i]
     aggregateWithTables(aggTables, perAp, agg)
-    const r = agg.rssiDbm
+    // 58-15: a pruned radio can still be the strongest (always < target).
+    const r = prunedMax && prunedMax[k] > agg.rssiDbm ? prunedMax[k] : agg.rssiDbm
     if (Number.isNaN(r)) continue
     const gapR = Math.max(0, opts.targetRssiDbm - r)
     gapRssiArr[inScope] = gapR
@@ -336,14 +449,15 @@ async function greedyFromStart(baseScenario, aps, apsToPlan, txMap, opts, onProg
       sweepCount++
       for (let k = 0; k < n; k++) {
         const ap = apsToPlan[(k + offset) % n]
-        const maxTx = maxTxFor(ap)
+        const maxTx = baseScenario.searchMaxTx.get(ap.id)
+        const minTx = baseScenario.offTx.get(ap.id)   // 58-15 (D1)
         for (const delta of [+stepSize, -stepSize]) {
           let moved = false
           // 線搜尋：同方向推到不再改善（最後一次失敗的 evaluate 是停損成本）。
           for (;;) {
             const cur = txMap.get(ap.id)
             const next = cur + delta
-            if (next < opts.txMinDbm || next > maxTx) break
+            if (next < minTx || next > maxTx) break
             txMap.set(ap.id, next)
             const score = evaluate(baseScenario, aps, txMap, opts)
             stats.startEvals++
@@ -436,10 +550,32 @@ function estimateEtaMs(stats) {
 
 // 主入口。回傳 { txMapBest, score } 或 { aborted: true }。
 //
-// floor / walls / aps / scopes：當前樓層完整資料（單樓層模式）。
-// apIdsToPlan：要規劃的 AP id 子集；其餘 AP 維持原 txPower 但仍納入 scenario。
+// floor / walls / aps / scopes：當前樓層完整資料。
+// floors / apsByFloor / wallsByFloor / holesByFloor（58-15）：全樓層資料，
+// 評分用跟熱圖同一個跨樓層 scenario；其他樓層的射頻固定不規劃。省略
+// floors → 只有本層（仍是熱圖幾何：接收高度 1.0 m）。
+// apIdsToPlan：要規劃的 AP（裝置）id 子集；其餘 AP 維持原 txPower 但仍納入 scenario。
+// 58: 回傳的 txMap 以射頻 key（radioKey）為 key；每個頻段各自規劃（見下）。
 // userOpts：覆蓋 DEFAULTS。
 // onProgress(state)：每次接受 step 後呼叫；回傳 false 可中止。
+//
+// 58: every band is planned on its own -- its own radios, its own coverage
+// target -- like per-band TPC in AP RRM (e.g. Cisco's 802.11a / 802.11b TPC).
+// One shared target let the 2.4 GHz radios win: they reach furthest, so the
+// search pushed 2.4 GHz to max and cut 5 GHz (measured on the demo: 2.4 GHz
+// 11 → 23 dBm, 5 GHz 15 → 12 dBm). Other bands never interfere, so a band's
+// scenario holds only that band's radios (this floor's and, 58-15, other
+// floors' of the same band).
+// Returns { txMap, scoresByBand: { [band]: score }, opts } -- opts.offTxByRadio:
+// radio key -> the TX at or below which that radio is applied as off (58-15).
+//
+// 58-15 (decision 6): disabled radios of the planned devices are planned too
+// -- like auto-place fill's reuse, switching one back on adds no device. Such
+// a radio starts off in every start (its off level) and the search may raise
+// it to an on level; apply then enables it. Only bands some radio on this
+// floor has on (a band switched off floor-wide stays off), and only radios
+// whose set channel the regulatory domain allows (the radio comes back on its
+// own channel). txMap carries them like any planned radio.
 export async function runAutoPowerPlan({
   floor,
   walls,
@@ -449,9 +585,105 @@ export async function runAutoPowerPlan({
   userOpts = {},
   onProgress = null,
   env = null,
+  floors = null,
+  apsByFloor = null,
+  wallsByFloor = null,
+  holesByFloor = null,
 }) {
+  const cross = { floors, apsByFloor, wallsByFloor, holesByFloor }
+  const planDevices = new Set(apIdsToPlan)
+  const onRadios = expandRadios(aps)
+  // 58-15 (decision 6): the planned devices' disabled radios that may come
+  // back on (see above) -- radio views, starting off.
+  const floorBands = new Set(onRadios.map((a) => a.frequency))
+  const domainId = env?.regulatoryDomain ?? useEditorStore.getState().regulatoryDomain
+  const offRadios = []
+  // Shown in the modal: bands off floor-wide that a planned device has a
+  // radio on, and disabled radios left out for their channel.
+  const skippedBands = new Set()
+  const skippedRadios = []
+  for (const ap of aps ?? []) {
+    if (!planDevices.has(ap.id)) continue
+    for (const r of apRadios(ap)) {
+      if (r.enabled) continue
+      if (!floorBands.has(r.band)) { skippedBands.add(r.band); continue }
+      if (!isChannelAllowed(domainId, r.band, r.channel)) {
+        skippedRadios.push({ name: ap.name ?? ap.id, band: r.band })
+        continue
+      }
+      offRadios.push(radioView(ap, r))
+    }
+  }
+  const skipped = {
+    skippedBands: [...skippedBands].sort((a, b) => a - b),
+    skippedRadios,
+  }
+  const startOff = new Set(offRadios.map((a) => a.id))
+  const radios = [...onRadios, ...offRadios]
+  const bands = [...new Set(radios
+    .filter((a) => planDevices.has(a.deviceId ?? a.id))
+    .map((a) => a.frequency))].sort((a, b) => a - b)
+  if (bands.length === 0) {
+    return { aborted: false, error: 'no-aps', txMap: null, scoresByBand: null }
+  }
+  const txMap = new Map()
+  const offTxByRadio = new Map()   // 58-15 (D1): radio key -> off level
+  const scoresByBand = {}
+  let lastOpts = null
+  // 58-14: progress is reported for the whole run, not per band: elapsedMs
+  // counts from the run start and etaMs covers the bands still to come. Each
+  // band is weighted by its number of planned radios; the time per radio seen
+  // so far projects the remaining bands.
+  const weights = bands.map((band) => radios.filter((a) => a.frequency === band
+    && planDevices.has(a.deviceId ?? a.id)).length)
+  const totalWeight = weights.reduce((s, w) => s + w, 0)
+  const runStartedAt = performance.now()
+  let doneWeight = 0
+  let doneMs = 0
+  const runProgress = (st, b) => {
+    const w = weights[b]
+    let etaMs = null
+    if (st.etaMs != null) {
+      const msPerWeight = (doneMs + st.elapsedMs + st.etaMs) / (doneWeight + w)
+      etaMs = st.etaMs + msPerWeight * (totalWeight - doneWeight - w)
+    } else if (doneWeight > 0) {
+      etaMs = Math.max(0, (doneMs / doneWeight) * (totalWeight - doneWeight) - st.elapsedMs)
+    }
+    return { elapsedMs: performance.now() - runStartedAt, etaMs }
+  }
+  for (let b = 0; b < bands.length; b++) {
+    const band = bands[b]
+    const bandStartedAt = performance.now()
+    const r = await planOneBand({
+      floor, walls, scopes, env, userOpts, band, cross,
+      aps: radios.filter((a) => a.frequency === band),
+      planDevices,
+      startOff,
+      onProgress: onProgress
+        ? (st) => onProgress({ ...st, ...runProgress(st, b), band, bandIdx: b, totalBands: bands.length })
+        : null,
+    })
+    if (r.aborted) return { aborted: true, txMap: null, scoresByBand: null }
+    if (r.error) return { aborted: false, error: r.error, txMap: null, scoresByBand: null }
+    for (const [k, v] of r.txMap) txMap.set(k, v)
+    for (const [k, v] of r.offTx) offTxByRadio.set(k, v)
+    scoresByBand[band] = r.score
+    lastOpts = r.opts
+    doneWeight += weights[b]
+    doneMs += performance.now() - bandStartedAt
+  }
+  // 58-15 (D1): opts carries the per-radio off levels to the modal (the
+  // worker passes opts through).
+  // opts.skippedBands / skippedRadios: what the plan left out (see above).
+  return { aborted: false, txMap, scoresByBand, opts: { ...lastOpts, offTxByRadio, ...skipped } }
+}
+
+// One band's radios (radio views, all on the same band).
+// startOff (58-15, decision 6): radio keys that start off in every start
+// (disabled radios the search may switch back on).
+async function planOneBand({ floor, walls, aps, scopes, planDevices, startOff, userOpts, onProgress, env, band, cross }) {
   const opts = { ...DEFAULTS, ...userOpts }
-  const planSet = new Set(apIdsToPlan)
+  const planSet = new Set(aps.filter((a) => planDevices.has(a.deviceId ?? a.id)).map((a) => a.id))
   const apsToPlan = aps.filter((a) => planSet.has(a.id))
   if (apsToPlan.length === 0) {
     return { aborted: false, error: 'no-aps', txMap: null, score: null }
@@ -463,10 +695,12 @@ export async function runAutoPowerPlan({
 
   // 三個起點：max / mid / min。walls / corners / scope 不隨 tx 改變 —
   // baseScenario（含 in-scope 格子快取）建一次、三個起點共用。
-  const baseScenario = buildBaseScenario(floor, walls, aps, scopes, env)
+  const baseScenario = buildBaseScenario(floor, walls, aps, scopes, env, band, cross, opts.txMinDbm)
   if (!baseScenario) {
     return { aborted: false, error: 'invalid-floor', txMap: null, score: null }
   }
+  // 58-15: every radio in the scenario (other floors' too), in scenario order.
+  const evalAps = baseScenario.aps
 
   const starts = ['max', 'mid', 'min']
   let bestTxMap = null
@@ -488,12 +722,13 @@ export async function runAutoPowerPlan({
   for (let s = 0; s < starts.length; s++) {
     const startKind = starts[s]
     const txMap = new Map()
-    for (const a of aps) {
+    for (const a of evalAps) {
       if (planSet.has(a.id)) {
-        const maxTx = maxTxFor(a)
-        const tx = startKind === 'max' ? maxTx
-                 : startKind === 'min' ? opts.txMinDbm
-                 : Math.round((maxTx + opts.txMinDbm) / 2)
+        const maxTx = baseScenario.searchMaxTx.get(a.id)
+        const minTx = baseScenario.offTx.get(a.id)   // 58-15 (D1)
+        const tx = startKind === 'min' || startOff?.has(a.id) ? minTx
+                 : startKind === 'max' ? maxTx
+                 : Math.round((maxTx + minTx) / 2) + 0   // + 0: no -0
         txMap.set(a.id, tx)
       } else {
         // 未規劃 AP 維持現值；fallback 要跟 buildScenario 同源（per-band
@@ -503,7 +738,7 @@ export async function runAutoPowerPlan({
     }
     stats.startEvals = 0  // reset per start
     const score = await greedyFromStart(
-      baseScenario, aps, apsToPlan, txMap, opts,
+      baseScenario, evalAps, apsToPlan, txMap, opts,
       onProgress
         ? (st) => onProgress({ ...st, startIdx: s, totalStarts: starts.length, startKind })
         : null,
@@ -521,5 +756,11 @@ export async function runAutoPowerPlan({
     stats.startsCompleted++
   }
 
-  return { aborted: false, txMap: bestTxMap, score: bestScore, opts }
+  // Only this floor's radios go back (other floors' stay as they are).
+  const own = new Set(aps.map((a) => a.id))
+  const txMapOut = new Map([...bestTxMap].filter(([k]) => own.has(k)))
+  // 58-15 (D1): each returned radio's off level -- apply / preview switch a
+  // radio off at or below it, exactly as evaluate scored it.
+  const offTxOut = new Map([...txMapOut.keys()].map((k) => [k, baseScenario.offTx.get(k)]))
+  return { aborted: false, txMap: txMapOut, offTx: offTxOut, score: bestScore, opts }
 }

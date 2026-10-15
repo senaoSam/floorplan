@@ -42,7 +42,7 @@
 ### AP 頻段
 | 頻段 | Hex | 用在 |
 |---|---|---|
-| 2.4 GHz | `#f39c12` | AP marker 環色 + APPanel 頻段 chip + heatmap legend |
+| 2.4 GHz | `#f39c12` | AP marker 環色 + APPanel 頻段 chip + heatmap legend 標題色點 + 熱圖頻段按鈕（58-7：選中填滿、未選外框；「最強」用 `$text-secondary` 中性色） |
 | 5 GHz   | `#4fc3f7` | 同上 |
 | 6 GHz   | `#a855f7` | 同上 |
 

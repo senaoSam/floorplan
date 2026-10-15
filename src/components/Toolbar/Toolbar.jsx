@@ -73,9 +73,7 @@ const GROUPS = [
     label: '無線 AP',
     representativeIcon: 'ap',
     items: [
-      { mode: EDITOR_MODE.PLACE_AP,        icon: 'ap', label: '放置 AP — 2.4 GHz', band: 2.4 },
-      { mode: EDITOR_MODE.PLACE_AP,        icon: 'ap', label: '放置 AP — 5 GHz',   band: 5   },
-      { mode: EDITOR_MODE.PLACE_AP,        icon: 'ap', label: '放置 AP — 6 GHz',   band: 6   },
+      { mode: EDITOR_MODE.PLACE_AP,        icon: 'ap', label: '放置 AP' },
       { mode: EDITOR_MODE.DRAW_SCOPE,      icon: 'scope', label: '範圍' },
     ],
   },
@@ -120,10 +118,9 @@ const EDIT_ACTIONS = [
 
 const CLOSE_DELAY_MS = 200
 
-function isItemActive(item, editorMode, placeApBand, placeSwitchKind) {
+function isItemActive(item, editorMode, placeSwitchKind) {
   if (item.action) return false
   if (item.mode !== editorMode) return false
-  if (item.band != null && item.band !== placeApBand) return false
   if (item.switchKind != null && item.switchKind !== placeSwitchKind) return false
   return true
 }
@@ -131,9 +128,7 @@ function isItemActive(item, editorMode, placeApBand, placeSwitchKind) {
 function Toolbar() {
   const editorMode = useEditorStore((s) => s.editorMode)
   const setEditorMode = useEditorStore((s) => s.setEditorMode)
-  const placeApBand = useEditorStore((s) => s.placeApBand)
   const placeSwitchKind = useEditorStore((s) => s.placeSwitchKind)
-  const setPlaceApBand = useEditorStore((s) => s.setPlaceApBand)
   const setPlaceSwitchKind = useEditorStore((s) => s.setPlaceSwitchKind)
   const setPrimaryMode = useEditorStore((s) => s.setPrimaryMode)
   const setToolbarMenuOpen = useEditorStore((s) => s.setToolbarMenuOpen)
@@ -224,7 +219,6 @@ function Toolbar() {
       closeImmediate()
       return
     }
-    if (item.band != null) setPlaceApBand(item.band)
     if (item.switchKind != null) setPlaceSwitchKind(item.switchKind)
     // In ALIGN_FLOOR, switching to any other tool would silently end align
     // mode — stash it and prompt instead (oldSrc handleModeClick 155-161).
@@ -257,13 +251,13 @@ function Toolbar() {
 
   const triggerIcon = (group) => {
     const active = group.items.find((it) =>
-      isItemActive(it, editorMode, placeApBand, placeSwitchKind),
+      isItemActive(it, editorMode, placeSwitchKind),
     )
     return active ? active.icon : group.representativeIcon
   }
 
   const groupHasActive = (group) =>
-    group.items.some((it) => isItemActive(it, editorMode, placeApBand, placeSwitchKind))
+    group.items.some((it) => isItemActive(it, editorMode, placeSwitchKind))
 
   // Camera / Stats are read-only worlds: their tools row has no RF-planning
   // groups (those are AP-only). We still surface the shared Undo/Redo keys in
@@ -367,7 +361,7 @@ function Toolbar() {
                 <div className="toolbar-floating__menu" role="menu">
                   {group.items.map((it, idx) => {
                     const key = `${it.mode ?? it.action}-${it.band ?? it.switchKind ?? idx}`
-                    const itemActive = isItemActive(it, editorMode, placeApBand, placeSwitchKind)
+                    const itemActive = isItemActive(it, editorMode, placeSwitchKind)
                     // 52-D5: grey out floor-dependent tools when there is no
                     // floor, so the state is visible before the click — the
                     // toast in handleItemClick is the fallback for anyone who

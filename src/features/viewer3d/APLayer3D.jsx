@@ -6,6 +6,7 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { getPatternById, sampleGain, sampleGainV, patternBackFloorDb } from '@/constants/antennaPatterns'
 import Label3D from './Label3D'
+import { enabledBands, hasEnabledBand, highestEnabledBand } from '@/utils/apRadios'
 
 // 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
 // `?? []` returns a new reference whenever the floor's key is absent, so
@@ -23,11 +24,17 @@ const FREQ_COLOR = {
   6:   '#a855f7',
 }
 const DEFAULT_COLOR = '#4fc3f7'
+// 58-10: a device with every radio off -- the 2D marker's FALLBACK_COLOR grey.
+const NO_RADIO_COLOR = '#9aa3ad'
 
 // Marker sizing (meters). Visually prominent without dominating the floorplan.
 const BODY_RADIUS_M = 0.18
 const BODY_HEIGHT_M = 0.08
 const RING_RADIUS_M = 0.28
+// 58: the ring splits into one arc per enabled radio, in its band colour
+// (the 2D marker's band dots, at a size that reads from the default camera).
+// Small gap so neighbouring arcs stay distinct.
+const RING_SEG_GAP_RAD = 0.14
 const RING_TUBE_M   = 0.035
 const DROP_RADIUS_M = 0.015   // thin "pole" down to the floor
 
@@ -225,8 +232,15 @@ function SelectionPulse({ radius }) {
 // AP edit — measured as the dominant share of a ~2 s main-thread stall on
 // drag release (three.js re-created VAOs + walked every object), even while
 // the 3D view was hidden (Viewer3D stays mounted in 2D mode).
-const APMarker = React.memo(function APMarker({ ap, pxToM, dimOpacity, isActiveFloor, onHover }) {
-  const color = FREQ_COLOR[ap.frequency] ?? DEFAULT_COLOR
+const APMarker = React.memo(function APMarker({ ap, pxToM, dimOpacity, isActiveFloor, onHover, showAPBand, viewBand = null }) {
+  // 58: a multi-band device takes its highest enabled band's colour; 58-10:
+  // grey when every radio is off.
+  const color = FREQ_COLOR[highestEnabledBand(ap)] ?? NO_RADIO_COLOR
+  // 58: ring arcs only for bands the layer toggle shows.
+  const ringBands = enabledBands(ap).filter((b) => showAPBand?.[b] !== false)
+  // 58-14: one visible band -> the whole ring is that band's colour, not the
+  // (possibly hidden) highest band's.
+  const singleRingColor = ringBands.length === 1 ? (FREQ_COLOR[ringBands[0]] ?? DEFAULT_COLOR) : color
   const x = (ap.x ?? 0) * pxToM
   const z = (ap.y ?? 0) * pxToM
   const y = ap.z ?? 2.4  // install height in meters
@@ -258,7 +272,8 @@ const APMarker = React.memo(function APMarker({ ap, pxToM, dimOpacity, isActiveF
   const accentEmissive = isSelected ? SELECT_EMISSIVE : (isHovered ? HOVER_EMISSIVE : color)
   const bodyEmissiveIntensity = isSelected ? 0.55 : (isHovered ? 0.30 : 0.15)
   const ringEmissiveIntensity = isSelected ? 0.7  : (isHovered ? 0.40 : 0.20)
-  const ringColor = isSelected ? SELECT_EMISSIVE : color
+  const ringColor = isSelected ? SELECT_EMISSIVE : singleRingColor
+  const ringEmissive = isSelected || isHovered ? accentEmissive : singleRingColor
 
   const onClick = (e) => {
     if (!isActiveFloor) return
@@ -317,10 +332,29 @@ const APMarker = React.memo(function APMarker({ ap, pxToM, dimOpacity, isActiveF
             <cylinderGeometry args={[BODY_RADIUS_M, BODY_RADIUS_M, BODY_HEIGHT_M, 24]} />
             <meshStandardMaterial color={color} roughness={0.5} metalness={0.2} emissive={accentEmissive} emissiveIntensity={bodyEmissiveIntensity} {...matOpts} />
           </mesh>
-          <mesh position={[0, BODY_HEIGHT_M / 2 + 0.005, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <torusGeometry args={[RING_RADIUS_M, RING_TUBE_M, 10, 36]} />
-            <meshStandardMaterial color={ringColor} roughness={0.4} metalness={0.3} emissive={accentEmissive} emissiveIntensity={ringEmissiveIntensity} {...matOpts} />
-          </mesh>
+          {/* 58: selected (red) or single-band -> one ring; else one arc per band. */}
+          {isSelected || ringBands.length <= 1 ? (
+            <mesh position={[0, BODY_HEIGHT_M / 2 + 0.005, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+              <torusGeometry args={[RING_RADIUS_M, RING_TUBE_M, 10, 36]} />
+              <meshStandardMaterial color={ringColor} roughness={0.4} metalness={0.3} emissive={ringEmissive} emissiveIntensity={ringEmissiveIntensity} {...matOpts} />
+            </mesh>
+          ) : ringBands.map((band, i) => {
+            const arc = (2 * Math.PI) / ringBands.length
+            const bandCol = FREQ_COLOR[band] ?? DEFAULT_COLOR
+            // 58-7: heatmap on one band the device has -> other arcs dimmed.
+            const segDim = viewBand != null && ringBands.includes(viewBand) && band !== viewBand
+            const segOpts = segDim
+              ? { transparent: true, opacity: dimOpacity * BAND_DIM_ALPHA, depthWrite: false, fog: false }
+              : matOpts
+            return (
+              <group key={band} position={[0, BODY_HEIGHT_M / 2 + 0.005, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+                <mesh rotation={[0, 0, i * arc + RING_SEG_GAP_RAD / 2]}>
+                  <torusGeometry args={[RING_RADIUS_M, RING_TUBE_M, 10, 16, arc - RING_SEG_GAP_RAD]} />
+                  <meshStandardMaterial color={bandCol} roughness={0.4} metalness={0.3} emissive={isHovered ? HOVER_EMISSIVE : bandCol} emissiveIntensity={ringEmissiveIntensity} {...segOpts} />
+                </mesh>
+              </group>
+            )
+          })}
         </group>
       </group>
 
@@ -384,13 +418,20 @@ export default function APLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloo
   // 47-8a: heatmap band filter dims (not hides) off-band APs — mirror 2D.
   const heatmapOn = useHeatmapStore((s) => s.enabled)
   const bandFilter = useHeatmapStore((s) => s.bandFilter)
-  const aps = allAPs.filter((ap) => showAPBand[ap.frequency] !== false)
+  // 58: hidden only when every enabled radio's band is hidden.
+  const aps = allAPs.filter((ap) => {
+    const bands = enabledBands(ap)
+    return bands.length === 0 || bands.some((b) => showAPBand[b] !== false)
+  })
   if (!aps.length || !pxToM) return null
   const bandActive = heatmapOn && bandFilter && bandFilter !== 'all'
   return (
     <group>
       {aps.map((ap) => {
-        const offBand = bandActive && String(ap.frequency) !== bandFilter
+        // 58-10: a device with every radio off is dimmed whenever the heatmap
+        // is on, whatever the filter (mirrors 2D bandDimAlpha).
+        const noRadio = enabledBands(ap).length === 0
+        const offBand = (heatmapOn && noRadio) || (bandActive && !hasEnabledBand(ap, bandFilter))
         return (
           <APMarker
             key={ap.id}
@@ -399,6 +440,8 @@ export default function APLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloo
             dimOpacity={offBand ? dimOpacity * BAND_DIM_ALPHA : dimOpacity}
             isActiveFloor={isActiveFloor}
             onHover={isActiveFloor ? onAPHover : undefined}
+            showAPBand={showAPBand}
+            viewBand={bandActive ? Number(bandFilter) : null}
           />
         )
       })}

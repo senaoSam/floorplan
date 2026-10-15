@@ -53,7 +53,8 @@ export function sampleField(scenario, gridStepM = 0.5, opts = {}) {
   // 47-9 (opt-in): when a redundancy threshold is given, also record how many
   // APs reach that RSSI per cell (capped at 255). Lets the caller compute
   // secondary/redundant coverage (≥2 APs) for voice/roaming. No extra probes —
-  // reuses the perAp values already computed below.
+  // reuses the perAp values already computed below. 58: counted per device --
+  // two radios of one AP are not two APs.
   const redundancyThresholdDbm = opts.redundancyThresholdDbm ?? null
   const redundancy = redundancyThresholdDbm != null ? new Uint8Array(nx * ny) : null
 
@@ -93,8 +94,11 @@ export function sampleField(scenario, gridStepM = 0.5, opts = {}) {
       snr[idx]  = agg.snrDb
       cci[idx]  = isFinite(agg.cciDbm) ? Math.max(agg.cciDbm, CCI_MIN_DBM) : CCI_MIN_DBM
       if (redundancy) {
-        let n = 0
-        for (let k = 0; k < perAp.length; k++) if (perAp[k] >= redundancyThresholdDbm) n++
+        const devices = new Set()
+        for (let k = 0; k < perAp.length; k++) {
+          if (perAp[k] >= redundancyThresholdDbm) devices.add(scenario.aps[k].deviceId ?? scenario.aps[k].id)
+        }
+        const n = devices.size
         redundancy[idx] = n > 255 ? 255 : n
       }
     }

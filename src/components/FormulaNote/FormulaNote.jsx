@@ -7,7 +7,7 @@ function FormulaNote() {
   return (
     <div className="formula-note">
       <section>
-        <h4>1. 路徑損失（每台 AP 按自身頻率）</h4>
+        <h4>1. 路徑損失（每個射頻按自身頻率）</h4>
         <p>使用 Friis 自由空間公式：</p>
         <p><code>PL = 20·log₁₀(d) + 20·log₁₀(f_MHz) − 27.55</code></p>
         <p className="muted">
@@ -98,9 +98,12 @@ function FormulaNote() {
       <section>
         <h4>6. 訊號品質指標聚合（RSSI / SINR / SNR / CCI）</h4>
         <ul>
-          <li>RSSI = 最強 AP 的接收功率（client 會 associate 到它）</li>
           <li>
-            SINR 分母加入「頻譜真的重疊」的其他 AP（依 band + channel + channelWidth 判斷），
+            RSSI = 該點收到最強的射頻的接收功率（篩選頻段時只計該頻段的射頻）。
+            這是覆蓋指標，不代表 client 一定連到它：client 選頻（5/6 GHz 可用時優先）見 Client View
+          </li>
+          <li>
+            SINR 分母加入「頻譜真的重疊」的其他射頻（依 band + channel + channelWidth 判斷），
             干擾與雜訊在線性功率 (mW) 域相加：<br />
             <code>SINR_dB = S_dBm − 10·log₁₀(10^(N/10) + Σ 10^(I_k/10))</code>
           </li>

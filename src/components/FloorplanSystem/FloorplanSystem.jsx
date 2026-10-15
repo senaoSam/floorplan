@@ -4,8 +4,7 @@ import { bindViewport } from '@/render/viewport'
 import { attachModeAdapter } from '@/render/modeAdapter'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { collectMarqueeHits } from '@/features/marquee/marqueeHits'
-import { greedyChannelAssign } from '@/utils/autoChannelPlan'
-import { storeChannelNeighbors } from '@/features/heatmap/channelNeighbors'
+import { assignNewRadioChannels } from '@/features/heatmap/channelNeighbors'
 import { attachFloorImageLayer } from '@/features/floorImage/floorImageLayer'
 import { attachWallsLayer } from '@/features/walls/wallsLayer'
 import { attachAPsLayer } from '@/features/aps/apsLayer'
@@ -47,7 +46,10 @@ import { useAPStore } from '@/store/useAPStore'
 import { useCableStore } from '@/store/useCableStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useEditorStore, EDITOR_MODE, VIEW_MODE } from '@/store/useEditorStore'
-import { getDefaultTxPower } from '@/constants/apModels'
+import { radiosForModel } from '@/utils/apRadios'
+
+// Hand-placed AP channel widths per band (pre-58 placement: 2.4 → 20, else 80).
+const PLACE_AP_WIDTH = { 2.4: 20, 5: 80, 6: 80 }
 import { useDragOverlayStore } from '@/store/useDragOverlayStore'
 import { useHoverStore } from '@/store/useHoverStore'
 import { useScopeStore } from '@/store/useScopeStore'
@@ -227,35 +229,28 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           const editor = useEditorStore.getState()
           const cable = useCableStore.getState()
           if (editor.editorMode === EDITOR_MODE.PLACE_AP) {
-            const band = editor.placeApBand ?? 5
-            const defaultChannel = band === 2.4 ? 1 : band === 5 ? 36 : 1
-            const width = band === 2.4 ? 20 : 80
             const newId = `ap-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
-            // Auto-channel-on-place (oldSrc Editor2D 1164-1170): probe greedy
-            // assignment including the new AP, take its assignment if any.
-            let channel = defaultChannel
-            if (editor.autoChannelOnPlace) {
-              const existing = useAPStore.getState().apsByFloor[fid] ?? []
-              // 57-16: carry the width the AP will be created with — the planner
-              // picks bonded blocks per width.
-              // 57-34: plus the install height / TX it will get, for the
-              // hearing-based neighbour test.
-              const probe = [...existing, { id: newId, x, y, z: 2.4, txPower: getDefaultTxPower(band), frequency: band, channelWidth: width }]
-              // 57-34: neighbours = APs that hear each other.
-              const assignments = greedyChannelAssign(probe, editor.regulatoryDomain, storeChannelNeighbors(fid, probe))
-              const picked = assignments.get(newId)
-              if (picked) channel = picked.channel
-            }
-            const ap = {
+            // 58: a whole device -- the default model's radios (off on a band
+            // the domain has no channel for), at the widths hand placement
+            // always used.
+            let ap = {
               id: newId,
               name: useAPStore.getState().nextAPName(),
               x, y, z: 2.4,
-              txPower: getDefaultTxPower(band),
-              frequency: band,
-              channel, channelWidth: width,
               antennaMode: 'omni', azimuth: 0, beamwidth: 60,
               patternId: null, mountType: 'ceiling', modelId: null,
               color: '#4fc3f7',
+              radios: radiosForModel(null, [], editor.regulatoryDomain)
+                .map((r) => ({ ...r, channelWidth: PLACE_AP_WIDTH[r.band] ?? r.channelWidth })),
+            }
+            // Auto-channel-on-place (oldSrc Editor2D 1164-1170): greedy
+            // assignment for the new AP's radios only, against the channels
+            // the existing radios actually use (held fixed, as on a model
+            // change). 57-34: neighbours = radios that hear each other.
+            if (editor.autoChannelOnPlace) {
+              const existing = useAPStore.getState().apsByFloor[fid] ?? []
+              const next = assignNewRadioChannels(fid, [...existing, ap], existing, editor.regulatoryDomain)
+              ap = next[next.length - 1]
             }
             useAPStore.getState().addAP(fid, ap)
             return
@@ -738,25 +733,12 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         }
       }
 
-      // Tab — cycle PLACE_AP band (2.4 / 5 / 6), PLACE_SWITCH kind
-      // (switch / idf / mdf / router), or DRAW_WALL material (glass →
-      // drywall → wood → brick → concrete → metal). Shift+Tab reverses.
-      // Pops the material toast naming the new selection.
+      // Tab — cycle PLACE_SWITCH kind (switch / idf / mdf / router) or
+      // DRAW_WALL material (glass → drywall → wood → brick → concrete →
+      // metal). Shift+Tab reverses. Pops the material toast naming the new
+      // selection. (58: PLACE_AP has no band to cycle -- it places a device.)
       if (e.key === 'Tab' && !cmd && !e.altKey) {
         const ed = useEditorStore.getState()
-        if (ed.editorMode === EDITOR_MODE.PLACE_AP) {
-          e.preventDefault()
-          const bands = [2.4, 5, 6]
-          const idx = Math.max(0, bands.indexOf(ed.placeApBand ?? 5))
-          const dir = e.shiftKey ? -1 : 1
-          const next = bands[(idx + dir + bands.length) % bands.length]
-          ed.setPlaceApBand(next)
-          const colorByBand = { 2.4: '#f39c12', 5: '#4fc3f7', 6: '#a855f7' }
-          useMaterialToastStore.getState().showToast({
-            label: `${next} GHz`, color: colorByBand[next], key: 'Tab',
-          })
-          return
-        }
         if (ed.editorMode === EDITOR_MODE.PLACE_SWITCH) {
           e.preventDefault()
           const kinds  = ['switch', 'idf', 'mdf', 'router']

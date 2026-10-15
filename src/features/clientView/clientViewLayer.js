@@ -2,6 +2,7 @@ import { Container, Graphics } from 'pixi.js'
 import { useViewportStore } from '@/store/useViewportStore'
 import { EDITOR_MODE } from '@/store/useEditorStore'
 import { PERSON, PERSON_FILL, PERSON_BORDER } from './personGeometry'
+import { deviceIdOf } from '@/utils/apRadios'
 
 // Renders the Client View overlay on scene.layers.overlays:
 //   - the placed client marker (little person, black body + white border,
@@ -63,11 +64,13 @@ export function attachClientViewLayer({
   g.eventMode = 'none'
   root.addChild(g)
 
-  // Look up the active floor's AP record (canvas px position) by id.
+  // Look up the active floor's AP record (canvas px position) by id. 58: a
+  // radio key resolves to its device.
   const apPosById = (id) => {
     const fid = useFloorStore.getState().activeFloorId
     const aps = useAPStore.getState().apsByFloor[fid] ?? []
-    const ap = aps.find((a) => a.id === id)
+    const devId = deviceIdOf(id)
+    const ap = aps.find((a) => a.id === devId)
     return ap ? { x: ap.x, y: ap.y } : null
   }
 
@@ -126,6 +129,8 @@ export function attachClientViewLayer({
     // Roaming-candidate dashed grey lines (under the serving line).
     if (reading && Array.isArray(reading.candidates)) {
       for (const c of reading.candidates) {
+        // 58: the serving device's other radios share its position.
+        if (reading.servingApId && deviceIdOf(c.id) === deviceIdOf(reading.servingApId)) continue
         const p = apPosById(c.id)
         if (!p) continue
         drawDashed(g, hx, hy, p.x, p.y, CANDIDATE_COLOR, 1.5 * s, 7 * s, 5 * s, 0.8)

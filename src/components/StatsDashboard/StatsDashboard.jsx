@@ -326,8 +326,16 @@ function StatsDashboard() {
             >
               <span className="stats-dash__rank-name" title={a.name}>{a.name}</span>
               <span className="stats-dash__rank-bar-track">
+                {/* 58-14: one segment per radio, by the clients on it (like
+                    裝置頻段分布), not the device's highest band. */}
                 <span className="stats-dash__rank-bar"
-                  style={{ width: `${(a.clientCount / maxApClients) * 100}%`, background: BAND_COLOR[String(a.band)] ?? '#4fc3f7' }} />
+                  style={{ width: `${(a.clientCount / maxApClients) * 100}%`, display: 'flex' }}>
+                  {bands.map((b) => {
+                    const n = a.radio?.[b]?.clients ?? 0
+                    if (n === 0) return null
+                    return <span key={b} style={{ flex: n, background: BAND_COLOR[b] }} title={`${BAND_LABEL[b]}: ${n} 台`} />
+                  })}
+                </span>
               </span>
               <b className="stats-dash__rank-val">{a.clientCount}</b>
             </li>

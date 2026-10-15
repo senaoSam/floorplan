@@ -6,6 +6,7 @@
 
 import { channelBlockCenterMHz } from './frequency'
 import { resolveApRadiation } from './apRadiation'
+import { expandRadios } from '@/utils/apRadios'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useClientViewStore } from '@/store/useClientViewStore'
 import {
@@ -155,7 +156,8 @@ function collectCorners(segments) {
 // Args:
 //   floor:    { imageWidth, imageHeight, scale }  — scale is px/m
 //   walls:    Wall[]  (startX/startY/endX/endY in px + optional openings)
-//   aps:      AP[]    (x/y in px, frequency/channel/channelWidth/txPower)
+//   aps:      AP[]    (x/y in px; devices with radios[], expanded here to one
+//                      entry per enabled radio -- 58)
 //   scopes:   Scope[] (points flat [x,y,…] in px, type 'in'|'out')  — optional
 //   crossFloor: {                        — optional cross-floor data (HM-F3a/F2b)
 //     activeElevationM: number,          active floor's ground-level Y (m)
@@ -265,7 +267,9 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null,
   const buildApEntry = (ap, posMeters, elevationM, azOffsetDeg = 0) => {
     const rad = resolveApRadiation(ap, domainId)
     return {
+      // 58: one entry per enabled radio -- id is the radio key, deviceId the AP.
       id: ap.id,
+      deviceId: ap.deviceId ?? ap.id,
       name: ap.name ?? ap.id,
       pos: posMeters,
       // Absolute Z of the AP = its floor's elevation + its install height.
@@ -295,7 +299,7 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null,
   let apList
   if (crossFloor && crossFloor.apsByFloor) {
     // Cross-floor path: each entry already has {posPx, floorScale, elevationM}.
-    apList = crossFloor.apsByFloor.map((ap) => {
+    apList = expandRadios(crossFloor.apsByFloor).map((ap) => {
       const apPxToM = ap.floorScale ? 1 / ap.floorScale : pxToM
       let pos = { x: ap.posPx.x * apPxToM, y: ap.posPx.y * apPxToM }
       const t = relAlignM(ap.floorRef, apPxToM)
@@ -307,7 +311,7 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null,
     })
   } else {
     // Planar path: every AP lives on the supplied `floor`.
-    apList = (aps ?? []).map((ap) =>
+    apList = expandRadios(aps).map((ap) =>
       buildApEntry(ap, { x: ap.x * pxToM, y: ap.y * pxToM }, 0),
     )
   }

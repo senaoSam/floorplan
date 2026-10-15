@@ -11,8 +11,8 @@ import { floorplanFromLines } from '@/utils/floorplanFromLines'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
 import { storeChannelNeighbors } from '@/features/heatmap/channelNeighbors'
 import { generateId } from '@/utils/id'
-import { AP_MODELS, DEFAULT_AP_MODEL_ID, getDefaultTxPower } from '@/constants/apModels'
-import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
+import { AP_MODELS, DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
+import { radiosForModel, expandRadios, applyRadioResults } from '@/utils/apRadios'
 import { MATERIALS } from '@/constants/materials'
 import Icon from '@/components/Icon/Icon'
 import './DemoLoader.sass'
@@ -127,45 +127,41 @@ function nextDemoName(floors) {
   return `${DEMO_BASE_NAME}-${n}`
 }
 
-// Per-AP band mix for the demo so a fresh load already exercises the multi-band
-// tooling (heatmap band filter + off-band dimming). Index-aligned with
-// DEMO_AP_POSITIONS_NORM; channel is assigned per band by greedyChannelAssign
-// below, so only the band + width matter here.
-const DEMO_AP_BANDS = [2.4, 6, 5, 5, 6]
+// Per-AP model mix for the demo: tri-band units (6 GHz) next to dual-band ones,
+// so a fresh load exercises the multi-band tooling (heatmap band filter +
+// off-band dimming). Index-aligned with DEMO_AP_POSITIONS_NORM. 58: every
+// radio of the model is on; channels are planned per radio below.
+const DEMO_AP_MODELS = [
+  DEFAULT_AP_MODEL_ID, AP_MODELS.CISCO_C9166.id, DEFAULT_AP_MODEL_ID,
+  DEFAULT_AP_MODEL_ID, AP_MODELS.CISCO_C9166.id,
+]
 
 function buildDemoAPs(canvasWidth, canvasHeight, regulatoryDomain, floorId) {
   const aps = DEMO_AP_POSITIONS_NORM.map((p, i) => {
-    const band = DEMO_AP_BANDS[i] ?? 5
+    const modelId = DEMO_AP_MODELS[i] ?? DEFAULT_AP_MODEL_ID
     return {
       id: generateId('ap'),
       name: `AP-${String(i + 1).padStart(2, '0')}`,
       x: p.x * canvasWidth,
       y: p.y * canvasHeight,
       z: 2.4,
-      txPower: getDefaultTxPower(band),
-      frequency: band,
-      channel: 36,
-      channelWidth: DEFAULT_CHANNEL_WIDTH[band] ?? 20,
       antennaMode: 'omni',
       azimuth: 0,
       beamwidth: 60,
       patternId: null,
       mountType: 'ceiling',
-      // The Generic model is dual-band, so the 6 GHz units need a tri-band one.
-      modelId: band === 6 ? AP_MODELS.CISCO_C9166.id : DEFAULT_AP_MODEL_ID,
+      modelId,
       color: '#4fc3f7',
+      radios: radiosForModel(modelId, [], regulatoryDomain),
       // Demo: pin AP-03 offline so the stats view always shows an offline unit
       // (grey 離線 badge + ring + an alert). Real cloud status overrides this.
       ...(i === 2 ? { mockStatus: 'offline' } : {}),
     }
   })
-  // 57-34: neighbours = APs that hear each other (walls are already in the
+  // 57-34: neighbours = radios that hear each other (walls are already in the
   // store when this runs).
-  const assignments = greedyChannelAssign(aps, regulatoryDomain, storeChannelNeighbors(floorId, aps))
-  return aps.map((ap) => {
-    const picked = assignments.get(ap.id)
-    return picked ? { ...ap, channel: picked.channel } : ap
-  })
+  const assignments = greedyChannelAssign(expandRadios(aps), regulatoryDomain, storeChannelNeighbors(floorId, aps))
+  return applyRadioResults(aps, assignments, (a) => ({ channel: a.channel }))
 }
 
 function DemoLoader() {

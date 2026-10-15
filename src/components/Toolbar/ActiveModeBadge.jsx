@@ -17,7 +17,7 @@ const MODE_HINT = {
   [EDITOR_MODE.DRAW_DOOR]:        { group: '結構',     name: '門模式',    accent: 'structure', hint: '點擊牆體兩點設定門的位置；右鍵或 Esc 取消' },
   [EDITOR_MODE.DRAW_WINDOW]:      { group: '結構',     name: '窗模式',    accent: 'structure', hint: '點擊牆體兩點設定窗的位置；右鍵或 Esc 取消' },
   [EDITOR_MODE.DRAW_FLOOR_HOLE]:  { group: '結構',     name: '中庭模式',  accent: 'structure', hint: '左鍵點擊設定端點，靠近起點閉合區域，Backspace 退一步；右鍵或 Esc 取消' },
-  [EDITOR_MODE.PLACE_AP]:         { group: '無線',     name: '放置 AP',   accent: 'wireless',  hint: '左鍵點擊放置；Tab 切換 2.4 / 5 / 6 GHz（Shift+Tab 反向）' },
+  [EDITOR_MODE.PLACE_AP]:         { group: '無線',     name: '放置 AP',   accent: 'wireless',  hint: '左鍵點擊放置（射頻依型號，放置後可在右側面板調整）' },
   [EDITOR_MODE.DRAW_SCOPE]:       { group: '無線',     name: '範圍模式',  accent: 'wireless',  hint: '左鍵點擊設定端點，靠近起點閉合區域，Backspace 退一步；右鍵或 Esc 取消' },
   [EDITOR_MODE.PLACE_SWITCH]:     { group: '網路布線', name: '放置 Switch', accent: 'cable',   hint: '左鍵點擊放置；Tab 切換 Switch / IDF / MDF / Router（Shift+Tab 反向）' },
   [EDITOR_MODE.DRAW_CABLE_TRAY]:  { group: '網路布線', name: '繪製線槽模式', accent: 'cable',   hint: '左鍵新增頂點；Shift 鎖 0/45/90°；自動 snap 到 tray / 牆角 / 牆邊；近牆方向自動平行；Backspace 退一步；Enter / 右鍵 / Esc 完成（≥ 2 點才會建立）' },
@@ -32,7 +32,6 @@ const SWITCH_KIND_LABEL = { switch: 'Switch', idf: 'IDF', mdf: 'MDF', router: 'R
 
 function ActiveModeBadge() {
   const editorMode = useEditorStore((s) => s.editorMode)
-  const placeApBand = useEditorStore((s) => s.placeApBand)
   const placeSwitchKind = useEditorStore((s) => s.placeSwitchKind)
   const is3D = useEditorStore((s) => s.viewMode === VIEW_MODE.THREE_D)
 
@@ -45,9 +44,7 @@ function ActiveModeBadge() {
 
   const cfg = MODE_HINT[editorMode] ?? MODE_HINT[EDITOR_MODE.SELECT]
   let name = cfg.name
-  if (editorMode === EDITOR_MODE.PLACE_AP) {
-    name = `放置 AP — ${placeApBand} GHz`
-  } else if (editorMode === EDITOR_MODE.PLACE_SWITCH) {
+  if (editorMode === EDITOR_MODE.PLACE_SWITCH) {
     name = `放置 Switch — ${SWITCH_KIND_LABEL[placeSwitchKind] ?? 'Switch'}`
   }
 

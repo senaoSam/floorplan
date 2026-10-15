@@ -292,6 +292,11 @@ export async function buildPlanningPdf({
   // disagree. Floors without a calibrated scale are reported as such rather than
   // silently scored — a coverage % computed without a scale is meaningless.
   onProgress('產生 RF 涵蓋率...')
+  // 58-7: same band as the heatmap and the planning panel.
+  const bandFilter = useHeatmapStore.getState().bandFilter || 'all'
+  const bandNote = bandFilter === 'all'
+    ? 'Strongest radio per point across 2.4 / 5 / 6 GHz. '
+    : `${bandFilter} GHz radios only. `
   doc.addPage()
   doc.setFont(FONT, 'bold')
   doc.setFontSize(14)
@@ -301,13 +306,15 @@ export async function buildPlanningPdf({
   doc.setTextColor(120)
   doc.text(
     `Coverage = share of in-scope floor area at or above ${thresholdDbm} dBm. `
-    + `Target ${coverageTargetPct}%. Reflections/diffraction off (first-order estimate).`,
+    + `Target ${coverageTargetPct}%. ${bandNote}`
+    + 'Reflections/diffraction off (first-order estimate).',
     margin, margin + 30,
   )
   doc.setTextColor(0)
 
   const covRows = []
   const conflictRows = []
+  let strongestConflictDbm = -Infinity
   for (const floor of floors) {
     const aps = apsByFloor[floor.id] ?? []
     if (!floor.scale) {
@@ -322,6 +329,7 @@ export async function buildPlanningPdf({
       thresholdDbm,
       // 57-17: same cross-floor scenario as the heatmap.
       floors, apsByFloor, wallsByFloor, holesByFloor,
+      bandFilter,
     })
     if (!q) {
       covRows.push([floorName(floor.id), String(aps.length), 'n/a', '-', '-', '-', 'NOT MEASURED'])
@@ -337,6 +345,7 @@ export async function buildPlanningPdf({
       q.coveragePct >= coverageTargetPct ? 'PASS' : 'BELOW TARGET',
     ])
     for (const c of q.channelConflicts ?? []) {
+      if (c.rssiDbm > strongestConflictDbm) strongestConflictDbm = c.rssiDbm
       conflictRows.push([
         floorName(floor.id),
         T(apById.get(c.apA)?.name ?? c.apA),
@@ -620,7 +629,7 @@ export async function buildPlanningPdf({
       doc.setFont(FONT, 'bold')
       doc.setFontSize(11)
       doc.setTextColor(...WARN_FILL)
-      doc.text(`Co-channel conflicts (${conflictRows.length})`, margin, cursorY)
+      doc.text(`Co-channel conflicts (${conflictRows.length}, strongest ${strongestConflictDbm.toFixed(1)} dBm)`, margin, cursorY)
       doc.setTextColor(0)
       autoTable(doc, {
         startY: cursorY + 6,

@@ -110,6 +110,64 @@
       background: #1e293b
       color: $text-primary
 
+  // 58-7: band chips, in a track shaped like __mode. Selected = filled with
+  // the band colour, unselected = band-colour outline; 最強 uses the neutral
+  // secondary text colour.
+  &__bands
+    display: flex
+    align-items: center
+    gap: 4px
+    height: 34px
+    padding: 0 4px
+    border: 1px solid rgba(255, 255, 255, 0.18)
+    border-radius: 17px
+    background: rgba(30, 41, 59, 0.85)
+
+  &__band
+    --band-color: #{$text-secondary}
+    height: 26px
+    padding: 0 9px
+    border: 1px solid var(--band-color)
+    border-radius: 13px
+    background: transparent
+    color: $text-primary
+    font-size: 11px
+    font-weight: 600
+    cursor: pointer
+    white-space: nowrap
+    font-variant-numeric: tabular-nums
+    &:hover:not(:disabled)
+      background: rgba(51, 65, 85, 0.9)
+
+    &--on, &--on:hover:not(:disabled)
+      background: var(--band-color)
+      color: #0f172a
+
+    // No device on this floor has the band: greyed, still clickable.
+    &--empty
+      opacity: 0.45
+
+    &:disabled
+      opacity: 0.3
+      cursor: not-allowed
+
+  &__band-count
+    margin-left: 3px
+    font-weight: 400
+    opacity: 0.75
+
+  &__band-dot
+    display: inline-block
+    width: 7px
+    height: 7px
+    border-radius: 50%
+    margin-right: 4px
+
+  &__readout-note
+    color: $text-tertiary
+    font-size: 10px
+    margin-top: 2px
+
   &__panel
     background: rgba(15, 23, 42, 0.95)
     border: 1px solid rgba(255, 255, 255, 0.15)
@@ -234,8 +292,25 @@
     font-weight: 400
     margin-left: 2px
 
+  // 58-7: viewed band in the title, and the 最強 caveat under it.
+  &__band-dot
+    display: inline-block
+    width: 7px
+    height: 7px
+    border-radius: 50%
+    margin-right: 3px
+
+  &__note
+    margin: -2px 0 5px
+    color: $text-tertiary
+    font-size: 9px
+    line-height: 1.3
+
   &__bar
     position: relative
+    // 58-7: the title now runs the full width (band suffix), so leave room
+    // for the hover pointer (top: -18px) instead of drawing it over the text.
+    margin-top: 19px
     height: 10px
     border-radius: 3px
     border: 1px solid rgba(255, 255, 255, 0.1)

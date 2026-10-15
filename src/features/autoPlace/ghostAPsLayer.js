@@ -53,7 +53,8 @@ export function attachGhostAPsLayer({ scene, useAutoPlaceStore, useFloorStore, u
     const st = useAutoPlaceStore.getState()
     const activeFloorId = useFloorStore.getState().activeFloorId
     const onThisFloor = st.floorId === activeFloorId
-    const show = onThisFloor && (st.previewAps.length > 0 || st.removeApIds.length > 0)
+    const enableIds = st.enableApIds ?? []
+    const show = onThisFloor && (st.previewAps.length > 0 || st.removeApIds.length > 0 || enableIds.length > 0)
     if (!show) {
       for (const t of textPool) t.visible = false
       if (typeof scene.requestRender === 'function') scene.requestRender()
@@ -82,8 +83,17 @@ export function attachGhostAPsLayer({ scene, useAutoPlaceStore, useFloorStore, u
       }
     }
 
-    st.previewAps.forEach((ap, i) => {
-      const color = BAND_COLOR[ap.frequency] ?? 0x4fc3f7
+    // 58-9: kept devices whose planned-band radio apply switches back on get
+    // the same "suggested position" marker, after the new ones.
+    const enableAps = enableIds.length > 0 && useAPStore
+      ? (useAPStore.getState().apsByFloor[activeFloorId] ?? [])
+        .filter((ap) => enableIds.includes(ap.id))
+        .map((ap) => ({ ...ap, planBand: st.enableBand }))
+      : []
+    const ghosts = [...st.previewAps, ...enableAps]
+    ghosts.forEach((ap, i) => {
+      // 58: the planned band (the device carries every radio of its model).
+      const color = BAND_COLOR[ap.planBand] ?? 0x4fc3f7
       const R = 14 * s
       // 淡填充（讀成「建議位置」而非實體 AP）+ 雙圈（深色外描邊撐對比）
       g.circle(ap.x, ap.y, R).fill({ color, alpha: 0.22 })
@@ -103,7 +113,7 @@ export function attachGhostAPsLayer({ scene, useAutoPlaceStore, useFloorStore, u
       t.position.set(ap.x, ap.y + R + 3 * s)
       t.scale.set(s)
     })
-    for (let i = st.previewAps.length; i < textPool.length; i++) textPool[i].visible = false
+    for (let i = ghosts.length; i < textPool.length; i++) textPool[i].visible = false
 
     if (typeof scene.requestRender === 'function') scene.requestRender()
   }

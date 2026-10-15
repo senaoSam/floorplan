@@ -11,9 +11,10 @@
 // Uses buildCandidates() (band filter + link direction + client tx) so coverage
 // matches what the panel would actually let the client use.
 
-import { buildCandidates } from './simulate'
+import { buildCandidates, preferredCandidates } from './simulate'
 import { maskToSmoothPolygons, cleanMask } from './contour'
 import { COVERAGE_THRESHOLD_DBM } from '@/constants/coverage'
+import { deviceIdOf } from '@/utils/apRadios'
 
 // Grid step (meters). 0.4 m keeps the wall-shaped boundary faithful enough that
 // Chaikin smoothing reads as a natural curve.
@@ -50,10 +51,12 @@ export function computeAssociationArea(scenario, floorScale, opts) {
     for (let c = 0; c < cols; c++) {
       const rx = { x: (c + 0.5) * step, y: (r + 0.5) * step }
       if (scenario.scopeMaskFn && !scenario.scopeMaskFn(rx.x, rx.y)) continue
-      // candidates are band-filtered + sorted strongest-first; [0] is the best
-      // usable AP. Covered iff that best RSSI clears the threshold.
+      // candidates are band-filtered + sorted strongest-first. 58: the radio the
+      // client would join (5 / 6 GHz first) -- covered iff it clears the
+      // threshold.
       const { candidates } = buildCandidates(scenario, rx, opts)
-      if (candidates.length && candidates[0].rssiDbm >= threshold) {
+      const best = preferredCandidates(candidates)[0]
+      if (best && best.rssiDbm >= threshold) {
         mask[r * cols + c] = 1
       }
     }
@@ -94,7 +97,10 @@ export function computeSingleApArea(scenario, floorScale, apId, opts) {
       const rx = { x: (c + 0.5) * step, y: (r + 0.5) * step }
       if (scenario.scopeMaskFn && !scenario.scopeMaskFn(rx.x, rx.y)) continue
       const { candidates } = buildCandidates(scenario, rx, opts)
-      const hit = candidates.find((cd) => cd.ap.id === apId)
+      // 58: `apId` may be a radio key (serving) -- the area is the device's,
+      // on the radio a client would join here (5 / 6 GHz first).
+      const own = candidates.filter((cd) => (cd.ap.deviceId ?? cd.ap.id) === deviceIdOf(apId))
+      const hit = preferredCandidates(own)[0]
       if (hit && hit.rssiDbm >= threshold) { mask[r * cols + c] = 1; any = true }
     }
   }

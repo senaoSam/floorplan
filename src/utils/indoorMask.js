@@ -41,6 +41,12 @@ const DEFAULT_SEAL_M = 0.6
 // 卻被連通塊判據當成漏光。真正漏光的特徵是室內「幾乎為零」，ratio 就抓得到。
 const MIN_INDOOR_BBOX_RATIO = 0.25
 
+// 58-15 (D3): below this (wall cells left out, see buildIndoorMask) the flood
+// fill reached nearly the whole building -- walls not closed. Between it and
+// MIN_INDOOR_BBOX_RATIO the walls may well be closed (tiny rooms, a scale set
+// too small), so the UI must not blame them.
+const LEAK_RATIO = 0.05
+
 // 把線段光柵化成 1 格細線（不加粗 —— 加粗會吃掉室內空間，見 DEFAULT_SEAL_M）。
 // 每半格取樣一次，確保對角線最壞情況也不漏格。
 function stampSegment(grid, gw, gh, cellM, ax, ay, bx, by) {
@@ -87,14 +93,18 @@ function stampCap(grid, gw, gh, cellM, px, py, radCells) {
 //   opts:   { cellM?, sealM? }
 //
 // Returns:
-//   { ok, indoorFn, ratio, cellM }
-//     ok       — false 表示偵測不可信（沒牆 / 漏光），呼叫端應忽略遮罩
-//     indoorFn — (x, y) => boolean，meter 座標；ok=false 時恆真
-//     ratio    — 室內格數 / 牆 bbox 格數（診斷與 UI 提示用）
+//   { ok, indoorFn, ratio, openRatio, leaky, noWalls, cellM }
+//     ok        — false 表示偵測不可信（沒牆 / 漏光），呼叫端應忽略遮罩
+//     indoorFn  — (x, y) => boolean，meter 座標；ok=false 時恆真
+//     ratio     — 室內格數 / 牆 bbox 格數（診斷與 UI 提示用）
+//     openRatio — 室內格數 / 牆 bbox 扣掉牆格（58-15 D3：判定用，與比例尺無關）
+//     leaky     — ok=false 且室內幾乎為零（牆沒封閉）；noWalls — 沒有牆
+//     rescued   — ok=true 但只靠 openRatio 過關（舊判據會退場）
 export function buildIndoorMask(walls, size, opts = {}) {
   const cellM = opts.cellM ?? DEFAULT_CELL_M
   const sealM = opts.sealM ?? DEFAULT_SEAL_M
-  const alwaysIndoor = { ok: false, indoorFn: () => true, ratio: 1, cellM }
+  // 58-15 (D3): `noWalls` -- nothing to recognise (the UI says so).
+  const alwaysIndoor = { ok: false, indoorFn: () => true, ratio: 1, cellM, noWalls: !walls || walls.length === 0 }
 
   if (!walls || walls.length === 0) return alwaysIndoor
   if (!size || !(size.w > 0) || !(size.h > 0)) return alwaysIndoor
@@ -162,11 +172,34 @@ export function buildIndoorMask(walls, size, opts = {}) {
     : nGrid
   const ratio = indoorCells / bboxCells
 
+  // 58-15 (D3): the judgement leaves the wall cells out of the denominator.
+  // A wall is a fixed-width line in metres (1 cell + endpoint caps), so its
+  // share of the bbox grows as the plan shrinks: the same closed walls at
+  // half the scale (Demo ×2, 15×11 m) gave 0.226 -- a fallback, blamed on the
+  // walls. Without the wall cells the share is what is left for rooms, which
+  // does not depend on the scale (Demo ×1 / ×2 / ×3: ≈0.6). It is never below
+  // `ratio`, so every plan that passed still passes, on the same mask.
+  let wallCells = 0
+  if (bx1 > bx0 && by1 > by0) {
+    const gx0 = Math.max(0, Math.ceil(bx0 / cellM))
+    const gx1 = Math.min(gw - 1, Math.floor(bx1 / cellM))
+    const gy0 = Math.max(0, Math.ceil(by0 / cellM))
+    const gy1 = Math.min(gh - 1, Math.floor(by1 / cellM))
+    for (let gy = gy0; gy <= gy1; gy++) {
+      for (let gx = gx0; gx <= gx1; gx++) {
+        if (grid[gy * gw + gx] === 1) wallCells++
+      }
+    }
+  }
+  const openRatio = indoorCells / Math.max(1, bboxCells - wallCells)
+
   // 退場：漏光時 flood fill 會從牆縫灌進建築，把室內吃到幾乎為零 ——
   // 這時遮罩會把幾乎所有候選點濾掉，一顆 AP 都放不了。
   // 回 ok:false 讓呼叫端退回原行為並在 UI 提示，不要靜默給空結果。
-  if (ratio < MIN_INDOOR_BBOX_RATIO) {
-    return { ok: false, indoorFn: () => true, ratio, cellM }
+  // 58-15 (D3): `leaky` -- almost nothing indoors (the flood got in), the
+  // only case the UI may blame the walls for.
+  if (Math.max(ratio, openRatio) < MIN_INDOOR_BBOX_RATIO) {
+    return { ok: false, indoorFn: () => true, ratio, openRatio, leaky: openRatio < LEAK_RATIO, cellM }
   }
 
   const indoorFn = (x, y) => {
@@ -176,5 +209,7 @@ export function buildIndoorMask(walls, size, opts = {}) {
     return grid[gy * gw + gx] === 0
   }
 
-  return { ok: true, indoorFn, ratio, cellM }
+  // rescued: accepted only by the scale-aware judgement (the bbox ratio alone
+  // fell back) -- the caller falls back as before if this mask leaves nothing.
+  return { ok: true, indoorFn, ratio, openRatio, rescued: ratio < MIN_INDOOR_BBOX_RATIO, cellM }
 }

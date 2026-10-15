@@ -2,8 +2,8 @@ import { create } from 'zustand'
 
 // Transient "you just changed X" overlay near the canvas — oldSrc Editor2D
 // 1643-1648 (`materialToast`). Driven by the Tab / Shift+Tab cycle in
-// FloorplanSystem keydown (wall material in DRAW_WALL, AP band in PLACE_AP,
-// switch kind in PLACE_SWITCH).
+// FloorplanSystem keydown (wall material in DRAW_WALL, switch kind in
+// PLACE_SWITCH).
 //
 // Auto-dismisses 1500 ms after the last showToast call (oldSrc 384). A new
 // showToast cancels the prior timer so back-to-back presses don't blink.

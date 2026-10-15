@@ -6,6 +6,7 @@ import { sampleFieldGLAsync } from '@/features/heatmap/sampleFieldGL'
 import { sampleField } from '@/features/heatmap/sampleField'
 import { getModeConfig } from '@/features/heatmap/modes'
 import { shouldSimplifyScene } from '@/features/heatmap/largeScene'
+import { withOnlyBand, enabledRadios } from '@/utils/apRadios'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
@@ -134,7 +135,7 @@ const ensureStackInner = async (fp) => {
   const hm = useHeatmapStore.getState()
   const bandFilter = hm.bandFilter || 'all'
   const mapAps = (list) =>
-    bandFilter === 'all' ? (list ?? []) : (list ?? []).filter((a) => String(a.frequency) === bandFilter)
+    bandFilter === 'all' ? (list ?? []).filter((a) => enabledRadios(a).length > 0) : (list ?? []).map((a) => withOnlyBand(a, bandFilter)).filter(Boolean)
   const modeCfg = getModeConfig(hm.mode)
 
   // Every calibrated non-active floor gets a plane; the active floor keeps

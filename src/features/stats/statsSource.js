@@ -12,9 +12,10 @@
 
 import { mulberry32, hashStringToSeed } from '@/utils/seededRng'
 import { buildScenario } from '@/features/heatmap/buildScenario'
-import { buildCandidates } from '@/features/clientView/simulate'
+import { buildCandidates, preferredCandidates } from '@/features/clientView/simulate'
 import { getCachedRoutes } from '@/features/cable/routesCache'
 import { getAPPoeWattage } from '@/constants/apModels'
+import { enabledBands, highestEnabledBand } from '@/utils/apRadios'
 import { CLIENT_DEVICE_LIST } from '@/constants/clientDevices'
 
 const DEFAULT_SEED = 20260706
@@ -113,9 +114,12 @@ export function deriveTopology(building, floorId, ts, seed = DEFAULT_SEED) {
   // deterministic (no random flapping) means the demo always shows exactly the
   // pinned offline unit — stable for testing. When real cloud data arrives it
   // supplies the real status here instead.
+  // 58-10: a device with every radio off is 'no_radio' -- not online, so it
+  // neither adds to the client target nor serves as a scatter centre.
   const apStatus = new Map()
   for (const ap of aps) {
-    apStatus.set(ap.id, ap.mockStatus === 'offline' ? 'offline' : 'online')
+    apStatus.set(ap.id, ap.mockStatus === 'offline' ? 'offline'
+      : enabledBands(ap).length === 0 ? 'no_radio' : 'online')
   }
 
   // Client count target for the floor, scaled by time of day.
@@ -137,8 +141,10 @@ export function deriveTopology(building, floorId, ts, seed = DEFAULT_SEED) {
         device, sixGHzOn: true, wifi7On: true, linkDirection: 'down',
         clientTxDbm: device.txPowerDbm, clientHeightM: 1.2,
       })
-      // Serving AP must be ONLINE — skip candidates on offline APs.
-      const serving = candidates.find((c) => onlineApIds.has(c.ap.id))
+      // Serving AP must be ONLINE — skip candidates on offline APs. 58:
+      // candidates are radios; the client belongs to the device, and joins
+      // 2.4 GHz only when no 5 / 6 GHz radio is available (Client View's rule).
+      const serving = preferredCandidates(candidates.filter((c) => onlineApIds.has(c.ap.deviceId ?? c.ap.id)))[0]
       if (!serving) continue
       // Theoretical = what the propagation model predicts here; measured =
       // theoretical minus a spatial environmental penalty (the real-world loss
@@ -148,7 +154,7 @@ export function deriveTopology(building, floorId, ts, seed = DEFAULT_SEED) {
       const linkMbps = Math.max(6, Math.round((measured + 90) * 12))
       clients.push({
         mac: randMac(rng),
-        apId: serving.ap.id,
+        apId: serving.ap.deviceId ?? serving.ap.id,
         x: pt.x, y: pt.y,
         rssiDbm: Math.round(measured),
         theoreticalRssiDbm: Math.round(theoretical),
@@ -200,27 +206,33 @@ export function getSnapshot(building, floorId, { ts } = {}) {
   // Per-AP snapshot.
   const perAp = aps.map((ap) => {
     const status = apStatus.get(ap.id)
-    if (status === 'offline') {
+    if (status === 'offline' || status === 'no_radio') {
       return {
         apId: ap.id, name: ap.name, clientCount: 0,
-        radio: null, channelUtil: null, status: 'offline', band: ap.frequency,
+        radio: null, channelUtil: null, status, band: highestEnabledBand(ap),
       }
     }
     const list = clientsByAp.get(ap.id) ?? []
     const clientCount = list.length
-    // Radio split: all clients are on this AP's band (single-radio AP model).
-    const band = String(ap.frequency)
-    const util = Math.min(1, clientCount / 25 + 0.05)
-    const txbps = clientCount * 4_000_000
-    const rxbps = clientCount * 1_500_000
+    // 58: radio split by the band each client associated on; the AP's
+    // channel utilisation is its busiest radio's.
     const radio = { '2.4': null, '5': null, '6': null }
-    radio[band] = { clients: clientCount, util, txbps, rxbps }
+    let util = 0
+    for (const b of enabledBands(ap)) {
+      const n = list.filter((c) => c.band === b).length
+      const u = Math.min(1, n / 25 + 0.05)
+      radio[String(b)] = { clients: n, util: u, txbps: n * 4_000_000, rxbps: n * 1_500_000 }
+      util = Math.max(util, u)
+    }
     return {
       apId: ap.id, name: ap.name, clientCount,
-      radio, channelUtil: util, status: 'online', band: ap.frequency,
+      radio, channelUtil: util, status: 'online', band: highestEnabledBand(ap),
     }
   })
   const apOnline = perAp.filter((a) => a.status === 'online').length
+  // 58-10: radios all off is a setting, not a fault -- 'no_radio' is neither
+  // online nor offline.
+  const apOffline = perAp.filter((a) => a.status === 'offline').length
 
   // Per-switch snapshot: PoE watts + port usage from routing (reuse SwitchPanel
   // formula — Σ getAPPoeWattage over APs whose route lands here).
@@ -229,13 +241,15 @@ export function getSnapshot(building, floorId, { ts } = {}) {
     let poeWatts = 0
     for (const n of neighbors) {
       const ap = aps.find((a) => a.id === n.deviceId)
-      if (ap && apStatus.get(ap.id) === 'online') poeWatts += getAPPoeWattage(ap)
+      // 58-10: a device with its radios off is still powered.
+      if (ap && apStatus.get(ap.id) !== 'offline') poeWatts += getAPPoeWattage(ap)
     }
     const uplinkUsed = sw.uplinkTo ? 1 : 0
     const portsUp = neighbors.length + uplinkUsed
     const trafficBps = neighbors.reduce((s, n) => {
       const a = perAp.find((p) => p.apId === n.deviceId)
-      return s + (a?.radio ? (a.radio[String(a.band)]?.txbps ?? 0) : 0)
+      // 58: every radio's traffic.
+      return s + (a?.radio ? Object.values(a.radio).reduce((t, r) => t + (r?.txbps ?? 0), 0) : 0)
     }, 0)
     return {
       swId: sw.id, name: sw.name, kind: sw.kind,
@@ -278,7 +292,7 @@ export function getSnapshot(building, floorId, { ts } = {}) {
 
   return {
     ts: now,
-    ap: { total: aps.length, online: apOnline, offline: aps.length - apOnline, perAp },
+    ap: { total: aps.length, online: apOnline, offline: apOffline, perAp },
     switchStat: { total: switches.length, online: switches.length, offline: 0, perSwitch },
     client: { total: clients.length, byBand, byAp, rssiHistogram, list: clients },
     alerts,

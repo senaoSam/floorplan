@@ -1,12 +1,34 @@
-import React, { useState } from 'react'
-import { useHeatmapStore } from '@/store/useHeatmapStore'
+import React, { useState, useMemo } from 'react'
+import { useHeatmapStore, bandFilterAllowed } from '@/store/useHeatmapStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
+import { useAPStore } from '@/store/useAPStore'
+import { useFloorStore } from '@/store/useFloorStore'
+import { showUiToast } from '@/store/useUiToastStore'
+import { BANDS, hasEnabledBand } from '@/utils/apRadios'
 import { HEATMAP_MODE_LIST, HEATMAP_MODE_CONFIG, getModeConfig } from '@/features/heatmap/modes'
 import FormulaNote from '@/components/FormulaNote/FormulaNote'
 import Icon from '@/components/Icon/Icon'
 import HeatmapLegend from './HeatmapLegend'
 import './HeatmapControl.sass'
+
+// 58-7: band chips. Colours are the AP band colours (apsLayer FREQ_COLOR).
+const BAND_COLOR = { 2.4: '#f39c12', 5: '#4fc3f7', 6: '#a855f7' }
+const ALL_BANDS_TITLE = '每一點取所有頻段中最強的射頻。預設功率下多半是 2.4 GHz，不等於手機實際連的頻段（手機優先 5/6 GHz，見 Client View）。計算量約為單一頻段的 2～3 倍。'
+
+// 58-7: strongest radio per band at the hovered point, from the probe's
+// per-radio RSSI (scenario entries carry `frequency`). Low band first.
+function strongestPerBand(hover) {
+  const best = new Map()
+  for (let i = 0; i < hover.perAp.length; i++) {
+    const v = hover.perAp[i]
+    const ap = hover.apList[i]
+    if (!ap || !isFinite(v)) continue
+    const cur = best.get(ap.frequency)
+    if (!cur || v > cur.dbm) best.set(ap.frequency, { band: ap.frequency, ap, dbm: v })
+  }
+  return [...best.values()].sort((a, b) => a.band - b.band)
+}
 
 // Pick the hover value that corresponds to the active visualisation mode.
 function hoverValueForMode(hover, mode) {
@@ -57,6 +79,21 @@ function HeatmapControl() {
   const crossFloorExcluded = useHeatmapStore((s) => s.crossFloorExcluded)
   const setEditorMode = useEditorStore((s) => s.setEditorMode)
   const hover        = useHoverReadoutStore((s) => s.reading)
+  const apsByFloor   = useAPStore((s) => s.apsByFloor)
+  const activeFloorId = useFloorStore((s) => s.activeFloorId)
+
+  // 58-7: devices with each band enabled -- on this floor (chip badge) and
+  // in the whole building (a band nobody has disables its chip).
+  const bandCounts = useMemo(() => {
+    const floor = {}
+    const building = {}
+    for (const band of BANDS) {
+      floor[band] = (apsByFloor[activeFloorId] ?? []).filter((a) => hasEnabledBand(a, band)).length
+      building[band] = Object.values(apsByFloor).reduce(
+        (n, list) => n + (list ?? []).filter((a) => hasEnabledBand(a, band)).length, 0)
+    }
+    return { floor, building }
+  }, [apsByFloor, activeFloorId])
 
   const [panelOpen, setPanelOpen] = useState(false)
   const [formulaOpen, setFormulaOpen] = useState(false)
@@ -65,6 +102,26 @@ function HeatmapControl() {
   const activeCfg  = getModeConfig(mode)
 
   const formatReading = (v, unit) => isFinite(v) ? `${v.toFixed(1)} ${unit}` : '—'
+
+  // 58-7: 最強 ('all') is RSSI-only; leaving RSSI on it falls back to the
+  // last single band (the store does the switch).
+  const onModeChange = (v) => {
+    const st = useHeatmapStore.getState()
+    if (!bandFilterAllowed(v, st.bandFilter)) {
+      showUiToast(`${getModeConfig(v).label} 只能看單一頻段，已改以 ${st.lastSingleBand} GHz 顯示`)
+    }
+    setMode(v)
+  }
+  const allBandsAllowed = bandFilterAllowed(mode, 'all')
+  // 58-7: hover rows -- one per band (one under a single-band filter); the
+  // strongest drives the colour under 最強.
+  const bandRows = hover ? strongestPerBand(hover) : []
+  const drivingBand = bandRows.length > 1
+    ? bandRows.reduce((a, b) => (b.dbm > a.dbm ? b : a)).band
+    : null
+  // The rows come from a direct-path probe; say so when the painted field
+  // includes reflection / diffraction.
+  const directOnlyNote = (reflections || diffraction) && !simplifiedLargeScene && budgetQuality !== 'direct'
 
   return (
     <div className="heatmap-control">
@@ -132,31 +189,32 @@ function HeatmapControl() {
           <div className="heatmap-control__readout-row heatmap-control__readout-pos">
             ({hover.at.x.toFixed(2)}, {hover.at.y.toFixed(2)}) m
           </div>
-          {(() => {
-            let best = -1
-            let bestVal = -Infinity
-            for (let i = 0; i < hover.perAp.length; i++) {
-              const v = hover.perAp[i]
-              if (isFinite(v) && v > bestVal) { bestVal = v; best = i }
-            }
-            if (best < 0) return null
-            const ap = hover.apList[best]
-            return (
-              <div className="heatmap-control__readout-row">
-                <b>{ap?.name ?? `AP-${best + 1}`}</b>
-                <span>
-                  {bestVal.toFixed(1)} dBm · ch {ap?.channel ?? '—'} · {ap?.channelWidth ? `${ap.channelWidth} MHz` : '—'}
-                </span>
-              </div>
-            )
-          })()}
+          {bandRows.map((r) => (
+            <div
+              key={r.band}
+              className="heatmap-control__readout-row"
+              title={drivingBand === r.band ? '此點熱圖顏色依這個射頻' : undefined}
+            >
+              <b>
+                <span className="heatmap-control__band-dot" style={{ background: BAND_COLOR[r.band] }} />
+                {r.band} {r.ap.name ?? '—'}
+              </b>
+              <span>
+                {r.dbm.toFixed(1)} dBm · ch {r.ap.channel ?? '—'}/{r.ap.channelWidth ?? '—'}
+                {drivingBand === r.band && ' ◀'}
+              </span>
+            </div>
+          ))}
+          {bandRows.length > 0 && directOnlyNote && (
+            <div className="heatmap-control__readout-note">（直射估算，不含反射/繞射）</div>
+          )}
         </div>
       )}
 
       {/* Color legend — only while heatmap is enabled; pointer follows hover
           value for the active mode. */}
       {enabled && (
-        <HeatmapLegend mode={mode} hoverValue={hoverValue} />
+        <HeatmapLegend mode={mode} hoverValue={hoverValue} bandFilter={bandFilter} />
       )}
 
       <div className="heatmap-control__row">
@@ -176,7 +234,7 @@ function HeatmapControl() {
             <select
               className="heatmap-control__mode"
               value={mode}
-              onChange={(e) => setMode(e.target.value)}
+              onChange={(e) => onModeChange(e.target.value)}
               title={`${activeCfg.plain}：${activeCfg.plainHelp}`}
             >
               {/* 52-D3: each option carries its plain name, and the hovered
@@ -187,17 +245,47 @@ function HeatmapControl() {
                 </option>
               ))}
             </select>
-            <select
-              className="heatmap-control__mode"
-              value={bandFilter}
-              onChange={(e) => setBandFilter(e.target.value)}
-              title="只顯示所選頻段的 AP 訊號場（避免遠處他頻段 AP 蓋掉覆蓋洞）"
-            >
-              <option value="all">全部頻段</option>
-              <option value="2.4">2.4 GHz</option>
-              <option value="5">5 GHz</option>
-              <option value="6">6 GHz</option>
-            </select>
+            {/* 58-7: band chips. Filled = viewed band; the badge counts this
+                floor's devices with the band on. A band absent here stays
+                clickable (other floors still bleed through); one absent from
+                the whole building is disabled -- unless it is the viewed band
+                (default 5 / auto-place preview), which stays readable. */}
+            <div className="heatmap-control__bands" role="radiogroup" aria-label="熱圖頻段">
+              {BANDS.map((band) => {
+                const value = String(band)
+                const onFloor = bandCounts.floor[band]
+                const inBuilding = bandCounts.building[band]
+                const checked = bandFilter === value
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={checked}
+                    className={`heatmap-control__band${checked ? ' heatmap-control__band--on' : ''}${onFloor === 0 ? ' heatmap-control__band--empty' : ''}`}
+                    style={{ '--band-color': BAND_COLOR[band] }}
+                    disabled={inBuilding === 0 && !checked}
+                    onClick={() => setBandFilter(value)}
+                    title={inBuilding === 0 ? `整棟沒有開啟的 ${value} GHz 射頻`
+                      : onFloor === 0 ? `本層無 ${value} GHz 射頻，只會看到其他樓層的滲透`
+                      : `只用 ${value} GHz 射頻計算熱圖`}
+                  >
+                    {value}<span className="heatmap-control__band-count">·{onFloor}</span>
+                  </button>
+                )
+              })}
+              <button
+                type="button"
+                role="radio"
+                aria-checked={bandFilter === 'all'}
+                className={`heatmap-control__band heatmap-control__band--all${bandFilter === 'all' ? ' heatmap-control__band--on' : ''}`}
+                disabled={!allBandsAllowed}
+                onClick={() => setBandFilter('all')}
+                title={allBandsAllowed ? ALL_BANDS_TITLE : `「最強」只適用 RSSI；${activeCfg.label} 請選單一頻段`}
+              >
+                最強
+              </button>
+            </div>
             <button
               type="button"
               className="heatmap-control__more"

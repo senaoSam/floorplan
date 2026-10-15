@@ -231,7 +231,7 @@ function ClientPanel() {
               <div className="client-panel__cand-title">可漫遊候選</div>
               {reading.candidates.map((c) => (
                 <div className="client-panel__row client-panel__row--cand" key={c.id}>
-                  <b>{c.name}</b><span>{fmt(c.rssiDbm, 'dBm', 1)}</span>
+                  <b>{c.name}{c.band ? ` · ${c.band} GHz` : ''}</b><span>{fmt(c.rssiDbm, 'dBm', 1)}</span>
                 </div>
               ))}
             </>

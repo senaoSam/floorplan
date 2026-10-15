@@ -10,6 +10,7 @@ import {
   qualityTiers, makeTimeBudget, jsFallbackOpts,
 } from '@/features/heatmap/largeScene'
 import { buildCrossFloorData } from '@/features/heatmap/buildCrossFloor'
+import { withOnlyBand, allRadioKeys, enabledRadios, patchRadio } from '@/utils/apRadios'
 import { EDITOR_MODE } from '@/store/useEditorStore'
 
 // Heatmap adapter — keeps the existing raw WebGL2 heatmap engine intact and
@@ -140,7 +141,9 @@ function thinScenarioForCoarse(scenario) {
     // buildScenario stores the position on `pos` in metres — there is no ap.x.
     const x = ap.pos?.x, y = ap.pos?.y
     if (!Number.isFinite(x) || !Number.isFinite(y)) return scenario  // unknown shape → don't thin
-    const key = `${Math.floor(x / COARSE_THIN_CELL_M)},${Math.floor(y / COARSE_THIN_CELL_M)}`
+    // 58: per band -- one device's radios share a position, and the bucket
+    // must not keep only one of them.
+    const key = `${Math.floor(x / COARSE_THIN_CELL_M)},${Math.floor(y / COARSE_THIN_CELL_M)},${ap.frequency}`
     if (!kept.has(key)) kept.set(key, ap)
   }
   if (kept.size === aps.length) return scenario       // nothing to gain
@@ -272,15 +275,18 @@ export function attachHeatmapLayer({
   // removeApIds 要一起排除 —— fresh / fixed 模式套用時會刪掉現有同頻段 AP，
   // 只加不減的話 what-if 熱圖是「新 AP + 舊 AP 全在」的疊加，比套用後的
   // 真實結果樂觀，使用者會照著一張不會發生的圖做決定。
-  let previewMergeCache = { real: null, preview: null, removeIds: null, fid: null, out: null }
+  // 58-9: enableIds -- kept devices whose planned-band radio is off get it
+  // switched back on by apply, so the what-if field has it on.
+  let previewMergeCache = { real: null, preview: null, removeIds: null, enableIds: null, enableChannels: null, fid: null, out: null }
   const mergePreviewAps = (real, fid) => {
     const st = useAutoPlaceStore ? useAutoPlaceStore.getState() : null
     const onFloor = st && st.floorId === fid
     const preview = onFloor && st.previewAps.length > 0 ? st.previewAps : null
     const removeIds = onFloor && st.removeApIds.length > 0 ? st.removeApIds : null
-    if (!preview && !removeIds) return real
+    const enableIds = onFloor && st.enableApIds?.length > 0 ? st.enableApIds : null
+    if (!preview && !removeIds && !enableIds) return real
     const c = previewMergeCache
-    if (c.real === real && c.preview === preview && c.removeIds === removeIds && c.fid === fid) {
+    if (c.real === real && c.preview === preview && c.removeIds === removeIds && c.enableIds === enableIds && c.enableChannels === st.enableChannels && c.fid === fid) {
       return c.out
     }
     let base = real[fid] ?? []
@@ -288,8 +294,14 @@ export function attachHeatmapLayer({
       const drop = new Set(removeIds)
       base = base.filter((ap) => !drop.has(ap.id))
     }
+    if (enableIds) {
+      const on = new Set(enableIds)
+      base = base.map((ap) => (on.has(ap.id)
+        ? { ...ap, radios: patchRadio(ap, st.enableBand, { enabled: true, ...(st.enableChannels?.[ap.id] != null ? { channel: st.enableChannels[ap.id] } : {}) }) }
+        : ap))
+    }
     const out = { ...real, [fid]: preview ? [...base, ...preview] : base }
-    previewMergeCache = { real, preview, removeIds, fid, out }
+    previewMergeCache = { real, preview, removeIds, enableIds, enableChannels: st.enableChannels, fid, out }
     return out
   }
   let gl = null
@@ -878,8 +890,12 @@ export function attachHeatmapLayer({
     // the selected band BEFORE the field is built, so a far off-band AP can't
     // paint over the selected band's coverage. Physics/data unchanged.
     const bandFilter = hm.bandFilter || 'all'
+    // 58: keep each device's radios on the band; devices without one drop out
+    // (on 'all', devices with every radio off).
     const applyBandFilter = (list) =>
-      bandFilter === 'all' ? list : list.filter((a) => String(a.frequency) === bandFilter)
+      bandFilter === 'all'
+        ? list.filter((a) => enabledRadios(a).length > 0)
+        : list.map((a) => withOnlyBand(a, bandFilter)).filter(Boolean)
 
     const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
     // Phase 49：ghost 預覽 AP 併入來源（planar 參數與 crossFloor 共用同一份，
@@ -1033,7 +1049,7 @@ export function attachHeatmapLayer({
       // (reflections/diffraction/blur/contours off, faraway APs culled at
       // -95 dBm). (oldSrc HeatmapLayer 322-495.)
       const renderScenario = isSoloAP
-        ? { ...scenario, aps: scenario.aps.filter((a) => a.id === dragAP.id) }
+        ? { ...scenario, aps: scenario.aps.filter((a) => a.deviceId === dragAP.id) }
         : scenario
 
       const opts = isSoloAP
@@ -1170,8 +1186,10 @@ export function attachHeatmapLayer({
     const isStale = () => gen !== generation
     // 57-2: every AP that still exists (all floors, ghosts included, before
     // the band filter) — lets the engine drop cached grids of deleted APs.
+    // 58: per-radio grids are keyed by radio key, geometry bakes by device.
     const liveApIds = new Set()
     for (const list of Object.values(idleInputs.apsAll ?? {})) {
+      for (const key of allRadioKeys(list)) liveApIds.add(key)
       for (const ap of list ?? []) liveApIds.add(ap.id)
     }
     const baseOpts = {

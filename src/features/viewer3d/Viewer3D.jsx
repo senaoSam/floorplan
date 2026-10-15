@@ -5,6 +5,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { useFloorStore, getPxPerM, getFloorHeight } from '@/store/useFloorStore'
 import { useEditorStore, VIEW_MODE, EDITOR_MODE } from '@/store/useEditorStore'
 import { resolveApRadiation } from '@/features/heatmap/apRadiation'
+import { enabledRadios, radioView, highestEnabledBand } from '@/utils/apRadios'
+import { getAPModelById } from '@/constants/apModels'
 import { useViewportStore } from '@/store/useViewportStore'
 import { getSceneRefs } from '@/render/sceneRegistry'
 import { SWITCH_KINDS, getSwitchKindColor } from '@/store/useCableStore'
@@ -755,15 +757,18 @@ const TOOLTIP_OFFSET_PX = 14
 // Rows render left→right in the primary line, meta rows in the dimmer line.
 function buildReadoutContent(type, d) {
   if (type === 'ap') {
-    const freqLabel = FREQ_LABEL_3D[d.frequency] ?? `${d.frequency} GHz`
-    const channelLabel = d.channel != null
-      ? `Ch ${d.channel}${d.channelWidth ? `/${d.channelWidth}MHz` : ''}`
-      : null
-    // 57-23: when the EIRP cap derates the TX power, show set → actual.
-    const rad = resolveApRadiation(d, useEditorStore.getState().regulatoryDomain)
-    const txLabel = d.txPower == null ? null
-      : rad.capped ? `${rad.setTxDbm}→${Math.round(rad.txDbm * 10) / 10} dBm`
-      : `${d.txPower} dBm`
+    // 58: one line per enabled radio (band, channel/width, tx).
+    const domainId = useEditorStore.getState().regulatoryDomain
+    const radioLines = enabledRadios(d).map((r) => {
+      // 57-23: when the EIRP cap derates the TX power, show set → actual.
+      const rad = resolveApRadiation(radioView(d, r), domainId)
+      const txLabel = rad.capped ? `${rad.setTxDbm}→${Math.round(rad.txDbm * 10) / 10} dBm` : `${r.txPower} dBm`
+      return `${FREQ_LABEL_3D[r.band] ?? `${r.band} GHz`} · Ch ${r.channel}/${r.channelWidth}MHz · ${txLabel}`
+    })
+    const top = highestEnabledBand(d)
+    // 58-10: every radio off -> grey pill (APLayer3D NO_RADIO_COLOR) and a
+    // 「無射頻」 line.
+    if (top == null) radioLines.push('無射頻')
     const mountLabel = d.z != null ? `掛 ${Number(d.z).toFixed(1)} m` : null
     const mode = d.antennaMode ?? 'omni'
     const antennaLabel = mode === 'omni' ? '全向'
@@ -772,8 +777,9 @@ function buildReadoutContent(type, d) {
       : mode
     return {
       title: d.name ?? d.id,
-      pill: { text: freqLabel, color: FREQ_COLOR_3D[d.frequency] ?? '#4fc3f7' },
-      main: [channelLabel, txLabel],
+      pill: { text: getAPModelById(d.modelId).name, color: top == null ? '#9aa3ad' : (FREQ_COLOR_3D[top] ?? '#4fc3f7') },
+      main: [],
+      lines: radioLines,
       meta: [mountLabel, antennaLabel],
     }
   }
@@ -852,6 +858,10 @@ function DeviceHoverReadout({ hovered, pointer, container }) {
         )}
         {content.main.filter(Boolean).map((t) => <span key={t}>{t}</span>)}
       </div>
+      {/* 58: one row per AP radio. */}
+      {content.lines?.map((t) => (
+        <div key={t} className="viewer3d__hover-readout-row"><span>{t}</span></div>
+      ))}
       <div className="viewer3d__hover-readout-row viewer3d__hover-readout-row--meta">
         {content.meta.filter(Boolean).map((t) => <span key={t}>{t}</span>)}
       </div>
@@ -1008,6 +1018,9 @@ function Viewer3D() {
   const floorPlate3D    = useEditorStore((s) => s.floorPlate3D)
   const setFloorPlate3D = useEditorStore((s) => s.setFloorPlate3D)
   const hmEnabled       = useHeatmapStore((s) => s.enabled)
+  // 58-7: HeatmapControl is hidden in 3D, so a read-only badge says which
+  // band the heatmap planes show.
+  const hmBandFilter    = useHeatmapStore((s) => s.bandFilter)
   const toggleLayer     = useEditorStore((s) => s.toggleLayer)
   const clearSelected   = useEditorStore((s) => s.clearSelected)
   // CanvasArea now keeps Viewer3D mounted but hidden when viewMode === 2D, so
@@ -1487,6 +1500,23 @@ function Viewer3D() {
             ))}
           </div>
         </div>
+
+        {/* 58-7: read-only band badge. Its own last row: beside the toggles it
+            widened the panel into the floating toolbar when PanelRight is
+            open, and as the last row its coming and going moves nothing. */}
+        {!inCameraMode && hmEnabled && (
+          <div className="viewer3d__panel-row">
+            <span
+              className="viewer3d__band-badge"
+              title="熱圖頻段（在 2D 熱圖列切換）"
+            >
+              {hmBandFilter !== 'all' && (
+                <span className="viewer3d__band-badge-dot" style={{ background: FREQ_COLOR_3D[hmBandFilter] }} />
+              )}
+              熱圖：{hmBandFilter === 'all' ? '最強頻段' : `${hmBandFilter} GHz`}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Phase 55 floor elevator rail — right edge, vertically centred. The

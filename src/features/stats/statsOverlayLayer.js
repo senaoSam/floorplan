@@ -95,7 +95,7 @@ export function attachStatsOverlayLayer({
     const snapById = new Map()
     if (snap) {
       for (const a of snap.ap.perAp) {
-        snapById.set(a.apId, { count: a.clientCount, band: a.band, online: a.status === 'online' })
+        snapById.set(a.apId, { count: a.clientCount, band: a.band, online: a.status === 'online', noRadio: a.status === 'no_radio' })
       }
     }
     // Keep the client list too — the plan-vs-measured gap overlay needs each
@@ -125,19 +125,21 @@ export function attachStatsOverlayLayer({
     // Client-count pill per online AP, offset just above the AP marker so it
     // doesn't cover it. Pill width grows with digit count; height fixed.
     const PILL_H = 18
-    const PILL_DY = 22   // canvas px above the AP centre (before zoom scale)
+    // 58-14: 28 (was 22) so the pill's lower edge clears the AP's band dots.
+    const PILL_DY = 28   // canvas px above the AP centre (before zoom scale)
     for (const ap of aps) {
       const rec = cache.snapById.get(ap.id)
       const t = getText(ap.id)
       if (!rec) { t.visible = false; continue }
       seen.add(ap.id)
 
-      const offline = !rec.online
+      const offline = !rec.online && !rec.noRadio
       // Offline AP: grey "離線" pill + a grey ring round the AP marker so the
       // dead unit is obvious on the plan (not just missing a number).
-      const label = offline ? '離線' : String(rec.count)
-      const color = offline ? OFFLINE_GREY : loadColor(rec.count)
-      const pillW = offline ? 34 : Math.max(20, 12 + label.length * 8)
+      // 58-10: radios all off -> grey "無射頻" pill (the marker is already grey).
+      const label = offline ? '離線' : rec.noRadio ? '無射頻' : String(rec.count)
+      const color = offline || rec.noRadio ? OFFLINE_GREY : loadColor(rec.count)
+      const pillW = offline ? 34 : rec.noRadio ? 46 : Math.max(20, 12 + label.length * 8)
       const cx = ap.x
       const cy = ap.y - PILL_DY * s
       const halfW = (pillW / 2) * s

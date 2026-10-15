@@ -54,7 +54,10 @@ function rssiQualityLabel(v) {
   return RSSI_BANDS.find((b) => v <= b.max)?.label ?? null
 }
 
-function HeatmapLegend({ mode, hoverValue }) {
+// 58-7: the band the field is drawn from (apsLayer FREQ_COLOR).
+const BAND_COLOR = { 2.4: '#f39c12', 5: '#4fc3f7', 6: '#a855f7' }
+
+function HeatmapLegend({ mode, hoverValue, bandFilter }) {
   const cfg = getModeConfig(mode)
   const { stops, minVal, maxVal, leftToRightAsc } = buildLegendData(cfg)
   const pct = valueToPercent(hoverValue, minVal, maxVal, leftToRightAsc)
@@ -67,8 +70,18 @@ function HeatmapLegend({ mode, hoverValue }) {
   return (
     <div className="heatmap-legend">
       <div className="heatmap-legend__title">
-        {cfg.label} <span className="heatmap-legend__unit">({cfg.unit})</span>
+        {cfg.label} {cfg.plain}<span className="heatmap-legend__unit">（{cfg.unit}）</span>
+        {' · '}
+        {bandFilter === 'all' ? '最強頻段' : (
+          <>
+            <span className="heatmap-legend__band-dot" style={{ background: BAND_COLOR[bandFilter] }} />
+            {bandFilter} GHz
+          </>
+        )}
       </div>
+      {bandFilter === 'all' && (
+        <div className="heatmap-legend__note">每點取最強射頻（多為 2.4 GHz），手機實際多連 5/6 GHz</div>
+      )}
 
       <div className="heatmap-legend__bar" style={{ background: gradient }}>
         {hasPointer && (

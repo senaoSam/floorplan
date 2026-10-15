@@ -30,7 +30,11 @@ export const HEATMAP_DRAG_MODES = ['live', 'solo']
 // '2.4'/'5'/'6' filter to a single band's APs *before* the field is built, so
 // e.g. a far 2.4 GHz AP can't mask a 6 GHz coverage hole. Purely a display
 // filter — AP data and shader physics are untouched.
+// 58-7: 'all' is labelled 最強 in the UI and is RSSI-only — SINR/SNR/CCI
+// across bands mix one band's signal with another band's interference.
 export const HEATMAP_BANDS = ['all', '2.4', '5', '6']
+export const DEFAULT_BAND_FILTER = '5'
+export const bandFilterAllowed = (mode, band) => band !== 'all' || mode === 'rssi'
 
 // Heatmap UI / compute options.
 export const useHeatmapStore = create((set) => ({
@@ -48,8 +52,12 @@ export const useHeatmapStore = create((set) => ({
   gridStepM: 0.5,
   blur: 8,
   showContours: true,
-  // 47-8a: which band's APs feed the field. 'all' = every AP (default).
-  bandFilter: 'all',
+  // 47-8a: which band's APs feed the field. 'all' = every AP (最強).
+  // 58-7: defaults to 5 GHz.
+  bandFilter: DEFAULT_BAND_FILTER,
+  // 58-7: last single band picked, restored when a non-RSSI mode rules out
+  // 'all'.
+  lastSingleBand: DEFAULT_BAND_FILTER,
 
   // Hover readout driven by Editor2D's mousemove when enabled. Shape:
   //   { at:{x,y}, rssiDbm, sinrDb, snrDb, cciDbm, perAp:number[], apList:AP[] }
@@ -105,7 +113,10 @@ export const useHeatmapStore = create((set) => ({
   crossFloorExcluded: [],
 
   setEnabled:     (v) => set({ enabled: v }),
-  setMode:        (v) => set({ mode: v }),
+  // 58-7: leaving RSSI while on 'all' falls back to the last single band.
+  setMode:        (v) => set((s) => (
+    bandFilterAllowed(v, s.bandFilter) ? { mode: v } : { mode: v, bandFilter: s.lastSingleBand }
+  )),
   setEngine:      (v) => set({ engine: v }),
   setDragMode:    (v) => set({ dragMode: v }),
   setReflections: (v) => set({ reflections: v }),
@@ -113,7 +124,10 @@ export const useHeatmapStore = create((set) => ({
   setGridStepM:   (v) => set({ gridStepM: v }),
   setBlur:        (v) => set({ blur: v }),
   setShowContours:(v) => set({ showContours: v }),
-  setBandFilter:  (v) => set({ bandFilter: v }),
+  setBandFilter:  (v) => set((s) => {
+    if (!bandFilterAllowed(s.mode, v)) return s
+    return v === 'all' ? { bandFilter: v } : { bandFilter: v, lastSingleBand: v }
+  }),
   setHoverReading:(v) => set({ hoverReading: v }),
   // 任務 4 (b): adapter calls this each compute; guarded to a no-op when the
   // value is unchanged so it never triggers an extra subscriber recompute loop.

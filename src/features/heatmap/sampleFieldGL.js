@@ -188,7 +188,8 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
   const losEnabled = opts.losEnabled !== false
   const losMap = losEnabled
     ? gl.bakeLos(
-        scenario.aps.map((ap, i) => ({ ap, key: ap.id ?? `_idx_${i}` })),
+        // 58: geometry-only, so one bake per device -- its radios share it.
+        scenario.aps.map((ap, i) => ({ ap, key: ap.deviceId ?? ap.id ?? `_idx_${i}` })),
         gridStepM, { x: originX, y: originY }, rxZM, nx, ny,
         scenario.walls.length,
       )
@@ -199,7 +200,7 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
   // callers turn this off (debug parity check vs unbaked path).
   const apGeoEnabled = opts.apGeoEnabled !== false
   const apGeoMap = apGeoEnabled
-    ? gl.bakeApGeo(scenario.aps.map((ap, i) => ({ ap, key: ap.id ?? `_idx_${i}` })), rxZM, !!opts.enableDiffraction)
+    ? gl.bakeApGeo(scenario.aps.map((ap, i) => ({ ap, key: ap.deviceId ?? ap.id ?? `_idx_${i}` })), rxZM, !!opts.enableDiffraction)
     : null
 
   // 任務 2 (C): per-AP output-grid cache. The cache container + invalidation
@@ -254,8 +255,9 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
     }
     cacheMisses++
 
-    const losEntry = losMap?.get(apKey)
-    const apGeoEntry = apGeoMap?.get(apKey)
+    const bakeKey = ap.deviceId ?? apKey   // 58: per-device geometry bakes
+    const losEntry = losMap?.get(bakeKey)
+    const apGeoEntry = apGeoMap?.get(bakeKey)
     const { rssi: shaderGrid } = gl.renderAp(
       apForGL, scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta,
       {
@@ -479,10 +481,12 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
       }
     }
 
+    // 58: geometry-only bakes are shared by a device's radios.
+    const bakeKey = ap.deviceId ?? apKey
     const losEntry = losEnabled
-      ? gl.bakeLosFor(ap, apKey, gridStepM, { x: originX, y: originY }, rxZM, nx, ny, scenario.walls.length)
+      ? gl.bakeLosFor(ap, bakeKey, gridStepM, { x: originX, y: originY }, rxZM, nx, ny, scenario.walls.length)
       : null
-    const apGeoEntry = apGeoEnabled ? gl.bakeApGeoFor(ap, apKey, rxZM, !!opts.enableDiffraction) : null
+    const apGeoEntry = apGeoEnabled ? gl.bakeApGeoFor(ap, bakeKey, rxZM, !!opts.enableDiffraction) : null
     const apOpts = {
       ...opts,
       gridSize: { nx, ny },

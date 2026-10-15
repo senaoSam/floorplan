@@ -4,11 +4,12 @@
 // responsive (modal progress, scrolling) during long plans.
 //
 // Message protocol (main → worker):
-//   { type: 'run', payload: { floor, walls, aps, scopes, apIdsToPlan, userOpts } }
+//   { type: 'run', payload: { floor, walls, aps, scopes, apIdsToPlan, userOpts, env,
+//                             floors, apsByFloor, wallsByFloor, holesByFloor } }
 //
 // Message protocol (worker → main):
 //   { type: 'progress', state: { ...iter info, elapsedMs, etaMs } }
-//   { type: 'done',     result: { aborted, error?, txMapEntries?, score?, opts? } }
+//   { type: 'done',     result: { aborted, error?, txMapEntries?, scoresByBand?, opts? } }
 //   { type: 'error',    message }
 //
 // 取消：主線程直接 worker.terminate()。greedy 全程是一條同步 microtask 鏈，
@@ -17,7 +18,8 @@
 //
 // scopeMaskFn (a closure inside the scenario) cannot cross postMessage, so we
 // re-import buildScenario inside the worker and rebuild the scenario from raw
-// floor/walls/aps/scopes here. txMap is serialized as entries array.
+// floor/walls/aps/scopes here (58-15: plus every floor's data, for the
+// heatmap's cross-floor scenario). txMap is serialized as entries array.
 
 import { runAutoPowerPlan } from '@/utils/autoPowerPlan'
 
@@ -26,7 +28,10 @@ self.addEventListener('message', async (e) => {
   if (!msg || msg.type !== 'run') return
 
   try {
-    const { floor, walls, aps, scopes, apIdsToPlan, userOpts, env } = msg.payload
+    const {
+      floor, walls, aps, scopes, apIdsToPlan, userOpts, env,
+      floors, apsByFloor, wallsByFloor, holesByFloor,
+    } = msg.payload
     const r = await runAutoPowerPlan({
       floor,
       walls,
@@ -35,6 +40,10 @@ self.addEventListener('message', async (e) => {
       apIdsToPlan,
       userOpts,
       env,   // 57-34
+      floors,          // 58-15
+      apsByFloor,
+      wallsByFloor,
+      holesByFloor,
       onProgress: (st) => {
         self.postMessage({ type: 'progress', state: st })
         return true
@@ -49,7 +58,7 @@ self.addEventListener('message', async (e) => {
       aborted: r.aborted,
       error: r.error ?? null,
       txMapEntries: r.txMap ? Array.from(r.txMap.entries()) : null,
-      score: r.score ?? null,
+      scoresByBand: r.scoresByBand ?? null,   // 58: per band
       opts: r.opts ? optsOut : null,
     }
     self.postMessage({ type: 'done', result: out })

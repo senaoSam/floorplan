@@ -4,7 +4,7 @@ import { useAPStore } from '@/store/useAPStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { generateId } from '@/utils/id'
-import { getDefaultTxPower } from '@/constants/apModels'
+import { radiosForModel } from '@/utils/apRadios'
 import './StressLoader.sass'
 
 // Inline defaults — apModels / channelWidths constants ported separately
@@ -47,10 +47,6 @@ function buildGridAPs(floor, count) {
       id: generateId('ap'),
       x, y,
       z: 2.4,
-      txPower: getDefaultTxPower(5),
-      frequency: 5,
-      channel: CHANNEL_CYCLE[i % CHANNEL_CYCLE.length],
-      channelWidth: DEFAULT_CHANNEL_WIDTH[5],
       antennaMode: 'omni',
       azimuth: 0,
       beamwidth: 60,
@@ -59,6 +55,11 @@ function buildGridAPs(floor, count) {
       modelId: DEFAULT_AP_MODEL_ID,
       name: `Stress-${String(i + 1).padStart(4, '0')}`,
       color: '#4fc3f7',
+      // 58: only the 5 GHz radio on, so stress numbers stay comparable with
+      // the single-radio baselines.
+      radios: radiosForModel(DEFAULT_AP_MODEL_ID).map((r) => (r.band === 5
+        ? { ...r, channel: CHANNEL_CYCLE[i % CHANNEL_CYCLE.length], channelWidth: DEFAULT_CHANNEL_WIDTH[5] }
+        : { ...r, enabled: false })),
     })
   }
   return aps

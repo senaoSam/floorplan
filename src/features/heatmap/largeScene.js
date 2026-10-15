@@ -27,7 +27,10 @@ const HW_AP_PER_SEG_THRESHOLD = 0.25
 
 export function shouldSimplifyScene(scenario, isSoftwareRender) {
   const segCount = Math.max(1, scenario.walls.length)
-  const apPerSegment = scenario.aps.length / segCount
+  // 58: devices, not radios -- the calibration measured AP density, and a
+  // device's co-located radios add no spatial density.
+  const devices = new Set(scenario.aps.map((a) => a.deviceId ?? a.id)).size
+  const apPerSegment = devices / segCount
   const threshold = isSoftwareRender ? SW_AP_PER_SEG_THRESHOLD : HW_AP_PER_SEG_THRESHOLD
   return apPerSegment >= threshold
 }

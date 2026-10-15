@@ -41,6 +41,8 @@ self.addEventListener('message', async (e) => {
         proposedAps: r.proposedAps ?? null,
         removeApIds: r.removeApIds ?? null,
         keptApIds: r.keptApIds ?? null,
+        enableApIds: r.enableApIds ?? null,   // 58-9
+        enableChannels: r.enableChannels ?? null,   // 58-15
         stats: r.stats ?? null,
       },
     })

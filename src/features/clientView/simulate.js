@@ -11,7 +11,7 @@
 //                          reciprocity: uplinkRSSI = downlinkRSSI − apTx + clientTx
 //                          (antenna gains cancel), so no extra propagation pass.
 //   3. roaming hysteresis — the incumbent serving AP stays unless a candidate
-//                          beats it by ROAM_HYSTERESIS_DB (on effective RSSI).
+//                          beats it by ROAM_HYSTERESIS_DB (on band score, 58-11).
 //   4. per-band noise + min-interfering — SNR uses the band's noise floor;
 //                          SINR's interference sum excludes APs below
 //                          minInterferingRssiDbm.
@@ -72,25 +72,75 @@ export function buildCandidates(scenario, rx, opts) {
   return { probe, candidates }
 }
 
+// 58-11: a 5 / 6 GHz radio counts as "available" (worth staying off 2.4 GHz
+// for) only at/above this -- AOSP's 5 GHz minimum usable RSSI. Below it the
+// radio is still associable down to MIN_USABLE_RSSI_DBM, but competes with 2.4.
+const BAND_AVAILABLE_RSSI_DBM = -77
+// 58-11: wpa_supplicant-style band bias -- each band step up adds this much to
+// the score radios are ranked by (5 GHz +2, 6 GHz +4 over 2.4). Ranking only;
+// the displayed / coverage RSSI stays the real one.
+const BAND_STEP_BONUS_DB = 2
+const BAND_STEP = { 2.4: 0, 5: 1, 6: 2 }
+
+const bandScore = (c) => c.rssiDbm + BAND_STEP_BONUS_DB * (BAND_STEP[c.ap.frequency] ?? 0)
+const byScore = (a, b) => bandScore(b) - bandScore(a)
+
+// 58: band preference. A dual-band client joins 2.4 GHz only when no 5 / 6
+// GHz radio is available -- Hamina's Client View: a client roams "to an AP in
+// 2.4 GHz, when no 5 GHz option is available". Without it 2.4 GHz, which
+// reaches furthest, won almost every association once APs carry several
+// radios. 58-11: "available" = >= BAND_AVAILABLE_RSSI_DBM; a 5 / 6 GHz
+// `incumbent` keeps counting down to that minus ROAM_HYSTERESIS_DB, so the
+// 2.4 <-> 5/6 change has the same 6 dB hysteresis as roaming (join 5/6 at
+// -77, fall back at -83) instead of flapping at the threshold. Returns the
+// pool ordered by band score, best first. While such an incumbent is held, the
+// other 5 / 6 GHz radios down to the same extended floor stay in the pool too,
+// so a 5 <-> 6 / AP <-> AP move is still judged by the score margin.
+function preferredPool(candidates, incumbent) {
+  const heldFloor = BAND_AVAILABLE_RSSI_DBM - ROAM_HYSTERESIS_DB
+  const held = incumbent && incumbent.ap.frequency !== 2.4 && incumbent.rssiDbm >= heldFloor
+  const floor = held ? heldFloor : BAND_AVAILABLE_RSSI_DBM
+  const high = candidates.filter((c) => c.ap.frequency !== 2.4 && c.rssiDbm >= floor)
+  return (high.length ? high : candidates).slice().sort(byScore)
+}
+
+// The radio a fresh client would join here first (association area, single-AP
+// area, stats mock clients, roaming-candidate list).
+export function preferredCandidates(candidates) {
+  return preferredPool(candidates, null)
+}
+
+// 58-11: pick a radio with roaming hysteresis. The incumbent stays while it is
+// in the preferred pool and the pool's best does not beat it by
+// ROAM_HYSTERESIS_DB on band score (5 <-> 6 and AP <-> AP alike). It is left
+// when it drops out of the pool: below MIN_USABLE_RSSI_DBM, or a 2.4 GHz
+// incumbent once a 5 / 6 GHz radio is available (that switch's hysteresis is
+// the -77 / -83 band above, not the score margin -- otherwise a client on a
+// strong 2.4 GHz would never move to an available 5 GHz).
+function chooseRadio(candidates, priorServingId) {
+  const incumbent = priorServingId != null ? candidates.find((c) => c.ap.id === priorServingId) : null
+  const pool = preferredPool(candidates, incumbent)
+  const best = pool[0]
+  if (!incumbent || !pool.includes(incumbent)) return best   // fresh / incumbent left the pool → roam
+  if (best === incumbent) return best
+  if (bandScore(best) - bandScore(incumbent) >= ROAM_HYSTERESIS_DB) return best
+  return incumbent                                           // sticky
+}
+
 // Decide the serving AP among `candidates` (strongest-first by effective RSSI).
 // Returns { serving } where serving is the chosen candidate, or null. When a
 // manual `lockedApId` is set but that AP isn't a usable candidate here, returns
 // { serving: null, lockUnreachable: true } — we do NOT silently fall back to
 // another AP (the user explicitly picked one; honour it or report it can't be
-// reached). Without a lock, applies roaming hysteresis against `priorServingId`.
+// reached). Applies roaming hysteresis against `priorServingId`.
 function pickServing(candidates, priorServingId, lockedApId) {
   if (lockedApId != null) {
-    const locked = candidates.find((c) => c.ap.id === lockedApId)
-    return locked ? { serving: locked } : { serving: null, lockUnreachable: true }
+    // 58: the lock is a device -- the same band rule among its own radios.
+    const own = candidates.filter((c) => (c.ap.deviceId ?? c.ap.id) === lockedApId)
+    return own.length ? { serving: chooseRadio(own, priorServingId) } : { serving: null, lockUnreachable: true }
   }
   if (candidates.length === 0) return { serving: null }
-  const strongest = candidates[0]
-  if (priorServingId == null) return { serving: strongest }
-  const incumbent = candidates.find((c) => c.ap.id === priorServingId)
-  if (!incumbent) return { serving: strongest }          // incumbent out of range → roam
-  if (strongest.ap.id === incumbent.ap.id) return { serving: strongest }
-  if (strongest.rssiDbm - incumbent.rssiDbm >= ROAM_HYSTERESIS_DB) return { serving: strongest }
-  return { serving: incumbent }                          // sticky
+  return { serving: chooseRadio(candidates, priorServingId) }
 }
 
 // Effective PHY for the data-rate ladder: an 11be device with Wi-Fi 7 disabled
@@ -140,7 +190,7 @@ export function simulateClient(scenario, rx, opts) {
 
   const servingAp = serving.ap
   // Whether the served AP is the manual lock (so the panel shows the 🔒 badge).
-  const isLocked = lockedApId != null && servingAp.id === lockedApId
+  const isLocked = lockedApId != null && (servingAp.deviceId ?? servingAp.id) === lockedApId
   const rssiDbm = serving.rssiDbm           // effective (link-direction-aware)
   const band = servingAp.frequency
 
@@ -192,10 +242,19 @@ export function simulateClient(scenario, rx, opts) {
   const distanceM = Math.hypot(rx.x - servingAp.pos.x, rx.y - servingAp.pos.y)
 
   // Roaming candidates (grey lines): other in-band APs within the window of the
-  // serving effective RSSI.
-  const roamCandidates = candidates
-    .filter((c) => c.ap.id !== servingAp.id && rssiDbm - c.rssiDbm <= ROAM_CANDIDATE_WINDOW_DB)
-    .map((c) => ({ id: c.ap.id, name: c.ap.name, rssiDbm: c.rssiDbm }))
+  // serving effective RSSI. 58: per device -- the serving device's other
+  // radios are not roaming targets, and each other device appears once (its
+  // best-scored radio among the bands the client would roam to).
+  const servingDev = servingAp.deviceId ?? servingAp.id
+  const seenDev = new Set([servingDev])
+  const roamCandidates = []
+  for (const c of preferredCandidates(candidates)) {
+    const dev = c.ap.deviceId ?? c.ap.id
+    if (seenDev.has(dev)) continue
+    seenDev.add(dev)
+    if (rssiDbm - c.rssiDbm > ROAM_CANDIDATE_WINDOW_DB) continue
+    roamCandidates.push({ id: c.ap.id, name: c.ap.name, band: c.ap.frequency, rssiDbm: c.rssiDbm })
+  }
 
   const reading = {
     servingApId: servingAp.id,

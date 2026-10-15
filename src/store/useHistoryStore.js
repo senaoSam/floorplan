@@ -335,13 +335,39 @@ let _prevTripwires = useCameraStore.getState().tripwiresByFloor
 let _prevCamZones  = useCameraStore.getState().zonesByFloor
 let _prevUnplaced  = useCameraStore.getState().unplacedCameras
 
+// 58-15 (B5): which floor a floor-keyed map change belongs to. The active floor
+// wins whenever its entry changed (every same-floor edit, byte-for-byte the old
+// behaviour). Otherwise, if exactly ONE other floor's entry changed, that floor
+// is the one being edited — auto-place 套用 deliberately writes to the floor
+// the plan was made for (53-G10) even after the user switched floors with the
+// click-through preview open, and before this it recorded nothing at all, so
+// removed devices could never be brought back. Several non-active floors in a
+// single set() has no single-floor snapshot shape, so it stays unrecorded as
+// before (no current writer does that).
+function changedFloorId(prevRef, currentRef, activeFloorId) {
+  if (prevRef[activeFloorId] !== currentRef[activeFloorId]) return activeFloorId
+  let found = null
+  for (const id of new Set([...Object.keys(prevRef ?? {}), ...Object.keys(currentRef ?? {})])) {
+    if (prevRef[id] === currentRef[id]) continue
+    if (found !== null) return null
+    found = id
+  }
+  return found
+}
+
 function onStoreChange(storeName, prevRef, currentRef) {
   if (_restoring) return
-  const floorId = useFloorStore.getState().activeFloorId
-  if (!floorId) return
+  const activeFloorId = useFloorStore.getState().activeFloorId
+  if (!activeFloorId) return
+  let floorId = activeFloorId
   if (storeName === 'risers' || storeName === 'unplaced') {
     // Building-/org-level arrays (not keyed by floor): compare the ref directly.
     if (prevRef === currentRef) return
+    // 58-15 (B5): these carry no floor of their own, so fold them into the
+    // non-active floor a pending raw is recording, when that raw was itself
+    // started as an off-floor write (same action). Otherwise this is the active
+    // floor, exactly as before.
+    if (_pendingRaw?.offFloor) floorId = _pendingRaw.floorId
   } else if (storeName === 'floor') {
     // 53-G5 (T1): `floors` is an ARRAY, not a floor-keyed map, so any floor's
     // edit produces a new array ref. Compare only the snapshot-relevant fields
@@ -354,8 +380,9 @@ function onStoreChange(storeName, prevRef, currentRef) {
     // not a field edit — those aren't undoable, so ignore.
     if (!before || !after) return
     if (FLOOR_SNAPSHOT_KEYS.every((k) => before[k] === after[k])) return
-  } else if (prevRef[floorId] === currentRef[floorId]) {
-    return
+  } else {
+    floorId = changedFloorId(prevRef, currentRef, activeFloorId)
+    if (floorId === null) return
   }
   if (_pendingRaw) {
     // 47-21: a pending raw for a DIFFERENT floor must be committed before we
@@ -372,6 +399,8 @@ function onStoreChange(storeName, prevRef, currentRef) {
   }
   const raw = {
     floorId,
+    // 58-15 (B5): recorded for a floor other than the active one (see above).
+    offFloor: floorId !== activeFloorId,
     // 53-G5 (T1): on a floor-field edit the "before" comes from prevRef;
     // otherwise capture the floor's current fields so an unrelated edit's
     // snapshot still round-trips scale/floorHeight unchanged.

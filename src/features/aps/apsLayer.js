@@ -1,4 +1,4 @@
-import { Container, Graphics, Circle, Text, TextStyle } from 'pixi.js'
+import { Container, Graphics, Text, TextStyle } from 'pixi.js'
 import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useDraftStore } from '@/store/useDraftStore'
@@ -11,6 +11,7 @@ import { perfOn, probe, probeEvent } from '@/features/cable/perfProbe'
 import { getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
 import { getModeCapability } from '@/render/modeCapabilities'
 import { resolveApRadiation } from '@/features/heatmap/apRadiation'
+import { enabledRadios, enabledBands, hasEnabledBand, highestEnabledBand, radioView, deviceIdOf } from '@/utils/apRadios'
 
 // AP markers adapter — per-AP interactive Container with click select,
 // drag, hover, right-click context menu, frequency-colored marker, and
@@ -30,7 +31,8 @@ const FREQ_LABEL = {
 }
 
 const FALLBACK_COLOR = '#9aa3ad'
-const colorForAP = (ap) => FREQ_COLOR[ap.frequency] ?? FALLBACK_COLOR
+// 58: a multi-band device takes its highest enabled band's colour (fans, axis).
+const colorForAP = (ap) => FREQ_COLOR[highestEnabledBand(ap)] ?? FALLBACK_COLOR
 
 // All sizes in canvas-px @ scale=1. Container is scaled 1/viewport.scale
 // so visuals stay at constant screen-px size.
@@ -56,10 +58,24 @@ const BAND_DIM_ALPHA = 0.3
 
 // Alpha for an AP given the heatmap band filter. 1 when the heatmap is off, the
 // filter is 'all', or this AP is on the selected band; dimmed otherwise.
+// 58-10: a device with every radio off adds nothing to any band's field, so it
+// is dimmed whenever the heatmap is on, whatever the filter.
 function bandDimAlpha(ap) {
   const hm = useHeatmapStore.getState()
-  if (!hm.enabled || !hm.bandFilter || hm.bandFilter === 'all') return 1
-  return String(ap.frequency) === hm.bandFilter ? 1 : BAND_DIM_ALPHA
+  if (!hm.enabled) return 1
+  if (enabledRadios(ap).length === 0) return BAND_DIM_ALPHA
+  if (!hm.bandFilter || hm.bandFilter === 'all') return 1
+  return hasEnabledBand(ap, hm.bandFilter) ? 1 : BAND_DIM_ALPHA
+}
+
+// 58-7: the single band the heatmap is showing (number), or null when the
+// heatmap is off or on 最強 ('all'). STATS mode hides the heatmap layer
+// (layerVisibilityBinder) while `enabled` stays on, so no band is "viewed".
+function heatmapViewBand() {
+  const hm = useHeatmapStore.getState()
+  if (!hm.enabled || !hm.bandFilter || hm.bandFilter === 'all') return null
+  if (useEditorStore.getState().editorMode === EDITOR_MODE.STATS) return null
+  return Number(hm.bandFilter)
 }
 
 // The AP whose single-AP coverage range is currently shown in Client View
@@ -68,7 +84,9 @@ function bandDimAlpha(ap) {
 function clientViewHighlightApId() {
   if (useEditorStore.getState().editorMode !== EDITOR_MODE.CLIENT_VIEW) return null
   const cv = useClientViewStore.getState()
-  return cv.singleApAreaId ?? cv.reading?.servingApId ?? null
+  // 58: serving id is a radio key; the marker is the device.
+  const id = cv.singleApAreaId ?? cv.reading?.servingApId ?? null
+  return id == null ? null : deviceIdOf(id)
 }
 
 const NAME_TEXT_STYLE = new TextStyle({
@@ -91,21 +109,29 @@ const INFO_TEXT_STYLE = new TextStyle({
   align: 'center',
   lineHeight: 14.3,
 })
-// User-requested: show frequency label INSIDE the AP body circle ("2.4" /
-// "5" / "6") so the band is identifiable at a glance, not only via the
-// info pill below. fill colour is set per-state in drawAP so the text
-// stays readable against hover-invert and selected states.
-const FREQ_INSIDE_LABEL = { 2.4: '2.4', 5: '5', 6: '6' }
-const FREQ_INSIDE_BASE_STYLE = {
-  fontFamily: 'system-ui, sans-serif',
-  fontSize: 9,
-  fontWeight: '700',
-  align: 'center',
+// 58: one dot per enabled radio above the body (2.4 orange / 5 blue /
+// 6 purple), replacing the band number that used to sit inside it.
+const BAND_DOT_R = 2.5
+const BAND_DOT_GAP = 7
+const BAND_DOT_Y = -(AP_RADIUS + 4)
+const BAND_DOT_OUTLINE = '#0b1220'
+// Name sits above the dots.
+const NAME_Y = -18
+// 58-14: the hit circle (HIT_RADIUS) stops short of the outer dots of a
+// two- or three-dot row, so the hit area also covers the dot row's box.
+const BAND_DOT_ROW_HALF_W = BAND_DOT_GAP + BAND_DOT_R + 1
+const apHitArea = {
+  contains: (x, y) => x * x + y * y <= HIT_RADIUS * HIT_RADIUS
+    || (Math.abs(x) <= BAND_DOT_ROW_HALF_W && y >= BAND_DOT_Y - BAND_DOT_R - 1 && y <= 0),
 }
+// 58-10: info line for a device with every radio off.
+const NO_RADIO_LABEL = '無射頻'
 const FREQ_LABEL_LONG = { 2.4: '2.4G', 5: '5G', 6: '6G' }
 // oldSrc Rect width:80 height:44 cornerRadius:4, Group offsetX:40 y:19.
-const INFO_PILL_W = 80
-const INFO_PILL_H = 44
+// 58: one line per radio, so the pill sizes to its text (min oldSrc width).
+const INFO_PILL_MIN_W = 80
+const INFO_PILL_PAD_X = 6
+const INFO_LINE_H = 14.3
 const INFO_PILL_BG = 'rgba(0, 0, 0, 0.75)'
 const INFO_PILL_Y = 19       // group y (oldSrc 19*s)
 const INFO_TEXT_Y = INFO_PILL_Y + 4
@@ -174,7 +200,7 @@ export function attachAPsLayer({
       const c = new Container()
       c.eventMode = 'static'
       c.cursor = 'grab'
-      c.hitArea = new Circle(0, 0, HIT_RADIUS)
+      c.hitArea = apHitArea
       const g = new Graphics()
       // Force PIXI to use the container hitArea (not Graphics's
       // per-pixel containsPoint) so clicking the AP body works at any
@@ -184,7 +210,7 @@ export function attachAPsLayer({
       // text top is 25 px ABOVE origin, centered horizontally.
       const nameText = new Text({ text: '', style: NAME_TEXT_STYLE })
       nameText.anchor.set(0.5, 1)
-      nameText.y = -14
+      nameText.y = NAME_Y
       nameText.eventMode = 'none'
       const infoBg = new Graphics()
       infoBg.eventMode = 'none'
@@ -194,21 +220,12 @@ export function attachAPsLayer({
       infoText.y = INFO_TEXT_Y
       infoText.eventMode = 'none'
       infoText.visible = false
-      // Frequency label inside the body circle (omni-only — directional /
-      // custom APs already show an orientation arrow there).
-      const freqInsideText = new Text({
-        text: '',
-        style: new TextStyle({ ...FREQ_INSIDE_BASE_STYLE, fill: BODY_STROKE_NORMAL }),
-      })
-      freqInsideText.anchor.set(0.5, 0.5)
-      freqInsideText.eventMode = 'none'
       c.addChild(g)
       c.addChild(infoBg)
-      c.addChild(freqInsideText)
       c.addChild(nameText)
       c.addChild(infoText)
       layer.addChild(c)
-      entry = { container: c, graphics: g, infoBg, nameText, infoText, freqInsideText, ap, floorId }
+      entry = { container: c, graphics: g, infoBg, nameText, infoText, ap, floorId }
       containers.set(ap.id, entry)
       bindInteractions(entry)
     } else {
@@ -243,7 +260,18 @@ export function attachAPsLayer({
     const isHovered  = hoverState.id === ap.id && hoverState.type === 'ap'
     const isFocused  = focusedAPIds.has(ap.id) && !isSelected
     const isInvert   = isHovered && !isSelected
-    const freqColor  = colorForAP(ap)
+    // 58-7: with the heatmap on one band, a device that has it shows that
+    // band: its fan/axis colour, full-strength dot (others dimmed) and only
+    // that band's info line. A viewed band hidden by the layer toggle falls
+    // back to the all-bands look.
+    const showBand = (b) => !!(editorState.showAPBand?.[b] ?? true)
+    const viewBand   = heatmapViewBand()
+    const showsViewBand = viewBand != null && hasEnabledBand(ap, viewBand) && showBand(viewBand)
+    const freqColor  = showsViewBand ? FREQ_COLOR[viewBand] : colorForAP(ap)
+    // 58-10: every radio off -> the body outline (and the colours that
+    // follow it) turn the same grey as the fan.
+    const noRadio = enabledRadios(ap).length === 0
+    const bodyNormalStroke = noRadio ? FALLBACK_COLOR : BODY_STROKE_NORMAL
 
     // oldSrc azimuth convention: 0° points +x (east), increases clockwise
     // (axisRad = azimuth * π/180). No -90 offset.
@@ -324,8 +352,8 @@ export function attachAPsLayer({
     } else if (isCvHover) {
       bodyFill = BODY_FILL_NORMAL; bodyStroke = CV_HIGHLIGHT_FILL; bodyWidth = 3
     } else {
-      bodyFill = isInvert ? BODY_STROKE_NORMAL : BODY_FILL_NORMAL
-      bodyStroke = isSelected ? SELECT_STROKE : (isInvert ? BODY_FILL_NORMAL : BODY_STROKE_NORMAL)
+      bodyFill = isInvert ? bodyNormalStroke : BODY_FILL_NORMAL
+      bodyStroke = isSelected ? SELECT_STROKE : (isInvert ? BODY_FILL_NORMAL : bodyNormalStroke)
       bodyWidth = isSelected ? 3 : (isHovered ? 2.5 : 2)
     }
     graphics
@@ -333,26 +361,22 @@ export function attachAPsLayer({
       .fill({ color: bodyFill, alpha: 1 })
       .stroke({ width: bodyWidth, color: bodyStroke, alpha: 1 })
 
-    // Frequency label inside the body — omni only (directional / custom
-    // already use the centre for their orientation arrow). User-requested
-    // addition beyond oldSrc parity. Text colour follows stroke colour so
-    // it stays readable against the white / inverted / selected body.
-    const showFreqInside = !isOriented
-    entry.freqInsideText.visible = showFreqInside
-    if (showFreqInside) {
-      const label = FREQ_INSIDE_LABEL[ap.frequency] ?? ''
-      if (entry.freqInsideText.text !== label) entry.freqInsideText.text = label
-      const desiredFill = bodyStroke
-      if (entry.freqInsideText.style.fill !== desiredFill) {
-        entry.freqInsideText.style = new TextStyle({ ...FREQ_INSIDE_BASE_STYLE, fill: desiredFill })
-      }
-    }
+    // 58: band dots, one per enabled radio on a visible band (layer toggle),
+    // centred above the body.
+    const dotBands = enabledBands(ap).filter(showBand)
+    const dotX0 = -((dotBands.length - 1) * BAND_DOT_GAP) / 2
+    dotBands.forEach((band, i) => {
+      graphics
+        .circle(dotX0 + i * BAND_DOT_GAP, BAND_DOT_Y, BAND_DOT_R)
+        .fill({ color: FREQ_COLOR[band] ?? FALLBACK_COLOR, alpha: showsViewBand && band !== viewBand ? BAND_DIM_ALPHA : 1 })
+        .stroke({ width: 1, color: BAND_DOT_OUTLINE, alpha: showsViewBand && band !== viewBand ? BAND_DIM_ALPHA * 0.8 : 0.8 })
+    })
 
     // Orientation arrow (bar + tip) — for directional / custom only.
     // oldSrc: Group{rotation: azimuth}, bar [-4,0]-[4,0] stroke 1.5,
     // tip [7,0]-[3,-3]-[3,3] closed filled. Rotated manually here.
     if (isOriented) {
-      const iconCol = isInvert ? '#ffffff' : '#1e3a8a'
+      const iconCol = isInvert ? '#ffffff' : bodyNormalStroke
       const c = Math.cos(axisRad)
       const s = Math.sin(axisRad)
       const rot = (px, py) => [px * c - py * s, px * s + py * c]
@@ -373,29 +397,39 @@ export function attachAPsLayer({
 
     nameText.text = ap.name ?? ''
 
-    // Info pill — dark rounded rect bg + 3-line text including name +
-    // freq/channel/width + tx power. Visible only when showAPInfo is on.
-    const freqLabel = FREQ_LABEL_LONG[ap.frequency] ?? `${ap.frequency}G`
-    // 57-23: when the EIRP cap derates the TX power, show set → actual.
-    const rad = resolveApRadiation(ap, editorState.regulatoryDomain)
-    const txLabel = rad.capped
-      ? `${rad.setTxDbm}→${Math.round(rad.txDbm * 10) / 10}`
-      : `${ap.txPower ?? '—'}`
-    infoText.text = `${ap.name ?? ''}\n${freqLabel} CH${ap.channel ?? '—'}/${ap.channelWidth ?? 20}\n${txLabel} dBm`
+    // Info pill — dark rounded rect bg: name, then one line per enabled
+    // radio (band, channel/width, tx). Visible only when showAPInfo is on.
+    const radioLines = enabledRadios(ap).filter((r) => showBand(r.band) && (!showsViewBand || r.band === viewBand)).map((r) => {
+      // 57-23: when the EIRP cap derates the TX power, show set → actual.
+      const rad = resolveApRadiation(radioView(ap, r), editorState.regulatoryDomain)
+      const txLabel = rad.capped
+        ? `${rad.setTxDbm}→${Math.round(rad.txDbm * 10) / 10}`
+        : `${r.txPower ?? '—'}`
+      const freqLabel = FREQ_LABEL_LONG[r.band] ?? `${r.band}G`
+      return `${freqLabel} CH${r.channel ?? '—'}/${r.channelWidth ?? 20}  ${txLabel} dBm`
+    })
+    // 58-10: a device with every radio off says so.
+    if (noRadio) radioLines.push(NO_RADIO_LABEL)
+    infoText.text = [ap.name ?? '', ...radioLines].join('\n')
     const showInfo = !!editorState.showAPInfo
     infoText.visible = showInfo
     infoBg.clear()
     if (showInfo) {
+      const pillW = Math.max(INFO_PILL_MIN_W, infoText.width + INFO_PILL_PAD_X * 2)
+      const pillH = Math.ceil((1 + radioLines.length) * INFO_LINE_H + 1)
       infoBg
-        .roundRect(-INFO_PILL_W / 2, INFO_PILL_Y, INFO_PILL_W, INFO_PILL_H, 4)
+        .roundRect(-pillW / 2, INFO_PILL_Y, pillW, pillH, 4)
         .fill({ color: INFO_PILL_BG, alpha: 1 })
       infoBg.visible = true
     } else {
       infoBg.visible = false
     }
 
-    // Per-band visibility filter (layer toggle — hides entirely).
-    entry.container.visible = !!(editorState.showAPBand?.[ap.frequency] ?? true)
+    // Per-band visibility filter (layer toggle — hides entirely). 58: hidden
+    // only when every enabled radio's band is hidden.
+    const bands = enabledBands(ap)
+    entry.container.visible = bands.length === 0
+      || bands.some((b) => !!(editorState.showAPBand?.[b] ?? true))
     // 47-8a heatmap band filter: dim (don't hide) APs off the viewed band.
     entry.container.alpha = bandDimAlpha(ap)
   }
@@ -627,6 +661,7 @@ export function attachAPsLayer({
   let lastShowAPBand = useEditorStore.getState().showAPBand
   let lastShowAPInfo = useEditorStore.getState().showAPInfo
   let lastDomain = useEditorStore.getState().regulatoryDomain
+  let lastInStats = useEditorStore.getState().editorMode === EDITOR_MODE.STATS
   let lastSelectedId = useEditorStore.getState().selectedId
   let lastSelectedType = useEditorStore.getState().selectedType
   let lastSelectedItems = useEditorStore.getState().selectedItems
@@ -644,10 +679,13 @@ export function attachAPsLayer({
       }
     }
     // 57-23: the domain changes the EIRP-capped TX shown in the info pill.
-    if (s.showAPBand !== lastShowAPBand || s.showAPInfo !== lastShowAPInfo || s.regulatoryDomain !== lastDomain) {
+    // 58-7: entering / leaving STATS switches the heatmap band emphasis.
+    const inStats = s.editorMode === EDITOR_MODE.STATS
+    if (s.showAPBand !== lastShowAPBand || s.showAPInfo !== lastShowAPInfo || s.regulatoryDomain !== lastDomain || inStats !== lastInStats) {
       lastShowAPBand = s.showAPBand
       lastShowAPInfo = s.showAPInfo
       lastDomain = s.regulatoryDomain
+      lastInStats = inStats
       for (const entry of containers.values()) {
         const drag = useDragOverlayStore.getState().ap
         if (drag && drag.id === entry.ap.id) {

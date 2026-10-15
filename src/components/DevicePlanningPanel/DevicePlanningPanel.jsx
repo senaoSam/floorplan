@@ -9,7 +9,8 @@ import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useClientViewStore } from '@/store/useClientViewStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { getSceneRefs } from '@/render/sceneRegistry'
-import { greedyChannelAssign } from '@/utils/autoChannelPlan'
+import { greedyChannelAssign, radiosWithoutChannels } from '@/utils/autoChannelPlan'
+import { expandRadios, applyRadioResults } from '@/utils/apRadios'
 import { computePlanQualityStats } from '@/features/heatmap/planQuality'
 import { storeChannelNeighbors } from '@/features/heatmap/channelNeighbors'
 import { NumberInput } from '@/components/PanelRight/_shared/PanelControls'
@@ -27,7 +28,7 @@ function fmtArea(m2) { return m2 >= 100 ? `${Math.round(m2)} m²` : `${m2.toFixe
 
 function DevicePlanningPanel() {
   const [collapsed, setCollapsed] = useState(true)
-  const [toast, setToast] = useState(null) // { kind: 'channel', count }
+  const [toast, setToast] = useState(null) // { kind: 'channel', count, skipped? }
 
   useEffect(() => {
     if (!toast) return
@@ -96,6 +97,9 @@ function DevicePlanningPanel() {
   // in the store commit, ~274 ms of blocked frames after it, and more on a
   // slow machine — the tester reported ~5.8 s). A worker would move the 15 ms
   // and leave the freeze exactly as it is.
+  // 58-15: those 15 ms predate the signal-based neighbours and the pair-move /
+  // multi-start search. Re-measured in node: 300 APs ~80 ms for the search,
+  // ~340 ms with the AP-to-AP signal computation; 1000 APs ~1 s / ~3.8 s.
   //
   // So the fix is honest feedback rather than parallelism: flip a busy flag,
   // yield twice so the browser actually paints it, then do the heavy commit.
@@ -108,14 +112,17 @@ function DevicePlanningPanel() {
     setChannelBusy(true)
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
     try {
-      // 57-34: neighbours = APs that hear each other (not a canvas-px radius).
-      const assignments = greedyChannelAssign(aps, regulatoryDomain, storeChannelNeighbors(activeFloorId, aps))
-      const updated = aps.map((ap) => {
-        const a = assignments.get(ap.id)
-        return a ? { ...ap, channel: a.channel } : ap
-      })
+      // 57-34: neighbours = radios that hear each other (not a canvas-px
+      // radius). 58: planned per radio; the toast counts radios.
+      const radios = expandRadios(aps)
+      const assignments = greedyChannelAssign(radios, regulatoryDomain, storeChannelNeighbors(activeFloorId, aps))
+      const updated = applyRadioResults(aps, assignments, (a) => ({ channel: a.channel }))
       setAPs(activeFloorId, updated)
-      setToast({ kind: 'channel', count: assignments.size })
+      // 58-16 (C5): enabled radios on a band the domain has no channel for
+      // (e.g. 6 GHz after switching to CN) are not planned -- say so.
+      const skipped = {}
+      for (const r of radiosWithoutChannels(radios, regulatoryDomain)) skipped[r.frequency] = (skipped[r.frequency] ?? 0) + 1
+      setToast({ kind: 'channel', count: assignments.size, skipped })
     } finally {
       setChannelBusy(false)
     }
@@ -138,6 +145,9 @@ function DevicePlanningPanel() {
 
   const meetsTarget = quality ? quality.coveragePct >= targetPct : false
   const conflictCount = quality?.channelConflicts?.length ?? 0
+  // 58-15: conflicts come sorted strongest first; the pair count alone hides
+  // that auto-channel trades a few loud pairs for more faint ones.
+  const strongestConflictDbm = quality?.channelConflicts?.[0]?.rssiDbm
 
   return (
     <div className="device-planning">
@@ -203,7 +213,7 @@ function DevicePlanningPanel() {
                     {fmtPct(quality.coveragePct)}
                   </span>
                   {/* 57-33: stats follow the heatmap's band filter. */}
-                  <span className="device-planning__hero-label">已涵蓋（≥ {thresholdDbm} dBm{bandFilter !== 'all' ? `，${bandFilter} GHz` : ''}）</span>
+                  <span className="device-planning__hero-label">已涵蓋（≥ {thresholdDbm} dBm，{bandFilter !== 'all' ? `${bandFilter} GHz` : '最強頻段，含 2.4 GHz'}）</span>
                 </div>
 
                 <div className="device-planning__bar" title={`已涵蓋 ${fmtPct(quality.coveragePct)}、盲區 ${fmtPct(quality.blindPct)}`}>
@@ -239,9 +249,9 @@ function DevicePlanningPanel() {
                     <span>雙重涵蓋（≥2 台）</span>
                     <b>{fmtPct(quality.secondaryCoveragePct ?? 0)}</b>
                   </div>
-                  <div className="device-planning__row" title={`同頻段、頻譜重疊、且彼此聽得到（AP 間訊號 ≥ ${minInterf} dBm，即 Client View 的最小干擾 RSSI）的 AP 對數`}>
+                  <div className="device-planning__row" title={`同頻段、頻譜重疊、且彼此聽得到（AP 間訊號 ≥ ${minInterf} dBm，即 Client View 的最小干擾 RSSI）的射頻對數（同一對 AP 在兩個頻段衝突算 2 對）；括號內為訊號最強那一對的 AP 間訊號`}>
                     <span>頻道衝突</span>
-                    <b className={conflictCount > 0 ? 'device-planning__val--warn' : ''}>{conflictCount} 對</b>
+                    <b className={conflictCount > 0 ? 'device-planning__val--warn' : ''}>{conflictCount} 對{conflictCount > 0 && strongestConflictDbm != null ? `（最強 ${strongestConflictDbm.toFixed(1)} dBm）` : ''}</b>
                   </div>
                   <div className="device-planning__row" title="訊號門檻——RSSI 高於此值才算已涵蓋">
                     <span>訊號門檻</span>
@@ -276,7 +286,8 @@ function DevicePlanningPanel() {
           {toast && (
             <div className="device-planning__toast" key={`${toast.kind}-${toast.count}-${Date.now()}`}>
               <span className="device-planning__toast-check">✓</span>
-              已為 {toast.count} 個 AP 指派{toast.kind === 'channel' ? '頻道' : '功率'}
+              已為 {toast.count} {toast.kind === 'channel' ? '個射頻指派頻道' : '個 AP 指派功率'}
+              {Object.entries(toast.skipped ?? {}).map(([band, n]) => `；${n} 個 ${band} GHz 射頻在目前國家頻段不可用，未排頻`).join('')}
             </div>
           )}
         </div>

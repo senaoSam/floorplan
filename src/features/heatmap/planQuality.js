@@ -63,10 +63,12 @@ function fitQualityStep(scenario, apCount) {
 // the louder of the two directions, at or above the min interfering RSSI --
 // the same -82 dBm rule the heatmap's SINR / CCI and Client View use. It used
 // to be a fixed 12 m radius that ignored walls. Only `apIds` (this floor's APs)
-// are paired; each unordered pair is reported once.
+// are paired; each unordered pair is reported once. 58: entries are radios;
+// `apIds` and the reported apA / apB are device ids (the row carries the band).
+// 58-15: sorted strongest first, so [0].rssiDbm is the loudest conflicting pair.
 export function detectChannelConflicts(scenario, apIds) {
   const thr = scenario.rf?.minInterfDbm ?? DEFAULT_MIN_INTERFERING_RSSI_DBM
-  const list = scenario.aps.filter((a) => apIds.has(a.id))
+  const list = scenario.aps.filter((a) => apIds.has(a.deviceId ?? a.id))
   const conflicts = []
   for (let i = 0; i < list.length; i++) {
     for (let j = i + 1; j < list.length; j++) {
@@ -76,9 +78,10 @@ export function detectChannelConflicts(scenario, apIds) {
       if (!apsShareSpectrum(a, b)) continue
       const rssiDbm = apToApRssiDbm(scenario, a, b)
       if (rssiDbm < thr) continue
-      conflicts.push({ apA: a.id, apB: b.id, band: a.frequency, channel: a.channel, rssiDbm })
+      conflicts.push({ apA: a.deviceId ?? a.id, apB: b.deviceId ?? b.id, band: a.frequency, channel: a.channel, rssiDbm })
     }
   }
+  conflicts.sort((p, q) => q.rssiDbm - p.rssiDbm)
   return conflicts
 }
 

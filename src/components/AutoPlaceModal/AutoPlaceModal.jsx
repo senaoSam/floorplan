@@ -7,8 +7,13 @@ import { useScopeStore } from '@/store/useScopeStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useAutoPlaceStore } from '@/store/useAutoPlaceStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
+import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { currentScenarioEnv } from '@/features/heatmap/buildScenario'
+import { computePlanQualityStats } from '@/features/heatmap/planQuality'
+import { COVERAGE_THRESHOLD_DBM } from '@/constants/coverage'
 import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
+import { hasEnabledBand, apRadio, patchRadio } from '@/utils/apRadios'
+import { allowedChannels } from '@/constants/regulatoryDomains'
 import './AutoPlaceModal.sass'
 
 import AutoPlaceWorker from '@/workers/autoPlacePlan.worker.js?worker'
@@ -25,14 +30,14 @@ const EMPTY = Object.freeze([])
 // 直接在畫布上看，確認才「套用」真正建立 AP。
 //
 // 套用語意：
-//   fresh / fixed — 移除現有「同頻段」AP（其他頻段不動）再新增
+//   fresh / fixed — 移除有「同頻段」射頻的現有 AP（58: 整台，含其他頻段）再新增
 //   fill          — 全保留，只新增
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
 
 const MODE_OPTIONS = [
-  { value: 'fresh', label: '重新規劃', hint: '算出達標所需的最少 AP 數（套用時移除現有同頻段 AP）' },
-  { value: 'fixed', label: '固定數量', hint: '用指定顆數把覆蓋做到最好（套用時移除現有同頻段 AP）' },
+  { value: 'fresh', label: '重新規劃', hint: '算出達標所需的最少 AP 數（套用時移除現有同頻段 AP，整台含其他頻段）' },
+  { value: 'fixed', label: '固定數量', hint: '用指定顆數把覆蓋做到最好（套用時移除現有同頻段 AP，整台含其他頻段）' },
   { value: 'fill',  label: '補洞',     hint: '現有 AP 全保留，只加新 AP 補覆蓋缺口' },
 ]
 
@@ -81,7 +86,17 @@ function AutoPlaceModal({ open, onClose }) {
   const [error, setError] = useState(null)
   const workerRef = useRef(null)
 
-  const sameBandCount = aps.filter((a) => (a.frequency ?? 5) === band).length
+  // 58: devices with an enabled radio on the band.
+  const sameBandCount = aps.filter((a) => hasEnabledBand(a, band)).length
+  // 58-9: devices that have the band but switched it off.
+  const offBandCount = aps.filter((a) => apRadio(a, band) && !hasEnabledBand(a, band)).length
+  // 58-9: only bands the regulatory domain has channels on (no 6 GHz in CN).
+  const bandOptions = BAND_OPTIONS.filter((b) => allowedChannels(regulatoryDomain, b.value).length > 0)
+
+  // 國家頻段換成沒有目前頻段頻道的國家 → 退回 5 GHz。
+  useEffect(() => {
+    if (allowedChannels(regulatoryDomain, band).length === 0) setBand(5)
+  }, [regulatoryDomain, band])
 
   // Unmount 清理：worker + ghost 預覽都不能留。
   useEffect(() => {
@@ -142,6 +157,7 @@ function AutoPlaceModal({ open, onClose }) {
             : r.error === 'no-indoor-cells' ? '規劃範圍與辨識出的室內區域沒有交集（可取消「僅室內放置」）'
             : r.error === 'no-candidates' ? '找不到可放置的候選點（scope 是否過小？）'
             : r.error === 'invalid-floor' ? '樓層資料不完整'
+            : r.error === 'band-not-allowed' ? '目前國家頻段沒有此頻段的頻道'
             : r.error
           setError(`錯誤：${text}`)
         } else {
@@ -152,13 +168,40 @@ function AutoPlaceModal({ open, onClose }) {
             name: `AP-${String(base + i + 1).padStart(2, '0')}`,
           }))
           const removeIds = r.removeApIds ?? []
+          const enableIds = r.enableApIds ?? []
+          const enableChannels = r.enableChannels ?? {}
+          // 58-15 (B4): the same plan on the planning panel's basis (every
+          // in-scope cell incl. outdoor margins, its default threshold, this
+          // band) -- computed here: the worker's stores hold default RF /
+          // regulatory settings, computePlanQualityStats reads the live ones.
+          let panelCoveragePct = null
+          if (r.stats?.indoorApplied) {
+            const st = useAPStore.getState()
+            const on = new Set(enableIds)
+            const drop = new Set(removeIds)
+            const finalAps = [
+              ...(st.apsByFloor[activeFloorId] ?? []).filter((a) => !drop.has(a.id)).map((a) => (on.has(a.id)
+                ? { ...a, radios: patchRadio(a, band, { enabled: true, ...(enableChannels[a.id] != null ? { channel: enableChannels[a.id] } : {}) }) }
+                : a)),
+              ...r.proposedAps.map(({ planBand, ...ap }) => ap),
+            ]
+            const q = computePlanQualityStats({
+              floor, walls, aps: finalAps, scopes, thresholdDbm: COVERAGE_THRESHOLD_DBM,
+              floors: useFloorStore.getState().floors,
+              apsByFloor: { ...st.apsByFloor, [activeFloorId]: finalAps },
+              wallsByFloor: useWallStore.getState().wallsByFloor,
+              holesByFloor: useFloorHoleStore.getState().floorHolesByFloor,
+              bandFilter: String(band),
+            })
+            panelCoveragePct = q ? q.coveragePct : null
+          }
           // 53-G10 (P0-3): stamp the floor this plan was computed FOR. The
           // preview overlay is deliberately click-through so the sidebar stays
           // usable, which means the user can switch floors between planning and
           // applying. Same self-describing-payload rule the preview store
           // already follows on the next line.
-          setResult({ floorId: activeFloorId, proposedAps: named, removeApIds: removeIds, stats: r.stats })
-          setPreview(activeFloorId, named, removeIds)
+          setResult({ floorId: activeFloorId, band, proposedAps: named, removeApIds: removeIds, enableApIds: enableIds, enableChannels, panelCoveragePct, stats: r.stats })
+          setPreview(activeFloorId, named, removeIds, enableIds, band, enableChannels)
         }
         worker.terminate()
         if (workerRef.current === worker) workerRef.current = null
@@ -227,10 +270,20 @@ function AutoPlaceModal({ open, onClose }) {
     if (result.removeApIds.length > 0) {
       store.removeAPs(targetFloorId, result.removeApIds)
     }
+    // 58-9: kept devices whose planned-band radio was off -- switch it on,
+    // 58-15: on the channel the plan assigned it.
+    if (result.enableApIds.length > 0) {
+      const on = new Set(result.enableApIds)
+      const chs = result.enableChannels ?? {}
+      const floorAps = useAPStore.getState().apsByFloor[targetFloorId] ?? []
+      store.setAPs(targetFloorId, floorAps.map((a) => (on.has(a.id)
+        ? { ...a, radios: patchRadio(a, result.band, { enabled: true, ...(chs[a.id] != null ? { channel: chs[a.id] } : {}) }) }
+        : a)))
+    }
     // 以 apNameBase 連號命名（避開 setAPs 載入不推進 counter 的撞名）；
     // addAP 逐顆進，counter 照常推進。
     const base = apNameBase()
-    result.proposedAps.forEach((ap, i) => {
+    result.proposedAps.forEach(({ planBand, ...ap }, i) => {
       const name = `AP-${String(base + i + 1).padStart(2, '0')}`
       useAPStore.getState().addAP(targetFloorId, { ...ap, name })
     })
@@ -265,11 +318,26 @@ function AutoPlaceModal({ open, onClose }) {
   // 執行中與預覽態不可點背景關閉（預覽態的背板本來就不擋畫布）。
   // hook 必須在 early return 之前呼叫。
   const previewing = !running && !!result
+
+  // 58-7: 預覽期間熱圖暫切到規劃頻段（其他頻段的射頻會蓋掉要補的洞），
+  // 套用 / 取消 / 重新設定 / 關閉時還原。
+  const previewBand = open && previewing ? result.band : null
+  useEffect(() => {
+    if (previewBand == null) return undefined
+    const { bandFilter: prevBand, lastSingleBand: prevLast } = useHeatmapStore.getState()
+    useHeatmapStore.getState().setBandFilter(String(previewBand))
+    return () => {
+      useHeatmapStore.getState().setBandFilter(prevBand)
+      useHeatmapStore.setState({ lastSingleBand: prevLast })
+    }
+  }, [previewBand])
   const dismiss = useOverlayDismiss(running || previewing ? null : onClose)
 
   if (!open) return null
 
   const stats = result?.stats
+  // Applying would change nothing.
+  const noChange = !!result && stats.placedCount === 0 && result.removeApIds.length === 0 && result.enableApIds.length === 0
 
   return createPortal((
     <div
@@ -325,17 +393,23 @@ function AutoPlaceModal({ open, onClose }) {
                   value={band}
                   onChange={(e) => setBand(parseFloat(e.target.value))}
                 >
-                  {BAND_OPTIONS.map((b) => (
+                  {bandOptions.map((b) => (
                     <option key={b.value} value={b.value}>{b.label}</option>
                   ))}
                 </select>
                 <span className="auto-place-modal__unit">
                   本層現有 {sameBandCount} 顆此頻段 AP
+                  {offBandCount > 0 && `（另 ${offBandCount} 顆此頻段已關閉）`}
                 </span>
               </div>
               <p className="auto-place-modal__hint">
                 業界慣例以 5 GHz 做覆蓋設計（5 GHz 達標則 2.4 GHz 必達標）。設計功率採該頻段預設值。
               </p>
+              {band === 2.4 && (
+                <p className="auto-place-modal__hint auto-place-modal__hint--warn">
+                  以 2.4 GHz 規劃會放得較稀，5 GHz 覆蓋可能不足
+                </p>
+              )}
             </section>
 
             <section className="auto-place-modal__section">
@@ -437,6 +511,7 @@ function AutoPlaceModal({ open, onClose }) {
         {/* 預覽（docked 小卡） */}
         {previewing && (
           <section className="auto-place-modal__section">
+            <p className="auto-place-modal__hint">預覽熱圖：{result.band} GHz</p>
             <div className="auto-place-modal__progress">
               <div className="auto-place-modal__progress-row auto-place-modal__progress-row--score">
                 <span>建議新增</span>
@@ -448,24 +523,66 @@ function AutoPlaceModal({ open, onClose }) {
                   <span>{stats.keptCount} 顆</span>
                 </div>
               )}
+              {stats.enabledCount > 0 && (
+                <div className="auto-place-modal__progress-row">
+                  <span>其中重新開啟此頻段射頻</span>
+                  <span>{stats.enabledCount} 顆</span>
+                </div>
+              )}
               <div className="auto-place-modal__progress-row">
-                <span>預估覆蓋率（≥ {targetRssi} dBm）</span>
+                <span>預估{stats.indoorApplied ? '室內' : ''}覆蓋率（≥ {targetRssi} dBm）</span>
                 <span>
                   {result.removeApIds.length === 0 && stats.coverageBefore > 0
                     ? `${fmtPct(stats.coverageBefore)} → ${fmtPct(stats.coverageAfter)}`
                     : fmtPct(stats.coverageAfter)}
                 </span>
               </div>
+              {result.panelCoveragePct != null && (
+                <div className="auto-place-modal__progress-row">
+                  <span>規劃面板口徑（≥ {COVERAGE_THRESHOLD_DBM} dBm，含室外邊緣）</span>
+                  <span>{`${result.panelCoveragePct.toFixed(1)}%`}</span>
+                </div>
+              )}
+              {/* 58-15 (decision 5): the re-plan's effect on the other bands
+                  (whole devices removed / added), on the headline's basis. */}
+              {stats.otherBands?.map((ob) => {
+                // Warn on a drop of the displayed (rounded) value only.
+                const before = fmtPct(ob.coverageBefore)
+                const after = fmtPct(ob.coverageAfter)
+                const dropped = before !== '—' && after !== '—' && parseFloat(after) < parseFloat(before)
+                return (
+                  <div key={ob.band} className={`auto-place-modal__progress-row${dropped ? ' auto-place-modal__progress-row--warn' : ''}`}>
+                    <span>{ob.band} GHz 預估{stats.indoorApplied ? '室內' : ''}覆蓋率（≥ {targetRssi} dBm）</span>
+                    <span>{`${before} → ${after}`}</span>
+                  </div>
+                )
+              })}
               {result.removeApIds.length > 0 && (
                 <div className="auto-place-modal__progress-row auto-place-modal__progress-row--warn">
-                  <span>套用將移除現有同頻段 AP</span>
+                  <span>
+                    {stats.removedOffCount > 0
+                      ? `套用將移除現有同頻段 AP（整台，含其他頻段；其中 ${stats.removedOffCount} 顆此頻段已關閉）`
+                      : '套用將移除現有同頻段 AP（整台，含其他頻段）'}
+                  </span>
                   <span>{result.removeApIds.length} 顆</span>
                 </div>
               )}
+              {/* 58-15 (D3): the walls are blamed only when they leak. */}
               {stats.indoorFallback && (
                 <div className="auto-place-modal__progress-row auto-place-modal__progress-row--warn">
                   <span>無法辨識室內範圍，已改用全範圍規劃</span>
-                  <span>檢查牆是否封閉</span>
+                  <span>
+                    {stats.indoorFallbackReason === 'leaky' ? '檢查牆是否封閉'
+                      : stats.indoorFallbackReason === 'no-walls' ? '圖面沒有牆'
+                      : '覆蓋率含室外區域'}
+                  </span>
+                </div>
+              )}
+              {/* 58-15 (D2): fixed mode stopped before the requested count. */}
+              {stats.targetMet === null && stats.stopReason === 'exhausted' && (
+                <div className="auto-place-modal__progress-row auto-place-modal__progress-row--warn">
+                  <span>只放 {stats.placedCount + stats.keptCount} 顆：已無位置能再提升覆蓋</span>
+                  <span>目標 {apCount} 顆</span>
                 </div>
               )}
               {stats.targetMet === false && (
@@ -474,17 +591,41 @@ function AutoPlaceModal({ open, onClose }) {
                   <span>
                     {stats.stopReason === 'exhausted' ? '已無可改善位置'
                       : stats.stopReason === 'max-aps' ? `已達上限 ${stats.placedCount} 顆`
+                      : stats.stopReason === 'channel' ? '實際頻道下覆蓋略降'
                       : '—'}
                   </span>
                 </div>
               )}
             </div>
-            {stats.placedCount === 0 && result.removeApIds.length === 0 ? (
+            {/* 58-15 (decision 4): nothing to add, but weak devices -- the
+                "already optimal" sentence would contradict the list below. */}
+            {noChange && stats.weakAps?.length > 0 && (
+              <p className="auto-place-modal__hint">
+                不新增 AP；可考慮調高下列 AP 的功率
+                {stats.indoorApplied && '。覆蓋率僅計算牆圍出的室內區域。'}
+              </p>
+            )}
+            {/* 58-15 (F): fill -- existing devices whose low TX left the hole. */}
+            {stats.weakAps?.length > 0 && (
+              <p className="auto-place-modal__hint auto-place-modal__hint--warn">
+                {stats.weakAps.slice(0, 3).map((a) => `${a.name}${stats.weakAps.length === 1 ? ' 功率偏低' : ''}（${a.txDbm} dBm）`).join('、')}
+                {stats.weakAps.length > 3 && `…等 ${stats.weakAps.length} 台`}
+                {stats.weakAps.length > 1 && '功率偏低'}
+                ，調高可能比新增更好
+              </p>
+            )}
+            {/* 58-15 (D4): a large floor's sampling steps were widened. */}
+            {stats.gridCoarsened && (
+              <p className="auto-place-modal__hint">
+                場地較大，已放寬取樣間距至 {stats.gridStepM} m
+              </p>
+            )}
+            {noChange ? (stats.weakAps?.length > 0 ? null : (
               <p className="auto-place-modal__hint">
                 現有配置已是本次規劃的最佳解，沒有需要調整的地方 —— 套用不會有任何變更。
                 {stats.indoorApplied && ' 覆蓋率僅計算牆圍出的室內區域。'}
               </p>
-            ) : (
+            )) : (
               <p className="auto-place-modal__hint">
                 畫布上的半透明「+」標記為建議位置
                 {result.removeApIds.length > 0 && '、紅色「✕」為套用時將移除的 AP'}
@@ -529,8 +670,8 @@ function AutoPlaceModal({ open, onClose }) {
               <button
                 className="auto-place-modal__btn auto-place-modal__btn--primary"
                 onClick={handleApply}
-                disabled={stats.placedCount === 0 && result.removeApIds.length === 0}
-                title={stats.placedCount === 0 && result.removeApIds.length === 0
+                disabled={stats.placedCount === 0 && result.removeApIds.length === 0 && result.enableApIds.length === 0}
+                title={stats.placedCount === 0 && result.removeApIds.length === 0 && result.enableApIds.length === 0
                   ? '沒有需要變更的項目' : undefined}
               >
                 套用

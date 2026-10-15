@@ -211,7 +211,7 @@ export function bindClientView({
       if (cv.pos != null && scenario && floor?.scale) {
         const rx = { x: cv.pos.x / floor.scale, y: cv.pos.y / floor.scale }
         const { candidates } = buildCandidates(scenario, rx, buildOpts(cv))
-        apReachable = candidates.some((c) => c.ap.id === apId)
+        apReachable = candidates.some((c) => (c.ap.deviceId ?? c.ap.id) === apId)
       } else {
         apReachable = false // no client placed yet → can't connect
       }
