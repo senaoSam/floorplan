@@ -7,8 +7,7 @@ import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useClientViewStore } from '@/store/useClientViewStore'
-import { useViewportStore } from '@/store/useViewportStore'
-import { getSceneRefs } from '@/render/sceneRegistry'
+import { flashGapMarker } from '@/features/cameras/gapMarkerBus'
 import { greedyChannelAssign, radiosWithoutChannels } from '@/utils/autoChannelPlan'
 import { expandRadios, applyRadioResults } from '@/utils/apRadios'
 import { computePlanQualityStats } from '@/features/heatmap/planQuality'
@@ -128,19 +127,11 @@ function DevicePlanningPanel() {
     }
   }
 
+  // Same cue as the camera CoveragePanel: a pulsing amber ring AT the gap,
+  // leaving the view where the user put it.
   const locateBiggestGap = () => {
     if (!quality?.biggestGap) return
-    const vp = useViewportStore.getState()
-    const canvas = getSceneRefs()?.app?.canvas
-    if (canvas && vp.setViewport) {
-      const rect = canvas.getBoundingClientRect()
-      const scale = vp.scale || 1
-      vp.setViewport({
-        x: rect.width / 2 - quality.biggestGap.x * scale,
-        y: rect.height / 2 - quality.biggestGap.y * scale,
-        scale,
-      })
-    }
+    flashGapMarker(quality.biggestGap.x, quality.biggestGap.y, performance.now(), activeFloorId, 'heatmap')
   }
 
   const meetsTarget = quality ? quality.coveragePct >= targetPct : false
@@ -272,7 +263,7 @@ function DevicePlanningPanel() {
                     type="button"
                     className="device-planning__gap"
                     onClick={locateBiggestGap}
-                    title="把畫面移到訊號盲區最集中的位置，方便補一台 AP"
+                    title="在訊號盲區最集中的位置閃示標記（不移動畫面），方便補一台 AP"
                   >
                     ◎ 定位最大盲區
                   </button>

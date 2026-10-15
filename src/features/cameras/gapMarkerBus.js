@@ -1,10 +1,14 @@
-// Gap-marker bus — a tiny module-level channel so the coverage panel (React)
+// Gap-marker bus — a tiny module-level channel so a coverage panel (React)
 // can ping the canvas (PIXI) to flash a "biggest blind spot here" marker at a
 // given image-px point. The marker layer subscribes and animates a pulsing
 // ring that fades out after a few seconds, so clicking "locate biggest gap"
-// reads as "the gap is HERE", not just an unexplained pan.
+// reads as "the gap is HERE" — the view itself is left where the user put it.
+//
+// Two panels flash it: the camera CoveragePanel ('camera') and the Wi-Fi
+// DevicePlanningPanel ('heatmap'). The source is part of the payload so a
+// marker only draws in the mode that flashed it.
 
-let marker = null   // { x, y, bornMs, floorId } in image-px, or null
+let marker = null   // { x, y, bornMs, floorId, source } in image-px, or null
 const listeners = new Set()
 
 // Flash the marker at (x,y). bornMs is a wall-clock timestamp the caller passes
@@ -16,8 +20,8 @@ const listeners = new Set()
 // floor B at floor A's coordinates — pointing at a blind spot that isn't there.
 // Self-describing payload rather than a cleanup call: the layer compares, so a
 // stale marker simply doesn't draw.
-export function flashGapMarker(x, y, bornMs, floorId = null) {
-  marker = { x, y, bornMs, floorId }
+export function flashGapMarker(x, y, bornMs, floorId = null, source = 'camera') {
+  marker = { x, y, bornMs, floorId, source }
   for (const fn of listeners) fn()
 }
 

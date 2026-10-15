@@ -5,8 +5,6 @@ import { useCameraStore } from '@/store/useCameraStore'
 import { useWallStore } from '@/store/useWallStore'
 import { computeCoverageStats } from '@/features/cameras/coverageStats'
 import { flashGapMarker } from '@/features/cameras/gapMarkerBus'
-import { useViewportStore } from '@/store/useViewportStore'
-import { getSceneRefs } from '@/render/sceneRegistry'
 import { NumberInput } from '@/components/PanelRight/_shared/PanelControls'
 import '@/components/PanelRight/_shared/shared.sass'
 import './CoveragePanel.sass'
@@ -154,17 +152,8 @@ function CoveragePanel() {
           type="button"
           className="coverage-panel__gap"
           onClick={() => {
-            const vp = useViewportStore.getState()
-            const canvas = getSceneRefs()?.app?.canvas
-            if (canvas && vp.setViewport) {
-              const rect = canvas.getBoundingClientRect()
-              const scale = vp.scale || 1
-              vp.setViewport({
-                x: rect.width / 2 - stats.biggestGap.x * scale,
-                y: rect.height / 2 - stats.biggestGap.y * scale,
-                scale,
-              })
-            }
+            // The view stays put — the user keeps their framing; the marker
+            // (and the brief blind shading) show where the gap is.
             // Flash a pulsing ring AT the gap so it's clear where to look.
             // 53-G6: stamp the floor — the coords are this floor's image-px.
             flashGapMarker(stats.biggestGap.x, stats.biggestGap.y, performance.now(), activeFloorId)
@@ -181,7 +170,7 @@ function CoveragePanel() {
               }, 4500)
             }
           }}
-          title="把畫面移到盲區最集中的位置並閃示標記，方便補一台相機"
+          title="在盲區最集中的位置閃示標記（不移動畫面），方便補一台相機"
         >
           ◎ 定位最大盲區
         </button>

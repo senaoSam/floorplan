@@ -4,7 +4,7 @@ import { useViewportStore } from '@/store/useViewportStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { getGapMarker, clearGapMarker, subscribeGapMarker } from './gapMarkerBus'
 
-// Biggest-blind-spot marker layer. When the coverage panel flashes a marker
+// Biggest-blind-spot marker layer. When a coverage panel flashes a marker
 // (gapMarkerBus), this draws a pulsing amber ring at that image-px point,
 // fading out over LIFETIME_MS so it's clearly a transient "look here" cue.
 // Self-stopping rAF — no animation when no marker is active.
@@ -27,6 +27,9 @@ export function attachGapMarkerLayer({ scene }) {
   root.addChild(g)
 
   const isCameraMode = () => useEditorStore.getState().editorMode === EDITOR_MODE.CAMERA
+  // A camera blind spot means nothing on the Wi-Fi heatmap and vice versa:
+  // draw a marker only in the mode family its panel lives in.
+  const isMarkerMode = (m) => (m.source === 'heatmap') !== isCameraMode()
   // 53-G6 (23t/P4#8): the marker's (x, y) is image-px on the floor that flashed
   // it. Draw only on that floor — otherwise the amber ring appeared on another
   // floor at coordinates that mean nothing there, pointing at a blind spot that
@@ -39,7 +42,7 @@ export function attachGapMarkerLayer({ scene }) {
   let raf = 0
   const draw = () => {
     const m = getGapMarker()
-    if (!m || !isCameraMode() || !isMarkerFloor(m)) { root.visible = false; g.clear(); raf = 0; scene.requestRender(); return }
+    if (!m || !isMarkerMode(m) || !isMarkerFloor(m)) { root.visible = false; g.clear(); raf = 0; scene.requestRender(); return }
     const age = performance.now() - m.bornMs
     if (age >= LIFETIME_MS) { clearGapMarker(); root.visible = false; g.clear(); raf = 0; scene.requestRender(); return }
 
