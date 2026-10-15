@@ -1,8 +1,9 @@
 import React, { useCallback } from 'react'
 import { useWallStore } from '@/store/useWallStore'
 import { useEditorStore } from '@/store/useEditorStore'
-import { useFloorStore } from '@/store/useFloorStore'
+import { useFloorStore, getPxPerM } from '@/store/useFloorStore'
 import { MATERIAL_LIST, OPENING_TYPES, getMaterialById, DEFAULT_WALL_THICKNESS_M, MIN_WALL_THICKNESS_CM, MAX_WALL_THICKNESS_CM, mToCm, cmToM } from '@/constants/materials'
+import { resolveDoorSwing } from '@/features/walls/doorSwing'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { NumberInput, Select, Button } from './_shared/PanelControls'
 import './_shared/shared.sass'
@@ -13,7 +14,8 @@ import './WallPanel.sass'
 // uses the shared primitives.
 function WallPanel({ floorId, wallId }) {
   // 直接訂閱 wall 資料，store 更新時才會觸發 re-render
-  const wall       = useWallStore((s) => (s.wallsByFloor[floorId] ?? []).find((w) => w.id === wallId))
+  const floorWalls = useWallStore((s) => s.wallsByFloor[floorId])
+  const wall       = (floorWalls ?? []).find((w) => w.id === wallId)
   const updateWall = useWallStore((s) => s.updateWall)
   const removeWall = useWallStore((s) => s.removeWall)
   const updateOpening = useWallStore((s) => s.updateOpening)
@@ -187,6 +189,17 @@ function WallPanel({ floorId, wallId }) {
                 const defaultMat = getMaterialById(newOt.defaultMaterial)
                 updateOpening(floorId, wallId, op.id, { type: newType, material: defaultMat })
               }
+              // Flip from the hanging the 2D symbol currently shows (auto-picked
+              // until the first flip), and store both fields so the door stops
+              // auto-picking from then on. A double door has a hinge at each
+              // end, so only its swing side can flip.
+              const isDoor = op.type !== 'window'
+              const swing = isDoor ? resolveDoorSwing(wall, op, floorWalls, getPxPerM(floor)) : null
+              const flipSwing = (field) => updateOpening(floorId, wallId, op.id, {
+                hingeAtEnd: swing.hingeAtEnd,
+                swingFlip: swing.swingFlip,
+                [field]: !swing[field],
+              })
               return (
                 <div key={op.id} className="wall-panel__opening-item">
                   <button
@@ -230,6 +243,23 @@ function WallPanel({ floorId, wallId }) {
                   >
                     ×
                   </Button>
+                  {isDoor && (
+                    <div className="wall-panel__opening-flips">
+                      <Button
+                        variant="ghost"
+                        onClick={() => flipSwing('hingeAtEnd')}
+                        disabled={swing.double}
+                      >
+                        ↔ 換門軸
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => flipSwing('swingFlip')}
+                      >
+                        ⇅ 換開向
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )
             })}

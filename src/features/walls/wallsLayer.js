@@ -5,6 +5,7 @@ import { useViewportStore } from '@/store/useViewportStore'
 import { useDragOverlayStore, isAnyBodyDragging } from '@/store/useDragOverlayStore'
 import { useDraftStore } from '@/store/useDraftStore'
 import { OPENING_TYPES, getMaterialById, DEFAULT_WALL_THICKNESS_M } from '@/constants/materials'
+import { clamp01, solidSpans, doorLeaves, resolveDoorSwing } from './doorSwing'
 import { generateId } from '@/utils/id'
 import { isTypingTarget } from '@/utils/isTypingTarget'
 import { getModeCapability } from '@/render/modeCapabilities'
@@ -20,8 +21,9 @@ const DRAG_COMMIT_THRESHOLD_PX = 1
 //   * Black halo for contrast (alpha 0.4): width 4 normal / 7 selected / 10 hovered
 //   * Inner stroke: width 3 normal / 5 selected / 6 hovered.
 //     Colour: white on hover, else wall.material.color.
-//   * Openings render on top in OPENING_TYPES colour (door brown / window blue).
-//     Width 6 normal / 8 hovered / 6 selected.
+//   * Openings: a door is a black/white/material slot with white jamb ticks
+//     and a dashed swing; a window breaks the wall for a triple line (see the
+//     constants block below).
 // Hit area is 14 screen-px wide along the segment so clicks register
 // even on thin segments at zoomed-out viewports.
 const WALL_HALO_WIDTH_NORMAL   = 4
@@ -45,12 +47,45 @@ const WALL_HOVER_BEAM_ALPHA    = 0.9
 const WALL_SELECTED_RING_PAD   = 4       // total extra width vs halo (2 px each side)
 const WALL_SELECTED_RING_COLOR = '#00e5ff'
 const WALL_SELECTED_RING_ALPHA = 0.85
-// User update: openings render at the SAME width as the wall body
-// (oldSrc had thicker openings to call them out; user wants visual
-// consistency). Each state mirrors the matching body width above.
-const OPENING_WIDTH_NORMAL     = WALL_BODY_WIDTH_NORMAL
-const OPENING_WIDTH_HOVERED    = WALL_BODY_WIDTH_HOVERED
-const OPENING_WIDTH_SELECTED   = WALL_BODY_WIDTH_SELECTED
+// Openings carry a plan symbol on top of their colour — once walls carry
+// realistic material colours (wood brown, glass blue) a door-brown /
+// window-blue band alone blends into the wall it sits on.
+//   * door   — a slot over its span, black → white → door material from the
+//              outside in, so even a door of the wall's own material reads as
+//              "wall | black | white | door | white | black | wall". White
+//              jamb ticks cross the wall at both ends; the open leaf and swing
+//              arc are dashed. Doors wider than DOUBLE_DOOR_MIN_M open as a
+//              pair of leaves, which keeps a wide (garage) opening from
+//              sweeping half the room. Which way it hangs comes from
+//              doorSwing.js.
+//   * window — the wall is broken over its span; three parallel lines (two
+//              faces + glazing) closed by jambs fill the gap.
+// Line widths are screen px so the symbol reads the same at every zoom.
+const OPENING_LINE_SCREEN_PX     = 1.5
+const OPENING_OUTLINE_SCREEN_PX  = 3.5
+const OPENING_OUTLINE_ALPHA      = 0.5
+const DOOR_ARC_LINE_SCREEN_PX    = 1.25
+const DOOR_ARC_OUTLINE_SCREEN_PX = 3
+const DOOR_ARC_ALPHA             = 0.85
+const DOOR_ARC_DASH_SCREEN_PX    = 4
+const DOOR_ARC_GAP_SCREEN_PX     = 3
+// A thin wall can't fit the slot's five layers, so the slot floors at this
+// width and may run a little wider than the wall there. Each ring is a share
+// of the slot width, never under 1 screen px.
+const DOOR_SLOT_MIN_SCREEN_PX      = 7
+const DOOR_SLOT_BLACK_RATIO        = 0.12
+const DOOR_SLOT_WHITE_RATIO        = 0.22
+const DOOR_SLOT_CORE_MIN_SCREEN_PX = 1.5
+// Jamb ticks reach this far past the slot / halo on each side.
+const DOOR_JAMB_OVERHANG_SCREEN_PX = 3
+// A door shorter than this on screen gets one centred tick instead of a slot.
+const DOOR_MIN_SPAN_SCREEN_PX      = 8
+const DOOR_SINGLE_TICK_SCALE       = 1.4
+// Double doors mark where the two leaves meet with a shorter tick.
+const DOOR_MEETING_TICK_SCALE      = 0.6
+// A window's three lines need room to stay apart when the wall band itself
+// has floored at its few-px minimum (zoomed out / thin wall).
+const WINDOW_MIN_BAND_SCREEN_PX  = 8
 // Hit envelope in SCREEN px (matches oldSrc Konva hitStrokeWidth=14). We
 // convert to world px by dividing by viewport.scale on every viewport
 // change — otherwise zooming out makes the wall hit area shrink to a few
@@ -73,6 +108,43 @@ const bodyWidthWorld = (wall, baseWidth, pxPerM, vpScale) => {
   const realWorldPx = t * pxPerM
   const minWorldPx = baseWidth / (vpScale || 1)
   return Math.max(realWorldPx, minWorldPx)
+}
+
+// Append a dashed straight line from (ax, ay) to (bx, by) to `out`.
+function pushDashedLine(out, ax, ay, bx, by, dash, gap, color) {
+  const len = Math.hypot(bx - ax, by - ay)
+  if (len <= 0 || dash <= 0) return
+  const ux = (bx - ax) / len
+  const uy = (by - ay) / len
+  for (let t = 0; t < len; t += dash + gap) {
+    const t1 = Math.min(t + dash, len)
+    out.push([ax + ux * t, ay + uy * t, ax + ux * t1, ay + uy * t1, color])
+  }
+}
+
+// Append a dashed arc (centre cx/cy, radius r, from angle a0 through `sweep`
+// radians) to `out` as short chords. Dash and gap are world-px arc lengths.
+function pushDashedArc(out, cx, cy, r, a0, sweep, dash, gap, color) {
+  const arcLen = Math.abs(sweep) * r
+  if (arcLen <= 0 || dash <= 0) return
+  const dir = Math.sign(sweep)
+  const maxStep = Math.PI / 36
+  for (let t = 0; t < arcLen; t += dash + gap) {
+    const t1 = Math.min(t + dash, arcLen)
+    const b0 = a0 + dir * (t / r)
+    const b1 = a0 + dir * (t1 / r)
+    const n = Math.max(1, Math.ceil(Math.abs(b1 - b0) / maxStep))
+    let px = cx + Math.cos(b0) * r
+    let py = cy + Math.sin(b0) * r
+    for (let i = 1; i <= n; i++) {
+      const b = b0 + ((b1 - b0) * i) / n
+      const qx = cx + Math.cos(b) * r
+      const qy = cy + Math.sin(b) * r
+      out.push([px, py, qx, qy, color])
+      px = qx
+      py = qy
+    }
+  }
 }
 
 function pointToSegmentDistance(px, py, ax, ay, bx, by) {
@@ -212,9 +284,6 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
     const baseHalo = hoverInvert ? WALL_HALO_WIDTH_HOVERED
                                  : isSelected ? WALL_HALO_WIDTH_SELECTED
                                              : WALL_HALO_WIDTH_NORMAL
-    const baseOpening = hoverInvert ? OPENING_WIDTH_HOVERED
-                                    : isSelected ? OPENING_WIDTH_SELECTED
-                                                 : OPENING_WIDTH_NORMAL
 
     // Body is the wall's real thickness; the halo/rings sit outside it by the
     // same screen-px margin they used to add over the old fixed-width line
@@ -226,74 +295,187 @@ export function attachWallsLayer({ scene, useFloorStore, useWallStore, onDrawMod
 
     const bodyWidth = bodyWidthWorld(wall, baseBody, pxPerM, vpScale)
     const haloWidth = bodyWidth + toWorld(baseHalo - baseBody)
-    // Openings replace the wall body over their span, so they match its width.
-    const openingWidth = baseOpening === baseBody
-      ? bodyWidth
-      : bodyWidth + toWorld(baseOpening - baseBody)
 
     graphics.clear()
+
+    const dx = wall.endX - wall.startX
+    const dy = wall.endY - wall.startY
+    const pointAt = (f) => [wall.startX + dx * f, wall.startY + dy * f]
+    const openings = wall.openings ?? []
+    // Only windows break the wall; a door paints its band over the body.
+    const spans = solidSpans(openings.filter((o) => o.type === 'window'))
+    const wallAngle = Math.atan2(dy, dx)
+
+    // Every wall band below is stroked over the solid spans only, so the
+    // opening reads as a gap. Ends at an opening stay square (a jamb); the
+    // wall's own two ends keep the round cap the full-length stroke had,
+    // added as an outward half-disc so a translucent band isn't painted twice.
+    const strokeBand = (width, color, alpha) => {
+      if (spans.length === 0) return
+      for (const [s0, s1] of spans) {
+        const [ax, ay] = pointAt(s0)
+        const [bx, by] = pointAt(s1)
+        graphics.moveTo(ax, ay).lineTo(bx, by).stroke({ width, color, alpha, cap: 'butt' })
+      }
+      const r = width / 2
+      if (spans[0][0] === 0) {
+        graphics
+          .arc(wall.startX, wall.startY, r, wallAngle + Math.PI / 2, wallAngle + Math.PI * 1.5)
+          .fill({ color, alpha })
+      }
+      if (spans[spans.length - 1][1] === 1) {
+        graphics
+          .arc(wall.endX, wall.endY, r, wallAngle - Math.PI / 2, wallAngle + Math.PI / 2)
+          .fill({ color, alpha })
+      }
+    }
 
     // (1) Selected outer cyan rim — drawn FIRST so the wider black halo
     // covers the inside, leaving a thin ring around the wall (only visible
     // when selected and not hovered).
     if (isSelected && !hoverInvert) {
-      graphics
-        .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
-        .stroke({
-          width: haloWidth + toWorld(WALL_SELECTED_RING_PAD),
-          color: WALL_SELECTED_RING_COLOR,
-          alpha: WALL_SELECTED_RING_ALPHA,
-          cap: 'round',
-        })
+      strokeBand(haloWidth + toWorld(WALL_SELECTED_RING_PAD), WALL_SELECTED_RING_COLOR, WALL_SELECTED_RING_ALPHA)
     }
 
     // (2) Hover white outer aura — drawn UNDER the black halo, wider so a
     // thin white ring shows outside the black. This is the "white outer
     // ring" the user wanted restored from oldSrc.
     if (hoverInvert) {
-      graphics
-        .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
-        .stroke({
-          width: haloWidth + toWorld(WALL_HOVER_BEAM_PAD),
-          color: WALL_HOVER_BEAM_COLOR,
-          alpha: WALL_HOVER_BEAM_ALPHA,
-          cap: 'round',
-        })
+      strokeBand(haloWidth + toWorld(WALL_HOVER_BEAM_PAD), WALL_HOVER_BEAM_COLOR, WALL_HOVER_BEAM_ALPHA)
     }
 
     // (3) Black outline halo for contrast.
-    graphics
-      .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
-      .stroke({ width: haloWidth, color: '#000000', alpha: 0.4, cap: 'round' })
+    strokeBand(haloWidth, '#000000', 0.4)
 
     // (4) Wall body — white on hover (oldSrc parity), else material colour.
     // Width is unchanged on hover per user preference; only the colour
     // flips so the hovered wall reads as "lit".
-    graphics
-      .moveTo(wall.startX, wall.startY).lineTo(wall.endX, wall.endY)
-      .stroke({
-        width: bodyWidth,
-        color: hoverInvert ? '#ffffff' : wall.material.color,
-        alpha: 1,
-        cap: 'round',
-      })
+    strokeBand(bodyWidth, hoverInvert ? '#ffffff' : wall.material.color, 1)
 
-    // (4) Openings overlay the wall body in OPENING_TYPES colour
-    // (door brown / window blue — independent from the wall material).
-    const openings = wall.openings ?? []
-    if (openings.length > 0) {
-      const dx = wall.endX - wall.startX
-      const dy = wall.endY - wall.startY
-      for (const op of openings) {
-        const sx = wall.startX + dx * op.startFrac
-        const sy = wall.startY + dy * op.startFrac
-        const ex = wall.startX + dx * op.endFrac
-        const ey = wall.startY + dy * op.endFrac
-        const ot = OPENING_TYPES[op.type === 'window' ? 'WINDOW' : 'DOOR']
-        graphics
-          .moveTo(sx, sy).lineTo(ex, ey)
-          .stroke({ width: openingWidth, color: ot.color, alpha: 1, cap: 'butt' })
+    // (4b) Door slots + jamb ticks (ticks are stroked last, in step 6).
+    const jambs = []   // [ax, ay, bx, by]
+    const wallLen = Math.hypot(dx, dy)
+    const jx = wallLen > 1e-6 ? dx / wallLen : 0
+    const jy = wallLen > 1e-6 ? dy / wallLen : 0
+    const pushJamb = (f, h) => {
+      const [px, py] = pointAt(f)
+      jambs.push([px + jy * h, py - jx * h, px - jy * h, py + jx * h])
+    }
+    for (const op of openings) {
+      if (op.type === 'window') continue
+      const s0 = clamp01(op.startFrac)
+      const s1 = clamp01(op.endFrac)
+      if (s1 <= s0) continue
+      const outer = Math.max(bodyWidth, toWorld(DOOR_SLOT_MIN_SCREEN_PX))
+      const h = Math.max(haloWidth, outer) / 2 + toWorld(DOOR_JAMB_OVERHANG_SCREEN_PX)
+      if (wallLen * (s1 - s0) * vpScale < DOOR_MIN_SPAN_SCREEN_PX) {
+        pushJamb((s0 + s1) / 2, h * DOOR_SINGLE_TICK_SCALE)
+        continue
       }
+      const blackRing = Math.max(toWorld(1), outer * DOOR_SLOT_BLACK_RATIO)
+      const whiteRing = Math.max(toWorld(1), outer * DOOR_SLOT_WHITE_RATIO)
+      const white = outer - 2 * blackRing
+      const core = Math.max(white - 2 * whiteRing, toWorld(DOOR_SLOT_CORE_MIN_SCREEN_PX))
+      const [ax, ay] = pointAt(s0)
+      const [bx, by] = pointAt(s1)
+      const layers = [
+        [outer, '#000000'],
+        [white, '#ffffff'],
+        [core, op.material?.color ?? OPENING_TYPES.DOOR.color],
+      ]
+      for (const [width, color] of layers) {
+        graphics.moveTo(ax, ay).lineTo(bx, by).stroke({ width, color, alpha: 1, cap: 'butt' })
+      }
+      const floorWalls = useWallStore.getState().wallsByFloor[entry.floorId]
+      if (resolveDoorSwing(wall, op, floorWalls, pxPerM).double) {
+        pushJamb((s0 + s1) / 2, h * DOOR_MEETING_TICK_SCALE)
+      }
+      pushJamb(s0, h)
+      pushJamb(s1, h)
+    }
+
+    // (5) Opening symbols, OPENING_TYPES colour over a black
+    // outline (the ghost-line double stroke) so they hold up on light and
+    // dark floor images alike.
+    const len = Math.hypot(dx, dy)
+    if (openings.length > 0 && len > 1e-6) {
+      const ux = dx / len
+      const uy = dy / len
+      const solid = []   // [ax, ay, bx, by, color]
+      const dashed = []
+      for (const op of openings) {
+        const s0 = clamp01(op.startFrac)
+        const s1 = clamp01(op.endFrac)
+        if (s1 <= s0) continue
+        const ot = OPENING_TYPES[op.type === 'window' ? 'WINDOW' : 'DOOR']
+        if (op.type === 'window') {
+          const h = Math.max(bodyWidth, toWorld(WINDOW_MIN_BAND_SCREEN_PX)) / 2
+          const [ax, ay] = pointAt(s0)
+          const [bx, by] = pointAt(s1)
+          for (const o of [-h, 0, h]) {
+            solid.push([ax - uy * o, ay + ux * o, bx - uy * o, by + ux * o, ot.color])
+          }
+          for (const [px, py] of [[ax, ay], [bx, by]]) {
+            solid.push([px + uy * h, py - ux * h, px - uy * h, py + ux * h, ot.color])
+          }
+          continue
+        }
+        // Hanging: the user's flips if set, else the one that clears the
+        // neighbouring walls (doorSwing.js). swingFlip mirrors the leaf from
+        // +normal to the wall's other side.
+        const floorWalls = useWallStore.getState().wallsByFloor[entry.floorId]
+        const swing = resolveDoorSwing(wall, op, floorWalls, pxPerM)
+        const side = swing.swingFlip ? -1 : 1
+        const nx = -uy * side
+        const ny = ux * side
+        for (const [hingeF, freeF] of doorLeaves(op, swing.double, swing.hingeAtEnd)) {
+          const [hx, hy] = pointAt(hingeF)
+          const [fx, fy] = pointAt(freeF)
+          const r = Math.abs(freeF - hingeF) * len
+          pushDashedLine(dashed, hx, hy, hx + nx * r, hy + ny * r,
+            toWorld(DOOR_ARC_DASH_SCREEN_PX), toWorld(DOOR_ARC_GAP_SCREEN_PX), ot.color)
+          const a0 = Math.atan2(fy - hy, fx - hx)
+          const a1 = Math.atan2(ny, nx)
+          let sweep = a1 - a0
+          if (sweep > Math.PI) sweep -= Math.PI * 2
+          else if (sweep < -Math.PI) sweep += Math.PI * 2
+          pushDashedArc(dashed, hx, hy, r, a0, sweep,
+            toWorld(DOOR_ARC_DASH_SCREEN_PX), toWorld(DOOR_ARC_GAP_SCREEN_PX), ot.color)
+        }
+      }
+
+      // One stroke per colour path keeps the draw count flat however many
+      // dashes an arc has.
+      const strokeSegs = (segs, width, colorOf, alpha) => {
+        const byColor = new Map()
+        for (const seg of segs) {
+          const c = colorOf(seg)
+          if (!byColor.has(c)) byColor.set(c, [])
+          byColor.get(c).push(seg)
+        }
+        for (const [color, list] of byColor) {
+          for (const [ax, ay, bx, by] of list) graphics.moveTo(ax, ay).lineTo(bx, by)
+          graphics.stroke({ width, color, alpha, cap: 'butt' })
+        }
+      }
+      // All outlines first, then all colour lines, so an outline never cuts
+      // across a neighbouring colour line where they meet.
+      const black = () => '#000000'
+      const own = (seg) => seg[4]
+      strokeSegs(dashed, toWorld(DOOR_ARC_OUTLINE_SCREEN_PX), black, OPENING_OUTLINE_ALPHA * DOOR_ARC_ALPHA)
+      strokeSegs(solid, toWorld(OPENING_OUTLINE_SCREEN_PX), black, OPENING_OUTLINE_ALPHA)
+      strokeSegs(dashed, toWorld(DOOR_ARC_LINE_SCREEN_PX), own, DOOR_ARC_ALPHA)
+      strokeSegs(solid, toWorld(OPENING_LINE_SCREEN_PX), own, 1)
+    }
+
+    // (6) Door jamb ticks — white over a black outline, always white so they
+    // mark the door's ends on any wall colour; the outline firms up on hover
+    // so they don't melt into the white hover aura.
+    if (jambs.length > 0) {
+      for (const [ax, ay, bx, by] of jambs) graphics.moveTo(ax, ay).lineTo(bx, by)
+      graphics.stroke({ width: toWorld(OPENING_OUTLINE_SCREEN_PX), color: '#000000', alpha: hoverInvert ? 0.8 : OPENING_OUTLINE_ALPHA, cap: 'butt' })
+      for (const [ax, ay, bx, by] of jambs) graphics.moveTo(ax, ay).lineTo(bx, by)
+      graphics.stroke({ width: toWorld(OPENING_LINE_SCREEN_PX), color: '#ffffff', alpha: 1, cap: 'butt' })
     }
 
     refreshHitArea(entry)

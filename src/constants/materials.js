@@ -97,6 +97,10 @@ export const OPENING_TYPES = {
 
 export const OPENING_LIST = Object.values(OPENING_TYPES)
 
+// 2D plan symbol: a door wider than this draws as a pair of leaves (two half-
+// width swings), so a wide opening doesn't sweep half the room.
+export const DOUBLE_DOOR_MIN_M = 1.2
+
 export const getMaterialById = (id) => MATERIAL_LIST.find((m) => m.id === id) ?? MATERIALS.WOOD
 
 export const FLOOR_SLAB_DEFAULT_DB = Object.fromEntries(
