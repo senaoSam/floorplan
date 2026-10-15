@@ -127,11 +127,12 @@ function DevicePlanningPanel() {
     }
   }
 
-  // Same cue as the camera CoveragePanel: a pulsing amber ring AT the gap,
-  // leaving the view where the user put it.
+  // Same cue as the camera CoveragePanel: a pulsing amber ring AT the gap
+  // plus a brief shade over every blind cell, leaving the view where the user
+  // put it (an edge arrow points the way when the gap is off-screen).
   const locateBiggestGap = () => {
     if (!quality?.biggestGap) return
-    flashGapMarker(quality.biggestGap.x, quality.biggestGap.y, performance.now(), activeFloorId, 'heatmap')
+    flashGapMarker(quality.biggestGap.x, quality.biggestGap.y, performance.now(), activeFloorId, 'heatmap', quality.blindMask)
   }
 
   const meetsTarget = quality ? quality.coveragePct >= targetPct : false

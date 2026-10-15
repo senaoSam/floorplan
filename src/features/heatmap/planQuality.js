@@ -87,7 +87,10 @@ export function detectChannelConflicts(scenario, apIds) {
 
 // Returns null when there's nothing to measure (no floor scale / no APs), else:
 //   { coveragePct, blindPct, coveredAreaM2, blindAreaM2, apCount,
-//     channelConflicts: [...], biggestGap: {x,y}|null, thresholdDbm }
+//     channelConflicts: [...], biggestGap: {x,y}|null, thresholdDbm,
+//     blindMask: { cells, nx, ny, originXPx, originYPx, stepPx } | null }
+// blindMask marks every in-scope sample below threshold (cells[j*nx+i] = 1);
+// sample (i, j) sits at image-px (originXPx + i*stepPx, originYPx + j*stepPx).
 // 57-17: pass `floors` (+ apsByFloor / wallsByFloor / holesByFloor) to sample
 // the same scenario the heatmap shows -- other floors' APs, walls and slabs,
 // receiver at 1.0 m. Without them it falls back to the old planar scenario
@@ -156,6 +159,7 @@ export function computePlanQualityStats({
   const cellW = Math.ceil(nx / GAP_GRID)
   const cellH = Math.ceil(ny / GAP_GRID)
   const blindPerCell = new Int32Array(GAP_GRID * GAP_GRID)
+  const blindCells = new Uint8Array(nx * ny)
 
   // sampleField samples the whole padded rectangle and never writes NaN, so we
   // must clip in-scope ourselves: (1) drop the trailing out-of-plane row/column
@@ -179,6 +183,7 @@ export function computePlanQualityStats({
       } else {
         const gx = Math.min(GAP_GRID - 1, Math.floor(i / cellW))
         blindPerCell[gy * GAP_GRID + gx] += 1
+        blindCells[idx] = 1
       }
     }
   }
@@ -221,5 +226,13 @@ export function computePlanQualityStats({
     channelConflicts,
     biggestGap,
     thresholdDbm,
+    blindMask: {
+      cells: blindCells,
+      nx,
+      ny,
+      originXPx: originX / pxToM,
+      originYPx: originY / pxToM,
+      stepPx: gridStepM / pxToM,
+    },
   }
 }

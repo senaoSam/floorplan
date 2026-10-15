@@ -22,6 +22,7 @@ import { Application, Container } from 'pixi.js'
 const LAYER_KEYS = [
   'floorImage',
   'heatmap',
+  'blindShade',    // Wi-Fi "locate biggest gap" blind-area flash — over the heatmap, under walls
   'cameraFov',     // camera FOV cones — under walls so wall lines stay crisp
   'walls',
   'scopes',

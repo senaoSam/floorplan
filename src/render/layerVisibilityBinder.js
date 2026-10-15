@@ -42,6 +42,8 @@ export function bindLayerVisibility({ scene, useEditorStore }) {
     // walls-only, and STATS draws its own AP-load glow that reads clearer
     // without the RSSI field underneath. Gate the whole container here.
     if (scene.layers.heatmap) scene.layers.heatmap.visible = !inCamera && !inStats
+    // The Wi-Fi blind-area flash belongs to the heatmap's modes too.
+    if (scene.layers.blindShade) scene.layers.blindShade.visible = !inCamera && !inStats
   }
   const unsubscribe = useEditorStore.subscribe(apply)
   apply()

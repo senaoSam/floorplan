@@ -17,6 +17,7 @@ import { attachOccupancyLayer } from '@/features/cameras/occupancyLayer'
 import { attachBlindSpotLayer } from '@/features/cameras/blindSpotLayer'
 import { attachOverlapLayer } from '@/features/cameras/overlapLayer'
 import { attachGapMarkerLayer } from '@/features/cameras/gapMarkerLayer'
+import { attachBlindShadeLayer } from '@/features/heatmap/blindShadeLayer'
 import { attachAnalyticsLayer } from '@/features/cameras/analyticsLayer'
 import { bindTracking } from '@/features/cameras/trackingBinder'
 import { attachCablesLayer } from '@/features/cables/cablesLayer'
@@ -118,6 +119,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
     let detachBlindSpots = null
     let detachOverlap = null
     let detachGapMarker = null
+    let detachBlindShade = null
     let analyticsCtl = null
     let detachTracking = null
     let detachCables = null
@@ -375,6 +377,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useCameraStore,
       })
       detachGapMarker = attachGapMarkerLayer({ scene: s })
+      detachBlindShade = attachBlindShadeLayer({ scene: s })
       analyticsCtl = attachAnalyticsLayer({
         scene: s,
         useFloorStore,
@@ -836,6 +839,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
       if (detachTracking) detachTracking()
       if (analyticsCtl) analyticsCtl.detach()
       if (detachGapMarker) detachGapMarker()
+      if (detachBlindShade) detachBlindShade()
       if (detachOverlap) detachOverlap()
       if (detachBlindSpots) detachBlindSpots()
       if (detachOccupancy) detachOccupancy()
