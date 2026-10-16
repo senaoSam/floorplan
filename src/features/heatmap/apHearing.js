@@ -3,7 +3,7 @@
 // the two directions, at or above the scenario's min interfering RSSI -- the
 // rule the heatmap's SINR / CCI and Client View use for interference.
 import { rssiFromAp } from './propagation'
-import { DEFAULT_MIN_INTERFERING_RSSI_DBM, AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI } from './rfConstants'
+import { DEFAULT_MIN_INTERFERING_RSSI_DBM, PLANNER_SOFT_RANGE_DB, AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI } from './rfConstants'
 import { channelBlockCenterMHz, channelRangeMHz } from './frequency'
 import { eirpLimitDbm } from '@/constants/regulatoryDomains'
 import { getDefaultTxPower } from '@/constants/apModels'
@@ -97,7 +97,7 @@ function peakGainBoundDbi(e) {
   return peak + Math.max(0, ...p.samples) + Math.max(0, ...(p.samplesV ?? p.samples))
 }
 
-function rssiBoundDbm(from, to, boundaries) {
+export function rssiBoundDbm(from, to, boundaries) {
   const freqMhz = from.centerMHz || 5190
   const dx = to.pos.x - from.pos.x
   const dy = to.pos.y - from.pos.y
@@ -128,7 +128,9 @@ function rssiBoundDbm(from, to, boundaries) {
 //   refRssiDbm(a, b, domainId) the pair's AP-to-AP RSSI at the reference
 //                              (referenceEntry); -Infinity for unknown ids
 //                              and for pairs whose ceiling (rssiBoundDbm)
-//                              is below the threshold
+//                              is below the planner's soft floor (threshold
+//                              - PLANNER_SOFT_RANGE_DB): the planner weighs
+//                              pairs down to there
 //   externalRadios(planned)    with `crossFloorFixed`: the scenario's radios
 //                              that are not being planned (other floors'),
 //                              as fixed neighbours; null otherwise
@@ -169,7 +171,7 @@ export function makeApHearingFn(scenario, { crossFloorFixed = false } = {}) {
     let v = refCache.get(key)
     if (v === undefined) {
       const bounds = scenario.floorBoundaries ?? null
-      v = Math.max(rssiBoundDbm(a, b, bounds), rssiBoundDbm(b, a, bounds)) < thr
+      v = Math.max(rssiBoundDbm(a, b, bounds), rssiBoundDbm(b, a, bounds)) < thr - PLANNER_SOFT_RANGE_DB
         ? -Infinity
         : apToApRssiDbm(scenario, a, b)
       refCache.set(key, v)

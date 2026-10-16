@@ -14,10 +14,15 @@ import { buildScenario } from './buildScenario'
 import { buildFloorScenario } from './buildCrossFloor'
 import { sampleField } from './sampleField'
 import { apsShareSpectrum } from './frequency'
-import { apToApRssiDbm } from './apHearing'
+import { apToApRssiDbm, rssiBoundDbm } from './apHearing'
 import { DEFAULT_MIN_INTERFERING_RSSI_DBM } from './rfConstants'
 
 const GRID_STEP_M = 1.0   // coarse enough to run debounced without a GPU
+// Covered cells whose SINR is under this count as "low SINR": the client has
+// signal but co-channel interference eats the link budget. 20 dB is the usual
+// design floor for solid data rates. This -- not the AP-pair count -- is what
+// the channel planner's interference-power objective improves (58-15).
+export const LOW_SINR_DB = 20
 const GAP_GRID = 8        // 8×8 coarse cells to locate the densest blind area
 
 // 52-C6: cost is cells × APs, and this runs SYNCHRONOUSLY on the main thread —
@@ -85,9 +90,40 @@ export function detectChannelConflicts(scenario, apIds) {
   return conflicts
 }
 
+// Co-channel conflicts between this floor's radios (`apIds`) and other floors'
+// radios in a cross-floor scenario -- same hearing / overlap rule as
+// detectChannelConflicts. Listed apart from the per-floor count (57-17 keeps
+// that per floor), so the planner -- which avoids other floors too -- can
+// trade a loud cross-floor pair for a quieter same-floor one and the user
+// sees both sides of the trade. apA is on this floor, apB on another.
+export function detectCrossFloorConflicts(scenario, apIds) {
+  const thr = scenario.rf?.minInterfDbm ?? DEFAULT_MIN_INTERFERING_RSSI_DBM
+  const own = scenario.aps.filter((a) => apIds.has(a.deviceId ?? a.id))
+  const others = scenario.aps.filter((a) => !apIds.has(a.deviceId ?? a.id))
+  const bounds = scenario.floorBoundaries ?? null
+  const conflicts = []
+  for (const a of own) {
+    for (const b of others) {
+      if (a.channel == null || b.channel == null) continue
+      if (!apsShareSpectrum(a, b)) continue
+      // Free-space + slab ceiling first (as makeApHearingFn does): most
+      // pairs across floors can't reach the threshold, and the wall scan of
+      // the real AP-to-AP RSSI is what made big buildings slow.
+      if (Math.max(rssiBoundDbm(a, b, bounds), rssiBoundDbm(b, a, bounds)) < thr) continue
+      const rssiDbm = apToApRssiDbm(scenario, a, b)
+      if (rssiDbm < thr) continue
+      conflicts.push({ apA: a.deviceId ?? a.id, apB: b.deviceId ?? b.id, band: a.frequency, channel: a.channel, rssiDbm })
+    }
+  }
+  conflicts.sort((p, q) => q.rssiDbm - p.rssiDbm)
+  return conflicts
+}
+
 // Returns null when there's nothing to measure (no floor scale / no APs), else:
 //   { coveragePct, blindPct, coveredAreaM2, blindAreaM2, apCount,
-//     channelConflicts: [...], biggestGap: {x,y}|null, thresholdDbm,
+//     lowSinrPct,            in-scope area that is covered but under LOW_SINR_DB
+//     channelConflicts: [...], crossFloorConflicts: [...] (only with `floors`),
+//     biggestGap: {x,y}|null, thresholdDbm,
 //     blindMask: { cells, nx, ny, originXPx, originYPx, stepPx } | null }
 // blindMask marks every in-scope sample below threshold (cells[j*nx+i] = 1);
 // sample (i, j) sits at image-px (originXPx + i*stepPx, originYPx + j*stepPx).
@@ -117,7 +153,9 @@ export function computePlanQualityStats({
     : buildScenario(floor, walls ?? [], apList, scopes ?? [])
   if (!scenario) return null
 
-  const channelConflicts = detectChannelConflicts(scenario, new Set(apList.map((a) => a.id)))
+  const apIds = new Set(apList.map((a) => a.id))
+  const channelConflicts = detectChannelConflicts(scenario, apIds)
+  const crossFloorConflicts = floors ? detectCrossFloorConflicts(scenario, apIds) : []
   if (bandFilter && bandFilter !== 'all') {
     scenario.aps = scenario.aps.filter((a) => String(a.frequency) === bandFilter)
   }
@@ -131,7 +169,9 @@ export function computePlanQualityStats({
       coveredAreaM2: 0,
       blindAreaM2: 0,
       apCount: 0,
+      lowSinrPct: 0,
       channelConflicts,
+      crossFloorConflicts,
       biggestGap: null,
       thresholdDbm,
     }
@@ -145,7 +185,7 @@ export function computePlanQualityStats({
     enableDiffraction: false,
     redundancyThresholdDbm: thresholdDbm,   // 47-9: per-cell count of APs ≥ threshold
   })
-  const { rssi, redundancy, nx, ny, gridStepM, originX, originY } = field
+  const { rssi, sinr, redundancy, nx, ny, gridStepM, originX, originY } = field
   const pxToM = 1 / floor.scale
   const { w: planW, h: planH } = scenario.size
   const maskFn = scenario.scopeMaskFn ?? (() => true)
@@ -153,6 +193,7 @@ export function computePlanQualityStats({
   let inScope = 0     // in-plane, in-scope cells → denominator
   let covered = 0
   let secondary = 0   // 47-9: cells with ≥2 APs ≥ threshold (voice/roaming safe)
+  let lowSinr = 0     // covered cells under LOW_SINR_DB
   const cellM2 = gridStepM * gridStepM
 
   // Blind density per coarse cell, to locate the biggest gap (image-px).
@@ -180,6 +221,7 @@ export function computePlanQualityStats({
       if (v >= thresholdDbm) {
         covered += 1
         if (redundancy && redundancy[idx] >= 2) secondary += 1
+        if (sinr[idx] < LOW_SINR_DB) lowSinr += 1
       } else {
         const gx = Math.min(GAP_GRID - 1, Math.floor(i / cellW))
         blindPerCell[gy * GAP_GRID + gx] += 1
@@ -191,7 +233,7 @@ export function computePlanQualityStats({
   if (inScope === 0) {
     return {
       coveragePct: 0, secondaryCoveragePct: 0, blindPct: 0, coveredAreaM2: 0, blindAreaM2: 0,
-      apCount: apList.length, channelConflicts, biggestGap: null, thresholdDbm,
+      apCount: apList.length, lowSinrPct: 0, channelConflicts, crossFloorConflicts, biggestGap: null, thresholdDbm,
     }
   }
 
@@ -223,7 +265,9 @@ export function computePlanQualityStats({
     coveredAreaM2: covered * cellM2,
     blindAreaM2: blind * cellM2,
     apCount: apList.length,
+    lowSinrPct: (lowSinr / inScope) * 100,
     channelConflicts,
+    crossFloorConflicts,
     biggestGap,
     thresholdDbm,
     blindMask: {

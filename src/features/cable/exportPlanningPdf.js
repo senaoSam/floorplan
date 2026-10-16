@@ -40,7 +40,7 @@ import { getCachedRoutes } from '@/features/cable/routesCache'
 import { computeTrayBOM } from '@/features/cable/computeTrayBOM'
 import { computeTrayCableLoads, computeTrayFill } from '@/features/cable/computeTrayFill'
 import { getCapacityProfile, DEFAULT_CAPACITY_PROFILE } from '@/store/useCableStore'
-import { computePlanQualityStats } from '@/features/heatmap/planQuality'
+import { computePlanQualityStats, LOW_SINR_DB } from '@/features/heatmap/planQuality'
 import { COVERAGE_THRESHOLD_DBM, COVERAGE_TARGET_PCT } from '@/constants/coverage'
 import { getHeatmapFrame, subscribeHeatmapFrame } from '@/render/heatmapFrameBus'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
@@ -177,8 +177,9 @@ export async function buildPlanningPdf({
 
   // Cross-floor name lookups.
   const apById = new Map()
-  for (const list of Object.values(apsByFloor)) {
-    for (const a of list ?? []) apById.set(a.id, a)
+  const apFloorId = new Map()
+  for (const [fid, list] of Object.entries(apsByFloor)) {
+    for (const a of list ?? []) { apById.set(a.id, a); apFloorId.set(a.id, fid) }
   }
   const swById = new Map()
   for (const list of Object.values(switchesByFloor)) {
@@ -315,10 +316,14 @@ export async function buildPlanningPdf({
   const covRows = []
   const conflictRows = []
   let strongestConflictDbm = -Infinity
+  // Cross-floor pairs show up from both floors' sides; list each once.
+  const crossRows = []
+  const crossSeen = new Set()
+  let strongestCrossDbm = -Infinity
   for (const floor of floors) {
     const aps = apsByFloor[floor.id] ?? []
     if (!floor.scale) {
-      covRows.push([floorName(floor.id), String(aps.length), 'no scale set', '-', '-', '-', 'NOT MEASURED'])
+      covRows.push([floorName(floor.id), String(aps.length), 'no scale set', '-', '-', '-', '-', 'NOT MEASURED'])
       continue
     }
     const q = computePlanQualityStats({
@@ -332,7 +337,7 @@ export async function buildPlanningPdf({
       bandFilter,
     })
     if (!q) {
-      covRows.push([floorName(floor.id), String(aps.length), 'n/a', '-', '-', '-', 'NOT MEASURED'])
+      covRows.push([floorName(floor.id), String(aps.length), 'n/a', '-', '-', '-', '-', 'NOT MEASURED'])
       continue
     }
     covRows.push([
@@ -340,6 +345,7 @@ export async function buildPlanningPdf({
       String(q.apCount),
       `${q.coveragePct.toFixed(1)}%`,
       `${q.secondaryCoveragePct.toFixed(1)}%`,
+      `${q.lowSinrPct.toFixed(1)}%`,
       `${q.blindPct.toFixed(1)}%`,
       q.blindAreaM2.toFixed(0),
       q.coveragePct >= coverageTargetPct ? 'PASS' : 'BELOW TARGET',
@@ -354,18 +360,32 @@ export async function buildPlanningPdf({
         String(c.channel),
       ])
     }
+    for (const c of q.crossFloorConflicts ?? []) {
+      const key = [c.apA, c.apB].sort().join('|') + '|' + c.band
+      if (crossSeen.has(key)) continue
+      crossSeen.add(key)
+      if (c.rssiDbm > strongestCrossDbm) strongestCrossDbm = c.rssiDbm
+      crossRows.push([
+        floorName(floor.id),
+        T(apById.get(c.apA)?.name ?? c.apA),
+        floorName(apFloorId.get(c.apB)),
+        T(apById.get(c.apB)?.name ?? c.apB),
+        `${c.band} GHz`,
+        String(c.channel),
+      ])
+    }
   }
 
   autoTable(doc, {
     startY: margin + 40,
-    head: [['Floor', 'APs', 'Coverage', 'Redundant (>=2 AP)', 'Blind', 'Blind area (m2)', 'Verdict']],
+    head: [['Floor', 'APs', 'Coverage', 'Redundant (>=2 AP)', `Low SINR (<${LOW_SINR_DB} dB)`, 'Blind', 'Blind area (m2)', 'Verdict']],
     body: covRows,
     styles: { font: FONT, fontSize: 9 },
     headStyles: { fillColor: HEAD_FILL, textColor: 255 },
     margin: { left: margin, right: margin },
     // Colour only the verdict cell — a fully tinted row would fight the table.
     didParseCell: (data) => {
-      if (data.section !== 'body' || data.column.index !== 6) return
+      if (data.section !== 'body' || data.column.index !== 7) return
       const v = data.cell.raw
       if (v === 'PASS') data.cell.styles.textColor = [16, 185, 129]
       else if (v === 'BELOW TARGET') data.cell.styles.textColor = DANGER_FILL
@@ -599,7 +619,7 @@ export async function buildPlanningPdf({
     if (r.routeStatus !== 'unroutable') continue
     unroutableAPs.push([floorName(r.homeFloorId), T(apById.get(r.apId)?.name ?? r.apId)])
   }
-  if (unroutableAPs.length + warnings.length + conflictRows.length > 0) {
+  if (unroutableAPs.length + warnings.length + conflictRows.length + crossRows.length > 0) {
     onProgress('產生警告...')
     doc.addPage()
     doc.setFont(FONT, 'bold')
@@ -635,6 +655,25 @@ export async function buildPlanningPdf({
         startY: cursorY + 6,
         head: [['Floor', 'AP A', 'AP B', 'Band', 'Channel']],
         body: conflictRows,
+        styles: { font: FONT, fontSize: 9 },
+        headStyles: { fillColor: WARN_FILL, textColor: 255 },
+        margin: { left: margin, right: margin },
+      })
+      cursorY = doc.lastAutoTable.finalY + 16
+    }
+
+    // Kept apart from the per-floor list above (57-17 counts conflicts per
+    // floor); the channel planner avoids these too.
+    if (crossRows.length > 0) {
+      doc.setFont(FONT, 'bold')
+      doc.setFontSize(11)
+      doc.setTextColor(...WARN_FILL)
+      doc.text(`Cross-floor co-channel conflicts (${crossRows.length}, strongest ${strongestCrossDbm.toFixed(1)} dBm)`, margin, cursorY)
+      doc.setTextColor(0)
+      autoTable(doc, {
+        startY: cursorY + 6,
+        head: [['Floor A', 'AP A', 'Floor B', 'AP B', 'Band', 'Channel']],
+        body: crossRows,
         styles: { font: FONT, fontSize: 9 },
         headStyles: { fillColor: WARN_FILL, textColor: 255 },
         margin: { left: margin, right: margin },

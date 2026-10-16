@@ -6,6 +6,10 @@ export const RX_ANT_GAIN_DBI = 0   // client device
 // Client View (whose panel edits them); defaults mirror Hamina's pane.
 export const DEFAULT_NOISE_FLOOR_BY_BAND = { 2.4: -92, 5: -95, 6: -96 }
 export const DEFAULT_MIN_INTERFERING_RSSI_DBM = -82
+// Channel planner's soft tier (autoChannelPlan): AP-to-AP pairs this many dB
+// under the min interfering RSSI still nudge the plan to spread channels, and
+// the hearing function (apHearing refRssiDbm) measures pairs down to there.
+export const PLANNER_SOFT_RANGE_DB = 20
 export const DEFAULT_RF = {
   noiseByBand: DEFAULT_NOISE_FLOOR_BY_BAND,
   minInterfDbm: DEFAULT_MIN_INTERFERING_RSSI_DBM,

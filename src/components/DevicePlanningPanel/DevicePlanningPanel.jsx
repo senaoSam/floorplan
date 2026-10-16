@@ -10,7 +10,7 @@ import { useClientViewStore } from '@/store/useClientViewStore'
 import { flashGapMarker } from '@/features/cameras/gapMarkerBus'
 import { greedyChannelAssign, radiosWithoutChannels } from '@/utils/autoChannelPlan'
 import { expandRadios, applyRadioResults } from '@/utils/apRadios'
-import { computePlanQualityStats } from '@/features/heatmap/planQuality'
+import { computePlanQualityStats, LOW_SINR_DB } from '@/features/heatmap/planQuality'
 import { storeChannelNeighbors } from '@/features/heatmap/channelNeighbors'
 import { NumberInput } from '@/components/PanelRight/_shared/PanelControls'
 import Icon from '@/components/Icon/Icon'
@@ -107,7 +107,8 @@ function DevicePlanningPanel() {
   const [channelBusy, setChannelBusy] = useState(false)
 
   const runAutoChannel = async () => {
-    if (aps.length === 0 || channelBusy) return
+    // No scale → no AP-to-AP distances to plan with (the button is disabled).
+    if (aps.length === 0 || channelBusy || !hasScale) return
     setChannelBusy(true)
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
     try {
@@ -140,6 +141,11 @@ function DevicePlanningPanel() {
   // 58-15: conflicts come sorted strongest first; the pair count alone hides
   // that auto-channel trades a few loud pairs for more faint ones.
   const strongestConflictDbm = quality?.channelConflicts?.[0]?.rssiDbm
+  // Cross-floor pairs are listed on their own row (not added to the per-floor
+  // count), shown once the building has another calibrated floor.
+  const crossFloorCount = quality?.crossFloorConflicts?.length ?? 0
+  const strongestCrossDbm = quality?.crossFloorConflicts?.[0]?.rssiDbm
+  const hasOtherFloors = floors.some((f) => f.id !== activeFloorId && f.scale)
 
   return (
     <div className="device-planning">
@@ -171,10 +177,12 @@ function DevicePlanningPanel() {
               <button
                 className="device-planning__btn"
                 onClick={runAutoChannel}
-                disabled={apsOnFloor === 0 || channelBusy}
+                disabled={apsOnFloor === 0 || channelBusy || !hasScale}
                 title={channelBusy
                   ? `正在為 ${apsOnFloor} 顆 AP 指派頻道…`
-                  : '自動為本樓層所有 AP 指派互不干擾的頻道'}
+                  : !hasScale
+                    ? '尚未設定比例尺，無法判斷 AP 之間的距離'
+                    : '自動為本樓層所有 AP 指派互不干擾的頻道'}
               >
                 {channelBusy ? `⏳ 指派頻道中（${apsOnFloor} 顆）…` : '📻 自動頻道'}
               </button>
@@ -241,10 +249,20 @@ function DevicePlanningPanel() {
                     <span>雙重涵蓋（≥2 台）</span>
                     <b>{fmtPct(quality.secondaryCoveragePct ?? 0)}</b>
                   </div>
-                  <div className="device-planning__row" title={`同頻段、頻譜重疊、且彼此聽得到（AP 間訊號 ≥ ${minInterf} dBm，即 Client View 的最小干擾 RSSI）的射頻對數（同一對 AP 在兩個頻段衝突算 2 對）；括號內為訊號最強那一對的 AP 間訊號`}>
+                  <div className="device-planning__row" title={`有訊號（≥ ${thresholdDbm} dBm）但 SINR 低於 ${LOW_SINR_DB} dB 的面積比例——多半是同頻干擾吃掉了訊號餘裕。自動頻道就是在壓低這個數字（與 SINR 熱圖同一套模型，只算直射）`}>
+                    <span>低 SINR（&lt;{LOW_SINR_DB} dB）</span>
+                    <b>{fmtPct(quality.lowSinrPct ?? 0)}</b>
+                  </div>
+                  <div className="device-planning__row" title={`本樓層內同頻段、頻譜重疊、且彼此聽得到（AP 間訊號 ≥ ${minInterf} dBm，即 Client View 的最小干擾 RSSI）的射頻對數——這些 AP 得輪流使用通話時間（同一對 AP 在兩個頻段衝突算 2 對）；括號內為訊號最強那一對的 AP 間訊號`}>
                     <span>頻道衝突</span>
                     <b className={conflictCount > 0 ? 'device-planning__val--warn' : ''}>{conflictCount} 對{conflictCount > 0 && strongestConflictDbm != null ? `（最強 ${strongestConflictDbm.toFixed(1)} dBm）` : ''}</b>
                   </div>
+                  {hasOtherFloors && (
+                    <div className="device-planning__row" title={`本樓層射頻與其他樓層射頻之間的同頻衝突（判斷規則同上），不計入上方本樓層的對數。自動頻道會一併避開其他樓層，所以有時會用一對較弱的本樓層衝突，換掉一對更強的跨樓層衝突`}>
+                      <span>跨樓層衝突</span>
+                      <b className={crossFloorCount > 0 ? 'device-planning__val--warn' : ''}>{crossFloorCount} 對{crossFloorCount > 0 && strongestCrossDbm != null ? `（最強 ${strongestCrossDbm.toFixed(1)} dBm）` : ''}</b>
+                    </div>
+                  )}
                   <div className="device-planning__row" title="訊號門檻——RSSI 高於此值才算已涵蓋">
                     <span>訊號門檻</span>
                     <NumberInput

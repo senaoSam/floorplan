@@ -33,7 +33,13 @@ export function storeChannelNeighbors(floorId, aps) {
 // channels the way a placed AP's radios do (greedy assignment, neighbours from
 // the stores), with every radio that already existed held at its channel.
 // `next` = the floor's AP list after the change, `prev` = before it.
+//
+// No scale → no distances: the 300 canvas-px fallback put every AP of a large
+// unscaled image out of range, so every new radio landed on the band's lowest
+// channel anyway, silently. Leave the radios at their defaults instead; the
+// auto-channel button (disabled until there is a scale) plans them later.
 export function assignNewRadioChannels(floorId, next, prev, domainId) {
+  if (!useFloorStore.getState().floors.find((f) => f.id === floorId)?.scale) return next
   const prevKeys = new Set(allRadioKeys(prev))
   const fixed = new Map()
   let added = false
