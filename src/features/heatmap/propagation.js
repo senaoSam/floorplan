@@ -21,7 +21,7 @@
 //     band + overlapping frequency range).
 
 import {
-  AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, DEFAULT_RF, indoorLossPerMeter,
+  AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, DEFAULT_RF, indoorLossPerMeter, MULTIPATH_MAX_M,
 } from './rfConstants.js'
 import {
   sub, dot, len, dist, norm, segSegIntersect,
@@ -416,6 +416,10 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
   const maxReflOrder = opts.maxReflOrder ?? 1
   const enableDiffraction = opts.enableDiffraction ?? true
   const boundaries = opts.floorBoundaries ?? null
+  // 59-3: longest reflected / diffracted path (horizontal metres, AP → bounce
+  // point → rx) that is summed. Mirrored in propagationGL.js (uMultipathMaxM).
+  // Infinity turns the limit off.
+  const multipathMaxM = opts.multipathMaxM ?? MULTIPATH_MAX_M
 
   const freqMhz = ap.centerMHz || 5190
   const wavelength = C / (freqMhz * 1e6)
@@ -461,6 +465,8 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
     for (const w of walls) {
       const hasZ = w.zLoM != null && w.zHiM != null
       if (hasZ && (w.zHiM < zSpanLo || w.zLoM > zSpanHi)) continue
+      // 59-3: the path is at least as long as the AP's distance to the wall.
+      if (pointSegDistance(ap.pos, w.a, w.b).d > multipathMaxM) continue
       const apImage = mirrorPoint(ap.pos, w.a, w.b)
       const hit = segSegIntersect(apImage, rx, w.a, w.b)
       if (!hit) continue
@@ -484,6 +490,7 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
       // straight line, so interpolate by its fraction of total path length.
       const d1 = dist(ap.pos, reflPt)
       const d2 = dist(reflPt, rx)
+      if (d1 + d2 > multipathMaxM) continue   // 59-3
       const reflZM = apZM + (rxZM - apZM) * (d1 / Math.max(d1 + d2, 1e-9))
       if (hasZ && (reflZM < w.zLoM || reflZM > w.zHiM)) continue
       const leg1 = accumulateWallLoss(ap.pos, reflPt, walls, apZM, reflZM, fOver24, w)
@@ -505,6 +512,7 @@ export function rssiFromAp(ap, rx, walls, corners, opts = {}) {
     for (const c of corners) {
       const d1 = dist(ap.pos, c)
       const d2 = dist(c, rx)
+      if (d1 + d2 > multipathMaxM) continue   // 59-3
       const cZM = apZM + (rxZM - apZM) * (d1 / Math.max(d1 + d2, 1e-9))
       // 57-40: only where the corner's walls exist (other floors' corners
       // never diffract here). 57-19: there must be an open side to bend

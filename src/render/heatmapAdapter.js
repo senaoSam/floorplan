@@ -188,7 +188,11 @@ const WOBBLE_OCTAVES = [
   { lambdaM:  1.8, weight: 0.05, du: -3.05, dv: -2.35 },
 ]
 const WOBBLE_DECAY_MS = 900    // amplitude ramp-down once the final field is in
-const WOBBLE_HOLD_MAX_MS = 4000 // safety cap if the fine stage never lands
+// Safety cap if the fine stage never lands. 59-4: past the fine budget (plus
+// the direct-only fallback after it) -- at 4 s the ripple stopped while a
+// 6 s fine pass was still running, so the plan read as finished and then
+// changed under the user.
+const WOBBLE_HOLD_MAX_MS = FINE_BUDGET_MS + 3000
 // 57-35: ripple frames render at this fraction of the output resolution.
 const RIPPLE_LOD_SCALE = 0.5
 
@@ -334,6 +338,14 @@ export function attachHeatmapLayer({
   // settings change retries full quality. Drag and fine renders keep separate
   // tiers (different grids, different budgets).
   let fineTierMemo = null     // { sig, tier }
+  // 59-4: the rate (ms per radio × wall × grid cell) of the last full pass
+  // that ran over budget, per floor + settings. A wall edit resets
+  // fineTierMemo, so a floor whose full pass can't fit re-paid the whole
+  // attempt (~5 s on a 100-AP floor) before falling to direct on every edit.
+  // With a rate on hand, a full pass predicted over budget is skipped; fewer
+  // APs or a smaller grid bring it back under. Measured on the user's own
+  // GPU, so a faster one still gets full quality.
+  const fullRateMemo = new Map()  // key -> msPerUnit
   let dragTierMemo = null
   const tierSceneSig = (floorId, hm) => ({
     floorId,
@@ -1276,18 +1288,53 @@ export function attachHeatmapLayer({
       if (!fineTierMemo || !sameTierScene(fineTierMemo.sig, sig)) fineTierMemo = { sig, tier: 0 }
       const budgetStart = performance.now()
       let tier = Math.min(fineTierMemo.tier, tiers.length - 1)
+      // 59-4: skip a full pass the measured rate says can't fit (fullRateMemo).
+      const rateKey = `${ctxBase.floorId}|${hm.reflections ? 1 : 0}|${hm.diffraction ? 1 : 0}|${hm.gridStepM}`
+      // Reflection cost per cell tracks the walls near each AP; on one floor
+      // that scales with the wall count.
+      const units = scenario.aps.length * Math.max(1, scenario.walls.length) *
+        (Math.ceil(scenario.size.w / hm.gridStepM) + 1) * (Math.ceil(scenario.size.h / hm.gridStepM) + 1)
+      const knownRate = fullRateMemo.get(rateKey)
+      // 1.5×: a floor that only just missed once (a 40-AP floor under GPU
+      // load) must not be locked out -- a skipped pass never re-measures.
+      if (tier === 0 && tiers.length > 1 && knownRate != null && knownRate * units > 1.5 * FINE_BUDGET_MS) {
+        tier = tiers.length - 1
+      }
       let fine = null
       for (;;) {
         const last = tier === tiers.length - 1
+        // 59-4: the projection is trusted from 50% done, not after one AP: on
+        // the UHD 770 the first APs run up to ~2× slower than the rest (GPU
+        // clocking up, first bakes), so a floor that fits projected past the
+        // budget at 1% and was dropped to direct; at 25% a 40-AP floor that
+        // finishes in ~2.3 s still got dropped 3 times in 10. Before 50% only
+        // a clearly hopeless pass (3× over) is cut.
         const budget = last ? null : makeTimeBudget(FINE_BUDGET_MS, {
-          startMs: budgetStart, settleFrac: 1 / Math.max(1, scenario.aps.length),
+          startMs: budgetStart, settleFrac: Math.max(1 / Math.max(1, scenario.aps.length), 0.5),
         })
-        const opts = budget ? { ...tiers[tier].opts, onProgress: budget.onProgress } : tiers[tier].opts
+        let frac = 0
+        const onProgress = budget && ((f) => { frac = f; budget.onProgress(f) })
+        const opts = budget ? { ...tiers[tier].opts, onProgress } : tiers[tier].opts
+        const tierStart = performance.now()
         fine = await stage(hm.gridStepM, opts, scenario, budget ? budget.exceeded : null)
         if (isStale()) return
+        // Only an over-budget full pass leaves a rate: a completed one may be
+        // a small floor whose time is mostly first-run shader compiles, and
+        // that rate made a 40-AP floor skip a full pass it fits in ~2 s.
+        if (tiers[tier].level === QUALITY.FULL) {
+          if (fine !== null) fullRateMemo.delete(rateKey)
+          else if (budget?.exceeded() && frac > 0.02 && units > 0) {
+            fullRateMemo.set(rateKey, (performance.now() - tierStart) / (frac * units))
+          }
+        }
         if (fine !== null) break
         if (!budget || !budget.exceeded()) return
         tier++
+        // 59-4: a full pass that didn't fit goes straight to direct.
+        // Dropping diffraction saves only ~7-9% (UHD 770: 40 APs 1.82 → 1.70 s,
+        // 100 APs 8.2 → 7.5 s), so that tier doesn't fit either and only
+        // delayed the direct result.
+        if (tiers[tier - 1].level === QUALITY.FULL && tiers[tier].level === QUALITY.NO_DIFFRACTION) tier++
       }
       fineTierMemo.tier = tier
       present(fine, false)

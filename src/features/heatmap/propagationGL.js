@@ -31,6 +31,7 @@
 //     shader, so they no longer trigger the old whole-grid host fallback.
 
 import { buildPatternTextureData, getPatternSlot } from '@/constants/antennaPatterns'
+import { MULTIPATH_MAX_M } from './rfConstants'
 
 const VS = `#version 300 es
 in vec2 aPos;
@@ -156,6 +157,12 @@ uniform int uLosFastMode;
 // renderAp binds it from opts.cullFloorDbm (defaults to -120 dBm).
 uniform float uCullFloorDbm;
 
+// 59-3: longest reflected / diffracted path (horizontal metres, AP → bounce
+// point → rx) that is summed; longer ones are skipped before their wall
+// scans. Mirrors opts.multipathMaxM in propagation.js (default
+// MULTIPATH_MAX_M); 1e9 = no limit.
+uniform float uMultipathMaxM;
+
 // HM-F5k: per-AP precomputed corner / wall geometry, baked once when AP or
 // walls change and reused across every fragment.
 //   uApCornersGeo (RGBA32F, N_corners packed 4096 wide): per corner
@@ -177,9 +184,15 @@ uniform float uCullFloorDbm;
 //   uApGeoEnabled = 0  → host did not bake (refl/diff path stays on
 //                        per-fragment compute, identical to pre-F5k).
 //                 = 1  → both textures populated for the current AP.
+//   59-3: both textures are LISTS of only the walls / corners within
+//   uMultipathMaxM of the AP, in index order -- uApReflCount /
+//   uApDiffCount texels; the wall index rides in uApWallMirror .b and the
+//   corner index in uApCornersGeo .a.
 uniform sampler2D uApCornersGeo;
 uniform sampler2D uApWallMirror;
 uniform int uApGeoEnabled;
+uniform int uApReflCount;
+uniform int uApDiffCount;
 
 const float PI = 3.14159265358979;
 // Catalog pattern sampling geometry — mirrors PATTERN_SAMPLES / STEP_DEG in
@@ -885,6 +898,14 @@ float accumulateWallLossExcept(vec2 ap, float apZ, vec2 rx, float rxZ, int exclu
   return accumulateWallLossExceptGrid(ap, apZ, rx, rxZ, excludeW);
 }
 
+// Distance from p to segment (a, b). Mirrors JS pointSegDistance.
+float pointSegDist(vec2 p, vec2 a, vec2 b) {
+  vec2 ab = b - a;
+  float l2 = dot(ab, ab);
+  float t = l2 > 0.0 ? clamp(dot(p - a, ab) / l2, 0.0, 1.0) : 0.0;
+  return length(p - (a + ab * t));
+}
+
 // Mirror point p across the infinite line through (a, b). Mirrors JS
 // mirrorPoint exactly: n = unit segment normal, then p - 2*(p-a)·n * n.
 vec2 mirrorPoint(vec2 p, vec2 a, vec2 b) {
@@ -1160,11 +1181,24 @@ float rssiWithReflections(vec2 rx, float rxZ) {
     // (Walls without Z data upload ±1e6, so they always pass.)
     float zSpanLo = min(uApPos.z, rxZ);
     float zSpanHi = max(uApPos.z, rxZ);
-    for (int w = 0; w < uWallCount; w++) {
+    // 59-3: baked → walk the AP's near-wall list (the bake already applied
+    // the distance test, in float64 like propagation.js); unbaked → every
+    // wall, distance-tested here.
+    int reflN = uApGeoEnabled == 1 ? uApReflCount : uWallCount;
+    for (int k = 0; k < reflN; k++) {
+      int w = k;
+      vec2 apImgBaked = vec2(0.0);
+      if (uApGeoEnabled == 1) {
+        vec4 m = texelFetch(uApWallMirror, ivec2(k % 4096, k / 4096), 0);
+        w = int(m.b + 0.5);
+        apImgBaked = m.xy;
+      }
       vec2 wa, wb;
       float wLossDb, wLossB, wZLo, wZHi;
       readWall(w, wa, wb, wLossDb, wLossB, wZLo, wZHi);
       if (wZHi < zSpanLo || wZLo > zSpanHi) continue;
+      // 59-3: the path is at least as long as the AP's distance to the wall.
+      if (uApGeoEnabled == 0 && pointSegDist(uApPos.xy, wa, wb) > uMultipathMaxM) continue;
       vec4 itu;
       float roughM;
       bool isMetal;
@@ -1175,9 +1209,7 @@ float rssiWithReflections(vec2 rx, float rxZ) {
       // 1 sub + 1 normalize + 1 dot + 1 sub-mul-mul out of the per-fragment
       // loop. Geometry is identical to JS — same n = unit segment normal,
       // same p - 2(p-a)·n·n.
-      vec2 apImg = uApGeoEnabled == 1
-        ? texelFetch(uApWallMirror, ivec2(w % 4096, w / 4096), 0).xy
-        : mirrorPoint(uApPos.xy, wa, wb);
+      vec2 apImg = uApGeoEnabled == 1 ? apImgBaked : mirrorPoint(uApPos.xy, wa, wb);
       vec3 hit = segSegHit(apImg, rx, wa, wb);
       if (hit.z < 0.5) continue;
       vec2 reflPt = hit.xy;
@@ -1210,6 +1242,7 @@ float rssiWithReflections(vec2 rx, float rxZ) {
       float d1 = length(reflPt - uApPos.xy);
       float d2 = length(rx - reflPt);
       float dTot = d1 + d2;
+      if (dTot > uMultipathMaxM) continue;   // 59-3
       float reflZ = uApPos.z + (rxZ - uApPos.z) * (d1 / max(dTot, 1e-9));
       if (reflZ < wZLo || reflZ > wZHi) continue;
 
@@ -1235,30 +1268,34 @@ float rssiWithReflections(vec2 rx, float rxZ) {
   // matching makeScalarPath in propagation.js.
   if (uDiffEnabled == 1 && dirHits > 0.0 && sameFloor && !cullByFloor) {
     float wavelengthM = C_LIGHT / f;
-    for (int ci = 0; ci < uCornerCount; ci++) {
+    // 59-3: baked → the AP's near-corner list; unbaked → every corner.
+    int diffN = uApGeoEnabled == 1 ? uApDiffCount : uCornerCount;
+    for (int k = 0; k < diffN; k++) {
+      // HM-F5k: pull AP→corner geometry from the precomputed texture when
+      // baked. d1 is exact (deterministic per (AP, corner)); geomLos==1
+      // means zero walls cross AP→corner geometrically, so the s1 DDA is
+      // guaranteed empty and we can skip it (mirror semantics of HM-F5j's
+      // direct-path LOS short-circuit).
+      int ci = k;
+      float d1 = 0.0;
+      bool s1Skip = false;
+      if (uApGeoEnabled == 1) {
+        vec4 g = texelFetch(uApCornersGeo, ivec2(k % 4096, k / 4096), 0);
+        if (g.b > 0.5) continue;   // 57-39: s1 would cull it on every fragment
+        ci = int(g.a + 0.5);
+        d1 = g.r;
+        s1Skip = g.g > 0.5;
+      }
       // 57-19 / 57-40: two texels per corner -- (x, y, zLo, zHi) and up to
       // four solid-wall directions (> 90 = unused; zLo > zHi = blocked).
       int tc = ci * 2;
       vec4 cGeo  = texelFetch(uCorners, ivec2(tc % 4096, tc / 4096), 0);
       vec4 cDirs = texelFetch(uCorners, ivec2((tc + 1) % 4096, (tc + 1) / 4096), 0);
       vec2 corner = cGeo.xy;
-      // HM-F5k: pull AP→corner geometry from the precomputed texture when
-      // baked. d1 is exact (deterministic per (AP, corner)); geomLos==1
-      // means zero walls cross AP→corner geometrically, so the s1 DDA is
-      // guaranteed empty and we can skip it (mirror semantics of HM-F5j's
-      // direct-path LOS short-circuit).
-      float d1;
-      bool s1Skip = false;
-      if (uApGeoEnabled == 1) {
-        vec4 g = texelFetch(uApCornersGeo, ivec2(ci % 4096, ci / 4096), 0);
-        if (g.b > 0.5) continue;   // 57-39: s1 would cull it on every fragment
-        d1 = g.r;
-        s1Skip = g.g > 0.5;
-      } else {
-        d1 = length(corner - uApPos.xy);
-      }
+      if (uApGeoEnabled == 0) d1 = length(corner - uApPos.xy);
       float d2 = length(rx - corner);
       float dTotC = d1 + d2;
+      if (dTotC > uMultipathMaxM) continue;   // 59-3
       float cZM = uApPos.z + (rxZ - uApPos.z) * (d1 / max(dTotC, 1e-9));
       // HM-F5f: hoist the geometric diffraction cull above the per-leg wall
       // scans. cornerDiffractionDb is pure 2D geometry (no DDA), so when the
@@ -3083,8 +3120,8 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     entry.lastBake = losBakeCounter
     return entry
   }
-  function bakeApGeoFor(ap, key, rxZM, withCorners = true) {
-    return bakeApGeoOne(ap, key, rxZM, withCorners)
+  function bakeApGeoFor(ap, key, rxZM, withCorners = true, maxPathM = MULTIPATH_MAX_M) {
+    return bakeApGeoOne(ap, key, rxZM, withCorners, maxPathM)
   }
   // `_idx_*` fallback keys aren't stable ids, so they're left alone (as in
   // pruneCachedGrids).
@@ -3157,7 +3194,16 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     return [los, certain >= 2]
   }
 
-  function bakeApGeoOne(ap, apKey, rxZM = 0, withCorners = true) {
+  // 59-3: distance from (px, py) to a bake wall. Mirrors the shader's
+  // pointSegDist.
+  function bakeWallDist(px, py, w) {
+    const abx = w.bx - w.ax, aby = w.by - w.ay
+    const l2 = abx * abx + aby * aby
+    const t = l2 > 0 ? Math.max(0, Math.min(1, ((px - w.ax) * abx + (py - w.ay) * aby) / l2)) : 0
+    return Math.hypot(px - (w.ax + abx * t), py - (w.ay + aby * t))
+  }
+
+  function bakeApGeoOne(ap, apKey, rxZM = 0, withCorners = true, maxPathM = MULTIPATH_MAX_M) {
     // Hash combines per-AP geometry (pos) with the wall topology version.
     // Antenna gain, frequency, channel — none affect mirrorPoint or the
     // geometric LOS test, so they don't bust the cache. AP / rx height feed
@@ -3167,7 +3213,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     // plan -- since only the diffraction loop reads it.
     const apX = ap.pos.x, apY = ap.pos.y
     const apZ = ap.zM ?? 0
-    const hash = `${apX},${apY},${apZ},${rxZM},${wallsVersion},${bakeCorners.length},${bakeWalls.length}`
+    const hash = `${apX},${apY},${apZ},${rxZM},${wallsVersion},${bakeCorners.length},${bakeWalls.length},${maxPathM}`
     const cached = apGeoCache.get(apKey)
     if (cached && cached.hash === hash && (cached.withCorners || !withCorners)) return cached
 
@@ -3194,7 +3240,21 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       apGeoCache.set(apKey, entry)
     }
 
+    // 59-3: only walls within maxPathM of the AP can reflect a path that
+    // short, and only they can cross an AP→corner leg of that length -- so
+    // both passes below work on this subset, in wall-index order. The
+    // shader loops over these lists instead of every wall / corner: on a
+    // 2422-segment floor that loop, not the paths, was ~87% of the cost.
+    const nearIdx = []
+    for (let i = 0; i < bakeWalls.length; i++) {
+      if (bakeWallDist(apX, apY, bakeWalls[i]) <= maxPathM) nearIdx.push(i)
+    }
+    const nearWalls = nearIdx.map((i) => bakeWalls[i])
+
     // ---- corners pass ----
+    // One texel per corner within maxPathM, in corner-index order; .a holds
+    // the corner index.
+    let diffCount = 0
     if (withCorners) {
       const nC = Math.max(1, bakeCorners.length)
       const cW = Math.min(nC, 4096), cH = Math.ceil(nC / 4096)
@@ -3204,10 +3264,14 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
         const c = bakeCorners[i]
         const dx = c.x - apX, dy = c.y - apY
         const d1 = Math.sqrt(dx * dx + dy * dy)
-        const [los, blocked] = scanApCornerLeg(apX, apY, c.x, c.y, bakeWalls, zSpanLo, zSpanHi)
-        cData[i * 4    ] = d1
-        cData[i * 4 + 1] = los ? 1.0 : 0.0
-        cData[i * 4 + 2] = blocked ? 1.0 : 0.0
+        if (d1 > maxPathM) continue
+        const [los, blocked] = scanApCornerLeg(apX, apY, c.x, c.y, nearWalls, zSpanLo, zSpanHi)
+        const o = diffCount * 4
+        cData[o    ] = d1
+        cData[o + 1] = los ? 1.0 : 0.0
+        cData[o + 2] = blocked ? 1.0 : 0.0
+        cData[o + 3] = i
+        diffCount++
       }
       gl.bindTexture(gl.TEXTURE_2D, entry.cornersTex)
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, cW, cH, 0, gl.RGBA, gl.FLOAT, cData)
@@ -3215,18 +3279,21 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     entry.withCorners = withCorners
 
     // ---- wall-mirror pass ----
+    // One texel per wall within maxPathM, in wall-index order; .b holds the
+    // wall index.
     const nW = Math.max(1, bakeWalls.length)
     const mW = Math.min(nW, 4096), mH = Math.ceil(nW / 4096)
     const mData = new Float32Array(mW * mH * 4)
-    for (let i = 0; i < bakeWalls.length; i++) {
-      const w = bakeWalls[i]
+    for (let n = 0; n < nearIdx.length; n++) {
+      const w = nearWalls[n]
       // mirrorPoint(AP, w.a, w.b): n = unit segment normal; apImg = AP - 2((AP-w.a)·n)·n
       const tx = w.bx - w.ax, ty = w.by - w.ay
       const tlen = Math.hypot(tx, ty) || 1
       const nx = -ty / tlen, ny = tx / tlen
       const k = (apX - w.ax) * nx + (apY - w.ay) * ny
-      mData[i * 4    ] = apX - 2 * k * nx
-      mData[i * 4 + 1] = apY - 2 * k * ny
+      mData[n * 4    ] = apX - 2 * k * nx
+      mData[n * 4 + 1] = apY - 2 * k * ny
+      mData[n * 4 + 2] = nearIdx[n]
     }
     gl.bindTexture(gl.TEXTURE_2D, entry.mirrorTex)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, mW, mH, 0, gl.RGBA, gl.FLOAT, mData)
@@ -3234,6 +3301,8 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     entry.hash = hash
     entry.cornerCount = bakeCorners.length
     entry.wallCount = bakeWalls.length
+    entry.reflCount = nearIdx.length
+    entry.diffCount = diffCount
     return entry
   }
 
@@ -3241,12 +3310,12 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // Mirrors bakeLos's lifetime semantics — caller passes a stable per-AP
   // key, stale entries are evicted, returned Map gives renderAp the texture
   // handles via opts.apGeoEntry.
-  function bakeApGeo(apEntries, rxZM, withCorners = true) {
+  function bakeApGeo(apEntries, rxZM, withCorners = true, maxPathM = MULTIPATH_MAX_M) {
     const seen = new Set()
     const out = new Map()
     for (const { ap, key } of apEntries) {
       seen.add(key)
-      out.set(key, bakeApGeoOne(ap, key, rxZM, withCorners))
+      out.set(key, bakeApGeoOne(ap, key, rxZM, withCorners, maxPathM))
     }
     for (const k of [...apGeoCache.keys()]) {
       if (!seen.has(k)) {
@@ -3289,8 +3358,12 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     else gl.deleteBuffer(pbo.buf)
   }
   // Resolves when every command issued before the fence has executed. Polls
-  // at ~8 ms so waiting never blocks; timeout guards against a wedged
+  // on a short timer so waiting never blocks; timeout guards against a wedged
   // context (TDR) that would otherwise leave the caller pending forever.
+  // 59-1: was 8 ms — every tiled draw paid up to that on top of its GPU time
+  // (UHD 770: ~17 ms per tile round trip), and small drag tiles spent most of
+  // their wall time waiting. Chained timeouts clamp to ~4 ms after 5 levels.
+  const FENCE_POLL_MS = 1
   function waitFence(sync, timeoutMs = 10000) {
     return new Promise((resolve, reject) => {
       const t0 = performance.now()
@@ -3316,7 +3389,7 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
           reject(new Error('fence wait timed out'))
           return
         }
-        setTimeout(poll, 8)
+        setTimeout(poll, FENCE_POLL_MS)
       }
       poll()
     })
@@ -3437,6 +3510,8 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     // HM-F5l: same cull floor the aggregated path uses. Default -120 dBm
     // matches JS aggregateApContributions's "below this is no signal".
     gl.uniform1f(gl.getUniformLocation(prog, 'uCullFloorDbm'), opts.cullFloorDbm ?? -120)
+    // 59-3: Infinity (limit off) clamps to a finite float uniform.
+    gl.uniform1f(gl.getUniformLocation(prog, 'uMultipathMaxM'), Math.min(opts.multipathMaxM ?? MULTIPATH_MAX_M, 1e9))
 
     // HM-F5c step 3: knife-edge diffraction toggle + corners texture.
     gl.uniform1i(gl.getUniformLocation(prog, 'uDiffEnabled'),
@@ -3467,6 +3542,8 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, apGeoEntry?.mirrorTex || apGeoPlaceholderTex)
     gl.uniform1i(gl.getUniformLocation(prog, 'uApWallMirror'), 8)
     gl.uniform1i(gl.getUniformLocation(prog, 'uApGeoEnabled'), apGeoEntry ? 1 : 0)
+    gl.uniform1i(gl.getUniformLocation(prog, 'uApReflCount'), apGeoEntry?.reflCount ?? 0)
+    gl.uniform1i(gl.getUniformLocation(prog, 'uApDiffCount'), apGeoEntry?.withCorners ? apGeoEntry.diffCount : 0)
 
     gl.activeTexture(gl.TEXTURE9)
     gl.bindTexture(gl.TEXTURE_2D, patternsTex)
@@ -3529,15 +3606,26 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
   // fragments run; each fragment sees the same program, uniforms and inputs.
   // Small scenes stay on the single-draw path (TILE_GEOM_MIN), untouched.
   const TILE_GEOM_MIN = 600
-  // 200 ms keeps ~10× headroom under the ~2 s watchdog while making the
-  // ramp-up short; growth is capped at ×8 per tile.
-  // 57-39: smaller tiles would let PIXI frames (same GPU) in sooner, but a
-  // heavy refl/diff fragment costs ms, so a small tile can't fill the GPU:
-  // on the UHD 770 baseline 50 / 100 ms tiles took > 35 s where 200 ms took
-  // 5–13 s. The heatmap time budget (heatmapAdapter) bounds the stutter.
-  const TILE_TARGET_MS = 200
+  // Growth is capped at ×8 per tile.
+  // 59-4: 24 ms, was 200. PIXI shares the GPU, so each tile delays its frames
+  // by up to this much: on the UHD 770, during a 100-AP floor's full pass the
+  // plan view's frames waited 158-191 ms on the GPU at 200 ms tiles, and
+  // 21 ms (p95) at 24 ms.
+  // The 57-39 finding that 50 / 100 ms tiles took > 35 s came from the
+  // per-tile fence wait being counted as GPU work (fixed in 59-1), not from
+  // tile size itself.
+  const TILE_TARGET_MS = 24
+  // ...but never fewer fragments than this: a tile too small to fill the GPU
+  // runs its heavy fragments nearly serially (~6 ms per 301-cell row of a
+  // 100-AP pass in 4-row slices, ~2.5 ms in 40-row ones).
+  const MIN_SLICE_FRAGS = 8192
   const TILE_START_FRAGS = 4
   let tileHint = null // { key, msPerFrag }
+  // 59-1: fixed per-tile cost (flush + fence round trip), as the smallest
+  // tile time seen. The rate below excludes it: counted in, it made a small
+  // target keep its tiles small (33 ms drag tiles ran ~20× slower than one
+  // draw) and an 8–16 ms target shrank tiles to a single cell.
+  let tileFloorMs = Infinity
   function apDrawNeedsTiling(scenario, opts = {}) {
     const refl = opts.maxReflOrder && opts.maxReflOrder > 0
     const geom = (refl ? scenario.walls.length : 0) + (opts.enableDiffraction ? cornerCount : 0)
@@ -3593,9 +3681,17 @@ export function createPropagationGL({ gl: injectedGl } = {}) {
       // Rows are contiguous in `out` (full-width tiles or a single row run).
       readPboInto(pbo, out.subarray(y0 * nx + x0, y0 * nx + x0 + w * h))
       const done = w * h
-      const msPerFrag = dt / done
+      tileFloorMs = Math.min(tileFloorMs, dt)
+      // ≥ 1 ms: a tile timed at the floor would otherwise read as free and
+      // size the next one (or the next AP's first, via tileHint) unbounded.
+      const msPerFrag = Math.max(dt - tileFloorMs, 1) / done
       tileHint = { key: hintKey, msPerFrag }
-      frags = Math.min(done * 8, Math.floor(targetMs / msPerFrag))
+      // 59-4: at least MIN_SLICE_FRAGS once the ramp gets there (still ×8 per
+      // tile), unless that many would hold the GPU past ~0.4 s. Not for drag
+      // frames (their own tileTargetMs): a bigger tile there pushed a 15-AP
+      // floor's frames past the 33 ms budget and dropped the drag to direct.
+      const minFrags = opts.tileTargetMs == null && MIN_SLICE_FRAGS * msPerFrag < 400 ? MIN_SLICE_FRAGS : 1
+      frags = Math.min(done * 8, Math.max(minFrags, Math.floor(targetMs / msPerFrag)))
       x0 += w
       if (h > 1 || x0 >= nx) { y0 += h; x0 = 0 }
       opts.onTileProgress?.((y0 * nx + x0) / (nx * ny))   // 57-39: time budget

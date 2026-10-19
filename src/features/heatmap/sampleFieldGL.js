@@ -24,7 +24,7 @@ import { aggregateApContributions, makeApAggregator, aggregateWithTables } from 
 import { fitGridStep } from './sampleField'
 import { createPropagationGL } from './propagationGL'
 import {
-  AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, DEFAULT_RF,
+  AP_ANT_GAIN_DBI, RX_ANT_GAIN_DBI, DEFAULT_RF, MULTIPATH_MAX_M,
 } from './rfConstants.js'
 
 const CCI_MIN_DBM = -120
@@ -96,6 +96,7 @@ function buildGeomSig(gl, scenario, boundaries, opts, {
     opts.maxReflOrder ?? 0,
     opts.enableDiffraction ? 1 : 0,
     opts.cullFloorDbm ?? '',
+    opts.multipathMaxM ?? '',   // 59-3
     opts.losFastMode ? 1 : 0,
     // 53-G2 (23c): the three debug flags below exist SO THAT the JS/GL parity
     // harness can disable an acceleration and compare against the unaccelerated
@@ -200,7 +201,8 @@ export function sampleFieldGL(scenario, gridStepM = 0.5, opts = {}) {
   // callers turn this off (debug parity check vs unbaked path).
   const apGeoEnabled = opts.apGeoEnabled !== false
   const apGeoMap = apGeoEnabled
-    ? gl.bakeApGeo(scenario.aps.map((ap, i) => ({ ap, key: ap.deviceId ?? ap.id ?? `_idx_${i}` })), rxZM, !!opts.enableDiffraction)
+    ? gl.bakeApGeo(scenario.aps.map((ap, i) => ({ ap, key: ap.deviceId ?? ap.id ?? `_idx_${i}` })), rxZM, !!opts.enableDiffraction,
+      opts.multipathMaxM ?? MULTIPATH_MAX_M)
     : null
 
   // 任務 2 (C): per-AP output-grid cache. The cache container + invalidation
@@ -486,7 +488,9 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
     const losEntry = losEnabled
       ? gl.bakeLosFor(ap, bakeKey, gridStepM, { x: originX, y: originY }, rxZM, nx, ny, scenario.walls.length)
       : null
-    const apGeoEntry = apGeoEnabled ? gl.bakeApGeoFor(ap, bakeKey, rxZM, !!opts.enableDiffraction) : null
+    const apGeoEntry = apGeoEnabled
+      ? gl.bakeApGeoFor(ap, bakeKey, rxZM, !!opts.enableDiffraction, opts.multipathMaxM ?? MULTIPATH_MAX_M)
+      : null
     const apOpts = {
       ...opts,
       gridSize: { nx, ny },

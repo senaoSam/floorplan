@@ -42,6 +42,10 @@ export function shouldSimplifyScene(scenario, isSoftwareRender) {
 // 1 AP: reflections 30 ms, diffraction 8.5 s on the UHD 770 baseline).
 //   fine (idle) render: 5 s, projected from progress and checked as it runs
 //   drag render: 33 ms per frame
+// 59-4: 10 s was tried and dropped. With the fine pass in small GPU slices
+// (smooth panning) a 100-AP / 2400-segment floor needs ~8 s, ~10 s under
+// panning -- it then hit the cap and fell to direct only after the whole
+// wait, instead of ~2 s. Up to ~40 APs / 1000 segments fits in 5 s.
 export const FINE_BUDGET_MS = 5000
 export const DRAG_BUDGET_MS = 33
 // Projecting from less than this much work is too noisy (per-AP cost varies

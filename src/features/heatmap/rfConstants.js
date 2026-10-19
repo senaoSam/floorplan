@@ -15,6 +15,17 @@ export const DEFAULT_RF = {
   minInterfDbm: DEFAULT_MIN_INTERFERING_RSSI_DBM,
 }
 
+// 59-3: reflected / diffracted paths longer than this (horizontal metres,
+// AP → bounce point → rx) are not summed; the direct path is never cut. Each
+// such path skips its two wall scans, the bulk of refl/diff cost. Measured
+// 2026-10-16 on the UHD 770 against the uncut field, 2.4 and 5 GHz, offices
+// of 15 / 40 / 4 APs and a 60-AP warehouse: 0% of grid points change RSSI
+// band and ≤ 0.05% change SINR band (cells already below -100 dBm on the
+// warehouse's outer wall line); a 40-AP / 997-segment floor 8.8 s → 1.8 s.
+// 30 m was not enough: SINR bands moved on small floors, since interference
+// sums other APs' far paths.
+export const MULTIPATH_MAX_M = 40
+
 // Indoor distance loss (dB per meter), layered on top of free-space Friis.
 // Pure Friis ≈ log-distance with n=2 — too optimistic for indoor (signal
 // carries too far). A small per-meter term lifts the effective path-loss
