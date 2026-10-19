@@ -116,7 +116,10 @@ export const DEFAULT_FLOOR_SLAB_DB = FLOOR_SLAB_DEFAULT_DB[DEFAULT_FLOOR_SLAB_MA
 // depth. 0.1 is the value 3D had hardcoded before walls carried the field.
 export const DEFAULT_WALL_THICKNESS_M = 0.1
 export const MIN_WALL_THICKNESS_M = 0.01
-export const MAX_WALL_THICKNESS_M = 2
+// 40 cm covers shear walls and lift shafts (2 m was arbitrary). A thicker
+// band also widens the corner gap the round caps leave -- half the
+// thickness, where a ray crosses no wall (task.md 牆體厚度).
+export const MAX_WALL_THICKNESS_M = 0.4
 
 // The UI edits thickness in centimetres — a wall is 10 or 30 cm, never 0.1 or
 // 0.3 of anything, and metres force a decimal point onto every entry. Storage
