@@ -634,7 +634,11 @@ export async function runAutoPlacePlan({
   // Channels stay on the design channel here, like every candidate: the
   // channels' own loss is judged once, on the final plan below -- else a
   // re-run of an applied plan would add devices the first run did not.
-  if (matchedApIds.size > 0) {
+  // Repeats while the top-up maps positions onto more existing devices: those
+  // are re-counted as configured too.
+  let recount = matchedApIds.size > 0
+  while (recount) {
+    recount = false
     const designCh = allowedChannels(opts.domainId, band)[0]
     covered.set(coveredByDevices(deriveStaying().stayingDevices.map((a) => (matchedApIds.has(a.id)
       ? { ...a, radios: patchRadio(a, band, { channel: designCh }) }
@@ -688,9 +692,11 @@ export async function runAutoPlacePlan({
       }
       if (stopReason === null) stopReason = 'max-aps'
       // Added positions on top of an existing device keep it in place (fresh:
-      // not "remove + new at the same spot"; fill: its radio switched on).
-      // They stay scored as design candidates -- no second re-count.
+      // not "remove + new at the same spot"; fill: its radio switched on),
+      // and send the loop round to re-count it as configured.
+      const matchedBefore = matchedApIds.size
       matchKept(chosen.slice(prevLen))
+      recount = matchedApIds.size > matchedBefore
     }
   }
   const { removedIds, enableApIds, enableSet, stayingDevices } = deriveStaying()
@@ -731,7 +737,11 @@ export async function runAutoPlacePlan({
   // 58-16 (C1): other floors' radios in that scenario are fixed neighbours
   // (same as storeChannelNeighbors) -- avoided, never reassigned.
   const poolScenario = buildFor(channelPool, null)
-  const assigned = greedyChannelAssign(expandRadios(channelPool), opts.domainId,
+  // A re-enabled radio joins with no channel: the planner prefers a radio's
+  // current channel, and this one's is only the one it kept while off.
+  const planRadios = expandRadios(channelPool).map((r) => (
+    enableSet.has(r.deviceId) && r.frequency === band ? { ...r, channel: null } : r))
+  const assigned = greedyChannelAssign(planRadios, opts.domainId,
     poolScenario ? makeApHearingFn(poolScenario, { crossFloorFixed: true }) : 300, fixedChannels.size ? fixedChannels : null)
   proposed = applyRadioResults(proposed, assigned, (a) => ({ channel: a.channel }))
   // 58-15: the channel each re-enabled radio gets (apply / preview write it).

@@ -332,6 +332,9 @@ function AutoPlaceModal({ open, onClose }) {
     }
   }, [previewBand])
   const dismiss = useOverlayDismiss(running || previewing ? null : onClose)
+  // 58-15 (E4): the plan's coverage is direct path only; the heatmap may add
+  // reflected / diffracted power.
+  const heatmapMultipath = useHeatmapStore((s) => s.reflections || s.diffraction)
 
   if (!open) return null
 
@@ -532,7 +535,7 @@ function AutoPlaceModal({ open, onClose }) {
               <div className="auto-place-modal__progress-row">
                 <span>預估{stats.indoorApplied ? '室內' : ''}覆蓋率（≥ {targetRssi} dBm）</span>
                 <span>
-                  {result.removeApIds.length === 0 && stats.coverageBefore > 0
+                  {stats.coverageBefore > 0
                     ? `${fmtPct(stats.coverageBefore)} → ${fmtPct(stats.coverageAfter)}`
                     : fmtPct(stats.coverageAfter)}
                 </span>
@@ -614,15 +617,24 @@ function AutoPlaceModal({ open, onClose }) {
                 ，調高可能比新增更好
               </p>
             )}
+            {heatmapMultipath && (
+              <p className="auto-place-modal__hint">
+                預估覆蓋率只計算直射路徑；熱圖開啟反射 / 繞射，覆蓋看起來可能略好。
+              </p>
+            )}
             {/* 58-15 (D4): a large floor's sampling steps were widened. */}
             {stats.gridCoarsened && (
               <p className="auto-place-modal__hint">
                 場地較大，已放寬取樣間距至 {stats.gridStepM} m
               </p>
             )}
+            {/* Short of the target with nothing to change: no "optimal" claim
+                next to the warning above. */}
             {noChange ? (stats.weakAps?.length > 0 ? null : (
               <p className="auto-place-modal__hint">
-                現有配置已是本次規劃的最佳解，沒有需要調整的地方 —— 套用不會有任何變更。
+                {stats.targetMet === false
+                  ? '沒有可再提升覆蓋的位置 —— 套用不會有任何變更。'
+                  : '現有配置已是本次規劃的最佳解，沒有需要調整的地方 —— 套用不會有任何變更。'}
                 {stats.indoorApplied && ' 覆蓋率僅計算牆圍出的室內區域。'}
               </p>
             )) : (
