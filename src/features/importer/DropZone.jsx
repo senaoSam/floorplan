@@ -1,4 +1,5 @@
 import React, { useRef, useState, useCallback } from 'react'
+import Icon from '@/components/Icon/Icon'
 import { useFloorImport } from './useFloorImport'
 import './DropZone.sass'
 
@@ -45,7 +46,7 @@ function DropZone() {
       {busy ? (
         <div className="drop-zone__spinner" />
       ) : (
-        <div className="drop-zone__icon">🗺</div>
+        <div className="drop-zone__icon"><Icon name="map" size={48} /></div>
       )}
       <p className="drop-zone__title">
         {isLoading ? loadingMsg : '拖曳平面圖至此'}

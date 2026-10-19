@@ -3,6 +3,7 @@ import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useClientViewStore } from '@/store/useClientViewStore'
 import { CLIENT_DEVICE_LIST, getClientDeviceById } from '@/constants/clientDevices'
 import { Select, NumberInput, Checkbox } from '@/components/PanelRight/_shared/PanelControls'
+import Icon from '@/components/Icon/Icon'
 import '@/components/PanelRight/_shared/shared.sass'
 import './ClientPanel.sass'
 
@@ -175,7 +176,7 @@ function ClientPanel() {
           button. (Lock is set via right-click menu on an AP.) */}
       {placed && lockedApId != null && (
         <div className="client-panel__lock">
-          <span>🔒 手動連線（非真實漫遊）</span>
+          <span><Icon name="lock" size={11} inline style={{ marginRight: 4 }} />手動連線（非真實漫遊）</span>
           <button type="button" onClick={() => setLockedApId(null)}>解除</button>
         </div>
       )}
@@ -192,7 +193,7 @@ function ClientPanel() {
         <div className="client-panel__readout">
           <div className="client-panel__row client-panel__row--head">
             <b>連線 AP</b>
-            <span>{reading.isLocked ? '🔒 ' : ''}{reading.servingApName ?? '—'}</span>
+            <span>{reading.isLocked && <Icon name="lock" size={13} inline style={{ marginRight: 4 }} />}{reading.servingApName ?? '—'}</span>
           </div>
           <div className="client-panel__row">
             <b>距離</b><span>{fmt(reading.distanceM, 'm', 1)}</span>

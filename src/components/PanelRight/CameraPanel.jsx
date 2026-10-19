@@ -9,6 +9,7 @@ import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/Pan
 import { TextInput, NumberInput, Select } from './_shared/PanelControls'
 import { generateId } from '@/utils/id'
 import { wrapAzimuth } from '@/utils/angle'
+import Icon from '@/components/Icon/Icon'
 import './_shared/shared.sass'
 
 // Camera properties panel (Phase 34-1). Opens when a camera marker is
@@ -155,7 +156,8 @@ function CameraPanel({ floorId, cameraId }) {
             }}
             title="開啟即時影像（模擬畫面）"
           >
-            📹 即時影像
+            <Icon name="video" size={13} inline />
+            即時影像
           </button>
         </PanelField>
         <PanelField label="熱圖校正" hint="點 4 對點求單應性矩陣，對齊 Verkada 做法">
@@ -172,7 +174,8 @@ function CameraPanel({ floorId, cameraId }) {
               }}
               title="開啟 4 點校正（在平面圖與相機畫面點對應點）"
             >
-              🎯 {camera.calibration ? '已校正' : '校正熱圖'}
+              <Icon name="crosshair" size={13} inline />
+              {camera.calibration ? '已校正' : '校正熱圖'}
             </button>
             {!camera.calibration && (
               <span style={{ color: '#f59e0b', fontSize: 11, lineHeight: 1.3 }}>
@@ -254,15 +257,15 @@ function CameraPanel({ floorId, cameraId }) {
         <PanelField label="轉向" hint="微調或朝向底圖中心">
           <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
             <button type="button" style={NUDGE_BTN} title="逆時針 15°"
-              onClick={() => handleField('azimuth', wrapAzimuth(rawAz - 15))}>↺ 15°</button>
+              onClick={() => handleField('azimuth', wrapAzimuth(rawAz - 15))}><Icon name="rotateCcw" size={12} inline style={{ marginRight: 4 }} />15°</button>
             <button type="button" style={NUDGE_BTN} title="順時針 15°"
-              onClick={() => handleField('azimuth', wrapAzimuth(rawAz + 15))}>15° ↻</button>
+              onClick={() => handleField('azimuth', wrapAzimuth(rawAz + 15))}>15°<Icon name="rotateCw" size={12} inline style={{ marginLeft: 4 }} /></button>
             <button type="button" style={NUDGE_BTN} title="朝向底圖中心"
               onClick={() => {
                 if (!floor?.imageWidth) return
                 const deg = Math.atan2(floor.imageHeight / 2 - camera.y, floor.imageWidth / 2 - camera.x) * 180 / Math.PI
                 handleField('azimuth', wrapAzimuth(Math.round(deg)))
-              }}>◎ 對準中心</button>
+              }}><Icon name="locate" size={12} inline style={{ marginRight: 4 }} />對準中心</button>
           </span>
         </PanelField>
         <PanelField label="視角 (FOV)" hint={`${MIN_FOV}~${MAX_FOV}，360=環景`}>
@@ -314,7 +317,7 @@ function CameraPanel({ floorId, cameraId }) {
         </div>
         {!hasScale && (
           <div className="pnl__field" style={{ display: 'block', fontSize: 11, color: '#f59e0b' }}>
-            ⚠ 尚未設定比例尺，可視距離以預設 40 px/m 估算
+            <Icon name="warning" size={12} inline style={{ marginRight: 4 }} />尚未設定比例尺，可視距離以預設 40 px/m 估算
           </div>
         )}
       </PanelSection>

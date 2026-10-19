@@ -433,7 +433,7 @@ function SidebarLeft() {
                         className="sidebar-left__anchor-badge"
                         title="對齊基準樓層：其他樓層以它為基準對齊，建議固定不動"
                       >
-                        📌
+                        <Icon name="pin" size={11} inline />
                       </span>
                     )}
                   </span>
@@ -574,14 +574,14 @@ function SidebarLeft() {
                     title="依覆蓋目標自動計算本樓層 AP 的建議位置與頻道（先預覽再套用）"
                     onClick={(e) => { e.stopPropagation(); setAutoPlaceOpen(true) }}
                   >
-                    📍 自動規劃 AP 放置
+                    <Icon name="mapPin" size={12} inline style={{ marginRight: 4 }} />自動規劃 AP 放置
                   </button>
                   <button
                     className="sidebar-left__floor-action"
                     title="自動調整本樓層各 AP 的發射功率，達成目標訊號涵蓋"
                     onClick={(e) => { e.stopPropagation(); setAutoPowerOpen(true) }}
                   >
-                    ⚡ 自動規劃整層 AP 功率
+                    <Icon name="zap" size={12} inline style={{ marginRight: 4 }} />自動規劃整層 AP 功率
                   </button>
                 </li>
               )}

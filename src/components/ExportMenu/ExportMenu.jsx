@@ -9,6 +9,7 @@ import { useEditorStore, VIEW_MODE } from '@/store/useEditorStore'
 import { showUiToast } from '@/store/useUiToastStore'
 import { capturePlanPng, triggerImageDownload } from '@/features/exportPng/exportPlanView'
 import { getSceneRefs } from '@/render/sceneRegistry'
+import Icon from '@/components/Icon/Icon'
 import './ExportMenu.sass'
 
 // 52-D1: the single visible home for "get my work out of here".
@@ -143,7 +144,7 @@ function ExportMenu() {
               ? '匯出目前樓層的平面圖（含牆 / AP / 熱圖）為 PNG'
               : is3D ? '匯出的是 2D 平面圖，請先切回 2D' : '需先匯入底圖'}
           >
-            <span className="export-menu__item-label">🖼 目前樓層 PNG</span>
+            <span className="export-menu__item-label"><Icon name="image" size={13} inline style={{ marginRight: 4 }} />目前樓層 PNG</span>
             <span className="export-menu__item-hint">
               {!hasImage ? '尚未匯入平面圖'
                 : is3D ? '僅能在 2D 檢視下匯出'
@@ -159,7 +160,7 @@ function ExportMenu() {
             onClick={exportPdf}
             title="輸出多頁 PDF：封面 / RF 涵蓋率與達標判定 / 每層平面圖快照 / AP 線纜表 / 線槽 BOM / 警告"
           >
-            <span className="export-menu__item-label">📄 規劃報告 PDF</span>
+            <span className="export-menu__item-label"><Icon name="fileText" size={13} inline style={{ marginRight: 4 }} />規劃報告 PDF</span>
             <span className="export-menu__item-hint">
               涵蓋率、每層平面圖、AP 線纜表、線槽 BOM
             </span>

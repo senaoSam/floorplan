@@ -12,7 +12,7 @@ function RegulatorySelector() {
   return (
     <div className="regulatory-selector">
       <div className="regulatory-selector__header" onClick={() => setCollapsed((v) => !v)}>
-        <span className="regulatory-selector__icon">🌐</span>
+        <span className="regulatory-selector__icon"><Icon name="globe" size={12} inline /></span>
         <span className="regulatory-selector__title">國家頻段</span>
         <span className={`regulatory-selector__arrow${collapsed ? ' regulatory-selector__arrow--collapsed' : ''}`}><Icon name="chevronDown" size={11} /></span>
       </div>

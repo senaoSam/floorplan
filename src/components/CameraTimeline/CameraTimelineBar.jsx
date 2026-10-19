@@ -5,6 +5,7 @@ import { useTrackingStore, LAPSE_SPEEDS } from '@/store/useTrackingStore'
 import { useCameraStore } from '@/store/useCameraStore'
 import { DAY_START_SEC, DAY_END_SEC, formatClock, formatClockSec } from '@/features/cameras/mockTracks'
 import { regenerateActiveFloorTracks } from '@/features/cameras/trackingBinder'
+import Icon from '@/components/Icon/Icon'
 import './CameraTimelineBar.sass'
 
 // Camera-mode playback bar (Phase 34-2/34-4). One clock drives live motion
@@ -81,7 +82,7 @@ function CameraTimelineBar() {
             onClick={() => setPlaying(!playing)}
             title={playing ? '暫停' : '播放'}
           >
-            {playing ? '⏸' : '▶'}
+            <Icon name={playing ? 'pause' : 'play'} size={14} inline />
           </button>
 
           <span className="camera-timeline__clock">{formatClockSec(clockSec)}</span>
@@ -120,7 +121,7 @@ function CameraTimelineBar() {
             onClick={regenerateActiveFloorTracks}
             title={`重新產生一天的模擬人流（目前 ${trackCount} 條軌跡）`}
           >
-            🎲 重新產生
+            <Icon name="dices" size={12} inline style={{ marginRight: 4 }} />重新產生
           </button>
         </div>
       )}
@@ -147,7 +148,7 @@ function CameraTimelineBar() {
           onClick={toggleShowTrendPanel}
           title="顯示整層樓的逐時占用趨勢（全日人/車數、尖峰時段）"
         >
-          📊 趨勢
+          <Icon name="stats" size={12} inline style={{ marginRight: 4 }} />趨勢
         </button>
         <button
           type="button"
@@ -155,7 +156,7 @@ function CameraTimelineBar() {
           onClick={toggleShowCameraList}
           title="顯示本樓層相機清單（型號／狀態），點一列選取並置中"
         >
-          📋 清單
+          <Icon name="clipboardList" size={12} inline style={{ marginRight: 4 }} />清單
         </button>
 
         {/* Regenerate lives on the playback row normally; when that row is
@@ -167,7 +168,7 @@ function CameraTimelineBar() {
             onClick={regenerateActiveFloorTracks}
             title={`重新產生一天的模擬人流（目前 ${trackCount} 條軌跡）`}
           >
-            🎲 重新產生
+            <Icon name="dices" size={12} inline style={{ marginRight: 4 }} />重新產生
           </button>
         )}
 
@@ -248,7 +249,7 @@ function CameraTimelineBar() {
               onClick={resetOccupancyLapse}
               title="回到開頭：統計時段跳回一天最早，寬度不變"
             >
-              ⏮
+              <Icon name="skipBack" size={12} inline />
             </button>
             <button
               type="button"
@@ -266,7 +267,7 @@ function CameraTimelineBar() {
               }}
               title="時間推移：固定你選的統計時段寬度，沿整天自動滑動播放，看活動熱點隨時間演變（整天寬度時自動縮成 2 小時）"
             >
-              {occupancyLapsePlaying ? '⏸ 推移' : '⏱ 推移'}
+              <Icon name={occupancyLapsePlaying ? 'pause' : 'timer'} size={12} inline style={{ marginRight: 4 }} />推移
             </button>
             <div className="camera-timeline__speeds">
               {LAPSE_SPEEDS.map((sp) => (

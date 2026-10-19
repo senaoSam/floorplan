@@ -271,7 +271,7 @@ export function attachTracksLayer({
     const pxPerM = getPxPerM(floor)
     const speedM = trackSpeedAt(best.track, useTrackingStore.getState().clockSec) / pxPerM
     const who = TYPE_LABEL[best.track.type] ?? best.track.type
-    const detTxt = best.detected ? `📹 ${best.detected.name}` : '未偵測'
+    const detTxt = best.detected ? `偵測：${best.detected.name}` : '未偵測'
     label.text = `${who} ${best.track.id.slice(-3)} · ${speedM.toFixed(1)} m/s · ${detTxt}`
     const s = 1 / vpScale
     label.scale.set(s)

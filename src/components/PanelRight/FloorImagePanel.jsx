@@ -3,6 +3,7 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { NumberInput, Button } from './_shared/PanelControls'
+import Icon from '@/components/Icon/Icon'
 import './_shared/shared.sass'
 import './FloorImagePanel.sass'
 
@@ -38,10 +39,10 @@ function FloorImagePanel({ floorId }) {
       <PanelSection title="旋轉角度">
         <div style={{ display: 'flex', gap: 6 }}>
           <Button onClick={() => setRotation(rotation - 90)} className="pnl-btn--block">
-            ↺ −90°
+            <Icon name="rotateCcw" size={12} inline style={{ marginRight: 4 }} />−90°
           </Button>
           <Button onClick={() => setRotation(rotation + 90)} className="pnl-btn--block">
-            ↻ +90°
+            <Icon name="rotateCw" size={12} inline style={{ marginRight: 4 }} />+90°
           </Button>
         </div>
 
@@ -147,7 +148,7 @@ function FloorImagePanel({ floorId }) {
             onClick={() => setEditorMode(EDITOR_MODE.CROP_IMAGE)}
             block
           >
-            ✂ 開始裁切
+            <Icon name="scissors" size={13} inline style={{ marginRight: 4 }} />開始裁切
           </Button>
         )}
       </PanelSection>

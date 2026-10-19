@@ -136,12 +136,12 @@ function HeatmapControl() {
           it's visible even with the settings panel collapsed. */}
       {enabled && drawWallFrozen && (
         <div className="heatmap-control__notice">
-          ❄️ 畫牆中：熱圖已暫停更新（畫完離開畫牆模式後自動重新計算）
+          <Icon name="snowflake" size={12} inline style={{ marginRight: 4 }} />畫牆中：熱圖已暫停更新（畫完離開畫牆模式後自動重新計算）
         </div>
       )}
       {enabled && alignFrozen && (
         <div className="heatmap-control__notice">
-          ❄️ 對齊樓層中：熱圖已暫停更新（完成對齊後自動重新計算）
+          <Icon name="snowflake" size={12} inline style={{ marginRight: 4 }} />對齊樓層中：熱圖已暫停更新（完成對齊後自動重新計算）
         </div>
       )}
       {/* Phase 48: floors whose scale is uncalibrated can't be positioned in
@@ -149,7 +149,7 @@ function HeatmapControl() {
           mis-placed. */}
       {enabled && crossFloorExcluded.length > 0 && (
         <div className="heatmap-control__notice">
-          ⚠️ {crossFloorExcluded.join('、')} 尚未校正比例尺，未納入跨樓層計算
+          <Icon name="warning" size={12} inline style={{ marginRight: 4 }} />{crossFloorExcluded.join('、')} 尚未校正比例尺，未納入跨樓層計算
         </div>
       )}
       {/* 47-22: heatmap is on but there's no scale — it can't render. Tell the
@@ -157,7 +157,7 @@ function HeatmapControl() {
           the enabled toggle isn't paired with a mysteriously blank canvas. */}
       {enabled && scaleMissing && (
         <div className="heatmap-control__notice heatmap-control__notice--action">
-          <span>⚠️ 尚未設定比例尺，熱圖無法計算</span>
+          <span><Icon name="warning" size={12} inline style={{ marginRight: 4 }} />尚未設定比例尺，熱圖無法計算</span>
           <button
             type="button"
             className="heatmap-control__notice-btn"
@@ -171,7 +171,7 @@ function HeatmapControl() {
           Without this the toggle reads "on" while nothing ever draws. */}
       {enabled && glUnavailable && (
         <div className="heatmap-control__notice">
-          ⚠️ 這個瀏覽器／裝置無法使用 WebGL2，熱圖無法繪製
+          <Icon name="warning" size={12} inline style={{ marginRight: 4 }} />這個瀏覽器／裝置無法使用 WebGL2，熱圖無法繪製
         </div>
       )}
       {/* Readout — stacked above the button. Shows all four metrics so the
@@ -206,7 +206,7 @@ function HeatmapControl() {
               </b>
               <span>
                 {r.dbm.toFixed(1)} dBm · ch {r.ap.channel ?? '—'}/{r.ap.channelWidth ?? '—'}
-                {drivingBand === r.band && ' ◀'}
+                {drivingBand === r.band && <Icon name="arrowLeft" size={11} inline style={{ marginLeft: 4 }} />}
               </span>
             </div>
           ))}
@@ -344,15 +344,16 @@ function HeatmapControl() {
               surprise. */}
           {simplifiedLargeScene && (
             <div className="heatmap-control__notice">
-              ⚡ 大場景已簡化：暫時關閉反射 / 繞射以維持效能（縮小場景後自動恢復）
+              <Icon name="zap" size={12} inline style={{ marginRight: 4 }} />大場景已簡化：暫時關閉反射 / 繞射以維持效能（縮小場景後自動恢復）
             </div>
           )}
           {/* 57-39: the fine render ran over its 5 s budget and stepped down. */}
           {!simplifiedLargeScene && budgetQuality && (
             <div className="heatmap-control__notice">
+              <Icon name="zap" size={12} inline style={{ marginRight: 4 }} />
               {budgetQuality === 'noDiffraction'
-                ? '⚡ 計算量過大：已關閉繞射以維持效能（修改牆面或設定後重試）'
-                : '⚡ 計算量過大：已關閉反射 / 繞射以維持效能（修改牆面或設定後重試）'}
+                ? '計算量過大：已關閉繞射以維持效能（修改牆面或設定後重試）'
+                : '計算量過大：已關閉反射 / 繞射以維持效能（修改牆面或設定後重試）'}
             </div>
           )}
           <label className="heatmap-control__line">

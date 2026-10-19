@@ -14,6 +14,7 @@ import { CHANNEL_WIDTHS, allowedWidthsForBand } from '@/constants/channelWidths'
 import { assignNewRadioChannels } from '@/features/heatmap/channelNeighbors'
 import { BANDS, apRadio, apRadios, patchRadio, radiosForModel, radioAllowed } from '@/utils/apRadios'
 import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
+import Icon from '@/components/Icon/Icon'
 import PatternPreview from './PatternPreview'
 import { PanelShell, PanelHeader } from './_shared/PanelShell'
 import { wrapAzimuth } from '@/utils/angle'
@@ -277,7 +278,6 @@ function BatchPanel() {
   }, [activeFloorId, selectedAPs, updateAPs])
 
   const channelEntriesForBand = band != null ? channelEntries(domainId, band) : []
-
   // 58-15 (C5): as in the AP panel -- a shared channel the domain does not
   // list gets its own 「（不允許）」 option (the select showed the first listed
   // channel instead), a listed one whose bonded block is out at the shared
@@ -285,6 +285,7 @@ function BatchPanel() {
   const channelUnlisted = band != null && apChannel !== MIXED && apChannel != null && !isChannelAllowed(domainId, band, apChannel)
   const notAllowedCount = band == null ? 0
     : bandRadios.filter((r) => r.enabled && !radioAllowed(domainId, band, r.channel, r.channelWidth)).length
+
   return (
     <PanelShell accent="batch" className="batch-panel">
       <PanelHeader
@@ -460,20 +461,20 @@ function BatchPanel() {
           <section className="batch-panel__section">
             <p className="batch-panel__label">
               {band} GHz 頻道（批次變更）
-            </p>
               {notAllowedCount > 0 && <span className="batch-panel__hint" style={{ color: '#ef4444' }}>{notAllowedCount} 台此國家不可用</span>}
+            </p>
             <select
               className="batch-panel__input batch-panel__select"
               value={apChannel === MIXED ? MIXED : (apChannel ?? '')}
               onChange={(e) => handleAPChannel(e.target.value)}
             >
               {apChannel === MIXED && <option value={MIXED}>— 多個值 —</option>}
-              {channelEntriesForBand.map((c) => (
               {channelUnlisted && <option value={apChannel}>Ch {apChannel}（不允許）</option>}
+              {channelEntriesForBand.map((c) => (
                 <option key={c.ch} value={c.ch}>
                   Ch {c.ch}{c.dfs ? '（DFS）' : ''}{c.indoorOnly ? '（室內）' : ''}
-                </option>
                   {apWidth !== MIXED && !radioAllowed(domainId, band, c.ch, apWidth) ? '（此頻寬不可用）' : ''}
+                </option>
               ))}
             </select>
           </section>
@@ -538,7 +539,7 @@ function BatchPanel() {
               onClick={() => setAutoPowerOpen(true)}
               style={{ marginTop: 8 }}
             >
-              ⚡ 自動規劃功率（所有頻段）
+              <Icon name="zap" size={13} inline style={{ marginRight: 4 }} />自動規劃功率（所有頻段）
             </button>
           </section>
           </>)}

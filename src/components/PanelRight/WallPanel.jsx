@@ -6,6 +6,7 @@ import { MATERIAL_LIST, OPENING_TYPES, getMaterialById, DEFAULT_WALL_THICKNESS_M
 import { resolveDoorSwing } from '@/features/walls/doorSwing'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { NumberInput, Select, Button } from './_shared/PanelControls'
+import Icon from '@/components/Icon/Icon'
 import './_shared/shared.sass'
 import './WallPanel.sass'
 
@@ -250,13 +251,13 @@ function WallPanel({ floorId, wallId }) {
                         onClick={() => flipSwing('hingeAtEnd')}
                         disabled={swing.double}
                       >
-                        ↔ 換門軸
+                        <Icon name="arrowLeftRight" size={13} inline style={{ marginRight: 4 }} />換門軸
                       </Button>
                       <Button
                         variant="ghost"
                         onClick={() => flipSwing('swingFlip')}
                       >
-                        ⇅ 換開向
+                        <Icon name="arrowUpDown" size={12} inline style={{ marginRight: 4 }} />換開向
                       </Button>
                     </div>
                   )}

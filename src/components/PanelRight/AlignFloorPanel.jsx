@@ -2,6 +2,7 @@ import React, { useCallback, useEffect } from 'react'
 import { useFloorStore, getAlignAnchorId } from '@/store/useFloorStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { getFloorColor } from '@/utils/floorColor'
+import Icon from '@/components/Icon/Icon'
 import './AlignFloorPanel.sass'
 
 // Right-panel UI for ALIGN_FLOOR mode. Ported 1:1 from oldSrc
@@ -70,13 +71,13 @@ function AlignFloorPanel({ floorId }) {
 
       {floorId === anchorFloorId && (
         <div className="align-floor-panel__warn">
-          📌 本樓層是對齊基準：其他樓層都以它為參考，移動它會讓整棟一起偏移。建議按「完成」離開，改對齊其他樓層。
+          <Icon name="pin" size={12} inline style={{ marginRight: 4 }} />本樓層是對齊基準：其他樓層都以它為參考，移動它會讓整棟一起偏移。建議按「完成」離開，改對齊其他樓層。
         </div>
       )}
 
       {uncalibrated.length > 0 && (
         <div className="align-floor-panel__warn">
-          ⚠️ {uncalibrated.map((f) => f.name).join('、')} 尚未校正比例尺：疊影以原始像素大小顯示，可能與實際比例不符。建議先用比例尺工具校正各樓層，不同解析度的圖會自動等大，通常只需位移＋旋轉即可對齊。
+          <Icon name="warning" size={12} inline style={{ marginRight: 4 }} />{uncalibrated.map((f) => f.name).join('、')} 尚未校正比例尺：疊影以原始像素大小顯示，可能與實際比例不符。建議先用比例尺工具校正各樓層，不同解析度的圖會自動等大，通常只需位移＋旋轉即可對齊。
         </div>
       )}
 
@@ -102,7 +103,7 @@ function AlignFloorPanel({ floorId }) {
                     <span>
                       {f.name}
                       {f.id === anchorFloorId && (
-                        <span className="align-floor-panel__ref-anchor" title="對齊基準樓層">📌</span>
+                        <span className="align-floor-panel__ref-anchor" title="對齊基準樓層"><Icon name="pin" size={10} inline /></span>
                       )}
                     </span>
                   </label>

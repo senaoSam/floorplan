@@ -3,6 +3,7 @@ import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useClientViewStore } from '@/store/useClientViewStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
+import Icon from '@/components/Icon/Icon'
 import '@/components/ContextMenu/TrayContextMenu.sass'
 
 // Lightweight right-click menu for CLIENT_VIEW only — manual-connect / unlock.
@@ -141,7 +142,7 @@ function ClientViewMenuInner({ menu }) {
     >
       <div className="tray-ctx-menu__header">
         <span className="tray-ctx-menu__title">
-          {lockedApId ? `🔒 已鎖定 ${(apsByFloor[activeFloorId] ?? []).find((a) => a.id === lockedApId)?.name ?? lockedApId}` : '手動連線（非真實漫遊）'}
+          {lockedApId ? <><Icon name="lock" size={11} inline style={{ marginRight: 4 }} />{`已鎖定 ${(apsByFloor[activeFloorId] ?? []).find((a) => a.id === lockedApId)?.name ?? lockedApId}`}</> : '手動連線（非真實漫遊）'}
         </span>
       </div>
       {items.map((item) => (

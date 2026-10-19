@@ -5,6 +5,7 @@ import { solveHomography } from '@/utils/homography'
 import { FRAME_W, FRAME_H } from '@/features/cameras/frameConstants'
 import { drawCctvFrame } from '@/features/cameras/mockCctv'
 import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
+import Icon from '@/components/Icon/Icon'
 import './CalibrationModal.sass'
 
 // Heat-map calibration modal (Verkada parity, see verkada-notes §L, stage 1).
@@ -196,7 +197,7 @@ function CalibrationModal() {
     <div className="calib" {...dismiss}>
       <div className="calib__frame">
         <div className="calib__bar">
-          <span className="calib__title">🎯 相機校正 · 用於人流熱圖 · {camera.name}</span>
+          <span className="calib__title"><Icon name="crosshair" size={14} inline style={{ marginRight: 4 }} />相機校正 · 用於人流熱圖 · {camera.name}</span>
           <button type="button" className="calib__close" onClick={closeCalibrate}>✕</button>
         </div>
 
@@ -257,11 +258,11 @@ function CalibrationModal() {
           <span className={`calib__status${(ready && (!H || crossedQuad || quadWarn)) ? ' calib__status--warn' : ''}`}>
             {ready
               ? (!H
-                ? '⚠ 四點過於共線，無法求解，請重設'
+                ? <><Icon name="warning" size={13} inline style={{ marginRight: 4 }} />四點過於共線，無法求解，請重設</>
                 : crossedQuad
-                  ? '⚠ 四點順序交叉成「Z 字」，會算出無效座標；請依同一方向（順時針或逆時針）重點'
+                  ? <><Icon name="warning" size={13} inline style={{ marginRight: 4 }} />四點順序交叉成「Z 字」，會算出無效座標；請依同一方向（順時針或逆時針）重點</>
                   : quadWarn
-                    ? '⚠ 四邊形過小／太接近共線，精度低；建議攤開四角重點'
+                    ? <><Icon name="warning" size={13} inline style={{ marginRight: 4 }} />四邊形過小／太接近共線，精度低；建議攤開四角重點</>
                     : '校正完成')
               : `已點 ${floorPts.length}+${framePts.length} / 4+4`}
           </span>

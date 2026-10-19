@@ -6,6 +6,7 @@ import { useAIPreviewStore } from '@/store/useAIPreviewStore'
 import { floorplanFromLines } from '@/utils/floorplanFromLines'
 import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
 import ImageLightbox from '@/components/ImageLightbox/ImageLightbox'
+import Icon from '@/components/Icon/Icon'
 import './AIWallsModal.sass'
 
 // AI Wall flow — backed by the "Floorplan cv+graph pipeline" service.
@@ -428,7 +429,7 @@ export default function AIWallsModal({ open, onClose }) {
                   className="ai-walls-modal__zoom-btn"
                   onClick={() => setZoom({ src: p.src, title: p.label })}
                 >
-                  🔍 放大
+                  <Icon name="zoomIn" size={11} inline style={{ marginRight: 4 }} />放大
                 </button>
               </div>
             ))}

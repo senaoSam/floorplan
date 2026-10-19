@@ -5,6 +5,7 @@ import { computeFloorElevations } from '@/utils/floorStacking'
 import { useEditorStore } from '@/store/useEditorStore'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { NumberInput, Checkbox } from './_shared/PanelControls'
+import Icon from '@/components/Icon/Icon'
 import './_shared/shared.sass'
 
 // Riser editing — floorIds is the core knob: the user picks which floors the
@@ -71,7 +72,7 @@ function RiserPanel({ riserId }) {
         </div>
         {floorSet.size === 0 ? (
           <div style={{ fontSize: 11, color: '#ef4444' }}>
-            ⚠ 沒有選擇任何樓層 → riser 在 2D 不會顯示
+            <Icon name="warning" size={11} inline style={{ marginRight: 4 }} />沒有選擇任何樓層 → riser 在 2D 不會顯示
           </div>
         ) : (
           <div style={{ fontSize: 11, color: 'var(--text-secondary, #94a3b8)' }}>

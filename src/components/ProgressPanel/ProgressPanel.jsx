@@ -1,16 +1,17 @@
 import React, { useState } from 'react'
 import { useEditorStore } from '@/store/useEditorStore'
+import Icon from '@/components/Icon/Icon'
 import './ProgressPanel.sass'
 
 const FEATURES = [
-  { icon: '🗺', text: '平面圖匯入：支援 PNG / JPG / PDF，PDF 多頁自動拆分為獨立樓層' },
-  { icon: '📐', text: '比例尺設定：在圖上點兩點並輸入實際距離，自動建立 px/m 換算' },
-  { icon: '🧱', text: '牆體繪製：連續線段繪製，支援端點吸附，可設定材質（玻璃到混凝土）、厚度與高度' },
-  { icon: '📍', text: 'AP 放置：點擊畫布放置，左鍵或右鍵按住可拖曳，支援頻段、發射功率、天線模式設定' },
-  { icon: '🟩', text: '範圍區域：繪製建築覆蓋範圍多邊形，區分涵蓋內／外區域' },
-  { icon: '⬛', text: '挑高區域：標記中庭、挑高等信號可跨樓層穿透的區域' },
-  { icon: '🖱', text: '右鍵操作：對任意物件按下右鍵可顯示屬性面板（停止繪製），按住右鍵可拖曳物件' },
-  { icon: '📹', text: 'Camera 模式：放置監視器（FOV 被牆遮擋、玻璃可穿透）、模擬人車軌跡與偵測、人流熱圖、盲區圖、計數線、分析區域、回放時間軸' },
+  { icon: 'map', text: '平面圖匯入：支援 PNG / JPG / PDF，PDF 多頁自動拆分為獨立樓層' },
+  { icon: 'scale', text: '比例尺設定：在圖上點兩點並輸入實際距離，自動建立 px/m 換算' },
+  { icon: 'wall', text: '牆體繪製：連續線段繪製，支援端點吸附，可設定材質（玻璃到混凝土）、厚度與高度' },
+  { icon: 'mapPin', text: 'AP 放置：點擊畫布放置，左鍵或右鍵按住可拖曳，支援頻段、發射功率、天線模式設定' },
+  { icon: 'scope', text: '範圍區域：繪製建築覆蓋範圍多邊形，區分涵蓋內／外區域' },
+  { icon: 'floorHole', text: '挑高區域：標記中庭、挑高等信號可跨樓層穿透的區域' },
+  { icon: 'mouseClick', text: '右鍵操作：對任意物件按下右鍵可顯示屬性面板（停止繪製），按住右鍵可拖曳物件' },
+  { icon: 'video', text: 'Camera 模式：放置監視器（FOV 被牆遮擋、玻璃可穿透）、模擬人車軌跡與偵測、人流熱圖、盲區圖、計數線、分析區域、回放時間軸' },
 ]
 
 const PHASES = [
@@ -592,7 +593,7 @@ const PHASES = [
         layer: 'Layer 36 — Device List + 即時影像',
         items: [
           { id: '36-1', done: true, text: 'Device List 側欄（對標 Verkada，只列攝影機）— CameraListPanel 從 floating 浮窗升級成 docked 常駐左欄（SidebarLeft↔CanvasArea 間、預設顯示、切走自動回收空間）' },
-          { id: '36-2', done: true, text: '清單列 📹 鈕直接開即時影像（openLiveView，不誤觸列選取）' },
+          { id: '36-2', done: true, text: '清單列影像鈕直接開即時影像（openLiveView，不誤觸列選取）' },
           { id: '36-3', done: true, text: '統一 hover store（cameras 遷到 useHoverStore type:camera，刪 hoverCameraId）' },
           { id: '36-4', done: true, text: '抽共用 mockCctv.drawCctvFrame（合併 3 處重複畫格 + mock|stream seam）' },
         ],
@@ -612,7 +613,7 @@ const PHASES = [
       {
         layer: 'Layer 38 — Camera 右鍵 context menu',
         items: [
-          { id: '37-1', done: true, text: 'Camera 右鍵選單（對標 AP）：重新命名/選取/複製相機/📹即時影像/校正熱圖/刪除（CAMERA_CAP allowContextMenu + camerasLayer button=2 + ContextMenuMount camera 分支）' },
+          { id: '37-1', done: true, text: 'Camera 右鍵選單（對標 AP）：重新命名/選取/複製相機/即時影像/校正熱圖/刪除（CAMERA_CAP allowContextMenu + camerasLayer button=2 + ContextMenuMount camera 分支）' },
         ],
       },
       {
@@ -633,7 +634,7 @@ const PHASES = [
         layer: 'Layer 41 — 3D 控制面板整理',
         items: [
           { id: '37-6', done: true, text: '移除 Log Camera（debug-only）' },
-          { id: '37-7', done: true, text: '新增「🔄 自動旋轉」toggle（沿用 OrbitControls autoRotate idle spin，拖曳即停並同步按鈕狀態）' },
+          { id: '37-7', done: true, text: '新增「自動旋轉」toggle（沿用 OrbitControls autoRotate idle spin，拖曳即停並同步按鈕狀態）' },
           { id: '37-8', done: true, text: '右上角控制項整理成統一深色玻璃面板（外框+標題「3D 視圖」+ 可收合）' },
         ],
       },
@@ -723,7 +724,9 @@ function ProgressPanel() {
       >
         <span className="progress-trigger__bar" style={{ width: `${(totalDone / totalCount) * 100}%` }} />
         <span className="progress-trigger__label">
-          {sidebarCollapsed ? '📋' : `📋 進度 ${totalDone}/${totalCount}`}
+          {sidebarCollapsed
+            ? <Icon name="clipboardList" size={13} inline />
+            : <><Icon name="clipboardList" size={13} inline style={{ marginRight: 4 }} />{`進度 ${totalDone}/${totalCount}`}</>}
         </span>
       </button>
 
@@ -752,7 +755,7 @@ function ProgressPanel() {
               <ul className="progress-panel__features">
                 {FEATURES.map((f, i) => (
                   <li key={i} className="progress-panel__feature">
-                    <span className="progress-panel__feature-icon">{f.icon}</span>
+                    <span className="progress-panel__feature-icon"><Icon name={f.icon} size={15} inline /></span>
                     <span>{f.text}</span>
                   </li>
                 ))}
@@ -775,7 +778,7 @@ function ProgressPanel() {
                           <div className="progress-panel__group-title">{group.layer}</div>
                           {group.items.map((item) => (
                             <div key={item.id} className={`progress-panel__item${item.done ? ' progress-panel__item--done' : ''}`}>
-                              <span className="progress-panel__item-icon">{item.done ? '✅' : '⬜'}</span>
+                              <span className="progress-panel__item-icon"><Icon name={item.done ? 'checkSquare' : 'square'} size={13} inline /></span>
                               <span className="progress-panel__item-id">{item.id}</span>
                               <span className="progress-panel__item-text">{item.text}</span>
                             </div>

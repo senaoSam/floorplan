@@ -419,7 +419,7 @@ function buildCameraItems(items, camera, floorId, setSelected, isSelected, onDel
   items.push({
     id: 'live-view',
     label: '即時影像',
-    icon: '📹',
+    icon: 'video',
     onClick: () => useCameraStore.getState().openLiveView(camera.id),
   })
 
@@ -428,7 +428,7 @@ function buildCameraItems(items, camera, floorId, setSelected, isSelected, onDel
   items.push({
     id: 'calibrate',
     label: camera.calibration ? '已校正' : '校正熱圖',
-    icon: '🎯',
+    icon: 'crosshair',
     onClick: () => useCameraStore.getState().openCalibrate(camera.id),
   })
 

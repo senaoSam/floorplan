@@ -199,9 +199,9 @@ function CameraListPanel() {
             toggle()
             // Closing hides the whole rail — point at the re-open entry so the
             // ✕ never reads as "gone for good" (ui-spec §2.3-4).
-            showUiToast('相機清單已關閉，可從下方時間軸的「📋 清單」重新開啟')
+            showUiToast('相機清單已關閉，可從下方時間軸的「清單」重新開啟')
           }}
-          title="關閉（可從時間軸「📋 清單」重新開啟）"
+          title="關閉（可從時間軸「清單」重新開啟）"
         >
           ✕
         </button>
@@ -275,7 +275,7 @@ function CameraListPanel() {
                           openLiveView(cam.id)
                         }}
                       >
-                        📹
+                        <Icon name="video" size={13} />
                       </button>
                       <button
                         type="button"

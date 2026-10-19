@@ -13,6 +13,7 @@ import { getCachedRoutes } from '@/features/cable/routesCache'
 import { getAPPoeWattage, getAPPoeClass, getPoeClassMeta } from '@/constants/apModels'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { TextInput, NumberInput, Select, Button } from './_shared/PanelControls'
+import Icon from '@/components/Icon/Icon'
 import './_shared/shared.sass'
 import './SwitchPanel.sass'
 
@@ -124,7 +125,7 @@ function SwitchPanel({ floorId, swId }) {
       if (cls === 'forbidden' && !isCurrent) continue
       const tag = (s.kind ?? 'switch').toUpperCase()
       const floorTag = f ? ` @ ${f.name}` : ''
-      const marker = cls === 'warn' ? ' ⚠' : cls === 'forbidden' ? ' ✗' : ''
+      const marker = cls === 'forbidden' ? ' ✗' : ''
       uplinkOptions.push({
         value: s.id,
         label: `${s.name}（${tag}${floorTag}）${marker}`,
@@ -238,7 +239,7 @@ function SwitchPanel({ floorId, swId }) {
         <PanelField
           label="Port 數"
           hint={portOver
-            ? `⚠ 已用 ${portsUsed} / ${portCount}（超出）`
+            ? <><Icon name="warning" size={11} inline style={{ marginRight: 4 }} />已用 {portsUsed} / {portCount}（超出）</>
             : `已用 ${portsUsed} / ${portCount}`}
         >
           <NumberInput
@@ -261,7 +262,7 @@ function SwitchPanel({ floorId, swId }) {
             <PanelField
               label="PoE 預算"
               hint={poeOver
-                ? `⚠ 已用 ${connected.totalPoe.toFixed(0)} W / ${poeBudget} W（超出）`
+                ? <><Icon name="warning" size={11} inline style={{ marginRight: 4 }} />已用 {connected.totalPoe.toFixed(0)} W / {poeBudget} W（超出）</>
                 : `已用 ${connected.totalPoe.toFixed(0)} W / ${poeBudget} W`}
             >
               <NumberInput
@@ -278,7 +279,7 @@ function SwitchPanel({ floorId, swId }) {
             <PanelField
               label="每埠供電"
               hint={connected.classShortCount > 0
-                ? `⚠ ${connected.classShortCount} 台 AP 需求超過每埠供電等級`
+                ? <><Icon name="warning" size={11} inline style={{ marginRight: 4 }} />{connected.classShortCount} 台 AP 需求超過每埠供電等級</>
                 : `每埠上限 ${getPoeClassMeta(poePortStd).perPortWatt} W`}
             >
               <Select
@@ -377,7 +378,7 @@ function SwitchPanel({ floorId, swId }) {
             </div>
           ) : uplinkUnset ? (
             <div className="switch-panel__hint switch-panel__hint--warn">
-              ⚠ 尚未指定上連目標。{sw.kind.toUpperCase()} 應該上連到
+              <Icon name="warning" size={11} inline style={{ marginRight: 4 }} />尚未指定上連目標。{sw.kind.toUpperCase()} 應該上連到
               {sw.kind === 'switch' && '一個 IDF（沒有 IDF 時可上連 MDF）'}
               {sw.kind === 'idf' && '一個 MDF'}
               {sw.kind === 'mdf' && '一個 Router 或設為頂層'}
@@ -389,7 +390,7 @@ function SwitchPanel({ floorId, swId }) {
             </div>
           ) : uplinkWarn ? (
             <div className="switch-panel__hint switch-panel__hint--warn">
-              ⚠ 跳階上連（collapsed core / 同階對等）。技術上可行，僅推薦小場館或冗餘 pair。
+              <Icon name="warning" size={11} inline style={{ marginRight: 4 }} />跳階上連（collapsed core / 同階對等）。技術上可行，僅推薦小場館或冗餘 pair。
             </div>
           ) : (
             <div className="switch-panel__hint">
@@ -441,7 +442,7 @@ function SwitchPanel({ floorId, swId }) {
                         className="switch-panel__conn-classwarn"
                         title={`此 AP 需 ${getPoeClassMeta(ap.poeClass).label}，超過本 Switch 每埠 ${getPoeClassMeta(poePortStd).label} 供電，radio 會被砍`}
                       >
-                        ⚠ 需 {getPoeClassMeta(ap.poeClass).label}
+                        <Icon name="warning" size={11} inline style={{ marginRight: 4 }} />需 {getPoeClassMeta(ap.poeClass).label}
                       </span>
                     )}
                   </span>

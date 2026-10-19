@@ -171,9 +171,9 @@ function TrendPanel() {
           className="trend-panel__close"
           onClick={() => {
             toggle()
-            showUiToast('占用趨勢已關閉，可從下方時間軸的「📊 趨勢」重新開啟')
+            showUiToast('占用趨勢已關閉，可從下方時間軸的「趨勢」重新開啟')
           }}
-          title="關閉（可從時間軸「📊 趨勢」重新開啟）"
+          title="關閉（可從時間軸「趨勢」重新開啟）"
         >
           ✕
         </button>

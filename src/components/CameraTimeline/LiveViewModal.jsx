@@ -7,6 +7,7 @@ import { isCameraDetecting } from '@/features/cameras/detectionBus'
 import { formatClockSec } from '@/features/cameras/mockTracks'
 import { drawCctvFrame } from '@/features/cameras/mockCctv'
 import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
+import Icon from '@/components/Icon/Icon'
 import './LiveViewModal.sass'
 
 // Mock live-view popover (Verkada parity). Clicking a device in Command opens
@@ -64,7 +65,7 @@ function LiveViewModal() {
     <div className="live-view" {...dismiss}>
       <div className="live-view__frame">
         <div className="live-view__bar">
-          <span className="live-view__title">📹 即時影像 · {camera.name}</span>
+          <span className="live-view__title"><Icon name="video" size={14} inline style={{ marginRight: 4 }} />即時影像 · {camera.name}</span>
           <button type="button" className="live-view__close" onClick={closeLiveView}>✕</button>
         </div>
         <canvas ref={canvasRef} width={W} height={H} className="live-view__canvas" />

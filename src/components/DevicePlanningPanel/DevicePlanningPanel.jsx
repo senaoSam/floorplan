@@ -158,7 +158,7 @@ function DevicePlanningPanel() {
   return (
     <div className="device-planning">
       <div className="device-planning__header" onClick={() => setCollapsed((v) => !v)}>
-        <span className="device-planning__icon">📡</span>
+        <span className="device-planning__icon"><Icon name="radioTower" size={12} inline /></span>
         <span className="device-planning__title">設備規劃</span>
         <span className={`device-planning__arrow${collapsed ? ' device-planning__arrow--collapsed' : ''}`}><Icon name="chevronDown" size={11} /></span>
       </div>
@@ -192,7 +192,8 @@ function DevicePlanningPanel() {
                     ? '尚未設定比例尺，無法判斷 AP 之間的距離'
                     : '自動為本樓層所有 AP 指派互不干擾的頻道'}
               >
-                {channelBusy ? `⏳ 指派頻道中（${apsOnFloor} 顆）…` : '📻 自動頻道'}
+                <Icon name={channelBusy ? 'hourglass' : 'radio'} size={14} />
+                {channelBusy ? `指派頻道中（${apsOnFloor} 顆）…` : '自動頻道'}
               </button>
             </div>
           </section>
@@ -233,7 +234,7 @@ function DevicePlanningPanel() {
                 </div>
 
                 <div className={`device-planning__verdict${meetsTarget ? ' device-planning__verdict--pass' : ' device-planning__verdict--fail'}`}>
-                  <span>{meetsTarget ? '✓ 已達標' : '⚠ 未達標'}</span>
+                  <span>{meetsTarget ? '✓ 已達標' : <><Icon name="warning" size={12} inline style={{ marginRight: 4 }} />未達標</>}</span>
                   <span className="device-planning__target" title="涵蓋率目標門檻">
                     目標
                     <NumberInput
@@ -271,13 +272,13 @@ function DevicePlanningPanel() {
                       <b className={crossFloorCount > 0 ? 'device-planning__val--warn' : ''}>{crossFloorCount} 對{crossFloorCount > 0 && strongestCrossDbm != null ? `（最強 ${strongestCrossDbm.toFixed(1)} dBm）` : ''}</b>
                     </div>
                   )}
-                  <div className="device-planning__row" title="訊號門檻——RSSI 高於此值才算已涵蓋">
                   {notAllowedCount > 0 && (
                     <div className="device-planning__row" title="已啟用、但頻段或頻道在目前國家不允許的射頻：不發射，不計入熱圖與上方各項數字。頻道不合法者可按「自動頻道」改到合法頻道；換回原國家即恢復">
                       <span>此國家不可用</span>
                       <b className="device-planning__val--warn">{notAllowedCount} 個射頻</b>
                     </div>
                   )}
+                  <div className="device-planning__row" title="訊號門檻——RSSI 高於此值才算已涵蓋">
                     <span>訊號門檻</span>
                     <NumberInput
                       value={thresholdDbm}
@@ -298,7 +299,7 @@ function DevicePlanningPanel() {
                     onClick={locateBiggestGap}
                     title="在訊號盲區最集中的位置閃示標記（不移動畫面），方便補一台 AP"
                   >
-                    ◎ 定位最大盲區
+                    <Icon name="locate" size={12} inline style={{ marginRight: 4 }} />定位最大盲區
                   </button>
                 )}
               </>

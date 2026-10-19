@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
 import ImageLightbox from '@/components/ImageLightbox/ImageLightbox'
+import Icon from '@/components/Icon/Icon'
 import './ApiTestModal.sass'
 
 // API test harness for the "Floorplan cv+graph pipeline" service (tmp.json).
@@ -443,7 +444,7 @@ export default function ApiTestModal({ open, onClose }) {
                 className="api-test-modal__zoom-btn"
                 onClick={() => setZoom({ src: images[kind], title })}
               >
-                🔍 放大
+                <Icon name="zoomIn" size={11} inline style={{ marginRight: 4 }} />放大
               </button>
             </div>
             <img

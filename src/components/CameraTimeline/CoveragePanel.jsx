@@ -7,6 +7,7 @@ import { computeCoverageStats } from '@/features/cameras/coverageStats'
 import { flashGapMarker } from '@/features/cameras/gapMarkerBus'
 import { NumberInput } from '@/components/PanelRight/_shared/PanelControls'
 import '@/components/PanelRight/_shared/shared.sass'
+import Icon from '@/components/Icon/Icon'
 import './CoveragePanel.sass'
 
 // Coverage report for Camera mode (planning aid). Always-on card top-left:
@@ -106,7 +107,7 @@ function CoveragePanel() {
       </div>
 
       <div className={`coverage-panel__verdict${meetsTarget ? ' coverage-panel__verdict--pass' : ' coverage-panel__verdict--fail'}`}>
-        <span>{meetsTarget ? '✓ 已達標' : '⚠ 未達標'}</span>
+        <span>{meetsTarget ? '✓ 已達標' : <><Icon name="warning" size={12} inline style={{ marginRight: 4 }} />未達標</>}</span>
         <span className="coverage-panel__target" title="覆蓋率目標門檻">
           目標
           <NumberInput
@@ -142,7 +143,7 @@ function CoveragePanel() {
 
       {selCam && soloStats && !soloStats.scaleMissing && (
         <div className="coverage-panel__solo" title="這台相機單獨能看到的範圍（不計其他相機）">
-          <span>📷 {selCam.name} 單獨涵蓋</span>
+          <span><Icon name="camera" size={12} inline style={{ marginRight: 4 }} />{selCam.name} 單獨涵蓋</span>
           <b>{fmtPct(soloStats.coveredPct)} · {fmtArea(soloStats.coveredAreaM2)}</b>
         </div>
       )}
@@ -172,7 +173,7 @@ function CoveragePanel() {
           }}
           title="在盲區最集中的位置閃示標記（不移動畫面），方便補一台相機"
         >
-          ◎ 定位最大盲區
+          <Icon name="locate" size={12} inline style={{ marginRight: 4 }} />定位最大盲區
         </button>
       )}
 

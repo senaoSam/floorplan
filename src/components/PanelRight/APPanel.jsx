@@ -14,6 +14,7 @@ import { apRadios, radiosForModel, patchRadio, radioView, highestEnabledBand, hi
 import PatternPreview3D from './PatternPreview3D'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { TextInput, NumberInput, Select, Checkbox } from './_shared/PanelControls'
+import Icon from '@/components/Icon/Icon'
 import { wrapAzimuth } from '@/utils/angle'
 import { tiltPatchForModeChange, tiltPatchForMountChange } from '@/utils/apMount'
 import './_shared/shared.sass'
@@ -162,8 +163,8 @@ function APPanel({ floorId, apId }) {
 
   const fmtDb = (v) => (Math.round(v * 10) / 10).toString()
   // 58-10: every radio off -> the 2D marker's grey (apsLayer FALLBACK_COLOR).
-  const noRadio = highestEnabledBand(ap) == null
   // 58-15 (C5): grey too when the domain allows none of the enabled radios.
+  const noRadio = highestEnabledBand(ap) == null
   const topLive = highestLiveBand(ap, domainId)
   const freqColor = topLive == null ? NO_RADIO_COLOR : bandColor(topLive)
   const shaped = ap.antennaMode === 'directional' || ap.antennaMode === 'custom'
@@ -365,16 +366,16 @@ function APPanel({ floorId, apId }) {
         const rad = resolveApRadiation(radioView(ap, r), domainId)
         const entries = channelEntries(domainId, band)
         const curCh = r.channel ?? DEFAULT_CHANNEL_BY_BAND[band] ?? 1
-        const curAllowed = isChannelAllowed(domainId, band, curCh)
         const allowedWidths = allowedWidthsForBand(band)
         const curWidth = r.channelWidth ?? DEFAULT_CHANNEL_WIDTH[band] ?? 20
         // 58-15 (C5): the whole bonded block must be allowed (radioAllowed),
         // so a primary that is listed can still be out at this width.
+        const curAllowed = isChannelAllowed(domainId, band, curCh)
         const chanOptions = []
         if (!curAllowed) chanOptions.push({ value: String(curCh), label: `Ch ${curCh}（不允許）` })
         for (const c of entries) {
-          chanOptions.push({
           const fitsWidth = radioAllowed(domainId, band, c.ch, curWidth)
+          chanOptions.push({
             value: String(c.ch),
             label: `Ch ${c.ch}${c.dfs ? '（DFS）' : ''}${c.indoorOnly ? '（室內）' : ''}${fitsWidth ? '' : '（此頻寬不可用）'}`,
           })
@@ -388,15 +389,15 @@ function APPanel({ floorId, apId }) {
                 <span style={{ width: 8, height: 8, borderRadius: '50%', background: bandColor(band) }} />
                 <Checkbox checked={!!r.enabled} onChange={(v) => handleRadio(band, { enabled: v })} />
                 {!r.enabled && <span className="ap-panel__hint">已關閉</span>}
-              </span>
                 {notAllowed && <span className="ap-panel__hint" style={{ color: '#ef4444' }}>此國家不可用</span>}
+              </span>
             </PanelField>
-            {/* 58-14: an off radio keeps a one-line summary of the settings it
             {notAllowed && (
               <div className="ap-panel__hint">
                 不發射，不計入熱圖與規劃。改用合法頻道或換回原國家即恢復
               </div>
             )}
+            {/* 58-14: an off radio keeps a one-line summary of the settings it
                 comes back with. */}
             {!r.enabled && (
               <div className="ap-panel__hint">
@@ -465,7 +466,7 @@ function APPanel({ floorId, apId }) {
                 )}
                 {!notAllowed && rad.capped && (
                   <div className="ap-panel__hint" style={{ color: '#ef4444' }}>
-                    ⚠ 超過法規 EIRP 上限，實際發射功率降為 {fmtDb(rad.txDbm)} dBm
+                    <Icon name="warning" size={12} inline style={{ marginRight: 4 }} />超過法規 EIRP 上限，實際發射功率降為 {fmtDb(rad.txDbm)} dBm
                   </div>
                 )}
               </>
@@ -484,7 +485,7 @@ function APPanel({ floorId, apId }) {
         <PanelSection title="狀態 / 線纜">
           {route.routeStatus === 'unroutable' ? (
             <div className="ap-panel__hint" style={{ color: '#ef4444' }}>
-              ⚠ 同樓層沒有 Switch，AP 無法接線
+              <Icon name="warning" size={12} inline style={{ marginRight: 4 }} />同樓層沒有 Switch，AP 無法接線
             </div>
           ) : (
             <>

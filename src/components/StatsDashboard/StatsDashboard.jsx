@@ -26,7 +26,7 @@ import './StatsDashboard.sass'
 const BAND_COLOR = { '2.4': '#f39c12', '5': '#4fc3f7', '6': '#a855f7' }
 const BAND_LABEL = { '2.4': '2.4G', '5': '5G', '6': '6G' }
 
-const SEV_ICON = { critical: '⛔', warning: '⚠', info: 'ℹ' }
+const SEV_ICON = { critical: 'octagonX', warning: 'warning', info: 'info' }
 
 // Clock label for a ts, weekday-aware ("週三 15:00").
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
@@ -307,7 +307,7 @@ function StatsDashboard() {
                 onMouseLeave={() => clearHoverIf(a.targetId)}
                 title="點擊定位到該裝置"
               >
-                <span className="stats-dash__alert-icon">{SEV_ICON[a.severity] ?? 'ℹ'}</span>
+                <span className="stats-dash__alert-icon"><Icon name={SEV_ICON[a.severity] ?? 'info'} size={12} inline /></span>
                 <span className="stats-dash__alert-msg">{a.msg}</span>
               </li>
             ))}
@@ -354,7 +354,7 @@ function StatsDashboard() {
           onToggle={() => toggleSection('timeline')}
           right={!atLive && (
             <button type="button" className="stats-dash__live-btn" onClick={goLive} title="回到即時">
-              ⏭ 即時
+              <Icon name="skipForward" size={10} inline style={{ marginRight: 4 }} />即時
             </button>
           )}
         >
@@ -384,7 +384,7 @@ function StatsDashboard() {
           </div>
           <div className="stats-dash__scrubber">
             <button type="button" className="stats-dash__play" onClick={togglePlaying} title={playing ? '暫停' : '播放'}>
-              {playing ? '⏸' : '▶'}
+              <Icon name={playing ? 'pause' : 'play'} size={12} />
             </button>
             <input
               type="range"

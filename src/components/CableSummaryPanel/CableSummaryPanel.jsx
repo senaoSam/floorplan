@@ -274,7 +274,7 @@ function CableSummaryPanel() {
   return (
     <div className="cable-summary">
       <div className="cable-summary__header" onClick={() => setCollapsed((v) => !v)}>
-        <span className="cable-summary__icon">🔌</span>
+        <span className="cable-summary__icon"><Icon name="plug" size={13} inline /></span>
         <span className="cable-summary__title">線纜總結</span>
         <span className="cable-summary__total">{shownM.toFixed(1)} m</span>
         {/* Segmented control, matching TrendPanel's 逐時/逐日 switch. A single
@@ -342,7 +342,7 @@ function CableSummaryPanel() {
                     <span className={`cable-summary__section-arrow${isOpen('unroutList') ? '' : ' cable-summary__section-arrow--collapsed'}`}>
                       <Icon name="chevronDown" size={9} />
                     </span>
-                    ⚠ 無法接線
+                    <Icon name="warning" size={12} inline style={{ marginRight: 4 }} />無法接線
                   </span>
                   <span>{stats.byStatus.unroutable}</span>
                 </div>
@@ -606,7 +606,7 @@ function CableSummaryPanel() {
           </section>
 
           {stats.warnings.length > 0 && (
-            <Section label={`⚠ Graph 警告（${stats.warnings.length}）`} warn open={isOpen('warnings')} onToggle={() => toggleSection('warnings')}>
+            <Section label={<><Icon name="warning" size={12} inline style={{ marginRight: 4 }} />Graph 警告（{stats.warnings.length}）</>} warn open={isOpen('warnings')} onToggle={() => toggleSection('warnings')}>
               {stats.warnings.map((w, i) => (
                 <div key={i} className="cable-summary__warning" title={w}>
                   {w}
@@ -623,7 +623,7 @@ function CableSummaryPanel() {
               onClick={handleExportPdf}
               title="輸出多頁 PDF：封面 / RF 涵蓋率與達標判定 / 每層平面圖快照 / AP 線纜表 / 線槽 BOM / 警告"
             >
-              {exportStatus ?? '📄 匯出規劃報告 PDF'}
+              {exportStatus ?? <><Icon name="fileText" size={12} inline style={{ marginRight: 4 }} />匯出規劃報告 PDF</>}
             </button>
           </section>
         </div>

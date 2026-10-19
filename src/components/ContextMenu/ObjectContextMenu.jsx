@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import Icon from '@/components/Icon/Icon'
+import Icon, { ICON_NAMES } from '@/components/Icon/Icon'
 import './TrayContextMenu.sass'
 
 // 23-2d Generic right-click object context menu.
@@ -138,7 +138,9 @@ function ObjectContextMenu({
                 style={{ background: item.swatch }}
               />
             )}
-            {item.icon && <span style={{ marginRight: 4 }}>{item.icon}</span>}
+            {item.icon && (ICON_NAMES.includes(item.icon)
+              ? <Icon name={item.icon} size={13} inline style={{ marginRight: 4 }} />
+              : <span style={{ marginRight: 4 }}>{item.icon}</span>)}
             {item.label}
             {item.hintInline && <span className="tray-ctx-menu__hint">{item.hintInline}</span>}
           </span>
