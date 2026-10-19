@@ -28,7 +28,7 @@ import { rssiFromAp } from '@/features/heatmap/propagation'
 import { channelBlockCenterMHz } from '@/features/heatmap/frequency'
 import { getDefaultTxPower, getAPModelById, AP_MODEL_LIST, DEFAULT_AP_MODEL_ID } from '@/constants/apModels'
 import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
-import { radiosForModel, hasEnabledBand, withOnlyBand, expandRadios, applyRadioResults, radioKey, apRadios, apRadio, patchRadio } from '@/utils/apRadios'
+import { radiosForModel, hasEnabledBand, withOnlyBand, expandRadios, applyRadioResults, radioKey, apRadios, apRadio, patchRadio, radioAllowed } from '@/utils/apRadios'
 import { allowedChannels } from '@/constants/regulatoryDomains'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
 import { buildIndoorMask } from '@/utils/indoorMask'
@@ -185,15 +185,19 @@ export async function runAutoPlacePlan({
   // scenario.aps 直接是 fill 模式初始覆蓋要用的 entries。
   const sameBand = (list) => (list ?? []).map((a) => withOnlyBand(a, band)).filter(Boolean)
   // `mapAps` null = every radio of every device (channel planning).
-  const buildFor = (thisFloorAps, mapAps = sameBand) => floors
-    ? buildFloorScenario({
-        floors, floorId: floor.id,
-        apsByFloor: { ...(apsByFloor ?? {}), [floor.id]: thisFloorAps },
-        wallsByFloor: { ...(wallsByFloor ?? {}), [floor.id]: walls ?? [] },
-        holesByFloor: holesByFloor ?? {},
-        scopes, ...(mapAps ? { mapAps } : {}), env,
-      })
-    : buildScenario(floor, walls, mapAps ? mapAps(thisFloorAps) : thisFloorAps, scopes, null, env)
+  // 58-15 (C5): `plannableIds` -- see buildScenario (channel planning only).
+  const buildFor = (thisFloorAps, mapAps = sameBand, plannableIds = null) => {
+    const scEnv = plannableIds ? { ...env, plannableIds } : env
+    return floors
+      ? buildFloorScenario({
+          floors, floorId: floor.id,
+          apsByFloor: { ...(apsByFloor ?? {}), [floor.id]: thisFloorAps },
+          wallsByFloor: { ...(wallsByFloor ?? {}), [floor.id]: walls ?? [] },
+          holesByFloor: holesByFloor ?? {},
+          scopes, ...(mapAps ? { mapAps } : {}), env: scEnv,
+        })
+      : buildScenario(floor, walls, mapAps ? mapAps(thisFloorAps) : thisFloorAps, scopes, null, scEnv)
+  }
   const scenario = buildFor(existingSameBand)
   if (!scenario) {
     return { aborted: false, error: 'invalid-floor' }
@@ -386,7 +390,9 @@ export async function runAutoPlacePlan({
   if (nReuse > 0) {
     reuseRssi.fill(-Infinity)
     const onAps = reuseAps.map((a) => ({ ...a, radios: patchRadio(a, band, { enabled: true }) }))
-    const reuseScenario = buildFor(onAps)
+    // 58-15 (C5): kept in even on a channel the domain does not allow -- the
+    // channel plan below replans every re-enabled radio.
+    const reuseScenario = buildFor(onAps, sameBand, new Set(reuseAps.map((a) => radioKey(a.id, band))))
     const reuseIndex = new Map(reuseAps.map((a, r) => [a.id, r]))
     const entries = (reuseScenario?.aps ?? []).filter((e) => reuseIndex.has(e.deviceId))
     for (let n = 0; n < entries.length; n++) {
@@ -640,7 +646,17 @@ export async function runAutoPlacePlan({
   while (recount) {
     recount = false
     const designCh = allowedChannels(opts.domainId, band)[0]
-    covered.set(coveredByDevices(deriveStaying().stayingDevices.map((a) => (matchedApIds.has(a.id)
+    // 58-15 (C5): a kept device whose radio on the band the domain does not
+    // allow keeps that channel (the channel plan below holds staying
+    // channels), so it counts as not transmitting -- as in the final count.
+    // A re-enabled radio is replanned, so it takes the design channel too.
+    const { enableSet: reEnabled, stayingDevices: staying } = deriveStaying()
+    const scoredOnDesign = (a) => {
+      if (reEnabled.has(a.id)) return true
+      const r = apRadio(a, band)
+      return !r || radioAllowed(opts.domainId, band, r.channel, r.channelWidth)
+    }
+    covered.set(coveredByDevices(staying.map((a) => (matchedApIds.has(a.id) && scoredOnDesign(a)
       ? { ...a, radios: patchRadio(a, band, { channel: designCh }) }
       : a))))
     for (const c of chosen) {
@@ -729,6 +745,7 @@ export async function runAutoPlacePlan({
       // 58-15: a radio switched back on had no channel in use -- it is
       // planned like a new one, not held at the channel it kept while off.
       if (enableSet.has(a.id) && r.band === band) continue
+      if (!radioAllowed(opts.domainId, r.band, r.channel, r.channelWidth)) continue
       fixedChannels.set(radioKey(a.id, r.band), r.channel)
     }
   }
@@ -736,11 +753,16 @@ export async function runAutoPlacePlan({
   // the planned pool, every band).
   // 58-16 (C1): other floors' radios in that scenario are fixed neighbours
   // (same as storeChannelNeighbors) -- avoided, never reassigned.
-  const poolScenario = buildFor(channelPool, null)
   // A re-enabled radio joins with no channel: the planner prefers a radio's
   // current channel, and this one's is only the one it kept while off.
-  const planRadios = expandRadios(channelPool).map((r) => (
-    enableSet.has(r.deviceId) && r.frequency === band ? { ...r, channel: null } : r))
+  // 58-15 (C5): a staying radio the domain does not allow does not transmit
+  // -- not held as a neighbour (its channel stays as it is).
+  const proposedIds = new Set(proposed.map((a) => a.id))
+  const replanned = (r) => proposedIds.has(r.deviceId) || (enableSet.has(r.deviceId) && r.frequency === band)
+  const planRadios = expandRadios(channelPool)
+    .filter((r) => replanned(r) || radioAllowed(opts.domainId, r.frequency, r.channel, r.channelWidth))
+    .map((r) => (enableSet.has(r.deviceId) && r.frequency === band ? { ...r, channel: null } : r))
+  const poolScenario = buildFor(channelPool, null, new Set(planRadios.filter(replanned).map((r) => r.id)))
   const assigned = greedyChannelAssign(planRadios, opts.domainId,
     poolScenario ? makeApHearingFn(poolScenario, { crossFloorFixed: true }) : 300, fixedChannels.size ? fixedChannels : null)
   proposed = applyRadioResults(proposed, assigned, (a) => ({ channel: a.channel }))

@@ -160,7 +160,8 @@ function buildDemoAPs(canvasWidth, canvasHeight, regulatoryDomain, floorId) {
   })
   // 57-34: neighbours = radios that hear each other (walls are already in the
   // store when this runs).
-  const assignments = greedyChannelAssign(expandRadios(aps), regulatoryDomain, storeChannelNeighbors(floorId, aps))
+  const radios = expandRadios(aps)
+  const assignments = greedyChannelAssign(radios, regulatoryDomain, storeChannelNeighbors(floorId, aps, new Set(radios.map((r) => r.id))))
   return applyRadioResults(aps, assignments, (a) => ({ channel: a.channel }))
 }
 

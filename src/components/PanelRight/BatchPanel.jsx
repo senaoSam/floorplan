@@ -9,10 +9,10 @@ import { useFloorStore } from '@/store/useFloorStore'
 import { MATERIAL_LIST } from '@/constants/materials'
 import { AP_MODEL_LIST, getAPModelById } from '@/constants/apModels'
 import { ANTENNA_PATTERN_LIST, getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
-import { channelEntries } from '@/constants/regulatoryDomains'
+import { channelEntries, isChannelAllowed } from '@/constants/regulatoryDomains'
 import { CHANNEL_WIDTHS, allowedWidthsForBand } from '@/constants/channelWidths'
 import { assignNewRadioChannels } from '@/features/heatmap/channelNeighbors'
-import { BANDS, apRadio, apRadios, patchRadio, radiosForModel } from '@/utils/apRadios'
+import { BANDS, apRadio, apRadios, patchRadio, radiosForModel, radioAllowed } from '@/utils/apRadios'
 import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
 import PatternPreview from './PatternPreview'
 import { PanelShell, PanelHeader } from './_shared/PanelShell'
@@ -278,6 +278,13 @@ function BatchPanel() {
 
   const channelEntriesForBand = band != null ? channelEntries(domainId, band) : []
 
+  // 58-15 (C5): as in the AP panel -- a shared channel the domain does not
+  // list gets its own 「（不允許）」 option (the select showed the first listed
+  // channel instead), a listed one whose bonded block is out at the shared
+  // width says so, and enabled radios the domain does not allow are counted.
+  const channelUnlisted = band != null && apChannel !== MIXED && apChannel != null && !isChannelAllowed(domainId, band, apChannel)
+  const notAllowedCount = band == null ? 0
+    : bandRadios.filter((r) => r.enabled && !radioAllowed(domainId, band, r.channel, r.channelWidth)).length
   return (
     <PanelShell accent="batch" className="batch-panel">
       <PanelHeader
@@ -454,6 +461,7 @@ function BatchPanel() {
             <p className="batch-panel__label">
               {band} GHz 頻道（批次變更）
             </p>
+              {notAllowedCount > 0 && <span className="batch-panel__hint" style={{ color: '#ef4444' }}>{notAllowedCount} 台此國家不可用</span>}
             <select
               className="batch-panel__input batch-panel__select"
               value={apChannel === MIXED ? MIXED : (apChannel ?? '')}
@@ -461,9 +469,11 @@ function BatchPanel() {
             >
               {apChannel === MIXED && <option value={MIXED}>— 多個值 —</option>}
               {channelEntriesForBand.map((c) => (
+              {channelUnlisted && <option value={apChannel}>Ch {apChannel}（不允許）</option>}
                 <option key={c.ch} value={c.ch}>
                   Ch {c.ch}{c.dfs ? '（DFS）' : ''}{c.indoorOnly ? '（室內）' : ''}
                 </option>
+                  {apWidth !== MIXED && !radioAllowed(domainId, band, c.ch, apWidth) ? '（此頻寬不可用）' : ''}
               ))}
             </select>
           </section>

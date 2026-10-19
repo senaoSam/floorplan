@@ -970,7 +970,8 @@ export function attachHeatmapLayer({
     }
 
     const scenario = buildScenario(floor, walls, aps, scopes, crossFloor)
-    if (!scenario) {
+    // 58-15 (C5): or every radio left is one the domain does not allow.
+    if (!scenario || scenario.aps.length === 0) {
       hide()
       return
     }

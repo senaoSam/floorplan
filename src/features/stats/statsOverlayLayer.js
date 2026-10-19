@@ -95,7 +95,7 @@ export function attachStatsOverlayLayer({
     const snapById = new Map()
     if (snap) {
       for (const a of snap.ap.perAp) {
-        snapById.set(a.apId, { count: a.clientCount, band: a.band, online: a.status === 'online', noRadio: a.status === 'no_radio' })
+        snapById.set(a.apId, { count: a.clientCount, band: a.band, online: a.status === 'online', noRadio: a.status === 'no_radio', notAllowed: !!a.notAllowed })
       }
     }
     // Keep the client list too — the plan-vs-measured gap overlay needs each
@@ -137,9 +137,11 @@ export function attachStatsOverlayLayer({
       // Offline AP: grey "離線" pill + a grey ring round the AP marker so the
       // dead unit is obvious on the plan (not just missing a number).
       // 58-10: radios all off -> grey "無射頻" pill (the marker is already grey).
-      const label = offline ? '離線' : rec.noRadio ? '無射頻' : String(rec.count)
+      // 58-15 (C5): or the domain allows none of its radios.
+      const label = offline ? '離線' : rec.notAllowed ? '此國家不可用' : rec.noRadio ? '無射頻' : String(rec.count)
       const color = offline || rec.noRadio ? OFFLINE_GREY : loadColor(rec.count)
-      const pillW = offline ? 34 : rec.noRadio ? 46 : Math.max(20, 12 + label.length * 8)
+      // 3 CJK characters fit 46 px, 6 fit 82 px (same per-character width).
+      const pillW = offline ? 34 : rec.notAllowed ? 82 : rec.noRadio ? 46 : Math.max(20, 12 + label.length * 8)
       const cx = ap.x
       const cy = ap.y - PILL_DY * s
       const halfW = (pillW / 2) * s

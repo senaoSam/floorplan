@@ -15,7 +15,8 @@ import { buildScenario } from '@/features/heatmap/buildScenario'
 import { buildCandidates, preferredCandidates } from '@/features/clientView/simulate'
 import { getCachedRoutes } from '@/features/cable/routesCache'
 import { getAPPoeWattage } from '@/constants/apModels'
-import { enabledBands, highestEnabledBand } from '@/utils/apRadios'
+import { enabledRadios, liveBands, highestLiveBand } from '@/utils/apRadios'
+import { useEditorStore } from '@/store/useEditorStore'
 import { CLIENT_DEVICE_LIST } from '@/constants/clientDevices'
 
 const DEFAULT_SEED = 20260706
@@ -92,8 +93,13 @@ function measuredDegradationDb(floorId, xM, yM) {
 // Build the AP↔switch↔port↔client topology for a floor at time `ts`, from a
 // seed. `building` carries the same slice refs the stores hold (so getCachedRoutes
 // hits its cache). Returns everything getSnapshot projects from.
+// 58-15 (C5): devices transmit on the radios the domain allows
+// (`building.regulatoryDomain`, else the editor's).
+const domainOf = (building) => building.regulatoryDomain ?? useEditorStore.getState().regulatoryDomain
+
 export function deriveTopology(building, floorId, ts, seed = DEFAULT_SEED) {
   const floor = building.floors.find((f) => f.id === floorId)
+  const domainId = domainOf(building)
   const aps = building.apsByFloor?.[floorId] ?? []
   const switches = building.switchesByFloor?.[floorId] ?? []
   const walls = building.wallsByFloor?.[floorId] ?? []
@@ -103,7 +109,7 @@ export function deriveTopology(building, floorId, ts, seed = DEFAULT_SEED) {
   // over the whole floor regardless of any planning scope the user drew — the
   // stats domain (real devices) is decoupled from the planning scope mask, and
   // this also guarantees the stats mock never affects the planning heatmap.
-  const scenario = floor ? buildScenario(floor, walls, aps, []) : null
+  const scenario = floor ? buildScenario(floor, walls, aps, [], null, { regulatoryDomain: domainId }) : null
   const pxToM = floor?.scale ? 1 / floor.scale : 1 / 40
 
   // AP → switch routing (reuse the shared cache; route.switchId is the link).
@@ -116,10 +122,11 @@ export function deriveTopology(building, floorId, ts, seed = DEFAULT_SEED) {
   // supplies the real status here instead.
   // 58-10: a device with every radio off is 'no_radio' -- not online, so it
   // neither adds to the client target nor serves as a scatter centre.
+  // 58-15 (C5): so is one whose enabled radios the domain does not allow.
   const apStatus = new Map()
   for (const ap of aps) {
     apStatus.set(ap.id, ap.mockStatus === 'offline' ? 'offline'
-      : enabledBands(ap).length === 0 ? 'no_radio' : 'online')
+      : liveBands(ap, domainId).length === 0 ? 'no_radio' : 'online')
   }
 
   // Client count target for the floor, scaled by time of day.
@@ -202,6 +209,7 @@ export function getSnapshot(building, floorId, { ts } = {}) {
   const topo = deriveTopology(building, floorId, now)
   if (!topo.floor) return null
   const { aps, switches, apStatus, clientsByAp, clients, apToSwitch, portBySwitch } = topo
+  const domainId = domainOf(building)
 
   // Per-AP snapshot.
   const perAp = aps.map((ap) => {
@@ -209,7 +217,9 @@ export function getSnapshot(building, floorId, { ts } = {}) {
     if (status === 'offline' || status === 'no_radio') {
       return {
         apId: ap.id, name: ap.name, clientCount: 0,
-        radio: null, channelUtil: null, status, band: highestEnabledBand(ap),
+        radio: null, channelUtil: null, status, band: highestLiveBand(ap, domainId),
+        // 58-15 (C5): no_radio because the domain allows none of its radios.
+        notAllowed: status === 'no_radio' && enabledRadios(ap).length > 0,
       }
     }
     const list = clientsByAp.get(ap.id) ?? []
@@ -218,7 +228,7 @@ export function getSnapshot(building, floorId, { ts } = {}) {
     // channel utilisation is its busiest radio's.
     const radio = { '2.4': null, '5': null, '6': null }
     let util = 0
-    for (const b of enabledBands(ap)) {
+    for (const b of liveBands(ap, domainId)) {
       const n = list.filter((c) => c.band === b).length
       const u = Math.min(1, n / 25 + 0.05)
       radio[String(b)] = { clients: n, util: u, txbps: n * 4_000_000, rxbps: n * 1_500_000 }
@@ -226,7 +236,7 @@ export function getSnapshot(building, floorId, { ts } = {}) {
     }
     return {
       apId: ap.id, name: ap.name, clientCount,
-      radio, channelUtil: util, status: 'online', band: highestEnabledBand(ap),
+      radio, channelUtil: util, status: 'online', band: highestLiveBand(ap, domainId),
     }
   })
   const apOnline = perAp.filter((a) => a.status === 'online').length

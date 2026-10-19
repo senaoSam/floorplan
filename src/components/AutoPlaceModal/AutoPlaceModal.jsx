@@ -12,7 +12,7 @@ import { currentScenarioEnv } from '@/features/heatmap/buildScenario'
 import { computePlanQualityStats } from '@/features/heatmap/planQuality'
 import { COVERAGE_THRESHOLD_DBM } from '@/constants/coverage'
 import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
-import { hasEnabledBand, apRadio, patchRadio } from '@/utils/apRadios'
+import { hasEnabledBand, apRadio, patchRadio, radioAllowed } from '@/utils/apRadios'
 import { allowedChannels } from '@/constants/regulatoryDomains'
 import './AutoPlaceModal.sass'
 
@@ -90,6 +90,12 @@ function AutoPlaceModal({ open, onClose }) {
   const sameBandCount = aps.filter((a) => hasEnabledBand(a, band)).length
   // 58-9: devices that have the band but switched it off.
   const offBandCount = aps.filter((a) => apRadio(a, band) && !hasEnabledBand(a, band)).length
+  // 58-15 (C5): of those enabled, the ones the domain does not allow -- they
+  // keep their channel here (auto channel retunes them) and add no coverage.
+  const notAllowedCount = aps.filter((a) => {
+    const r = apRadio(a, band)
+    return r?.enabled && !radioAllowed(regulatoryDomain, band, r.channel, r.channelWidth)
+  }).length
   // 58-9: only bands the regulatory domain has channels on (no 6 GHz in CN).
   const bandOptions = BAND_OPTIONS.filter((b) => allowedChannels(regulatoryDomain, b.value).length > 0)
 
@@ -411,6 +417,11 @@ function AutoPlaceModal({ open, onClose }) {
               {band === 2.4 && (
                 <p className="auto-place-modal__hint auto-place-modal__hint--warn">
                   以 2.4 GHz 規劃會放得較稀，5 GHz 覆蓋可能不足
+                </p>
+              )}
+              {notAllowedCount > 0 && (
+                <p className="auto-place-modal__hint auto-place-modal__hint--warn">
+                  其中 {notAllowedCount} 顆的此頻段頻道在此國家不可用，不計入覆蓋。建議先在設備規劃按「自動頻道」改到合法頻道，再執行規劃
                 </p>
               )}
             </section>

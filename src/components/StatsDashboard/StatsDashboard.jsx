@@ -155,9 +155,11 @@ function StatsDashboard() {
     return () => { alive = false; if (rafRef.current) cancelAnimationFrame(rafRef.current) }
   }, [playing])
 
+  // 58-15 (C5): radios the domain does not allow carry no clients.
+  const regulatoryDomain = useEditorStore((s) => s.regulatoryDomain)
   const building = useMemo(() => ({
-    floors, apsByFloor, wallsByFloor, scopesByFloor, switchesByFloor, traysByFloor, risers,
-  }), [floors, apsByFloor, wallsByFloor, scopesByFloor, switchesByFloor, traysByFloor, risers])
+    floors, apsByFloor, wallsByFloor, scopesByFloor, switchesByFloor, traysByFloor, risers, regulatoryDomain,
+  }), [floors, apsByFloor, wallsByFloor, scopesByFloor, switchesByFloor, traysByFloor, risers, regulatoryDomain])
 
   const snap = useMemo(() => {
     if (!activeFloorId || playheadTs == null) return null

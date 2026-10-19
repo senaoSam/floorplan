@@ -6,7 +6,7 @@ import { useEditorStore } from '@/store/useEditorStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { getPatternById, sampleGain, sampleGainV, patternBackFloorDb } from '@/constants/antennaPatterns'
 import Label3D from './Label3D'
-import { enabledBands, hasEnabledBand, highestEnabledBand } from '@/utils/apRadios'
+import { enabledBands, liveBands, hasLiveBand, highestLiveBand } from '@/utils/apRadios'
 
 // 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
 // `?? []` returns a new reference whenever the floor's key is absent, so
@@ -232,12 +232,12 @@ function SelectionPulse({ radius }) {
 // AP edit — measured as the dominant share of a ~2 s main-thread stall on
 // drag release (three.js re-created VAOs + walked every object), even while
 // the 3D view was hidden (Viewer3D stays mounted in 2D mode).
-const APMarker = React.memo(function APMarker({ ap, pxToM, dimOpacity, isActiveFloor, onHover, showAPBand, viewBand = null }) {
+const APMarker = React.memo(function APMarker({ ap, pxToM, dimOpacity, isActiveFloor, onHover, showAPBand, viewBand = null, domainId }) {
   // 58: a multi-band device takes its highest enabled band's colour; 58-10:
-  // grey when every radio is off.
-  const color = FREQ_COLOR[highestEnabledBand(ap)] ?? NO_RADIO_COLOR
+  // grey when every radio is off. 58-15 (C5): bands the domain allows only.
+  const color = FREQ_COLOR[highestLiveBand(ap, domainId)] ?? NO_RADIO_COLOR
   // 58: ring arcs only for bands the layer toggle shows.
-  const ringBands = enabledBands(ap).filter((b) => showAPBand?.[b] !== false)
+  const ringBands = liveBands(ap, domainId).filter((b) => showAPBand?.[b] !== false)
   // 58-14: one visible band -> the whole ring is that band's colour, not the
   // (possibly hidden) highest band's.
   const singleRingColor = ringBands.length === 1 ? (FREQ_COLOR[ringBands[0]] ?? DEFAULT_COLOR) : color
@@ -418,6 +418,8 @@ export default function APLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloo
   // 47-8a: heatmap band filter dims (not hides) off-band APs — mirror 2D.
   const heatmapOn = useHeatmapStore((s) => s.enabled)
   const bandFilter = useHeatmapStore((s) => s.bandFilter)
+  // 58-15 (C5): colours / rings / dimming follow what the domain allows.
+  const domainId = useEditorStore((s) => s.regulatoryDomain)
   // 58: hidden only when every enabled radio's band is hidden.
   const aps = allAPs.filter((ap) => {
     const bands = enabledBands(ap)
@@ -430,8 +432,8 @@ export default function APLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloo
       {aps.map((ap) => {
         // 58-10: a device with every radio off is dimmed whenever the heatmap
         // is on, whatever the filter (mirrors 2D bandDimAlpha).
-        const noRadio = enabledBands(ap).length === 0
-        const offBand = (heatmapOn && noRadio) || (bandActive && !hasEnabledBand(ap, bandFilter))
+        const noLive = liveBands(ap, domainId).length === 0
+        const offBand = (heatmapOn && noLive) || (bandActive && !hasLiveBand(ap, bandFilter, domainId))
         return (
           <APMarker
             key={ap.id}
@@ -442,6 +444,7 @@ export default function APLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloo
             onHover={isActiveFloor ? onAPHover : undefined}
             showAPBand={showAPBand}
             viewBand={bandActive ? Number(bandFilter) : null}
+            domainId={domainId}
           />
         )
       })}

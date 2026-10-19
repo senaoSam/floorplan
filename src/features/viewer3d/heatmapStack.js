@@ -159,7 +159,8 @@ const ensureStackInner = async (fp) => {
     })
     if (!crossFloor || crossFloor.apsByFloor.length === 0) continue
     const scenario = buildScenario(f, walls, aps, [], crossFloor)
-    if (!scenario) continue
+    // 58-15 (C5): or every radio left is one the domain does not allow.
+    if (!scenario || scenario.aps.length === 0) continue
 
     // 57-36: the 2D adapter's large-scene downgrade, same function (it used
     // to keep the old wall×AP product, so a floor could get different physics

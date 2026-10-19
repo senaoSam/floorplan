@@ -10,7 +10,7 @@ import { channelEntries, isChannelAllowed, getDomain } from '@/constants/regulat
 import { resolveApRadiation } from '@/features/heatmap/apRadiation'
 import { assignNewRadioChannels } from '@/features/heatmap/channelNeighbors'
 import { CHANNEL_WIDTHS, DEFAULT_CHANNEL_WIDTH, allowedWidthsForBand } from '@/constants/channelWidths'
-import { apRadios, radiosForModel, patchRadio, radioView, highestEnabledBand, DEFAULT_CHANNEL_BY_BAND } from '@/utils/apRadios'
+import { apRadios, radiosForModel, patchRadio, radioView, highestEnabledBand, highestLiveBand, DEFAULT_CHANNEL_BY_BAND, radioAllowed } from '@/utils/apRadios'
 import PatternPreview3D from './PatternPreview3D'
 import { PanelShell, PanelHeader, PanelSection, PanelField } from './_shared/PanelShell'
 import { TextInput, NumberInput, Select, Checkbox } from './_shared/PanelControls'
@@ -163,7 +163,9 @@ function APPanel({ floorId, apId }) {
   const fmtDb = (v) => (Math.round(v * 10) / 10).toString()
   // 58-10: every radio off -> the 2D marker's grey (apsLayer FALLBACK_COLOR).
   const noRadio = highestEnabledBand(ap) == null
-  const freqColor = noRadio ? NO_RADIO_COLOR : bandColor(highestEnabledBand(ap))
+  // 58-15 (C5): grey too when the domain allows none of the enabled radios.
+  const topLive = highestLiveBand(ap, domainId)
+  const freqColor = topLive == null ? NO_RADIO_COLOR : bandColor(topLive)
   const shaped = ap.antennaMode === 'directional' || ap.antennaMode === 'custom'
 
   return (
@@ -173,7 +175,7 @@ function APPanel({ floorId, apId }) {
         meta={
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: freqColor }} />
-            AP 屬性{noRadio && ' · 無射頻'}
+            AP 屬性{noRadio ? ' · 無射頻' : topLive == null ? ' · 此國家不可用' : ''}
           </span>
         }
         onDelete={handleDelete}
@@ -364,16 +366,21 @@ function APPanel({ floorId, apId }) {
         const entries = channelEntries(domainId, band)
         const curCh = r.channel ?? DEFAULT_CHANNEL_BY_BAND[band] ?? 1
         const curAllowed = isChannelAllowed(domainId, band, curCh)
+        const allowedWidths = allowedWidthsForBand(band)
+        const curWidth = r.channelWidth ?? DEFAULT_CHANNEL_WIDTH[band] ?? 20
+        // 58-15 (C5): the whole bonded block must be allowed (radioAllowed),
+        // so a primary that is listed can still be out at this width.
         const chanOptions = []
         if (!curAllowed) chanOptions.push({ value: String(curCh), label: `Ch ${curCh}（不允許）` })
         for (const c of entries) {
           chanOptions.push({
+          const fitsWidth = radioAllowed(domainId, band, c.ch, curWidth)
             value: String(c.ch),
-            label: `Ch ${c.ch}${c.dfs ? '（DFS）' : ''}${c.indoorOnly ? '（室內）' : ''}`,
+            label: `Ch ${c.ch}${c.dfs ? '（DFS）' : ''}${c.indoorOnly ? '（室內）' : ''}${fitsWidth ? '' : '（此頻寬不可用）'}`,
           })
         }
-        const allowedWidths = allowedWidthsForBand(band)
-        const curWidth = r.channelWidth ?? DEFAULT_CHANNEL_WIDTH[band] ?? 20
+        // 58-15 (C5): band or channel block not allowed -> not computed.
+        const notAllowed = !!r.enabled && !radioAllowed(domainId, band, curCh, curWidth)
         return (
           <PanelSection key={band} title={`${band}G 射頻`}>
             <PanelField label="啟用">
@@ -382,8 +389,14 @@ function APPanel({ floorId, apId }) {
                 <Checkbox checked={!!r.enabled} onChange={(v) => handleRadio(band, { enabled: v })} />
                 {!r.enabled && <span className="ap-panel__hint">已關閉</span>}
               </span>
+                {notAllowed && <span className="ap-panel__hint" style={{ color: '#ef4444' }}>此國家不可用</span>}
             </PanelField>
             {/* 58-14: an off radio keeps a one-line summary of the settings it
+            {notAllowed && (
+              <div className="ap-panel__hint">
+                不發射，不計入熱圖與規劃。改用合法頻道或換回原國家即恢復
+              </div>
+            )}
                 comes back with. */}
             {!r.enabled && (
               <div className="ap-panel__hint">
@@ -444,11 +457,13 @@ function APPanel({ floorId, apId }) {
                     />
                   </PanelField>
                 )}
-                <div className="ap-panel__hint">
-                  EIRP {fmtDb(rad.eirpDbm)} dBm
-                  {rad.eirpLimitDbm != null && `（${getDomain(domainId).label}上限 ${fmtDb(rad.eirpLimitDbm)} dBm）`}
-                </div>
-                {rad.capped && (
+                {!notAllowed && (
+                  <div className="ap-panel__hint">
+                    EIRP {fmtDb(rad.eirpDbm)} dBm
+                    {rad.eirpLimitDbm != null && `（${getDomain(domainId).label}上限 ${fmtDb(rad.eirpLimitDbm)} dBm）`}
+                  </div>
+                )}
+                {!notAllowed && rad.capped && (
                   <div className="ap-panel__hint" style={{ color: '#ef4444' }}>
                     ⚠ 超過法規 EIRP 上限，實際發射功率降為 {fmtDb(rad.txDbm)} dBm
                   </div>

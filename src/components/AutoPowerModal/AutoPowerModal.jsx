@@ -5,8 +5,9 @@ import { useWallStore } from '@/store/useWallStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
+import { useEditorStore } from '@/store/useEditorStore'
 import { getDefaultTxPower } from '@/constants/apModels'
-import { apRadios, enabledRadios, radioKey, applyRadioResults, deviceIdOf } from '@/utils/apRadios'
+import { apRadios, enabledRadios, radioKey, applyRadioResults, deviceIdOf, radioAllowed } from '@/utils/apRadios'
 import { currentScenarioEnv } from '@/features/heatmap/buildScenario'
 import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
 import './AutoPowerModal.sass'
@@ -57,15 +58,17 @@ const offTxOf = (opts, key) => opts?.offTxByRadio?.get(key) ?? opts?.txMinDbm ??
 
 // 58-15 (decision 6): whether radio `r` of `ap` is on once the plan is
 // applied -- a planned radio above its off level is on (a disabled one is
-// switched back on), at or below it off; an unplanned radio keeps its state.
-function onAfterPlan(result, ap, r) {
+// switched back on), at or below it off; an unplanned radio keeps its state
+// (58-15 C5: one the domain does not allow does not transmit).
+function onAfterPlan(result, ap, r, domainId) {
   const key = radioKey(ap.id, r.band)
   const next = result.txMap.get(key)
-  return next == null ? r.enabled : next > offTxOf(result.opts, key)
+  return next == null ? r.enabled && radioAllowed(domainId, r.band, r.channel, r.channelWidth) : next > offTxOf(result.opts, key)
 }
 
 function AutoPowerModal({ open, apIds, onClose }) {
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
+  const regulatoryDomain = useEditorStore((s) => s.regulatoryDomain)
   const floors = useFloorStore((s) => s.floors)
   const floor = floors.find((f) => f.id === activeFloorId)
   const walls = useWallStore((s) => s.wallsByFloor[activeFloorId] ?? EMPTY)
@@ -162,6 +165,10 @@ function AutoPowerModal({ open, apIds, onClose }) {
         const r = msg.result
         if (r.aborted) {
           setError('已取消')
+        } else if (r.error === 'not-allowed') {
+          // 58-15 (C5): every radio to plan is one the domain does not allow.
+          const names = (r.opts?.notAllowedRadios ?? []).map((x) => `${x.name} · ${x.band} GHz`)
+          setError(`選取的 AP 射頻在此國家皆不可用，未規劃：${names.slice(0, 5).join('、')}${names.length > 5 ? `…等 ${names.length} 個` : ''}`)
         } else if (r.error) {
           setError(`錯誤：${r.error}`)
         } else {
@@ -478,7 +485,7 @@ function AutoPowerModal({ open, apIds, onClose }) {
                 already all off is not listed. */}
             {(() => {
               const names = targetAPs.filter((ap) => enabledRadios(ap).length > 0
-                && apRadios(ap).every((r) => !onAfterPlan(result, ap, r))).map((ap) => ap.name ?? ap.id)
+                && apRadios(ap).every((r) => !onAfterPlan(result, ap, r, regulatoryDomain))).map((ap) => ap.name ?? ap.id)
               if (names.length === 0) return null
               return (
                 <p className="auto-power-modal__hint">
@@ -501,6 +508,17 @@ function AutoPowerModal({ open, apIds, onClose }) {
               return (
                 <p className="auto-power-modal__hint">
                   {`${list.length} 個已關閉的射頻頻道不符目前國家頻段，未納入規劃：${names.slice(0, 5).join('、')}${names.length > 5 ? `…等 ${names.length} 個` : ''}`}
+                </p>
+              )
+            })()}
+            {/* 58-15 (C5): enabled radios the domain does not allow. */}
+            {(() => {
+              const list = result.opts?.notAllowedRadios ?? []
+              if (list.length === 0) return null
+              const names = list.map((x) => `${x.name} · ${x.band} GHz`)
+              return (
+                <p className="auto-power-modal__hint">
+                  {`${list.length} 個射頻此國家不可用，未納入規劃：${names.slice(0, 5).join('、')}${names.length > 5 ? `…等 ${names.length} 個` : ''}`}
                 </p>
               )
             })()}

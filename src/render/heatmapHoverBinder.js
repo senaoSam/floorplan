@@ -91,7 +91,12 @@ export function bindHeatmapHover({
     lastFireAt = now
 
     const scenario = getScenario()
-    if (!scenario) return
+    // 58-15 (C5): no radio left (e.g. none the domain allows) -- drop the
+    // last reading instead of leaving it up.
+    if (!scenario || scenario.aps.length === 0) {
+      if (useHoverReadoutStore.getState().reading) useHoverReadoutStore.getState().setReading(null)
+      return
+    }
     const wp = scene.world.toLocal(e.global)
     // Canvas px → meters via floor scale.
     const { floors, activeFloorId } = useFloorStore.getState()
@@ -136,9 +141,20 @@ export function bindHeatmapHover({
     }
   })
 
+  // 58-15 (C5): so does a domain switch -- radios it rules out are gone from
+  // the scenario.
+  let lastDomain = useEditorStore?.getState().regulatoryDomain
+  const unsubEditor = useEditorStore ? useEditorStore.subscribe((s) => {
+    if (s.regulatoryDomain === lastDomain) return
+    lastDomain = s.regulatoryDomain
+    invalidate()
+    if (useHoverReadoutStore.getState().reading) useHoverReadoutStore.getState().setReading(null)
+  }) : () => {}
+
   stage.on('pointermove', onMove)
 
   return () => {
+    unsubEditor()
     unsubFloor()
     unsubWall()
     unsubAP()

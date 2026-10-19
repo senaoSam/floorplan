@@ -6,7 +6,8 @@
 
 import { channelBlockCenterMHz } from './frequency'
 import { resolveApRadiation } from './apRadiation'
-import { expandRadios } from '@/utils/apRadios'
+import { expandRadios, radioAllowed } from '@/utils/apRadios'
+import { allowedChannels } from '@/constants/regulatoryDomains'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useClientViewStore } from '@/store/useClientViewStore'
 import {
@@ -296,10 +297,18 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null,
     }
   }
 
+  // 58-15 (C5): a radio the domain does not allow does not transmit -- left
+  // out here, so every reader skips it. A channel planner passes the radio
+  // keys it is about to assign as `env.plannableIds`: those stay while their
+  // band has channels, so the planner still hears their neighbours.
+  // Same defaults as buildApEntry below.
+  const transmits = (ap) => radioAllowed(domainId, ap.frequency ?? 5, ap.channel ?? 36, ap.channelWidth ?? 20)
+    || (!!env?.plannableIds?.has(ap.id) && allowedChannels(domainId, ap.frequency ?? 5).length > 0)
+
   let apList
   if (crossFloor && crossFloor.apsByFloor) {
     // Cross-floor path: each entry already has {posPx, floorScale, elevationM}.
-    apList = expandRadios(crossFloor.apsByFloor).map((ap) => {
+    apList = expandRadios(crossFloor.apsByFloor).filter(transmits).map((ap) => {
       const apPxToM = ap.floorScale ? 1 / ap.floorScale : pxToM
       let pos = { x: ap.posPx.x * apPxToM, y: ap.posPx.y * apPxToM }
       const t = relAlignM(ap.floorRef, apPxToM)
@@ -311,7 +320,7 @@ export function buildScenario(floor, walls, aps, scopes = [], crossFloor = null,
     })
   } else {
     // Planar path: every AP lives on the supplied `floor`.
-    apList = expandRadios(aps).map((ap) =>
+    apList = expandRadios(aps).filter(transmits).map((ap) =>
       buildApEntry(ap, { x: ap.x * pxToM, y: ap.y * pxToM }, 0),
     )
   }

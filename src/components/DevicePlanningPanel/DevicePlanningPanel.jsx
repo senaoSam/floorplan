@@ -9,7 +9,7 @@ import { useHeatmapStore } from '@/store/useHeatmapStore'
 import { useClientViewStore } from '@/store/useClientViewStore'
 import { flashGapMarker } from '@/features/cameras/gapMarkerBus'
 import { greedyChannelAssign, radiosWithoutChannels } from '@/utils/autoChannelPlan'
-import { expandRadios, applyRadioResults } from '@/utils/apRadios'
+import { expandRadios, applyRadioResults, enabledRadios, radioAllowed } from '@/utils/apRadios'
 import { computePlanQualityStats, LOW_SINR_DB } from '@/features/heatmap/planQuality'
 import { storeChannelNeighbors } from '@/features/heatmap/channelNeighbors'
 import { NumberInput } from '@/components/PanelRight/_shared/PanelControls'
@@ -85,7 +85,7 @@ function DevicePlanningPanel() {
       }))
     }, QUALITY_DEBOUNCE_MS)
     return () => { if (qualityTimerRef.current) clearTimeout(qualityTimerRef.current) }
-  }, [collapsed, floor, hasScale, walls, aps, scopes, thresholdDbm, floors, apsByFloor, wallsByAll, holesByFloor, bandFilter, minInterf])
+  }, [collapsed, floor, hasScale, walls, aps, scopes, thresholdDbm, floors, apsByFloor, wallsByAll, holesByFloor, bandFilter, minInterf, regulatoryDomain])
 
   // 52-D2: this was the button that froze the UI with zero feedback — the
   // tester hit it, saw nothing move for seconds, and assumed a crash.
@@ -115,7 +115,9 @@ function DevicePlanningPanel() {
       // 57-34: neighbours = radios that hear each other (not a canvas-px
       // radius). 58: planned per radio; the toast counts radios.
       const radios = expandRadios(aps)
-      const assignments = greedyChannelAssign(radios, regulatoryDomain, storeChannelNeighbors(activeFloorId, aps))
+      // 58-15 (C5): every radio here is being planned -- one on a channel the
+      // domain does not allow is moved to an allowed one.
+      const assignments = greedyChannelAssign(radios, regulatoryDomain, storeChannelNeighbors(activeFloorId, aps, new Set(radios.map((r) => r.id))))
       const updated = applyRadioResults(aps, assignments, (a) => ({ channel: a.channel }))
       setAPs(activeFloorId, updated)
       // 58-16 (C5): enabled radios on a band the domain has no channel for
@@ -146,6 +148,12 @@ function DevicePlanningPanel() {
   const crossFloorCount = quality?.crossFloorConflicts?.length ?? 0
   const strongestCrossDbm = quality?.crossFloorConflicts?.[0]?.rssiDbm
   const hasOtherFloors = floors.some((f) => f.id !== activeFloorId && f.scale)
+  // 58-15 (C5): this floor's enabled radios the domain does not allow -- left
+  // out of every number above.
+  let notAllowedCount = 0
+  for (const a of aps) {
+    for (const r of enabledRadios(a)) if (!radioAllowed(regulatoryDomain, r.band, r.channel, r.channelWidth)) notAllowedCount++
+  }
 
   return (
     <div className="device-planning">
@@ -264,6 +272,12 @@ function DevicePlanningPanel() {
                     </div>
                   )}
                   <div className="device-planning__row" title="訊號門檻——RSSI 高於此值才算已涵蓋">
+                  {notAllowedCount > 0 && (
+                    <div className="device-planning__row" title="已啟用、但頻段或頻道在目前國家不允許的射頻：不發射，不計入熱圖與上方各項數字。頻道不合法者可按「自動頻道」改到合法頻道；換回原國家即恢復">
+                      <span>此國家不可用</span>
+                      <b className="device-planning__val--warn">{notAllowedCount} 個射頻</b>
+                    </div>
+                  )}
                     <span>訊號門檻</span>
                     <NumberInput
                       value={thresholdDbm}

@@ -11,7 +11,7 @@ import { perfOn, probe, probeEvent } from '@/features/cable/perfProbe'
 import { getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
 import { getModeCapability } from '@/render/modeCapabilities'
 import { resolveApRadiation } from '@/features/heatmap/apRadiation'
-import { enabledRadios, enabledBands, hasEnabledBand, highestEnabledBand, radioView, deviceIdOf } from '@/utils/apRadios'
+import { enabledRadios, enabledBands, liveRadios, liveBands, hasLiveBand, highestLiveBand, radioAllowed, radioView, deviceIdOf } from '@/utils/apRadios'
 
 // AP markers adapter — per-AP interactive Container with click select,
 // drag, hover, right-click context menu, frequency-colored marker, and
@@ -32,7 +32,9 @@ const FREQ_LABEL = {
 
 const FALLBACK_COLOR = '#9aa3ad'
 // 58: a multi-band device takes its highest enabled band's colour (fans, axis).
-const colorForAP = (ap) => FREQ_COLOR[highestEnabledBand(ap)] ?? FALLBACK_COLOR
+// 58-15 (C5): of the bands it may transmit on under the domain.
+const domainNow = () => useEditorStore.getState().regulatoryDomain
+const colorForAP = (ap) => FREQ_COLOR[highestLiveBand(ap, domainNow())] ?? FALLBACK_COLOR
 
 // All sizes in canvas-px @ scale=1. Container is scaled 1/viewport.scale
 // so visuals stay at constant screen-px size.
@@ -60,12 +62,13 @@ const BAND_DIM_ALPHA = 0.3
 // filter is 'all', or this AP is on the selected band; dimmed otherwise.
 // 58-10: a device with every radio off adds nothing to any band's field, so it
 // is dimmed whenever the heatmap is on, whatever the filter.
+// 58-15 (C5): nor do radios the domain does not allow.
 function bandDimAlpha(ap) {
   const hm = useHeatmapStore.getState()
   if (!hm.enabled) return 1
-  if (enabledRadios(ap).length === 0) return BAND_DIM_ALPHA
+  if (liveRadios(ap, domainNow()).length === 0) return BAND_DIM_ALPHA
   if (!hm.bandFilter || hm.bandFilter === 'all') return 1
-  return hasEnabledBand(ap, hm.bandFilter) ? 1 : BAND_DIM_ALPHA
+  return hasLiveBand(ap, hm.bandFilter, domainNow()) ? 1 : BAND_DIM_ALPHA
 }
 
 // 58-7: the single band the heatmap is showing (number), or null when the
@@ -126,6 +129,8 @@ const apHitArea = {
 }
 // 58-10: info line for a device with every radio off.
 const NO_RADIO_LABEL = '無射頻'
+// 58-15 (C5): a radio the regulatory domain does not allow.
+const NOT_ALLOWED_LABEL = '此國家不可用'
 const FREQ_LABEL_LONG = { 2.4: '2.4G', 5: '5G', 6: '6G' }
 // oldSrc Rect width:80 height:44 cornerRadius:4, Group offsetX:40 y:19.
 // 58: one line per radio, so the pill sizes to its text (min oldSrc width).
@@ -266,12 +271,16 @@ export function attachAPsLayer({
     // back to the all-bands look.
     const showBand = (b) => !!(editorState.showAPBand?.[b] ?? true)
     const viewBand   = heatmapViewBand()
-    const showsViewBand = viewBand != null && hasEnabledBand(ap, viewBand) && showBand(viewBand)
+    const domainId = editorState.regulatoryDomain
+    const showsViewBand = viewBand != null && hasLiveBand(ap, viewBand, domainId) && showBand(viewBand)
     const freqColor  = showsViewBand ? FREQ_COLOR[viewBand] : colorForAP(ap)
     // 58-10: every radio off -> the body outline (and the colours that
     // follow it) turn the same grey as the fan.
+    // 58-15 (C5): so does a device whose enabled radios the domain does not
+    // allow (its info lines say why, not 無射頻).
     const noRadio = enabledRadios(ap).length === 0
-    const bodyNormalStroke = noRadio ? FALLBACK_COLOR : BODY_STROKE_NORMAL
+    const noLive = liveRadios(ap, domainId).length === 0
+    const bodyNormalStroke = noLive ? FALLBACK_COLOR : BODY_STROKE_NORMAL
 
     // oldSrc azimuth convention: 0° points +x (east), increases clockwise
     // (axisRad = azimuth * π/180). No -90 offset.
@@ -363,7 +372,7 @@ export function attachAPsLayer({
 
     // 58: band dots, one per enabled radio on a visible band (layer toggle),
     // centred above the body.
-    const dotBands = enabledBands(ap).filter(showBand)
+    const dotBands = liveBands(ap, domainId).filter(showBand)
     const dotX0 = -((dotBands.length - 1) * BAND_DOT_GAP) / 2
     dotBands.forEach((band, i) => {
       graphics
@@ -401,11 +410,15 @@ export function attachAPsLayer({
     // radio (band, channel/width, tx). Visible only when showAPInfo is on.
     const radioLines = enabledRadios(ap).filter((r) => showBand(r.band) && (!showsViewBand || r.band === viewBand)).map((r) => {
       // 57-23: when the EIRP cap derates the TX power, show set → actual.
-      const rad = resolveApRadiation(radioView(ap, r), editorState.regulatoryDomain)
+      const rad = resolveApRadiation(radioView(ap, r), domainId)
       const txLabel = rad.capped
         ? `${rad.setTxDbm}→${Math.round(rad.txDbm * 10) / 10}`
         : `${r.txPower ?? '—'}`
       const freqLabel = FREQ_LABEL_LONG[r.band] ?? `${r.band}G`
+      // 58-15 (C5): not transmitting -- no TX / EIRP to show.
+      if (!radioAllowed(domainId, r.band, r.channel, r.channelWidth)) {
+        return `${freqLabel} CH${r.channel ?? '—'}/${r.channelWidth ?? 20}  ${NOT_ALLOWED_LABEL}`
+      }
       return `${freqLabel} CH${r.channel ?? '—'}/${r.channelWidth ?? 20}  ${txLabel} dBm`
     })
     // 58-10: a device with every radio off says so.

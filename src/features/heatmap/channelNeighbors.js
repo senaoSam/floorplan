@@ -15,7 +15,10 @@ import { makeApHearingFn } from './apHearing'
 import { greedyChannelAssign } from '@/utils/autoChannelPlan'
 import { apRadios, radioKey, allRadioKeys, expandRadios, applyRadioResults } from '@/utils/apRadios'
 
-export function storeChannelNeighbors(floorId, aps) {
+// 58-15 (C5): `plannableIds` -- the radio keys being assigned. They stay in the
+// scenario even on a channel the domain does not allow (that is what the
+// planner fixes); other such radios do not transmit and are left out.
+export function storeChannelNeighbors(floorId, aps, plannableIds = null) {
   const floors = useFloorStore.getState().floors
   const floor = floors.find((f) => f.id === floorId)
   if (!floor?.scale) return 300
@@ -25,6 +28,7 @@ export function storeChannelNeighbors(floorId, aps) {
     apsByFloor: { ...useAPStore.getState().apsByFloor, [floorId]: aps },
     wallsByFloor: useWallStore.getState().wallsByFloor,
     holesByFloor: useFloorHoleStore.getState().floorHolesByFloor,
+    env: plannableIds ? { plannableIds } : null,
   })
   return sc ? makeApHearingFn(sc, { crossFloorFixed: true }) : 300
 }
@@ -51,7 +55,9 @@ export function assignNewRadioChannels(floorId, next, prev, domainId) {
     }
   }
   if (!added) return next
-  const assigned = greedyChannelAssign(expandRadios(next), domainId, storeChannelNeighbors(floorId, next), fixed)
+  const radios = expandRadios(next)
+  const newKeys = new Set(radios.filter((r) => !prevKeys.has(r.id)).map((r) => r.id))
+  const assigned = greedyChannelAssign(radios, domainId, storeChannelNeighbors(floorId, next, newKeys), fixed)
   const fresh = new Map([...assigned].filter(([key]) => !prevKeys.has(key)))
   return applyRadioResults(next, fresh, (a) => ({ channel: a.channel }))
 }

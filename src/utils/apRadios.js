@@ -11,12 +11,25 @@
 import { getAPModelById, getDefaultTxPower } from '@/constants/apModels'
 import { DEFAULT_CHANNEL_WIDTH } from '@/constants/channelWidths'
 import { allowedChannels } from '@/constants/regulatoryDomains'
+import { channelBlockMembers } from '@/features/heatmap/frequency'
 
 export const BANDS = [2.4, 5, 6]
 export const DEFAULT_CHANNEL_BY_BAND = { 2.4: 1, 5: 36, 6: 1 }
 
 const KEY_SEP = '#'
 export const radioKey = (apId, band) => `${apId}${KEY_SEP}${band}`
+// 58-15 (C5): what a device transmits on under the domain -- its enabled
+// radios that radioAllowed (below) passes. Drawing and readouts use these so
+// they agree with the computation; layer toggles keep the enabled ones.
+export const liveRadios = (ap, domainId) =>
+  enabledRadios(ap).filter((r) => radioAllowed(domainId, r.band, r.channel, r.channelWidth))
+export const liveBands = (ap, domainId) => liveRadios(ap, domainId).map((r) => r.band)
+export const hasLiveBand = (ap, band, domainId) => liveBands(ap, domainId).some((b) => String(b) === String(band))
+export function highestLiveBand(ap, domainId) {
+  const bands = liveBands(ap, domainId)
+  return bands.length ? Math.max(...bands) : null
+}
+
 // Device id of a radio key (or of a plain device id).
 export function deviceIdOf(key) {
   const s = String(key)
@@ -57,6 +70,16 @@ export function radiosForModel(modelId, prev = [], domainId = null) {
     const maxTx = model.maxTxPower?.[band]
     return maxTx != null && old.txPower > maxTx ? { ...old, txPower: maxTx } : old
   })
+}
+
+// 58-15 (C5): may a radio on band / channel / width transmit under the
+// domain? Every 20 MHz member of its bonded block must be an allowed channel
+// (the same test the channel planner's candidates pass) -- false when the
+// band has no channel there at all. A radio that may not is left out of every
+// computation; its settings stay, so switching the domain back restores it.
+export function radioAllowed(domainId, band, channel, width) {
+  const allowed = new Set(allowedChannels(domainId, band))
+  return allowed.size > 0 && channelBlockMembers(band, channel, width ?? 20).every((m) => allowed.has(m))
 }
 
 export const apRadios = (ap) => ap?.radios ?? []

@@ -5,7 +5,7 @@ import { useHoverReadoutStore } from '@/store/useHoverReadoutStore'
 import { useAPStore } from '@/store/useAPStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { showUiToast } from '@/store/useUiToastStore'
-import { BANDS, hasEnabledBand } from '@/utils/apRadios'
+import { BANDS, hasEnabledBand, hasLiveBand } from '@/utils/apRadios'
 import { HEATMAP_MODE_LIST, HEATMAP_MODE_CONFIG, getModeConfig } from '@/features/heatmap/modes'
 import FormulaNote from '@/components/FormulaNote/FormulaNote'
 import Icon from '@/components/Icon/Icon'
@@ -84,16 +84,21 @@ function HeatmapControl() {
 
   // 58-7: devices with each band enabled -- on this floor (chip badge) and
   // in the whole building (a band nobody has disables its chip).
+  // 58-15 (C5): enabled and allowed by the domain, like the heatmap.
+  const domainId = useEditorStore((s) => s.regulatoryDomain)
   const bandCounts = useMemo(() => {
     const floor = {}
     const building = {}
+    const enabled = {}   // enabled, allowed or not (for the chip's reason)
     for (const band of BANDS) {
-      floor[band] = (apsByFloor[activeFloorId] ?? []).filter((a) => hasEnabledBand(a, band)).length
+      floor[band] = (apsByFloor[activeFloorId] ?? []).filter((a) => hasLiveBand(a, band, domainId)).length
       building[band] = Object.values(apsByFloor).reduce(
+        (n, list) => n + (list ?? []).filter((a) => hasLiveBand(a, band, domainId)).length, 0)
+      enabled[band] = Object.values(apsByFloor).reduce(
         (n, list) => n + (list ?? []).filter((a) => hasEnabledBand(a, band)).length, 0)
     }
-    return { floor, building }
-  }, [apsByFloor, activeFloorId])
+    return { floor, building, enabled }
+  }, [apsByFloor, activeFloorId, domainId])
 
   const [panelOpen, setPanelOpen] = useState(false)
   const [formulaOpen, setFormulaOpen] = useState(false)
@@ -266,7 +271,7 @@ function HeatmapControl() {
                     style={{ '--band-color': BAND_COLOR[band] }}
                     disabled={inBuilding === 0 && !checked}
                     onClick={() => setBandFilter(value)}
-                    title={inBuilding === 0 ? `整棟沒有開啟的 ${value} GHz 射頻`
+                    title={inBuilding === 0 ? (bandCounts.enabled[band] > 0 ? `整棟的 ${value} GHz 射頻在此國家都不可用` : `整棟沒有開啟的 ${value} GHz 射頻`)
                       : onFloor === 0 ? `本層無 ${value} GHz 射頻，只會看到其他樓層的滲透`
                       : `只用 ${value} GHz 射頻計算熱圖`}
                   >

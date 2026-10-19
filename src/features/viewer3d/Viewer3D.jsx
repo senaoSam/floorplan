@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { useFloorStore, getPxPerM, getFloorHeight } from '@/store/useFloorStore'
 import { useEditorStore, VIEW_MODE, EDITOR_MODE } from '@/store/useEditorStore'
 import { resolveApRadiation } from '@/features/heatmap/apRadiation'
-import { enabledRadios, radioView, highestEnabledBand } from '@/utils/apRadios'
+import { enabledRadios, radioView, highestLiveBand, radioAllowed } from '@/utils/apRadios'
 import { getAPModelById } from '@/constants/apModels'
 import { useViewportStore } from '@/store/useViewportStore'
 import { getSceneRefs } from '@/render/sceneRegistry'
@@ -763,12 +763,15 @@ function buildReadoutContent(type, d) {
       // 57-23: when the EIRP cap derates the TX power, show set → actual.
       const rad = resolveApRadiation(radioView(d, r), domainId)
       const txLabel = rad.capped ? `${rad.setTxDbm}→${Math.round(rad.txDbm * 10) / 10} dBm` : `${r.txPower} dBm`
-      return `${FREQ_LABEL_3D[r.band] ?? `${r.band} GHz`} · Ch ${r.channel}/${r.channelWidth}MHz · ${txLabel}`
+      // 58-15 (C5): a radio the domain does not allow does not transmit.
+      const tail = radioAllowed(domainId, r.band, r.channel, r.channelWidth) ? txLabel : '此國家不可用'
+      return `${FREQ_LABEL_3D[r.band] ?? `${r.band} GHz`} · Ch ${r.channel}/${r.channelWidth}MHz · ${tail}`
     })
-    const top = highestEnabledBand(d)
+    const top = highestLiveBand(d, domainId)
     // 58-10: every radio off -> grey pill (APLayer3D NO_RADIO_COLOR) and a
-    // 「無射頻」 line.
-    if (top == null) radioLines.push('無射頻')
+    // 「無射頻」 line. 58-15 (C5): grey too when none is allowed (the lines
+    // above say so).
+    if (enabledRadios(d).length === 0) radioLines.push('無射頻')
     const mountLabel = d.z != null ? `掛 ${Number(d.z).toFixed(1)} m` : null
     const mode = d.antennaMode ?? 'omni'
     const antennaLabel = mode === 'omni' ? '全向'

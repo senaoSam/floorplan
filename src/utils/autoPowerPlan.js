@@ -61,8 +61,7 @@
 import { buildFloorScenario } from '@/features/heatmap/buildCrossFloor'
 import { resolveApRadiation } from '@/features/heatmap/apRadiation'
 import { useEditorStore } from '@/store/useEditorStore'
-import { expandRadios, apRadios, radioView } from '@/utils/apRadios'
-import { isChannelAllowed } from '@/constants/regulatoryDomains'
+import { expandRadios, apRadios, radioView, radioAllowed } from '@/utils/apRadios'
 import { rssiFromAp, makeApAggregator, aggregateWithTables } from '@/features/heatmap/propagation'
 import {
   getAPModelById,
@@ -592,11 +591,18 @@ export async function runAutoPowerPlan({
 }) {
   const cross = { floors, apsByFloor, wallsByFloor, holesByFloor }
   const planDevices = new Set(apIdsToPlan)
-  const onRadios = expandRadios(aps)
-  // 58-15 (decision 6): the planned devices' disabled radios that may come
-  // back on (see above) -- radio views, starting off.
-  const floorBands = new Set(onRadios.map((a) => a.frequency))
   const domainId = env?.regulatoryDomain ?? useEditorStore.getState().regulatoryDomain
+  // 58-15 (C5): an enabled radio the domain does not allow does not transmit
+  // -- not planned and not counted (power cannot fix its channel).
+  const allowed = (a) => radioAllowed(domainId, a.frequency, a.channel, a.channelWidth)
+  const onRadios = expandRadios(aps).filter(allowed)
+  const notAllowedRadios = expandRadios(aps)
+    .filter((a) => planDevices.has(a.deviceId) && !allowed(a))
+    .map((a) => ({ name: a.name ?? a.deviceId, band: a.frequency }))
+  // 58-15 (decision 6): the planned devices' disabled radios that may come
+  // back on (see above) -- radio views, starting off. A band is "off floor-
+  // wide" when no radio on it is enabled (allowed or not).
+  const floorBands = new Set(expandRadios(aps).map((a) => a.frequency))
   const offRadios = []
   // Shown in the modal: bands off floor-wide that a planned device has a
   // radio on, and disabled radios left out for their channel.
@@ -607,7 +613,7 @@ export async function runAutoPowerPlan({
     for (const r of apRadios(ap)) {
       if (r.enabled) continue
       if (!floorBands.has(r.band)) { skippedBands.add(r.band); continue }
-      if (!isChannelAllowed(domainId, r.band, r.channel)) {
+      if (!radioAllowed(domainId, r.band, r.channel, r.channelWidth)) {
         skippedRadios.push({ name: ap.name ?? ap.id, band: r.band })
         continue
       }
@@ -617,6 +623,7 @@ export async function runAutoPowerPlan({
   const skipped = {
     skippedBands: [...skippedBands].sort((a, b) => a - b),
     skippedRadios,
+    notAllowedRadios,
   }
   const startOff = new Set(offRadios.map((a) => a.id))
   const radios = [...onRadios, ...offRadios]
@@ -624,7 +631,8 @@ export async function runAutoPowerPlan({
     .filter((a) => planDevices.has(a.deviceId ?? a.id))
     .map((a) => a.frequency))].sort((a, b) => a - b)
   if (bands.length === 0) {
-    return { aborted: false, error: 'no-aps', txMap: null, scoresByBand: null }
+    // 58-15 (C5): say why when it is the domain.
+    return { aborted: false, error: notAllowedRadios.length ? 'not-allowed' : 'no-aps', txMap: null, scoresByBand: null, opts: skipped }
   }
   const txMap = new Map()
   const offTxByRadio = new Map()   // 58-15 (D1): radio key -> off level
