@@ -14,6 +14,7 @@ import { computePlanQualityStats, LOW_SINR_DB } from '@/features/heatmap/planQua
 import { storeChannelNeighbors } from '@/features/heatmap/channelNeighbors'
 import { NumberInput } from '@/components/PanelRight/_shared/PanelControls'
 import Icon from '@/components/Icon/Icon'
+import Redundant24Modal from '@/components/Redundant24Modal/Redundant24Modal'
 import { COVERAGE_THRESHOLD_DBM, COVERAGE_TARGET_PCT } from '@/constants/coverage'
 import './DevicePlanningPanel.sass'
 
@@ -105,6 +106,7 @@ function DevicePlanningPanel() {
   // Without the double rAF the paint and the commit land in the same frame and
   // the user still sees nothing.
   const [channelBusy, setChannelBusy] = useState(false)
+  const [r24Open, setR24Open] = useState(false)   // 58-13
 
   const runAutoChannel = async () => {
     // No scale → no AP-to-AP distances to plan with (the button is disabled).
@@ -195,7 +197,18 @@ function DevicePlanningPanel() {
                 <Icon name={channelBusy ? 'hourglass' : 'radio'} size={14} />
                 {channelBusy ? `指派頻道中（${apsOnFloor} 顆）…` : '自動頻道'}
               </button>
+              {/* 58-13 */}
+              <button
+                className="device-planning__btn"
+                onClick={() => setR24Open(true)}
+                disabled={apsOnFloor === 0 || !hasScale}
+                title={!hasScale ? '尚未設定比例尺' : '找出覆蓋已被其他 AP 蓋到的 2.4 GHz 射頻，預覽後關閉'}
+              >
+                <Icon name="powerOff" size={14} />
+                關閉多餘 2.4 GHz
+              </button>
             </div>
+            <Redundant24Modal open={r24Open} onClose={() => setR24Open(false)} />
           </section>
 
           {/* 規劃品質報表：涵蓋率 / 盲區 / 頻道衝突。以本樓層 scope 內
