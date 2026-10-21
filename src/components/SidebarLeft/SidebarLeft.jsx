@@ -18,6 +18,7 @@ import { useCameraStore } from '@/store/useCameraStore'
 import { useTrackingStore } from '@/store/useTrackingStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { useAutoPlaceStore } from '@/store/useAutoPlaceStore'
+import { useRadioPreviewStore } from '@/store/useRadioPreviewStore'
 import { useEditorStore, EDITOR_MODE } from '@/store/useEditorStore'
 import { useFloorImport } from '@/features/importer/useFloorImport'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
@@ -28,15 +29,15 @@ import DemoLoader from '@/components/DemoLoader/DemoLoader'
 import StressLoader from '@/components/StressLoader/StressLoader'
 import { capturePlanPng, triggerImageDownload } from '@/features/exportPng/exportPlanView'
 import { getSceneRefs } from '@/render/sceneRegistry'
-import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
-import AutoPlaceModal from '@/components/AutoPlaceModal/AutoPlaceModal'
+import { usePlanningDialogStore } from '@/store/usePlanningDialogStore'
 import './SidebarLeft.sass'
 
 // Ported from oldSrc; trimmed against the PIXI port:
 //   * 匯出 PNG ↘ ported Bundle 22 via PIXI renderer.extract.canvas
 //     (scene refs via getSceneRefs(); alert below is only the not-ready guard).
 //   * 自動規劃整層 AP 功率 ↘ AutoPowerModal (heatmap-driven greedy planner)
-//     ported Bundle 23 — button opens the modal (setAutoPowerOpen).
+//     ported Bundle 23 — button opens the modal (usePlanningDialogStore;
+//     mounted once in PlanningDialogs).
 // Everything else (add / collapse / rename / align switch / inline floor
 // properties / reorder / remove) is identical to oldSrc.
 
@@ -76,8 +77,7 @@ function SidebarLeft() {
 
   const [menuOpenId, setMenuOpenId] = useState(null)
   const [pendingRemove, setPendingRemove] = useState(null)
-  const [autoPowerOpen, setAutoPowerOpen] = useState(false)
-  const [autoPlaceOpen, setAutoPlaceOpen] = useState(false)
+  const openDialog = usePlanningDialogStore((s) => s.openDialog)
   const [pendingSwitch, setPendingSwitch] = useState(null)
   // Set when the user asks to align the ANCHOR floor — confirmed before
   // proceeding, since the anchor is the pose everyone else aligns onto.
@@ -265,6 +265,10 @@ function SidebarLeft() {
     // alive and leaving `removeApIds` pointing at deleted APs.
     if (useAutoPlaceStore.getState().floorId === floor.id) {
       useAutoPlaceStore.getState().clearPreview()
+    }
+    // Same for a planning dialog's radio preview.
+    if (useRadioPreviewStore.getState().floorId === floor.id) {
+      useRadioPreviewStore.getState().clearPreview()
     }
     removeFloor(floor.id)
     if (isAlignMode && floor.id === activeFloorId) {
@@ -572,14 +576,14 @@ function SidebarLeft() {
                   <button
                     className="sidebar-left__floor-action"
                     title="依覆蓋目標自動計算本樓層 AP 的建議位置與頻道（先預覽再套用）"
-                    onClick={(e) => { e.stopPropagation(); setAutoPlaceOpen(true) }}
+                    onClick={(e) => { e.stopPropagation(); openDialog('autoPlace') }}
                   >
                     <Icon name="mapPin" size={12} inline style={{ marginRight: 4 }} />自動規劃 AP 放置
                   </button>
                   <button
                     className="sidebar-left__floor-action"
                     title="自動調整本樓層各 AP 的發射功率，達成目標訊號涵蓋"
-                    onClick={(e) => { e.stopPropagation(); setAutoPowerOpen(true) }}
+                    onClick={(e) => { e.stopPropagation(); openDialog('autoPower') }}
                   >
                     <Icon name="zap" size={12} inline style={{ marginRight: 4 }} />自動規劃整層 AP 功率
                   </button>
@@ -641,15 +645,6 @@ function SidebarLeft() {
           onCancel={() => setPendingSwitch(null)}
         />
       )}
-      <AutoPowerModal
-        open={autoPowerOpen}
-        apIds={[]}
-        onClose={() => setAutoPowerOpen(false)}
-      />
-      <AutoPlaceModal
-        open={autoPlaceOpen}
-        onClose={() => setAutoPlaceOpen(false)}
-      />
     </aside>
   )
 }

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react'
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
@@ -7,6 +7,8 @@ import { useScopeStore } from '@/store/useScopeStore'
 import { useFloorHoleStore } from '@/store/useFloorHoleStore'
 import { currentScenarioEnv } from '@/features/heatmap/buildScenario'
 import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
+import { useRadioPreview } from '@/hooks/useRadioPreview'
+import BeforeAfterSwitch from '@/components/AutoPowerModal/BeforeAfterSwitch'
 import { patchRadio } from '@/utils/apRadios'
 import { runRedundant24Plan, COF_MIN, MAX_DROP_PCT } from '@/utils/redundant24Plan'
 import { BAND_AVAILABLE_RSSI_DBM } from '@/features/clientView/simulate'
@@ -16,7 +18,20 @@ import '@/components/AutoPowerModal/AutoPowerModal.sass'
 import '@/components/AutoPlaceModal/AutoPlaceModal.sass'
 
 const EMPTY = []
+
+// What the preview draws: the band map (where phones land -- next to no
+// change is the point) or the 2.4 GHz signal itself (where it got weaker).
+const PREVIEW_VIEWS = {
+  band: { label: '頻段地圖', view: { mode: 'band' }, hint: '頻段地圖幾乎不變，代表手機連線不受影響' },
+  rssi24: { label: '2.4 GHz 訊號', view: { mode: 'rssi', bandFilter: '2.4' }, hint: '變弱的地方，手機會改連 5 / 6 GHz' },
+}
 const fmtPct = (v) => (v == null ? '—' : `${(v * 100).toFixed(1)}%`)
+
+// The plan floor's APs with the plan's 2.4 GHz radios switched off.
+const withPlanApplied = (result, floorAps) => {
+  const ids = new Set(result.disable.map((d) => d.apId))
+  return floorAps.map((a) => (ids.has(a.id) ? { ...a, radios: patchRadio(a, 2.4, { enabled: false }) } : a))
+}
 
 // 58-13: preview-then-apply for redundantly placed 2.4 GHz radios on the
 // active floor (rule: utils/redundant24Plan). Applying switches those radios
@@ -29,14 +44,17 @@ function Redundant24Modal({ open, onClose }) {
   const setAPs = useAPStore((s) => s.setAPs)
 
   const [legacy, setLegacy] = useState(false)
+  const [previewView, setPreviewView] = useState('band')
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState(0)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const runId = useRef(0)
 
+  // Reset on open and on close (also by another planning dialog opening,
+  // usePlanningDialogStore): a run in flight is dropped, a reopen never
+  // previews an old plan.
   useEffect(() => {
-    if (!open) return
     runId.current++
     setRunning(false)
     setResult(null)
@@ -47,6 +65,9 @@ function Redundant24Modal({ open, onClose }) {
   const handleRun = useCallback(async () => {
     if (!floor?.scale) { setError('尚未設定比例尺'); return }
     const id = ++runId.current
+    // The preview card leaves the canvas usable, so the user can switch
+    // floors before applying: the plan carries its floor (53-G10).
+    const planFloorId = activeFloorId
     setRunning(true)
     setError(null)
     setProgress(0)
@@ -70,16 +91,19 @@ function Redundant24Modal({ open, onClose }) {
         : '無法計算（樓層資料不完整）')
       return
     }
-    setResult(r)
+    setResult({ ...r, floorId: planFloorId })
   }, [floor, aps, floors, activeFloorId, legacy])
 
   const handleApply = useCallback(() => {
     if (!result) return
-    const ids = new Set(result.disable.map((d) => d.apId))
-    const floorAps = useAPStore.getState().apsByFloor[activeFloorId] ?? []
-    setAPs(activeFloorId, floorAps.map((a) => (ids.has(a.id) ? { ...a, radios: patchRadio(a, 2.4, { enabled: false }) } : a)))
+    if (!useFloorStore.getState().floors.some((f) => f.id === result.floorId)) {
+      setError('規劃所屬的樓層已不存在，請重新分析')
+      setResult(null)
+      return
+    }
+    setAPs(result.floorId, withPlanApplied(result, useAPStore.getState().apsByFloor[result.floorId] ?? []))
     onClose()
-  }, [result, activeFloorId, setAPs, onClose])
+  }, [result, setAPs, onClose])
 
   const handleCancel = useCallback(() => {
     if (running) {
@@ -91,19 +115,47 @@ function Redundant24Modal({ open, onClose }) {
     }
   }, [running, onClose])
 
-  const dismiss = useOverlayDismiss(running ? null : onClose)
+  // Preview: the plan on the band map (where phones land once 2.4 GHz is off)
+  // while the result is up, with the dialog docked as a card.
+  const previewing = !running && !!result && result.disable.length > 0
+  const previewPlan = useMemo(() => (previewing ? (floorAps) => withPlanApplied(result, floorAps) : null), [previewing, result])
+  // Each new result starts on the band map.
+  useEffect(() => { setPreviewView('band') }, [result])
+  useRadioPreview(open && previewing ? result.floorId : null, previewPlan, PREVIEW_VIEWS[previewView].view)
+
+  const dismiss = useOverlayDismiss(running || previewing ? null : onClose)
   if (!open) return null
 
   const stats = result?.stats
   const names = result?.disable.map((d) => d.name) ?? []
 
   return createPortal((
-    <div className="auto-power-modal-overlay" {...dismiss}>
+    <div className={`auto-power-modal-overlay${previewing ? ' auto-power-modal-overlay--preview' : ''}`} {...dismiss}>
       <div className="auto-power-modal">
         <div className="auto-power-modal__header">
           <span className="auto-power-modal__title">關閉多餘 2.4 GHz 射頻</span>
           <span className="auto-power-modal__sub">本層</span>
         </div>
+        {previewing && (
+          <>
+            <BeforeAfterSwitch />
+            <div className="auto-power-modal__compare">
+              <span>顯示</span>
+              <span className="auto-power-modal__seg" role="group" aria-label="預覽顯示的熱圖">
+                {Object.entries(PREVIEW_VIEWS).map(([key, v]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`auto-power-modal__seg-btn${previewView === key ? ' auto-power-modal__seg-btn--active' : ''}`}
+                    aria-pressed={previewView === key}
+                    onClick={() => setPreviewView(key)}
+                  >{v.label}</button>
+                ))}
+              </span>
+            </div>
+            <p className="auto-power-modal__hint auto-power-modal__compare-hint">{PREVIEW_VIEWS[previewView].hint}</p>
+          </>
+        )}
 
         {running && (
           <div className="auto-power-modal__progressbar">
@@ -172,7 +224,7 @@ function Redundant24Modal({ open, onClose }) {
 
         <div className="auto-power-modal__actions">
           <button className="auto-power-modal__btn auto-power-modal__btn--cancel" onClick={handleCancel}>
-            {running ? '中止' : '關閉'}
+            {running ? '中止' : previewing ? '取消' : '關閉'}
           </button>
           {!running && !result && (
             <button className="auto-power-modal__btn auto-power-modal__btn--primary" onClick={handleRun}>

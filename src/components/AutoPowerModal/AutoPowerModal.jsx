@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react'
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useWallStore } from '@/store/useWallStore'
@@ -10,6 +10,8 @@ import { getDefaultTxPower } from '@/constants/apModels'
 import { apRadios, enabledRadios, radioKey, applyRadioResults, deviceIdOf, radioAllowed } from '@/utils/apRadios'
 import { currentScenarioEnv } from '@/features/heatmap/buildScenario'
 import { useOverlayDismiss } from '@/hooks/useOverlayDismiss'
+import { useRadioPreview } from '@/hooks/useRadioPreview'
+import BeforeAfterSwitch from './BeforeAfterSwitch'
 import './AutoPowerModal.sass'
 
 // HM-F9: run the greedy plan in a Web Worker so the main thread stays
@@ -66,6 +68,23 @@ function onAfterPlan(result, ap, r, domainId) {
   return next == null ? r.enabled && radioAllowed(domainId, r.band, r.channel, r.channelWidth) : next > offTxOf(result.opts, key)
 }
 
+// The plan floor's APs once `result` is applied: txMap is keyed per radio and
+// only the planned devices are written. A radio the search drove to its TX
+// floor is switched off rather than left radiating at it (planning tools
+// disable surplus radios the same way); 58-15 (D1): the floor is per radio.
+// 58-15 (decision 6): a disabled radio planned on is switched back on; one
+// that stays off is left untouched (keeps its stored TX).
+function plannedFloorAps(result, floorAps) {
+  const targetIds = new Set(result.targetIds)
+  const wasOff = new Set(floorAps.flatMap((ap) => apRadios(ap)
+    .filter((r) => !r.enabled).map((r) => radioKey(ap.id, r.band))))
+  const planned = new Map([...result.txMap].filter(([k]) => targetIds.has(deviceIdOf(k)))
+    .map(([k, tx]) => [k, tx <= offTxOf(result.opts, k) ? null : tx])
+    .filter(([k, tx]) => !(tx == null && wasOff.has(k))))
+  return applyRadioResults(floorAps, planned,
+    (tx) => (tx == null ? { enabled: false } : { enabled: true, txPower: tx }))
+}
+
 function AutoPowerModal({ open, apIds, onClose }) {
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
   const regulatoryDomain = useEditorStore((s) => s.regulatoryDomain)
@@ -91,6 +110,10 @@ function AutoPowerModal({ open, apIds, onClose }) {
 
   const targetIds = apIds && apIds.length > 0 ? apIds : aps.map((a) => a.id)
   const targetAPs = aps.filter((a) => targetIds.includes(a.id))
+  // The result lists the devices of the floor it was planned for, which may
+  // no longer be the active one (preview card, see handleRun).
+  const planFloorAps = useAPStore((s) => (result ? s.apsByFloor[result.floorId] ?? EMPTY : EMPTY))
+  const resultAPs = result ? planFloorAps.filter((a) => result.targetIds.includes(a.id)) : targetAPs
 
   // Tear the worker down if the modal unmounts mid-run, otherwise the search
   // would silently keep churning + post messages to a dead component.
@@ -106,12 +129,19 @@ function AutoPowerModal({ open, apIds, onClose }) {
   // 每次開啟都從乾淨的設定頁開始。元件關閉時不 unmount（open=false 只是
   // return null），舊 result 會殘留 — 換樓層/換選取後重開，舊 txMap 對不上
   // 新 AP id，結果列會渲染出 undefined/NaN。
+  // Closing (also by another planning dialog opening, usePlanningDialogStore)
+  // stops a run and drops the result, so a reopen never previews an old plan.
   useEffect(() => {
-    if (open) {
-      setResult(null)
-      setProgress(null)
-      setError(null)
+    if (!open) {
+      if (workerRef.current) {
+        workerRef.current.terminate()
+        workerRef.current = null
+      }
+      setRunning(false)
     }
+    setResult(null)
+    setProgress(null)
+    setError(null)
   }, [open])
 
   const handleRun = useCallback(() => {
@@ -141,6 +171,11 @@ function AutoPowerModal({ open, apIds, onClose }) {
     setResult(null)
     setProgress(null)
     setFillPct(null)
+    // The preview card leaves the canvas usable, so the user can switch
+    // floors before applying: the plan carries the floor and devices it was
+    // made for (as AutoPlaceModal's does, 53-G10).
+    const planFloorId = activeFloorId
+    const planTargetIds = [...targetIds]
 
     // Spin up a fresh worker per run so a previously-terminated worker can't
     // leak state into this one.
@@ -178,6 +213,8 @@ function AutoPowerModal({ open, apIds, onClose }) {
             txMap: r.txMapEntries ? new Map(r.txMapEntries) : null,
             scoresByBand: r.scoresByBand,   // 58: per band
             opts: r.opts,
+            floorId: planFloorId,
+            targetIds: planTargetIds,
           })
         }
         worker.terminate()
@@ -217,28 +254,20 @@ function AutoPowerModal({ open, apIds, onClose }) {
         holesByFloor: useFloorHoleStore.getState().floorHolesByFloor,
       },
     })
-  }, [floor, walls, aps, scopes, targetIds, targetRssi, targetSinr])
+  }, [floor, walls, aps, scopes, targetIds, targetRssi, targetSinr, activeFloorId])
 
   const handleApply = useCallback(() => {
     if (!result || !result.txMap) return
-    // 58: txMap is keyed per radio -- write the devices' radios back in one
-    // store write (only target devices are in txMap's planned keys).
-    const targetIds = new Set(targetAPs.map((a) => a.id))
-    const floorAps = useAPStore.getState().apsByFloor[activeFloorId] ?? []
-    // 58: a radio the search drove to the TX floor is switched off rather than
-    // left radiating at it (planning tools disable surplus radios the same way).
-    // 58-15 (D1): the floor is per radio -- resolved here (null = off).
-    // 58-15 (decision 6): a disabled radio planned on is switched back on; one
-    // that stays off is left untouched (keeps its stored TX).
-    const wasOff = new Set(floorAps.flatMap((ap) => apRadios(ap)
-      .filter((r) => !r.enabled).map((r) => radioKey(ap.id, r.band))))
-    const planned = new Map([...result.txMap].filter(([k]) => targetIds.has(deviceIdOf(k)))
-      .map(([k, tx]) => [k, tx <= offTxOf(result.opts, k) ? null : tx])
-      .filter(([k, tx]) => !(tx == null && wasOff.has(k))))
-    setAPs(activeFloorId, applyRadioResults(floorAps, planned,
-      (tx) => (tx == null ? { enabled: false } : { enabled: true, txPower: tx })))
+    // 58: one store write, to the floor the plan was made for.
+    if (!useFloorStore.getState().floors.some((f) => f.id === result.floorId)) {
+      setError('規劃所屬的樓層已不存在，請重新規劃')
+      setResult(null)
+      return
+    }
+    const floorAps = useAPStore.getState().apsByFloor[result.floorId] ?? []
+    setAPs(result.floorId, plannedFloorAps(result, floorAps))
     onClose()
-  }, [result, targetAPs, setAPs, activeFloorId, onClose])
+  }, [result, setAPs, onClose])
 
   const handleCancel = useCallback(() => {
     if (running) {
@@ -265,13 +294,19 @@ function AutoPowerModal({ open, apIds, onClose }) {
     setError(null)
   }, [])
 
-  const dismiss = useOverlayDismiss(running ? null : onClose)
+  // Preview: the plan on the heatmap (useRadioPreview) while the result is up,
+  // with the dialog docked as a card -- the same transform apply runs.
+  const previewing = !running && !!result?.txMap
+  const previewPlan = useMemo(() => (result?.txMap ? (floorAps) => plannedFloorAps(result, floorAps) : null), [result])
+  useRadioPreview(open && previewing ? result.floorId : null, previewPlan)
+
+  const dismiss = useOverlayDismiss(running || previewing ? null : onClose)
 
   if (!open) return null
 
   // Render to body：避開 PanelRight 祖先 transform 對 position:fixed 的影響。
   return createPortal((
-    <div className="auto-power-modal-overlay" {...dismiss}>
+    <div className={`auto-power-modal-overlay${previewing ? ' auto-power-modal-overlay--preview' : ''}`} {...dismiss}>
       <div className="auto-power-modal">
         <div className="auto-power-modal__header">
           <span className="auto-power-modal__title">自動功率規劃</span>
@@ -279,6 +314,7 @@ function AutoPowerModal({ open, apIds, onClose }) {
             {targetIds.length} 顆 AP{apIds && apIds.length > 0 ? '（已選取）' : '（整層）'}
           </span>
         </div>
+        {previewing && <BeforeAfterSwitch />}
 
         {/* 整體進度條：執行中才顯示。
             起點 1 期間 etaMs=null → indeterminate（左右掃）動畫；
@@ -442,7 +478,7 @@ function AutoPowerModal({ open, apIds, onClose }) {
             ))}
             <p className="auto-power-modal__label" style={{ marginTop: 12 }}>各 AP 功率變更</p>
             <div className="auto-power-modal__changes">
-              {targetAPs.flatMap((ap) => apRadios(ap).map((r) => ({ ap, r, key: radioKey(ap.id, r.band) }))).map(({ ap: a, r, key }) => {
+              {resultAPs.flatMap((ap) => apRadios(ap).map((r) => ({ ap, r, key: radioKey(ap.id, r.band) }))).map(({ ap: a, r, key }) => {
                 const next = result.txMap.get(key)
                 // 開啟後第一幀可能還帶著上一輪的 result（reset effect 在
                 // render 後才跑）— txMap 對不上當前 AP 就跳過該列，避免
@@ -484,7 +520,7 @@ function AutoPowerModal({ open, apIds, onClose }) {
                 disabled one switched back on keeps the device on); a device
                 already all off is not listed. */}
             {(() => {
-              const names = targetAPs.filter((ap) => enabledRadios(ap).length > 0
+              const names = resultAPs.filter((ap) => enabledRadios(ap).length > 0
                 && apRadios(ap).every((r) => !onAfterPlan(result, ap, r, regulatoryDomain))).map((ap) => ap.name ?? ap.id)
               if (names.length === 0) return null
               return (
@@ -537,7 +573,7 @@ function AutoPowerModal({ open, apIds, onClose }) {
             className="auto-power-modal__btn auto-power-modal__btn--cancel"
             onClick={handleCancel}
           >
-            {running ? '中止' : '關閉'}
+            {running ? '中止' : previewing ? '取消' : '關閉'}
           </button>
           {!running && !result && (
             <button

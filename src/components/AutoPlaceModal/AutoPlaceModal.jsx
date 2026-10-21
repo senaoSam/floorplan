@@ -115,13 +115,20 @@ function AutoPlaceModal({ open, onClose }) {
     }
   }, [])
 
-  // 每次開啟從乾淨設定頁開始（同 AutoPowerModal——關閉不 unmount）。
+  // 每次開啟從乾淨設定頁開始（同 AutoPowerModal——關閉不 unmount）。關閉時
+  // （含開了別的規劃視窗，usePlanningDialogStore）停掉 worker、收掉 ghost 預覽。
   useEffect(() => {
-    if (open) {
-      setResult(null)
-      setProgress(null)
-      setError(null)
+    if (!open) {
+      if (workerRef.current) {
+        workerRef.current.terminate()
+        workerRef.current = null
+      }
+      useAutoPlaceStore.getState().clearPreview()
+      setRunning(false)
     }
+    setResult(null)
+    setProgress(null)
+    setError(null)
   }, [open])
 
   const handleRun = useCallback(() => {

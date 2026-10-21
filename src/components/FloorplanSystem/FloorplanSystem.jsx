@@ -61,6 +61,8 @@ import { useCameraStore } from '@/store/useCameraStore'
 import { useTrackingStore } from '@/store/useTrackingStore'
 import { useDraftStore } from '@/store/useDraftStore'
 import { useAutoPlaceStore } from '@/store/useAutoPlaceStore'
+import { useRadioPreviewStore } from '@/store/useRadioPreviewStore'
+import PlanningDialogs from '@/components/PlanningDialogs/PlanningDialogs'
 import { useMaterialToastStore } from '@/store/useMaterialToastStore'
 import { showUiToast } from '@/store/useUiToastStore'
 import { generateId } from '@/utils/id'
@@ -402,6 +404,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useDragOverlayStore,
         useEditorStore,
         useAutoPlaceStore,
+        useRadioPreviewStore,
         useClientViewStore,
       })
       detachGhostAPs = attachGhostAPsLayer({
@@ -454,6 +457,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useEditorStore,
         useClientViewStore,
         useHoverStore,
+        useRadioPreviewStore,
       })
       detachClientView = bindClientView({
         scene: s,
@@ -542,6 +546,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
           camera: useCameraStore,
           tracking: useTrackingStore,
           autoPlace: useAutoPlaceStore,
+          radioPreview: useRadioPreviewStore,
         }
       }
     })
@@ -993,6 +998,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         <Viewer3D />
       </div>
       <MaterialToast />
+      <PlanningDialogs />
       {pendingBatchDelete && (
         <ConfirmDialog
           title="刪除多個物件"

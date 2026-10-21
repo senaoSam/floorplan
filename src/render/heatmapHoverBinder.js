@@ -3,6 +3,7 @@ import { buildFloorScenario } from '@/features/heatmap/buildCrossFloor'
 import { getHeatmapField } from './heatmapFrameBus'
 import { withOnlyBand } from '@/utils/apRadios'
 import { EDITOR_MODE } from '@/store/useEditorStore'
+import { withRadioPreview } from '@/store/useRadioPreviewStore'
 import { BAND_MAP_BANDS, BAND_MAP_NO_SIGNAL_DBM, classifyBand } from '@/features/heatmap/bandMap'
 
 // 57-17: bilinear read of one metric grid at (x, y) metres; NaN neighbours
@@ -51,6 +52,7 @@ export function bindHeatmapHover({
   useEditorStore = null,
   useClientViewStore = null,
   useHoverStore = null,
+  useRadioPreviewStore = null,
 }) {
   const stage = scene.app.stage
   let lastFireAt = 0
@@ -79,7 +81,11 @@ export function bindHeatmapHover({
     const sc = buildFloorScenario({
       floors,
       floorId: activeFloorId,
-      apsByFloor: useAPStore.getState().apsByFloor ?? {},
+      // A planning dialog's preview: the readout lists the radios the
+      // previewed field was drawn from.
+      apsByFloor: useRadioPreviewStore
+        ? withRadioPreview(useAPStore.getState().apsByFloor ?? {}, useRadioPreviewStore.getState())
+        : useAPStore.getState().apsByFloor ?? {},
       wallsByFloor: useWallStore.getState().wallsByFloor ?? {},
       holesByFloor: useFloorHoleStore?.getState().floorHolesByFloor ?? {},
       scopes,
@@ -193,6 +199,7 @@ export function bindHeatmapHover({
   const unsubAP = useAPStore.subscribe(invalidate)
   const unsubScope = useScopeStore ? useScopeStore.subscribe(invalidate) : () => {}
   const unsubHole = useFloorHoleStore ? useFloorHoleStore.subscribe(invalidate) : () => {}
+  const unsubRadioPreview = useRadioPreviewStore ? useRadioPreviewStore.subscribe(invalidate) : () => {}
   // 58-7: a band switch also drops the reading -- its per-band rows belong
   // to the old band until the pointer moves again.
   let lastBand = useHeatmapStore.getState().bandFilter
@@ -244,6 +251,7 @@ export function bindHeatmapHover({
     unsubAP()
     unsubScope()
     unsubHole()
+    unsubRadioPreview()
     unsubHeatmap()
     stage.off('pointermove', onMove)
     canvasEl?.removeEventListener('pointerleave', onLeave)

@@ -223,3 +223,71 @@
 
       &:hover
         opacity: 0.85
+
+// Preview (auto power / redundant 2.4 GHz): the backdrop gets out of the way
+// and the dialog docks bottom-right as a small card, so the plan can be read
+// on the heatmap -- same as AutoPlaceModal's preview.
+.auto-power-modal-overlay--preview
+  background: none
+  backdrop-filter: none
+  pointer-events: none
+  align-items: flex-end
+  justify-content: flex-end
+  padding: 0 16px 16px 0
+
+  // At most half the screen, so the plan stays readable: the result scrolls
+  // inside the card while the header, the switch and the buttons stay put.
+  .auto-power-modal
+    pointer-events: auto
+    min-width: 340px
+    max-width: 380px
+    max-height: 50vh
+    overflow: hidden
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55)
+    border-color: rgba(255, 255, 255, 0.18)
+
+  .auto-power-modal__header, .auto-power-modal__compare, .auto-power-modal__compare-hint, .auto-power-modal__actions
+    flex-shrink: 0
+
+  // The section scrolls as a whole; its own children (score blocks, the
+  // per-AP change list) keep their height instead of being squeezed.
+  .auto-power-modal__section
+    min-height: 0
+    overflow-y: auto
+
+    > *
+      flex-shrink: 0
+
+// Before / after switch (BeforeAfterSwitch) -- the same segmented look as the
+// cable summary's 本層 / 全案.
+.auto-power-modal__compare
+  display: flex
+  align-items: center
+  justify-content: space-between
+  font-size: 12px
+  color: $text-secondary
+
+.auto-power-modal__seg
+  display: flex
+  border: 1px solid rgba(255, 255, 255, 0.12)
+  border-radius: 6px
+  overflow: hidden
+
+.auto-power-modal__seg-btn
+  padding: 3px 12px
+  border: none
+  background: transparent
+  color: $text-secondary
+  font-size: 12px
+  font-weight: 600
+  cursor: pointer
+
+  &:not(:last-child)
+    border-right: 1px solid rgba(255, 255, 255, 0.12)
+
+  &:hover
+    color: $text-primary
+
+  &--active
+    background: rgba($accent, 0.22)
+    color: $text-primary

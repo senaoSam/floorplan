@@ -14,6 +14,7 @@ import {
 import { buildCrossFloorData } from '@/features/heatmap/buildCrossFloor'
 import { withOnlyBand, allRadioKeys, enabledRadios, patchRadio } from '@/utils/apRadios'
 import { EDITOR_MODE } from '@/store/useEditorStore'
+import { withRadioPreview } from '@/store/useRadioPreviewStore'
 
 // Heatmap adapter — keeps the existing raw WebGL2 heatmap engine intact and
 // wraps its offscreen canvas as a PIXI.Sprite mounted in scene.layers.heatmap.
@@ -270,6 +271,7 @@ export function attachHeatmapLayer({
   useDragOverlayStore,
   useEditorStore,
   useAutoPlaceStore,   // Phase 49（選用）：ghost 預覽 AP 併入場計算（what-if 熱圖）
+  useRadioPreviewStore = null,   // （選用）自動功率 / 關閉多餘 2.4 GHz 的預覽射頻
   useClientViewStore = null,   // 57-28（選用）：雜訊底 / 最小干擾 RSSI 設定
 }) {
   const layer = scene.layers.heatmap
@@ -308,6 +310,25 @@ export function attachHeatmapLayer({
     }
     const out = { ...real, [fid]: preview ? [...base, ...preview] : base }
     previewMergeCache = { real, preview, removeIds, enableIds, enableChannels: st.enableChannels, fid, out }
+    return out
+  }
+  // Planning-dialog preview (useRadioPreviewStore): the plan applied to the
+  // live APs. Memoized the same way, so the fingerprint only changes when the
+  // plan, the before / after switch or the APs do.
+  let radioMergeCache = { src: null, plan: null, fid: null, out: null }
+  // The preview's before / after fields, kept while it lasts (runIdle).
+  let previewFields = []
+  const radioPreviewOn = (fid) => {
+    const st = useRadioPreviewStore ? useRadioPreviewStore.getState() : null
+    return !!st && st.floorId === fid && !!st.plan
+  }
+  const mergeRadioPreview = (src, fid) => {
+    const st = useRadioPreviewStore ? useRadioPreviewStore.getState() : null
+    if (!st || st.floorId !== fid || !st.plan || st.showBefore) return src
+    const c = radioMergeCache
+    if (c.src === src && c.plan === st.plan && c.fid === fid) return c.out
+    const out = withRadioPreview(src, st)
+    radioMergeCache = { src, plan: st.plan, fid, out }
     return out
   }
   let gl = null
@@ -650,12 +671,14 @@ export function attachHeatmapLayer({
   //   fine lands   → base swaps underneath (masked by the ripple) → decay
   // Each frame costs one wobbleInto pass + the heatmapGL passes; no
   // propagation recompute.
-  const presentField = (target, ctx, awaitingFine) => {
+  const presentField = (target, ctx, awaitingFine, instant = false) => {
     // 41-4 software renderer: every ripple frame would re-run the colormap
     // passes on the CPU — paint directly instead.
     // 58-12: nor does the band map -- the ripple perturbs one dB grid, and a
     // perturbed category boundary would only flicker.
-    if (useHeatmapStore.getState().isSoftwareRender || ctx.bandMap) {
+    // `instant`: a planning dialog's before / after flip (runIdle) swaps the
+    // field without a ripple pulse.
+    if (instant || useHeatmapStore.getState().isSoftwareRender || ctx.bandMap) {
       cancelAnim(false)
       paintCanvas(target.grid, target.nx, target.ny, target.stepM, ctx)
       return
@@ -927,7 +950,7 @@ export function attachHeatmapLayer({
     const walls = useWallStore.getState().wallsByFloor[activeFloorId] ?? []
     // Phase 49：ghost 預覽 AP 併入來源（planar 參數與 crossFloor 共用同一份，
     // 預覽態的熱圖直接呈現「套用後」的 what-if 場）。
-    const apsByFloorAll = mergePreviewAps(useAPStore.getState().apsByFloor ?? {}, activeFloorId)
+    const apsByFloorAll = mergeRadioPreview(mergePreviewAps(useAPStore.getState().apsByFloor ?? {}, activeFloorId), activeFloorId)
     const aps = applyBandFilter(applyApOverlay(apsByFloorAll[activeFloorId] ?? []))
     // Cross-floor: even when the ACTIVE floor has no APs, other floors'
     // APs can still cast attenuated signal through the slab. Check the
@@ -1217,7 +1240,7 @@ export function attachHeatmapLayer({
       bandSplit: !!modeCfg.bandMap,   // 58-12
     }
     const ctx = { ...ctxBase, blur: hm.blur, contours: hm.showContours, anchors: modeCfg.anchors, bandMap: !!modeCfg.bandMap }
-    const present = (field, awaitingFine) => {
+    const present = (field, awaitingFine, instant = false) => {
       const activeField = field[modeCfg.field] ?? field.rssi
       // 57-17: hand the numbers behind this paint to the hover readout.
       publishHeatmapField({
@@ -1237,7 +1260,7 @@ export function attachHeatmapLayer({
       presentField({
         grid: activeField, nx: field.nx, ny: field.ny,
         stepM: field.gridStepM, originX: field.originX, originY: field.originY,
-      }, ctx, awaitingFine)
+      }, ctx, awaitingFine, instant)
     }
     // `sc` lets the coarse stage run against a thinned scenario; the fine
     // stage always passes the real one.
@@ -1254,6 +1277,28 @@ export function attachHeatmapLayer({
       }
     }
     try {
+      // Planning-dialog preview: its before / after switch (and a dialog's
+      // view switch) flips between a few fields. They are kept while the
+      // preview lasts (before / after of up to two views) and shown again as
+      // they are, and no coarse stage is painted in between -- the coarse
+      // field read as a flash on every flip (the band map has no ripple to
+      // mask it).
+      const previewing = radioPreviewOn(ctxBase.floorId)
+      if (!previewing) previewFields = []
+      else {
+        const hit = previewFields.find((e) => idleInputsEqual(e.inputs, idleInputs))
+        if (hit) {
+          present(hit.field, false, true)
+          lastIdleInputs = idleInputs
+          useHeatmapStore.getState().setBudgetQuality(hit.quality)
+          return
+        }
+      }
+      const keepForPreview = (field, quality) => {
+        if (!previewing) return
+        previewFields = [...previewFields.filter((e) => !idleInputsEqual(e.inputs, idleInputs)),
+          { inputs: idleInputs, field, quality }].slice(-4)
+      }
       // The coarse stage exists to put SOMETHING on screen within a frame or
       // two while the user-quality pass runs, so the field isn't just blank.
       // It bought that by widening the grid alone — but the shader loops over
@@ -1273,15 +1318,18 @@ export function attachHeatmapLayer({
       // make unchanged-AP recomputes cheap.
       // 58-12: an RSSI coarse preview skips the interference loop (the fine
       // stage that follows carries SINR / CCI for the hover).
-      const coarse = await stage(coarseStep, fineNeeded
-        ? { ...baseOpts, maxReflOrder: 0, enableDiffraction: false, gridCacheEnabled: false, rssiOnly: hm.mode === 'rssi' }
-        : baseOpts, coarseScenario)
-      if (coarse === null || isStale()) return
-      present(coarse, fineNeeded)
-      if (!fineNeeded) {
-        lastIdleInputs = idleInputs
-        useHeatmapStore.getState().setBudgetQuality(null)
-        return
+      if (!previewing || !fineNeeded) {
+        const coarse = await stage(coarseStep, fineNeeded
+          ? { ...baseOpts, maxReflOrder: 0, enableDiffraction: false, gridCacheEnabled: false, rssiOnly: hm.mode === 'rssi' }
+          : baseOpts, coarseScenario)
+        if (coarse === null || isStale()) return
+        present(coarse, fineNeeded, previewing)
+        if (!fineNeeded) {
+          keepForPreview(coarse, null)
+          lastIdleInputs = idleInputs
+          useHeatmapStore.getState().setBudgetQuality(null)
+          return
+        }
       }
       // Task boundary so the first ripple frames paint before the fine
       // stage's (small) synchronous command encoding runs.
@@ -1343,7 +1391,8 @@ export function attachHeatmapLayer({
         if (tiers[tier - 1].level === QUALITY.FULL && tiers[tier].level === QUALITY.NO_DIFFRACTION) tier++
       }
       fineTierMemo.tier = tier
-      present(fine, false)
+      present(fine, false, previewing)
+      keepForPreview(fine, tiers[tier].level === QUALITY.FULL ? null : tiers[tier].level)
       lastIdleInputs = idleInputs
       // Set last: a heatmap-store change re-enters compute(), which finds
       // these inputs already done and returns.
@@ -1407,6 +1456,11 @@ export function attachHeatmapLayer({
   // Phase 49：ghost 預覽 set / clear 都是單一事件（非連續編輯），走即時路徑，
   // 預覽一放上去熱圖立刻切到 what-if 場。
   const unsubAutoPlace = useAutoPlaceStore ? useAutoPlaceStore.subscribe(scheduleCompute) : () => {}
+  // Same for the planning dialogs' preview and their before / after switch.
+  const unsubRadioPreview = useRadioPreviewStore ? useRadioPreviewStore.subscribe((s) => {
+    if (!s.plan) previewFields = []
+    scheduleCompute()
+  }) : () => {}
   // NOTE: scopes do NOT trigger a heatmap recompute. They are a purely visual
   // vector clip (rebuildMask / unsubMaskScope below), so the field value never
   // changes when a scope is drawn/dragged/flipped. Subscribing recompute here
@@ -1451,6 +1505,7 @@ export function attachHeatmapLayer({
     unsubWall()
     unsubAP()
     unsubAutoPlace()
+    unsubRadioPreview()
     unsubHole()
     unsubDrag()
     unsubEditor()

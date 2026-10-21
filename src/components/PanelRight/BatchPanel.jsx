@@ -13,7 +13,7 @@ import { channelEntries, isChannelAllowed } from '@/constants/regulatoryDomains'
 import { CHANNEL_WIDTHS, allowedWidthsForBand } from '@/constants/channelWidths'
 import { assignNewRadioChannels } from '@/features/heatmap/channelNeighbors'
 import { BANDS, apRadio, apRadios, patchRadio, radiosForModel, radioAllowed } from '@/utils/apRadios'
-import AutoPowerModal from '@/components/AutoPowerModal/AutoPowerModal'
+import { usePlanningDialogStore } from '@/store/usePlanningDialogStore'
 import Icon from '@/components/Icon/Icon'
 import PatternPreview from './PatternPreview'
 import { PanelShell, PanelHeader } from './_shared/PanelShell'
@@ -67,7 +67,7 @@ function BatchPanel() {
   const clearSelected = useEditorStore((s) => s.clearSelected)
   const domainId      = useEditorStore((s) => s.regulatoryDomain)
   const activeFloorId = useFloorStore((s) => s.activeFloorId)
-  const [autoPowerOpen, setAutoPowerOpen] = useState(false)
+  const openDialog = usePlanningDialogStore((s) => s.openDialog)
   // 58: which band's radios the radio fields edit.
   const [editBand, setEditBand] = useState(null)
   // 58-14: bumped on every TX commit so the uncontrolled input re-reads the
@@ -536,7 +536,7 @@ function BatchPanel() {
             </>)}
             <button
               className="batch-panel__btn batch-panel__btn--auto-power"
-              onClick={() => setAutoPowerOpen(true)}
+              onClick={() => openDialog('autoPower', apIds)}
               style={{ marginTop: 8 }}
             >
               <Icon name="zap" size={13} inline style={{ marginRight: 4 }} />自動規劃功率（所有頻段）
@@ -701,14 +701,6 @@ function BatchPanel() {
         </>
       )}
 
-      {/* AutoPower modal — 套用後 store 變更會自動觸發熱圖重算 */}
-      {autoPowerOpen && (
-        <AutoPowerModal
-          open={autoPowerOpen}
-          apIds={apIds}
-          onClose={() => setAutoPowerOpen(false)}
-        />
-      )}
 
       {/* Scope 批次：類型（In / Out） */}
       {showScopeFields && (
