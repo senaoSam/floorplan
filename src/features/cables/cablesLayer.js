@@ -57,6 +57,8 @@ const S2S_COPPER_STROKE = '#6d28d9'                    // violet-700
 const S2S_FIBER_TRUNK   = '#fb7185'                    // rose-400
 const S2S_FIBER_STROKE  = '#9f1239'                    // rose-800
 const DIM_OPACITY       = 0.18
+// P1-14: zoom redraws only once the wheel has been still this long.
+const ZOOM_SETTLE_MS    = 150
 
 // Badge text style for "!" — recreated per-draw if size changes.
 const BADGE_TEXT_STYLE = new TextStyle({
@@ -917,14 +919,28 @@ export function attachCablesLayer({
   // pan is applied by the parent container's transform and never reaches this
   // geometry. Panning therefore rebuilt all 300 routes for a result identical
   // to what was already on screen: measured at 51 ms per pan event vs 53 ms per
-  // zoom event (300 APs), i.e. the entire cost was wasted. Zoom still redraws,
-  // unchanged — the scale-baked widths genuinely do need it.
+  // zoom event (300 APs), i.e. the entire cost was wasted.
+  //
+  // P1-14: zoom redraws once the wheel settles (ZOOM_SETTLE_MS), not per step.
+  // Every step redrew all routes (300 AP ~37 fps, 1000 AP ~11 fps on UHD 770);
+  // in between, the drawn lines just scale with the plan and snap back to
+  // their screen width on the settle redraw (300 AP 60 fps, 1000 AP ~55 fps
+  // with one ~0.2 s redraw at the end). Redrawing a light version per step
+  // (dashes solid, no markers) still dropped 1000 AP to ~30 fps.
   let lastVpScale = useViewportStore.getState().scale
+  let zoomSettle = null
   const unsubViewport = useViewportStore.subscribe(() => {
     const scale = useViewportStore.getState().scale
     if (scale === lastVpScale) return
     lastVpScale = scale
-    invalidateStatic(); probeEvent('viewport'); rebuild()
+    clearTimeout(zoomSettle)
+    zoomSettle = setTimeout(() => {
+      zoomSettle = null
+      invalidateStatic(); probeEvent('viewport'); rebuild()
+      // Rendering is on demand (scene.js) and no store changed here, so the
+      // redraw would otherwise sit unseen until something else repaints.
+      scene.requestRender?.()
+    }, ZOOM_SETTLE_MS)
   })
   // Live cable redraw during AP/SW/tray drag. Subscribe gated by checking
   // whether any relevant override key changed so unrelated dragOverlay
@@ -992,6 +1008,7 @@ export function attachCablesLayer({
     unsubCable()
     unsubEditor()
     unsubViewport()
+    clearTimeout(zoomSettle)
     unsubDrag()
     clearRoutesCache()  // 32-E shared focus cache — drop on teardown
     clearBadges(badgeStatic)
