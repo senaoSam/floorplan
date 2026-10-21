@@ -2,6 +2,7 @@ import { probeAt } from '@/features/heatmap/hoverProbe'
 import { buildFloorScenario } from '@/features/heatmap/buildCrossFloor'
 import { getHeatmapField } from './heatmapFrameBus'
 import { withOnlyBand } from '@/utils/apRadios'
+import { EDITOR_MODE } from '@/store/useEditorStore'
 import { BAND_MAP_BANDS, BAND_MAP_NO_SIGNAL_DBM, classifyBand } from '@/features/heatmap/bandMap'
 
 // 57-17: bilinear read of one metric grid at (x, y) metres; NaN neighbours
@@ -31,6 +32,13 @@ function sampleGrid(f, grid, x, y, stride = 1, off = 0) {
 
 const THROTTLE_MS = 33  // ~30 hz
 
+// The readout follows the cursor (CursorTip), so it only shows while the
+// pointer reads the field: select mode, no button held (drag / pan /
+// marquee), straight over the canvas (no panel / dialog on top), and not
+// over an object -- scopes and floor holes are areas the pointer reads
+// inside, so they don't count.
+const AREA_HOVER_TYPES = new Set(['scope', 'floor_hole'])
+
 export function bindHeatmapHover({
   scene,
   useFloorStore,
@@ -42,6 +50,7 @@ export function bindHeatmapHover({
   useFloorHoleStore = null,
   useEditorStore = null,
   useClientViewStore = null,
+  useHoverStore = null,
 }) {
   const stage = scene.app.stage
   let lastFireAt = 0
@@ -82,18 +91,62 @@ export function bindHeatmapHover({
 
   const invalidate = () => { cachedSig = '' }
 
+  const clearReading = () => {
+    if (useHoverReadoutStore.getState().reading) useHoverReadoutStore.getState().setReading(null)
+  }
+  const suppressed = () => {
+    if (useEditorStore && useEditorStore.getState().editorMode !== EDITOR_MODE.SELECT) return true
+    const type = useHoverStore?.getState().type
+    return !!type && !AREA_HOVER_TYPES.has(type)
+  }
+
+  // A move dropped by the throttle is read when the window ends -- else the
+  // last move off an object (which cleared the readout) could leave it
+  // hidden until the pointer moves again.
+  let trailing = null
+  const cancelTrailing = () => { clearTimeout(trailing); trailing = null }
+  // Last point the pointer read the field from (null off the canvas) -- read
+  // again when the hover leaves an object without a move after it.
+  let lastAt = null
+
+  const schedule = (at) => {
+    const wait = THROTTLE_MS - (performance.now() - lastFireAt)
+    cancelTrailing()
+    if (wait > 0) {
+      trailing = setTimeout(() => {
+        trailing = null
+        if (useHeatmapStore.getState().enabled && !suppressed()) readAt(at)
+      }, wait)
+      return
+    }
+    readAt(at)
+  }
+
   const onMove = (e) => {
     const hm = useHeatmapStore.getState()
     if (!hm.enabled) {
+      lastAt = null
+      cancelTrailing()
       if (useHoverReadoutStore.getState().reading) {
         useHoverReadoutStore.getState().setReading(null)
       }
       return
     }
-    const now = performance.now()
-    if (now - lastFireAt < THROTTLE_MS) return
-    lastFireAt = now
+    // PIXI hears moves on the whole window: over a panel or a dialog above
+    // the canvas the pointer isn't reading the field.
+    const onCanvas = e.nativeEvent?.target === scene.app.canvas && !e.buttons
+    // The event object is pooled -- keep a copy of the point.
+    lastAt = onCanvas ? { x: e.global.x, y: e.global.y } : null
+    if (!onCanvas || suppressed()) {
+      cancelTrailing()
+      clearReading()
+      return
+    }
+    schedule(lastAt)
+  }
 
+  const readAt = (at) => {
+    lastFireAt = performance.now()
     const scenario = getScenario()
     // 58-15 (C5): no radio left (e.g. none the domain allows) -- drop the
     // last reading instead of leaving it up.
@@ -101,7 +154,7 @@ export function bindHeatmapHover({
       if (useHoverReadoutStore.getState().reading) useHoverReadoutStore.getState().setReading(null)
       return
     }
-    const wp = scene.world.toLocal(e.global)
+    const wp = scene.world.toLocal(at)
     // Canvas px → meters via floor scale.
     const { floors, activeFloorId } = useFloorStore.getState()
     const floor = floors.find((f) => f.id === activeFloorId)
@@ -155,21 +208,36 @@ export function bindHeatmapHover({
   // the scenario.
   let lastDomain = useEditorStore?.getState().regulatoryDomain
   const unsubEditor = useEditorStore ? useEditorStore.subscribe((s) => {
+    if (s.editorMode !== EDITOR_MODE.SELECT) clearReading()
     if (s.regulatoryDomain === lastDomain) return
     lastDomain = s.regulatoryDomain
     invalidate()
     if (useHoverReadoutStore.getState().reading) useHoverReadoutStore.getState().setReading(null)
   }) : () => {}
 
+  // Hovering onto an object can land between throttled moves; leaving one
+  // reads the field again where the pointer is.
+  const unsubHover = useHoverStore ? useHoverStore.subscribe(() => {
+    if (suppressed()) {
+      cancelTrailing()
+      clearReading()
+    } else if (lastAt && useHeatmapStore.getState().enabled) {
+      schedule(lastAt)
+    }
+  }) : () => {}
+
   stage.on('pointermove', onMove)
   // The readout follows the cursor (CursorTip): off the canvas it goes.
   const canvasEl = scene.app.canvas
   const onLeave = () => {
+    lastAt = null
+    cancelTrailing()
     if (useHoverReadoutStore.getState().reading) useHoverReadoutStore.getState().setReading(null)
   }
   canvasEl?.addEventListener('pointerleave', onLeave)
 
   return () => {
+    unsubHover()
     unsubEditor()
     unsubFloor()
     unsubWall()
@@ -179,6 +247,7 @@ export function bindHeatmapHover({
     unsubHeatmap()
     stage.off('pointermove', onMove)
     canvasEl?.removeEventListener('pointerleave', onLeave)
+    cancelTrailing()
     useHoverReadoutStore.getState().setReading(null)
   }
 }

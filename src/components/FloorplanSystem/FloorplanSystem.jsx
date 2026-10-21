@@ -453,6 +453,7 @@ function FloorplanSystem(/* { buildingData, onSave } */) {
         useFloorHoleStore,
         useEditorStore,
         useClientViewStore,
+        useHoverStore,
       })
       detachClientView = bindClientView({
         scene: s,
