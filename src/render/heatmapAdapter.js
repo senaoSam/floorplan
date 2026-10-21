@@ -1140,25 +1140,8 @@ export function attachHeatmapLayer({
         bandMap:  !!modeCfg.bandMap,
       }
 
-      // JS engine: keep the old synchronous render — the compute runs on the
-      // main thread either way, so the async pipeline buys nothing.
-      if (hm.engine !== 'shader') {
-        const field = sampleField(renderScenario, stepM, opts)
-        const activeField = field[modeCfg.field] ?? field.rssi
-        paintCanvas(activeField, field.nx, field.ny, field.gridStepM, paintCtx)
-        if (snapSprite) {
-          if (isSoloAP && snapCanvas) {
-            snapSprite.visible = true
-            snapSprite.alpha = 0.3
-          } else {
-            snapSprite.visible = false
-          }
-        }
-        return
-      }
-
-      // Shader engine: coalesce into the async drag pipeline (latest wins) —
-      // no sync readPixels stall on the drag path. See runDragLoop.
+      // Coalesce into the async drag pipeline (latest wins) — no sync
+      // readPixels stall on the drag path. See runDragLoop.
       dragSessionOn = true
       dragPending = {
         renderScenario, stepM, opts, modeCfg, paintCtx, isSoloAP,
@@ -1192,7 +1175,7 @@ export function attachHeatmapLayer({
       // trigger a needless recompute + ripple.
       holes: useFloorHoleStore ? useFloorHoleStore.getState().floorHolesByFloor : null,
       floors,
-      mode: hm.mode, engine: hm.engine, gridStepM: hm.gridStepM,
+      mode: hm.mode, gridStepM: hm.gridStepM,
       blur: hm.blur, contours: hm.showContours,
       reflections: hm.reflections, diffraction: hm.diffraction,
       // 47-8a: the band filter changes which APs feed the field, so a filter
@@ -1271,16 +1254,6 @@ export function attachHeatmapLayer({
       }
     }
     try {
-      // JS engine: single synchronous stage (pre-41 behaviour) + a short
-      // settle ripple.
-      if (hm.engine !== 'shader') {
-        const field = sampleField(scenario, hm.gridStepM, baseOpts)
-        if (isStale()) return
-        present(field, false)
-        lastIdleInputs = idleInputs
-        useHeatmapStore.getState().setBudgetQuality(null)
-        return
-      }
       // The coarse stage exists to put SOMETHING on screen within a frame or
       // two while the user-quality pass runs, so the field isn't just blank.
       // It bought that by widening the grid alone — but the shader loops over

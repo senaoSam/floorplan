@@ -83,7 +83,7 @@ export function __setNullFieldForFloor(fn) { __nullFieldForFloor = fn }
 
 const FP_KEYS = [
   'activeFloorId', 'floors', 'wallsAll', 'apsAll', 'holes',
-  'mode', 'engine', 'gridStepM', 'blur', 'contours',
+  'mode', 'gridStepM', 'blur', 'contours',
   'reflections', 'diffraction', 'bandFilter', 'regulatoryDomain',
   'noiseFloor', 'minInterf',
 ]
@@ -98,7 +98,7 @@ const buildFingerprint = () => {
     wallsAll: useWallStore.getState().wallsByFloor,
     apsAll: useAPStore.getState().apsByFloor,
     holes: useFloorHoleStore.getState().floorHolesByFloor,
-    mode: hm.mode, engine: hm.engine, gridStepM: hm.gridStepM,
+    mode: hm.mode, gridStepM: hm.gridStepM,
     blur: hm.blur, contours: hm.showContours,
     reflections: hm.reflections, diffraction: hm.diffraction,
     bandFilter: hm.bandFilter,
@@ -176,9 +176,7 @@ const ensureStackInner = async (fp) => {
 
     let field
     try {
-      field = hm.engine === 'shader'
-        ? await sampleFieldGLAsync(scenario, hm.gridStepM, opts)
-        : sampleField(scenario, hm.gridStepM, opts)
+      field = await sampleFieldGLAsync(scenario, hm.gridStepM, opts)
       // 53-G4 (23d) test seam. The `!field` branch below cannot be reached from
       // outside — an ES module namespace is frozen, so a test cannot stub the
       // engine to return null, and the engines only return null when genuinely

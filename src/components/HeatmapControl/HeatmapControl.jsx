@@ -65,8 +65,6 @@ function HeatmapControl() {
   const setBlur      = useHeatmapStore((s) => s.setBlur)
   const showContours = useHeatmapStore((s) => s.showContours)
   const setShowContours = useHeatmapStore((s) => s.setShowContours)
-  const engine       = useHeatmapStore((s) => s.engine)
-  const setEngine    = useHeatmapStore((s) => s.setEngine)
   const dragMode     = useHeatmapStore((s) => s.dragMode)
   const setDragMode  = useHeatmapStore((s) => s.setDragMode)
   // 任務 4: when the active scene's wall×AP exceeds the downgrade threshold,
@@ -351,18 +349,6 @@ function HeatmapControl() {
 
       {enabled && panelOpen && (
         <div className="heatmap-control__panel">
-          <label className="heatmap-control__line">
-            <span>引擎</span>
-            <select
-              className="heatmap-control__select"
-              value={engine}
-              onChange={(e) => setEngine(e.target.value)}
-              title="精確：完整物理（含反射／繞射，較慢）。快速：GPU 加速，適合大場景即時預覽。"
-            >
-              <option value="js">精確（完整物理）</option>
-              <option value="shader">快速（GPU 加速）</option>
-            </select>
-          </label>
           <label className="heatmap-control__line">
             <span>拖曳模式</span>
             <select

@@ -42,7 +42,6 @@ export const bandFilterAllowed = (mode, band) => (mode === 'band' ? band === 'al
 export const useHeatmapStore = create((set) => ({
   enabled: false,
   mode: 'rssi',
-  engine: 'shader',
   // 26-2 P3c — 'solo' (HM-drag-solo, Hamina style): wall/scope freeze the
   // heatmap during drag; AP renders only the dragged AP as overlay on a
   // snapshot. At 150+ AP this is the difference between 1 FPS and 30+ FPS
@@ -123,7 +122,6 @@ export const useHeatmapStore = create((set) => ({
     if (s.mode === 'band') return { mode: v, bandFilter: s.lastSingleBand }
     return bandFilterAllowed(v, s.bandFilter) ? { mode: v } : { mode: v, bandFilter: s.lastSingleBand }
   }),
-  setEngine:      (v) => set({ engine: v }),
   setDragMode:    (v) => set({ dragMode: v }),
   setReflections: (v) => set({ reflections: v }),
   setDiffraction: (v) => set({ diffraction: v }),
