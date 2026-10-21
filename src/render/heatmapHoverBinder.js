@@ -2,10 +2,13 @@ import { probeAt } from '@/features/heatmap/hoverProbe'
 import { buildFloorScenario } from '@/features/heatmap/buildCrossFloor'
 import { getHeatmapField } from './heatmapFrameBus'
 import { withOnlyBand } from '@/utils/apRadios'
+import { BAND_MAP_BANDS, BAND_MAP_NO_SIGNAL_DBM, classifyBand } from '@/features/heatmap/bandMap'
 
 // 57-17: bilinear read of one metric grid at (x, y) metres; NaN neighbours
 // fall back to the nearest sample. Returns undefined outside the grid.
-function sampleGrid(f, grid, x, y) {
+// 58-12: `stride` / `off` read one channel of the packed band field (4
+// floats per cell).
+function sampleGrid(f, grid, x, y, stride = 1, off = 0) {
   if (!grid) return undefined
   const gx = (x - f.originX) / f.stepM
   const gy = (y - f.originY) / f.stepM
@@ -13,11 +16,12 @@ function sampleGrid(f, grid, x, y) {
   const i0 = Math.floor(gx), j0 = Math.floor(gy)
   const i1 = Math.min(i0 + 1, f.nx - 1), j1 = Math.min(j0 + 1, f.ny - 1)
   const tx = gx - i0, ty = gy - j0
-  const v00 = grid[j0 * f.nx + i0], v10 = grid[j0 * f.nx + i1]
-  const v01 = grid[j1 * f.nx + i0], v11 = grid[j1 * f.nx + i1]
+  const at = (j, i) => grid[(j * f.nx + i) * stride + off]
+  const v00 = at(j0, i0), v10 = at(j0, i1)
+  const v01 = at(j1, i0), v11 = at(j1, i1)
   const v = (v00 * (1 - tx) + v10 * tx) * (1 - ty) + (v01 * (1 - tx) + v11 * tx) * ty
   if (Number.isFinite(v)) return v
-  const near = grid[Math.round(gy) * f.nx + Math.round(gx)]
+  const near = at(Math.round(gy), Math.round(gx))
   return Number.isFinite(near) ? near : undefined
 }
 
@@ -120,6 +124,12 @@ export function bindHeatmapHover({
         const v = sampleGrid(field, grid, rx.x, rx.y)
         if (v !== undefined) probe[key] = v
       }
+      // 58-12: band map -- each band's painted RSSI here and the band a
+      // phone would join (same rule as the paint).
+      if (field.band) {
+        const r = BAND_MAP_BANDS.map((b, slot) => sampleGrid(field, field.band, rx.x, rx.y, 4, slot) ?? BAND_MAP_NO_SIGNAL_DBM)
+        probe.bandMap = { rssiByBand: { 2.4: r[0], 5: r[1], 6: r[2] }, ...classifyBand(r[0], r[1], r[2]) }
+      }
     }
     useHoverReadoutStore.getState().setReading(probe)
   }
@@ -152,6 +162,12 @@ export function bindHeatmapHover({
   }) : () => {}
 
   stage.on('pointermove', onMove)
+  // The readout follows the cursor (CursorTip): off the canvas it goes.
+  const canvasEl = scene.app.canvas
+  const onLeave = () => {
+    if (useHoverReadoutStore.getState().reading) useHoverReadoutStore.getState().setReading(null)
+  }
+  canvasEl?.addEventListener('pointerleave', onLeave)
 
   return () => {
     unsubEditor()
@@ -162,6 +178,7 @@ export function bindHeatmapHover({
     unsubHole()
     unsubHeatmap()
     stage.off('pointermove', onMove)
+    canvasEl?.removeEventListener('pointerleave', onLeave)
     useHoverReadoutStore.getState().setReading(null)
   }
 }

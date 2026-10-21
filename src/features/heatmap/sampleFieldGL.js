@@ -381,6 +381,28 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
       ...ap,
       _antGainDbi: ap.antGainDbi ?? AP_ANT_GAIN_DBI,
     }))
+    // 58-12: band map -- one RSSI-only pass per band over that band's radios
+    // (each radio still drawn once; no CCI loop), packed per cell.
+    if (opts.bandSplit) {
+      const band = newBandField(nx * ny)
+      const rssi = new Float32Array(nx * ny).fill(BAND_NO_SIGNAL_DBM)
+      for (let slot = 0; slot < BAND_SLOTS.length; slot++) {
+        const sub = apsForGL.filter((ap) => ap.frequency === BAND_SLOTS[slot])
+        if (sub.length === 0) continue
+        gl.uploadAps(sub)
+        const out = await gl.renderFieldAsync(scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta, {
+          _rxGainDbi: RX_ANT_GAIN_DBI,
+          rf: scenario.rf ?? DEFAULT_RF,
+          cullFloorDbm: opts.cullFloorDbm ?? CULL_FLOOR_DBM,
+          rssiOnly: true,
+          gridSize: { nx, ny },
+          isStale,
+        })
+        if (out === null || isStale()) return null
+        foldBand(band, rssi, out.rssi, slot)
+      }
+      return { rssi, sinr: null, snr: null, cci: null, band, nx, ny, gridStepM, originX, originY }
+    }
     gl.uploadAps(apsForGL)
     const out = await gl.renderFieldAsync(scenario, gridStepM, { x: originX, y: originY }, rxZM, slabMeta, {
       _rxGainDbi: RX_ANT_GAIN_DBI,
@@ -394,6 +416,9 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
 
     // Scopes clip on the PIXI sprite, not here (see the sync path above).
     const { rssi, sinr, snr, cci } = out
+    // 58-12: an RSSI-only pass skipped the interference loop -- its other
+    // channels hold nothing, so none are handed on.
+    if (opts.rssiOnly) return { rssi, sinr: null, snr: null, cci: null, nx, ny, gridStepM, originX, originY }
     for (let idx = 0; idx < cci.length; idx++) {
       if (cci[idx] < CCI_MIN_DBM) cci[idx] = CCI_MIN_DBM
     }
@@ -542,7 +567,46 @@ async function sampleFieldGLAsyncInner(scenario, gridStepM = 0.5, opts = {}) {
   // 57-6: same live set reclaims LOS / AP-geometry bakes of deleted APs.
   if (opts.liveApIds) gl.pruneBakes(opts.liveApIds)
 
+  if (opts.bandSplit) return foldBandsChunked(perApGrids, scenario, nx, ny, originX, originY, gridStepM, isStale)
   return aggregateChunked(perApGrids, scenario, nx, ny, originX, originY, gridStepM, w, h, mask, isStale)
+}
+
+// 58-12: band map packing -- 4 floats per cell (2.4 / 5 / 6 GHz strongest
+// radio, unused), BAND_NO_SIGNAL_DBM where a band has nothing (bandMap.js).
+const BAND_SLOTS = [2.4, 5, 6]
+const BAND_NO_SIGNAL_DBM = -150
+function newBandField(n) {
+  const band = new Float32Array(n * 4).fill(BAND_NO_SIGNAL_DBM)
+  for (let k = 3; k < band.length; k += 4) band[k] = 0
+  return band
+}
+function foldBand(band, rssi, grid, slot) {
+  for (let k = 0; k < grid.length; k++) {
+    const v = grid[k]
+    if (!(v > BAND_NO_SIGNAL_DBM)) continue   // -Infinity / NaN / below the floor
+    if (v > band[k * 4 + slot]) band[k * 4 + slot] = v
+    if (v > rssi[k]) rssi[k] = v
+  }
+}
+
+// 58-12: the per-radio grids folded into the band map -- each band's
+// strongest radio per cell (no SINR / CCI: the map shows bands only). Sliced
+// like aggregateChunked.
+async function foldBandsChunked(perApGrids, scenario, nx, ny, originX, originY, gridStepM, isStale) {
+  const n = nx * ny
+  const band = newBandField(n)
+  const rssi = new Float32Array(n).fill(BAND_NO_SIGNAL_DBM)
+  let sliceStart = performance.now()
+  for (let k = 0; k < scenario.aps.length; k++) {
+    const slot = BAND_SLOTS.indexOf(scenario.aps[k].frequency)
+    if (slot >= 0) foldBand(band, rssi, perApGrids[k], slot)
+    if (performance.now() - sliceStart > CHUNK_BUDGET_MS) {
+      await yieldMacro()
+      if (isStale()) return null
+      sliceStart = performance.now()
+    }
+  }
+  return { rssi, sinr: null, snr: null, cci: null, band, nx, ny, gridStepM, originX, originY }
 }
 
 // Phase 41-6: the O(grid × N_AP) fold, sliced by rows on a ~5 ms budget with

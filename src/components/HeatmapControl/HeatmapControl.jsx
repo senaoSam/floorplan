@@ -10,11 +10,17 @@ import { HEATMAP_MODE_LIST, HEATMAP_MODE_CONFIG, getModeConfig } from '@/feature
 import FormulaNote from '@/components/FormulaNote/FormulaNote'
 import Icon from '@/components/Icon/Icon'
 import HeatmapLegend from './HeatmapLegend'
+import CursorTip from './CursorTip'
+import { BAND_MAP_NO_SIGNAL_DBM } from '@/features/heatmap/bandMap'
 import './HeatmapControl.sass'
 
 // 58-7: band chips. Colours are the AP band colours (apsLayer FREQ_COLOR).
 const BAND_COLOR = { 2.4: '#f39c12', 5: '#4fc3f7', 6: '#a855f7' }
 const ALL_BANDS_TITLE = '每一點取所有頻段中最強的射頻。預設功率下多半是 2.4 GHz，不等於手機實際連的頻段（手機優先 5/6 GHz，見 Client View）。計算量約為單一頻段的 2～3 倍。'
+// Mode glossary for the info icon beside the mode menu.
+const MODE_HELP = HEATMAP_MODE_LIST.map((m) => `${m.label}（${m.plain}）：${m.plainHelp}`).join('\n')
+// 58-12
+const BAND_MAP_CHIP_TITLE = '頻段地圖已包含所有頻段；要看單一頻段請切回其他模式'
 
 // 58-7: strongest radio per band at the hovered point, from the probe's
 // per-radio RSSI (scenario entries carry `frequency`). Low band first.
@@ -112,7 +118,8 @@ function HeatmapControl() {
   // last single band (the store does the switch).
   const onModeChange = (v) => {
     const st = useHeatmapStore.getState()
-    if (!bandFilterAllowed(v, st.bandFilter)) {
+    // 58-12: the band map switches bands itself (to all, and back on leaving).
+    if (v !== 'band' && st.mode !== 'band' && !bandFilterAllowed(v, st.bandFilter)) {
       showUiToast(`${getModeConfig(v).label} 只能看單一頻段，已改以 ${st.lastSingleBand} GHz 顯示`)
     }
     setMode(v)
@@ -121,9 +128,14 @@ function HeatmapControl() {
   // 58-7: hover rows -- one per band (one under a single-band filter); the
   // strongest drives the colour under 最強.
   const bandRows = hover ? strongestPerBand(hover) : []
-  const drivingBand = bandRows.length > 1
-    ? bandRows.reduce((a, b) => (b.dbm > a.dbm ? b : a)).band
-    : null
+  // 58-12: on the band map the colour follows the band a phone joins.
+  const isBandMap = !!activeCfg.bandMap
+  const hoverBandMap = isBandMap ? hover?.bandMap ?? null : null
+  const drivingBand = isBandMap
+    ? hoverBandMap?.band ?? null
+    : bandRows.length > 1
+      ? bandRows.reduce((a, b) => (b.dbm > a.dbm ? b : a)).band
+      : null
   // The rows come from a direct-path probe; say so when the painted field
   // includes reflection / diffraction.
   const directOnlyNote = (reflections || diffraction) && !simplifiedLargeScene && budgetQuality !== 'direct'
@@ -174,27 +186,52 @@ function HeatmapControl() {
           <Icon name="warning" size={12} inline style={{ marginRight: 4 }} />這個瀏覽器／裝置無法使用 WebGL2，熱圖無法繪製
         </div>
       )}
-      {/* Readout — stacked above the button. Shows all four metrics so the
-          user can compare without flipping modes. */}
+      {/* Readout beside the cursor (CursorTip). Shows all four metrics so
+          the user can compare without flipping modes. */}
       {enabled && hover && (
-        <div className="heatmap-control__readout">
+        <CursorTip className="heatmap-control__readout">
           {/* 52-D3: hovering a row now explains the acronym in place. */}
-          <div className="heatmap-control__readout-row" title={HEATMAP_MODE_CONFIG.rssi.plainHelp}>
-            <b>RSSI</b> <span>{formatReading(hover.rssiDbm, 'dBm')}</span>
-          </div>
-          <div className="heatmap-control__readout-row" title={HEATMAP_MODE_CONFIG.sinr.plainHelp}>
-            <b>SINR</b> <span>{formatReading(hover.sinrDb, 'dB')}</span>
-          </div>
-          <div className="heatmap-control__readout-row" title={HEATMAP_MODE_CONFIG.snr.plainHelp}>
-            <b>SNR</b> <span>{formatReading(hover.snrDb, 'dB')}</span>
-          </div>
-          <div className="heatmap-control__readout-row" title={HEATMAP_MODE_CONFIG.cci.plainHelp}>
-            <b>CCI</b> <span>{formatReading(hover.cciDbm, 'dBm')}</span>
-          </div>
+          {/* 58-12: the band map reads the band a phone joins here and each
+              band's painted RSSI (no SINR / CCI on this map). */}
+          {isBandMap ? hoverBandMap && (
+            <>
+              <div className="heatmap-control__readout-row" title={activeCfg.plainHelp}>
+                <b>手機會連</b>
+                <span>
+                  {hoverBandMap.band == null ? '無服務'
+                    : `${hoverBandMap.band} GHz · ${formatReading(hoverBandMap.rssiDbm, 'dBm')}${hoverBandMap.good ? '' : '（未達目標）'}`}
+                </span>
+              </div>
+              {[2.4, 5, 6].map((b) => (
+                <div key={b} className="heatmap-control__readout-row">
+                  <b>
+                    <span className="heatmap-control__band-dot" style={{ background: BAND_COLOR[b] }} />
+                    {b} GHz
+                  </b>
+                  <span>{formatReading(hoverBandMap.rssiByBand[b] > BAND_MAP_NO_SIGNAL_DBM ? hoverBandMap.rssiByBand[b] : -Infinity, 'dBm')}</span>
+                </div>
+              ))}
+            </>
+          ) : (
+            <>
+              <div className="heatmap-control__readout-row" title={HEATMAP_MODE_CONFIG.rssi.plainHelp}>
+                <b>RSSI</b> <span>{formatReading(hover.rssiDbm, 'dBm')}</span>
+              </div>
+              <div className="heatmap-control__readout-row" title={HEATMAP_MODE_CONFIG.sinr.plainHelp}>
+                <b>SINR</b> <span>{formatReading(hover.sinrDb, 'dB')}</span>
+              </div>
+              <div className="heatmap-control__readout-row" title={HEATMAP_MODE_CONFIG.snr.plainHelp}>
+                <b>SNR</b> <span>{formatReading(hover.snrDb, 'dB')}</span>
+              </div>
+              <div className="heatmap-control__readout-row" title={HEATMAP_MODE_CONFIG.cci.plainHelp}>
+                <b>CCI</b> <span>{formatReading(hover.cciDbm, 'dBm')}</span>
+              </div>
+            </>
+          )}
           <div className="heatmap-control__readout-row heatmap-control__readout-pos">
             ({hover.at.x.toFixed(2)}, {hover.at.y.toFixed(2)}) m
           </div>
-          {bandRows.map((r) => (
+          {!isBandMap && bandRows.map((r) => (
             <div
               key={r.band}
               className="heatmap-control__readout-row"
@@ -210,16 +247,19 @@ function HeatmapControl() {
               </span>
             </div>
           ))}
-          {bandRows.length > 0 && directOnlyNote && (
+          {!isBandMap && bandRows.length > 0 && directOnlyNote && (
             <div className="heatmap-control__readout-note">（直射估算，不含反射/繞射）</div>
           )}
-        </div>
+        </CursorTip>
       )}
 
       {/* Color legend — only while heatmap is enabled; pointer follows hover
           value for the active mode. */}
       {enabled && (
-        <HeatmapLegend mode={mode} hoverValue={hoverValue} bandFilter={bandFilter} />
+        <HeatmapLegend mode={mode} hoverValue={hoverValue} bandFilter={bandFilter}
+          hoverBand={hoverBandMap ? hoverBandMap.band : undefined}
+          bandCounts={bandCounts}
+          multipath={(reflections || diffraction) && !simplifiedLargeScene && budgetQuality !== 'direct'} />
       )}
 
       <div className="heatmap-control__row">
@@ -250,6 +290,12 @@ function HeatmapControl() {
                 </option>
               ))}
             </select>
+            {/* What each metric means -- the readout rows used to explain
+                themselves on hover, but the readout now follows the cursor
+                and never takes the pointer (CursorTip). */}
+            <span className="heatmap-control__mode-help" title={MODE_HELP}>
+              <Icon name="info" size={14} />
+            </span>
             {/* 58-7: band chips. Filled = viewed band; the badge counts this
                 floor's devices with the band on. A band absent here stays
                 clickable (other floors still bleed through); one absent from
@@ -269,9 +315,9 @@ function HeatmapControl() {
                     aria-checked={checked}
                     className={`heatmap-control__band${checked ? ' heatmap-control__band--on' : ''}${onFloor === 0 ? ' heatmap-control__band--empty' : ''}`}
                     style={{ '--band-color': BAND_COLOR[band] }}
-                    disabled={inBuilding === 0 && !checked}
+                    disabled={isBandMap || (inBuilding === 0 && !checked)}
                     onClick={() => setBandFilter(value)}
-                    title={inBuilding === 0 ? (bandCounts.enabled[band] > 0 ? `整棟的 ${value} GHz 射頻在此國家都不可用` : `整棟沒有開啟的 ${value} GHz 射頻`)
+                    title={isBandMap ? BAND_MAP_CHIP_TITLE : inBuilding === 0 ? (bandCounts.enabled[band] > 0 ? `整棟的 ${value} GHz 射頻在此國家都不可用` : `整棟沒有開啟的 ${value} GHz 射頻`)
                       : onFloor === 0 ? `本層無 ${value} GHz 射頻，只會看到其他樓層的滲透`
                       : `只用 ${value} GHz 射頻計算熱圖`}
                   >
@@ -284,9 +330,9 @@ function HeatmapControl() {
                 role="radio"
                 aria-checked={bandFilter === 'all'}
                 className={`heatmap-control__band heatmap-control__band--all${bandFilter === 'all' ? ' heatmap-control__band--on' : ''}`}
-                disabled={!allBandsAllowed}
+                disabled={!allBandsAllowed || isBandMap}
                 onClick={() => setBandFilter('all')}
-                title={allBandsAllowed ? ALL_BANDS_TITLE : `「最強」只適用 RSSI；${activeCfg.label} 請選單一頻段`}
+                title={isBandMap ? BAND_MAP_CHIP_TITLE : allBandsAllowed ? ALL_BANDS_TITLE : `「最強」只適用 RSSI；${activeCfg.label} 請選單一頻段`}
               >
                 最強
               </button>

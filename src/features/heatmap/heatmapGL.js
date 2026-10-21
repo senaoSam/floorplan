@@ -230,6 +230,138 @@ void main() {
   outColor = vec4(rgb / 255.0, (a / 255.0) * edgeFeather(vUv));
 }`;
 
+// 58-12: band map passes. The field is RGBA32F (2.4 / 5 / 6 GHz strongest
+// radio RSSI, unused); each band is resampled and blurred on its own -- a
+// class index must never be interpolated (2.4 next to 6 would invent a 5 GHz
+// seam) -- and the class is decided per output pixel.
+const FS_SAMPLE4 = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uField;
+uniform vec2 uFieldSize;
+uniform vec2 uFieldSpan;
+uniform float uSampleOffset;
+out vec4 outColor;
+vec4 cubicWeights(float t) {
+  float t2 = t * t;
+  float t3 = t2 * t;
+  return vec4(-0.5 * t3 + t2 - 0.5 * t, 1.5 * t3 - 2.5 * t2 + 1.0, -1.5 * t3 + 2.0 * t2 + 0.5 * t, 0.5 * t3 - 0.5 * t2);
+}
+void main() {
+  vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
+  vec2 sz = uFieldSize;
+  vec2 f = uv * uFieldSpan - uSampleOffset;
+  vec2 i = floor(f);
+  vec2 t = f - i;
+  vec4 wx = cubicWeights(t.x);
+  vec4 wy = cubicWeights(t.y);
+  vec4 result = vec4(0.0);
+  for (int oy = -1; oy <= 2; ++oy) {
+    vec4 ry = vec4(0.0);
+    for (int ox = -1; ox <= 2; ++ox) {
+      ivec2 p = ivec2(clamp(int(i.x) + ox, 0, int(sz.x) - 1), clamp(int(i.y) + oy, 0, int(sz.y) - 1));
+      ry += texelFetch(uField, p, 0) * wx[ox + 1];
+    }
+    result += ry * wy[oy + 1];
+  }
+  outColor = result;
+}`;
+
+const FS_BLUR4 = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uSrc;
+uniform vec2  uTexel;
+uniform vec2  uDir;
+uniform int   uRadius;
+uniform float uSigma;
+out vec4 outColor;
+void main() {
+  if (uRadius <= 0) {
+    outColor = texture(uSrc, vUv);
+    return;
+  }
+  vec4 sum = vec4(0.0);
+  float wsum = 0.0;
+  for (int k = -24; k <= 24; ++k) {
+    if (k < -uRadius || k > uRadius) continue;
+    float fk = float(k);
+    float w = exp(-(fk * fk) / (2.0 * uSigma * uSigma));
+    sum  += texture(uSrc, vUv + uDir * uTexel * fk) * w;
+    wsum += w;
+  }
+  outColor = sum / wsum;
+}`;
+
+// Same rule as bandMap.js classifyBand (keep in step): -1 none, 0 / 1 / 2 =
+// 2.4 / 5 / 6 GHz; uRule = (usable, available, bonus, good) dBm.
+const FS_BANDMAP = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uSrc;
+uniform vec2  uTexel;
+uniform vec4  uRule;
+uniform vec3  uBandRgb[3];
+uniform vec2  uBandAlpha;       // (design target met, reachable below it)
+uniform int   uContours;
+uniform vec4  uFeatherRect;
+uniform vec2  uFeatherWidth;
+uniform vec4  uFeatherSides;
+out vec4 outColor;
+
+float edgeFeather(vec2 uv) {
+  float k = 1.0;
+  if (uFeatherWidth.x > 0.0) {
+    if (uFeatherSides.x > 0.5) k *= clamp((uv.x - uFeatherRect.x) / uFeatherWidth.x, 0.0, 1.0);
+    if (uFeatherSides.y > 0.5) k *= clamp((uFeatherRect.z - uv.x) / uFeatherWidth.x, 0.0, 1.0);
+  }
+  if (uFeatherWidth.y > 0.0) {
+    if (uFeatherSides.z > 0.5) k *= clamp((uv.y - uFeatherRect.y) / uFeatherWidth.y, 0.0, 1.0);
+    if (uFeatherSides.w > 0.5) k *= clamp((uFeatherRect.w - uv.y) / uFeatherWidth.y, 0.0, 1.0);
+  }
+  return k * k * (3.0 - 2.0 * k);
+}
+
+int classify(vec4 r, out float rBest) {
+  bool high = r.y >= uRule.y || r.z >= uRule.y;
+  int c = -1;
+  float best = -1e9;
+  rBest = max(r.x, max(r.y, r.z));
+  if (!high && r.x >= uRule.x && r.x > best) { best = r.x; c = 0; rBest = r.x; }
+  if (r.y >= (high ? uRule.y : uRule.x) && r.y + uRule.z > best) { best = r.y + uRule.z; c = 1; rBest = r.y; }
+  if (r.z >= (high ? uRule.y : uRule.x) && r.z + 2.0 * uRule.z > best) { best = r.z + 2.0 * uRule.z; c = 2; rBest = r.z; }
+  return c;
+}
+
+void main() {
+  vec4 r = texture(uSrc, vUv);
+  if (!(r.x == r.x) || !(r.y == r.y) || !(r.z == r.z)) {
+    outColor = vec4(0.0);
+    return;
+  }
+  float rb;
+  int c = classify(r, rb);
+  vec3 rgb = vec3(0.0);
+  float a = 0.0;
+  if (c >= 0) {
+    rgb = uBandRgb[c];
+    a = rb >= uRule.w ? uBandAlpha.x : uBandAlpha.y;
+  }
+  // Band boundaries: a neighbour one pixel away in another class.
+  if (uContours == 1) {
+    float tmp;
+    int cl = classify(texture(uSrc, vUv - vec2(uTexel.x, 0.0)), tmp);
+    int cr = classify(texture(uSrc, vUv + vec2(uTexel.x, 0.0)), tmp);
+    int cd = classify(texture(uSrc, vUv - vec2(0.0, uTexel.y)), tmp);
+    int cu = classify(texture(uSrc, vUv + vec2(0.0, uTexel.y)), tmp);
+    if (cl != c || cr != c || cd != c || cu != c) {
+      rgb = mix(rgb, vec3(0.0), 0.6);
+      a = mix(a, 1.0, 0.6);
+    }
+  }
+  outColor = vec4(rgb, a * edgeFeather(vUv));
+}`;
+
 function compile(gl, type, src) {
   const sh = gl.createShader(type);
   gl.shaderSource(sh, src);
@@ -281,6 +413,8 @@ export function createHeatmapGL() {
   const progSample   = link(gl, VS, FS_SAMPLE);
   const progBlur     = link(gl, VS, FS_BLUR);
   const progColormap = link(gl, VS, FS_COLORMAP);
+  // 58-12: band map programs + RGBA32F resources, built on first use.
+  let bandRes = null;
 
   // Fullscreen triangle strip (two triangles).
   const vao = gl.createVertexArray();
@@ -350,6 +484,16 @@ export function createHeatmapGL() {
   }
 
   function render(field, outW, outH, _metersPerPixel, blurRadius, showContours, colorConfig) {
+    // 58-12: back on a scalar mode -- hand back the band map's full-size
+    // RGBA32F targets (4x the scalar ones); renderBand reallocates them.
+    if (bandRes && bandRes.w > 0) {
+      for (const t of bandRes.targets) {
+        gl.bindTexture(gl.TEXTURE_2D, t.tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1, 1, 0, gl.RGBA, gl.FLOAT, null);
+      }
+      bandRes.w = 0;
+      bandRes.h = 0;
+    }
     canvas.width = outW;
     canvas.height = outH;
     ensureTargets(outW, outH);
@@ -431,6 +575,109 @@ export function createHeatmapGL() {
     return canvas;
   }
 
+  // 58-12: band map render. field.band = Float32Array, 4 per cell (2.4 / 5 /
+  // 6 GHz RSSI, unused). cfg: { rule: { usableDbm, availableDbm, bonusDb,
+  // goodDbm }, bandRgb: [[r,g,b] 0..255 x3], bandAlpha: [met, below],
+  // edgeFeather }.
+  function ensureBandRes(w, h) {
+    if (!bandRes) {
+      bandRes = {
+        progSample: link(gl, VS, FS_SAMPLE4),
+        progBlur: link(gl, VS, FS_BLUR4),
+        progMap: link(gl, VS, FS_BANDMAP),
+        fieldTex: gl.createTexture(),
+        nx: 0, ny: 0,
+        targets: [createTarget(gl), createTarget(gl)],
+        w: 0, h: 0,
+      };
+    }
+    if (w !== bandRes.w || h !== bandRes.h) {
+      bandRes.w = w;
+      bandRes.h = h;
+      for (const t of bandRes.targets) {
+        gl.bindTexture(gl.TEXTURE_2D, t.tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, null);
+      }
+    }
+    return bandRes;
+  }
+
+  function renderBand(field, outW, outH, blurRadius, showContours, cfg) {
+    canvas.width = outW;
+    canvas.height = outH;
+    const res = ensureBandRes(outW, outH);
+    const { band, nx, ny } = field;
+    gl.bindTexture(gl.TEXTURE_2D, res.fieldTex);
+    if (nx !== res.nx || ny !== res.ny) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, nx, ny, 0, gl.RGBA, gl.FLOAT, band);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      res.nx = nx;
+      res.ny = ny;
+    } else {
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, nx, ny, gl.RGBA, gl.FLOAT, band);
+    }
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, res.targets[0].fbo);
+    gl.viewport(0, 0, outW, outH);
+    gl.useProgram(res.progSample);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, res.fieldTex);
+    gl.uniform1i(gl.getUniformLocation(res.progSample, 'uField'), 0);
+    gl.uniform2f(gl.getUniformLocation(res.progSample, 'uFieldSize'), nx, ny);
+    const hasSpan = field.spanX != null && field.spanY != null;
+    gl.uniform2f(gl.getUniformLocation(res.progSample, 'uFieldSpan'),
+      hasSpan ? field.spanX : nx, hasSpan ? field.spanY : ny);
+    gl.uniform1f(gl.getUniformLocation(res.progSample, 'uSampleOffset'), hasSpan ? 0 : 0.5);
+    drawQuad();
+
+    let src = 0;
+    const radius = Math.max(0, Math.min(24, blurRadius | 0));
+    if (radius > 0) {
+      const sigma = Math.max(radius * 0.8, 0.5);
+      gl.useProgram(res.progBlur);
+      gl.uniform1i(gl.getUniformLocation(res.progBlur, 'uSrc'), 0);
+      gl.uniform1i(gl.getUniformLocation(res.progBlur, 'uRadius'), radius);
+      gl.uniform1f(gl.getUniformLocation(res.progBlur, 'uSigma'), sigma);
+      gl.uniform2f(gl.getUniformLocation(res.progBlur, 'uTexel'), 1 / outW, 1 / outH);
+      for (const dir of [[1, 0], [0, 1]]) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, res.targets[1 - src].fbo);
+        gl.viewport(0, 0, outW, outH);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, res.targets[src].tex);
+        gl.uniform2f(gl.getUniformLocation(res.progBlur, 'uDir'), dir[0], dir[1]);
+        drawQuad();
+        src = 1 - src;
+      }
+    }
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, outW, outH);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    const p = res.progMap;
+    gl.useProgram(p);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, res.targets[src].tex);
+    gl.uniform1i(gl.getUniformLocation(p, 'uSrc'), 0);
+    gl.uniform2f(gl.getUniformLocation(p, 'uTexel'), 1 / outW, 1 / outH);
+    const rule = cfg.rule;
+    gl.uniform4f(gl.getUniformLocation(p, 'uRule'), rule.usableDbm, rule.availableDbm, rule.bonusDb, rule.goodDbm);
+    gl.uniform3fv(gl.getUniformLocation(p, 'uBandRgb'), new Float32Array(cfg.bandRgb.flat().map((v) => v / 255)));
+    gl.uniform2f(gl.getUniformLocation(p, 'uBandAlpha'), cfg.bandAlpha[0], cfg.bandAlpha[1]);
+    gl.uniform1i(gl.getUniformLocation(p, 'uContours'), showContours ? 1 : 0);
+    const ef = cfg.edgeFeather ?? null;
+    gl.uniform4f(gl.getUniformLocation(p, 'uFeatherRect'),
+      ef?.rect?.[0] ?? 0, ef?.rect?.[1] ?? 0, ef?.rect?.[2] ?? 1, ef?.rect?.[3] ?? 1);
+    gl.uniform2f(gl.getUniformLocation(p, 'uFeatherWidth'), ef?.widthUv?.[0] ?? 0, ef?.widthUv?.[1] ?? 0);
+    gl.uniform4f(gl.getUniformLocation(p, 'uFeatherSides'),
+      ef?.sides?.[0] ? 1 : 0, ef?.sides?.[1] ? 1 : 0, ef?.sides?.[2] ? 1 : 0, ef?.sides?.[3] ? 1 : 0);
+    drawQuad();
+    return canvas;
+  }
+
   function dispose() {
     gl.deleteProgram(progSample);
     gl.deleteProgram(progBlur);
@@ -442,6 +689,17 @@ export function createHeatmapGL() {
       gl.deleteFramebuffer(t.fbo);
       gl.deleteTexture(t.tex);
     }
+    if (bandRes) {
+      gl.deleteProgram(bandRes.progSample);
+      gl.deleteProgram(bandRes.progBlur);
+      gl.deleteProgram(bandRes.progMap);
+      gl.deleteTexture(bandRes.fieldTex);
+      for (const t of bandRes.targets) {
+        gl.deleteFramebuffer(t.fbo);
+        gl.deleteTexture(t.tex);
+      }
+      bandRes = null;
+    }
   }
 
   // 52-C3: expose the context so callers can detect a lost one and rebuild.
@@ -452,7 +710,7 @@ export function createHeatmapGL() {
     return gl.isContextLost();
   }
 
-  return { render, dispose, canvas, isContextLost };
+  return { render, renderBand, dispose, canvas, isContextLost };
 }
 
 function createTarget(gl) {

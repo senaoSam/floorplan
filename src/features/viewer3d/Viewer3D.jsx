@@ -1024,6 +1024,7 @@ function Viewer3D() {
   // 58-7: HeatmapControl is hidden in 3D, so a read-only badge says which
   // band the heatmap planes show.
   const hmBandFilter    = useHeatmapStore((s) => s.bandFilter)
+  const hmBandMap       = useHeatmapStore((s) => s.mode === 'band')   // 58-12
   const toggleLayer     = useEditorStore((s) => s.toggleLayer)
   const clearSelected   = useEditorStore((s) => s.clearSelected)
   // CanvasArea now keeps Viewer3D mounted but hidden when viewMode === 2D, so
@@ -1516,7 +1517,7 @@ function Viewer3D() {
               {hmBandFilter !== 'all' && (
                 <span className="viewer3d__band-badge-dot" style={{ background: FREQ_COLOR_3D[hmBandFilter] }} />
               )}
-              熱圖：{hmBandFilter === 'all' ? '最強頻段' : `${hmBandFilter} GHz`}
+              熱圖：{hmBandMap ? '頻段地圖' : hmBandFilter === 'all' ? '最強頻段' : `${hmBandFilter} GHz`}
             </span>
           </div>
         )}

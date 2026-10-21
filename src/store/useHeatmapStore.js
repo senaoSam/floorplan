@@ -6,7 +6,8 @@ import { detectSoftwareRender } from '@/utils/detectSoftwareRender'
 // - sinr: signal-to-interference-plus-noise in dB
 // - snr:  signal-to-noise only (ignores co-channel interferers) in dB
 // - cci:  co-channel interference power in dBm, higher = worse
-export const HEATMAP_MODES = ['rssi', 'sinr', 'snr', 'cci']
+// 58-12: band -- band map (which band a phone joins per cell; every band).
+export const HEATMAP_MODES = ['rssi', 'sinr', 'snr', 'cci', 'band']
 
 // Sampling engine. 'js' is the canonical CPU implementation; 'shader' uses
 // the WebGL2 fragment-shader path being ported in HM-F5a~f. Until full
@@ -34,7 +35,8 @@ export const HEATMAP_DRAG_MODES = ['live', 'solo']
 // across bands mix one band's signal with another band's interference.
 export const HEATMAP_BANDS = ['all', '2.4', '5', '6']
 export const DEFAULT_BAND_FILTER = '5'
-export const bandFilterAllowed = (mode, band) => band !== 'all' || mode === 'rssi'
+// 58-12: the band map always computes every band ('all').
+export const bandFilterAllowed = (mode, band) => (mode === 'band' ? band === 'all' : band !== 'all' || mode === 'rssi')
 
 // Heatmap UI / compute options.
 export const useHeatmapStore = create((set) => ({
@@ -114,9 +116,13 @@ export const useHeatmapStore = create((set) => ({
 
   setEnabled:     (v) => set({ enabled: v }),
   // 58-7: leaving RSSI while on 'all' falls back to the last single band.
-  setMode:        (v) => set((s) => (
-    bandFilterAllowed(v, s.bandFilter) ? { mode: v } : { mode: v, bandFilter: s.lastSingleBand }
-  )),
+  // 58-12: entering the band map switches to 'all'; leaving it restores the
+  // last single band.
+  setMode:        (v) => set((s) => {
+    if (v === 'band') return { mode: v, bandFilter: 'all' }
+    if (s.mode === 'band') return { mode: v, bandFilter: s.lastSingleBand }
+    return bandFilterAllowed(v, s.bandFilter) ? { mode: v } : { mode: v, bandFilter: s.lastSingleBand }
+  }),
   setEngine:      (v) => set({ engine: v }),
   setDragMode:    (v) => set({ dragMode: v }),
   setReflections: (v) => set({ reflections: v }),

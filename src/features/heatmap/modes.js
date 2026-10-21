@@ -101,6 +101,27 @@ export const HEATMAP_MODE_CONFIG = {
   },
 }
 
+// 58-12: band map -- a category per cell, not a dB scale: `bandMap` makes the
+// adapter / 3D stack paint the packed band field (field.band) through
+// heatmapGL.renderBand; `anchors` only serve callers that need a scalar.
+// Colours are the AP band colours (color-legend.md: one hex everywhere).
+HEATMAP_MODE_CONFIG.band = {
+  id: 'band',
+  label: '頻段地圖',
+  plain: '手機會連的頻段',
+  unit: '',
+  description: '新連線手機在每一點會選的頻段',
+  plainHelp: '每一點畫成手機在這裡會連的頻段（規則同 Client View：5 / 6 GHz 夠強就優先）。淡色：連得上但訊號未達設計目標。',
+  field: 'band',
+  anchors: RSSI_ANCHORS,
+  signBetter: 'high',
+  bandMap: true,
+}
+
+export const BAND_MAP_RGB = [[0xf3, 0x9c, 0x12], [0x4f, 0xc3, 0xf7], [0xa8, 0x55, 0xf7]]
+// Alpha of a band at / above the design target, and below it (reachable).
+export const BAND_MAP_ALPHA = [0.84, 0.35]
+
 export const HEATMAP_MODE_LIST = Object.values(HEATMAP_MODE_CONFIG)
 
 export function getModeConfig(mode) {

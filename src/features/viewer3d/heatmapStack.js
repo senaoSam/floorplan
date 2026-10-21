@@ -4,7 +4,8 @@ import { buildScenario } from '@/features/heatmap/buildScenario'
 import { buildCrossFloorData } from '@/features/heatmap/buildCrossFloor'
 import { sampleFieldGLAsync } from '@/features/heatmap/sampleFieldGL'
 import { sampleField } from '@/features/heatmap/sampleField'
-import { getModeConfig } from '@/features/heatmap/modes'
+import { getModeConfig, BAND_MAP_RGB, BAND_MAP_ALPHA } from '@/features/heatmap/modes'
+import { BAND_MAP_RULE } from '@/features/heatmap/bandMap'
 import { shouldSimplifyScene } from '@/features/heatmap/largeScene'
 import { withOnlyBand, enabledRadios } from '@/utils/apRadios'
 import { useFloorStore } from '@/store/useFloorStore'
@@ -170,6 +171,7 @@ const ensureStackInner = async (fp) => {
       maxReflOrder: forceAggregated ? 0 : (hm.reflections ? 1 : 0),
       enableDiffraction: forceAggregated ? false : hm.diffraction,
       isStale,
+      bandSplit: !!modeCfg.bandMap,   // 58-12
     }
 
     let field
@@ -229,15 +231,19 @@ const ensureStackInner = async (fp) => {
     // readings at the edge. Stacked floors are background context anyway; the
     // feather is for the floor being read.
     // 57-12: the stack canvas spans exactly the plan rect (no padding).
-    paintGL.render(
-      {
-        rssi: grid, nx: field.nx, ny: field.ny,
-        spanX: (outW / f.scale) / field.gridStepM,
-        spanY: (outH / f.scale) / field.gridStepM,
-      },
-      outW, outH, 1 / f.scale, hm.blur, hm.showContours,
-      { anchors: modeCfg.anchors },
-    )
+    const span = { spanX: (outW / f.scale) / field.gridStepM, spanY: (outH / f.scale) / field.gridStepM }
+    // 58-12: the band map paints the packed band field (same rule as 2D).
+    if (modeCfg.bandMap && field.band) {
+      paintGL.renderBand({ band: field.band, nx: field.nx, ny: field.ny, ...span },
+        outW, outH, hm.blur, hm.showContours,
+        { rule: BAND_MAP_RULE, bandRgb: BAND_MAP_RGB, bandAlpha: BAND_MAP_ALPHA })
+    } else {
+      paintGL.render(
+        { rssi: grid, nx: field.nx, ny: field.ny, ...span },
+        outW, outH, 1 / f.scale, hm.blur, hm.showContours,
+        { anchors: modeCfg.anchors },
+      )
+    }
     // Copy out — paintGL.canvas is reused for the next floor.
     const canvas = document.createElement('canvas')
     canvas.width = outW

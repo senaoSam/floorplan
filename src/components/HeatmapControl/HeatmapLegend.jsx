@@ -1,5 +1,10 @@
 import React from 'react'
-import { getModeConfig } from '@/features/heatmap/modes'
+import { getModeConfig, BAND_MAP_ALPHA } from '@/features/heatmap/modes'
+import { useBandMapStore } from '@/store/useBandMapStore'
+import { useFloorStore } from '@/store/useFloorStore'
+import Icon from '@/components/Icon/Icon'
+import { BAND_MAP_RULE } from '@/features/heatmap/bandMap'
+import { ROAM_HYSTERESIS_DB } from '@/store/useClientViewStore'
 
 // Build a CSS linear-gradient from a mode's anchors. Anchors are stored
 // high-value-first (same order WebGL consumes); for the legend we reverse to
@@ -57,8 +62,66 @@ function rssiQualityLabel(v) {
 // 58-7: the band the field is drawn from (apsLayer FREQ_COLOR).
 const BAND_COLOR = { 2.4: '#f39c12', 5: '#4fc3f7', 6: '#a855f7' }
 
-function HeatmapLegend({ mode, hoverValue, bandFilter }) {
+// 58-12: band map key -- one swatch per band (the paint's colour, faded shade
+// alongside) with its share of the plan, and no service. `hoverBand` is the
+// band under the pointer (null = no service, undefined = no hover).
+const fmtShare = (v) => (v == null ? '—' : `${(v * 100).toFixed(0)}%`)
+
+// `bandCounts` (HeatmapControl): building-wide devices per band, allowed
+// (`building`) and enabled at all (`enabled`) -- a band with none says why
+// instead of a 0% that reads like a coverage result.
+function BandMapLegend({ cfg, hoverBand, bandCounts, multipath }) {
+  const activeFloorId = useFloorStore((s) => s.activeFloorId)
+  const raw = useBandMapStore((s) => s.shares)
+  const shares = raw && raw.floorId === activeFloorId ? raw : null
+  const absent = (b) => {
+    if (!bandCounts || bandCounts.building[b] > 0) return null
+    return bandCounts.enabled[b] > 0 ? '此國家不可用' : '無射頻'
+  }
+  const rows = [
+    ...[2.4, 5, 6].map((b) => ({ key: String(b), label: `${b} GHz`, color: BAND_COLOR[b], share: shares?.[b], absent: absent(b) })),
+    { key: 'none', label: '無服務', color: null, share: shares?.none, absent: null },
+  ]
+  const hoverKey = hoverBand === undefined ? undefined : (hoverBand == null ? 'none' : String(hoverBand))
+  // The notes live in the info icon's tooltip: as text lines they made the
+  // legend ~180 px tall, which pushed the hover readout above it over the plan
+  // (it covered and blocked AP-01 on the demo).
+  const notes = [
+    `左深右淡：深色訊號 ≥ ${BAND_MAP_RULE.goodDbm} dBm，淡色連得上但未達。百分比為平面圖（範圍內）面積。`,
+    `新連線手機的選頻，規則同 Client View；已連在 5 / 6 GHz 的手機會撐到 ${BAND_MAP_RULE.availableDbm - ROAM_HYSTERESIS_DB} dBm 才改連 2.4 GHz。`,
+    ...(multipath ? ['訊號含反射 / 繞射；Client View 只算直射，頻段交界可能差幾 dB。'] : []),
+  ]
+  return (
+    <div className="heatmap-legend">
+      <div className="heatmap-legend__title">
+        {cfg.label} {cfg.plain} · 所有頻段
+        <span className="heatmap-legend__info" title={notes.join(' ')}>
+          <Icon name="info" size={11} inline style={{ marginLeft: 4 }} />
+        </span>
+      </div>
+      <div className="heatmap-legend__bandmap">
+        {rows.map((r) => (
+          <div key={r.key} className={`heatmap-legend__bandmap-row${hoverKey === r.key ? ' heatmap-legend__bandmap-row--on' : ''}${r.absent ? ' heatmap-legend__bandmap-row--wide' : ''}`}>
+            <span className="heatmap-legend__bandmap-swatch">
+              {r.color ? (
+                <>
+                  <span style={{ background: r.color, opacity: BAND_MAP_ALPHA[0] }} />
+                  <span style={{ background: r.color, opacity: BAND_MAP_ALPHA[1] }} />
+                </>
+              ) : <span className="heatmap-legend__bandmap-none" />}
+            </span>
+            <span className="heatmap-legend__bandmap-label">{r.label}</span>
+            <span className="heatmap-legend__bandmap-share">{r.absent ?? fmtShare(r.share)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function HeatmapLegend({ mode, hoverValue, bandFilter, hoverBand, bandCounts, multipath }) {
   const cfg = getModeConfig(mode)
+  if (cfg.bandMap) return <BandMapLegend cfg={cfg} hoverBand={hoverBand} bandCounts={bandCounts} multipath={multipath} />
   const { stops, minVal, maxVal, leftToRightAsc } = buildLegendData(cfg)
   const pct = valueToPercent(hoverValue, minVal, maxVal, leftToRightAsc)
   const hasPointer = pct !== null

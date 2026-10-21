@@ -4,7 +4,9 @@ import { createHeatmapGL } from '@/features/heatmap/heatmapGL'
 import { buildScenario } from '@/features/heatmap/buildScenario'
 import { sampleFieldGLAsync } from '@/features/heatmap/sampleFieldGL'
 import { sampleField } from '@/features/heatmap/sampleField'
-import { getModeConfig } from '@/features/heatmap/modes'
+import { getModeConfig, BAND_MAP_RGB, BAND_MAP_ALPHA } from '@/features/heatmap/modes'
+import { BAND_MAP_RULE, bandMapShares } from '@/features/heatmap/bandMap'
+import { useBandMapStore } from '@/store/useBandMapStore'
 import {
   shouldSimplifyScene, FINE_BUDGET_MS, DRAG_BUDGET_MS, QUALITY,
   qualityTiers, makeTimeBudget, jsFallbackOpts,
@@ -565,6 +567,7 @@ export function attachHeatmapLayer({
     if (snapSprite) snapSprite.visible = false
     publishHeatmapFrame(null)   // 3D plane follows the 2D sprite off
     publishHeatmapField(null)   // 57-17: hover falls back to its own probe
+    useBandMapStore.getState().setShares(null)   // 58-12
   }
 
   // Render one scalar grid through heatmapGL and present it: PIXI texture
@@ -577,10 +580,20 @@ export function attachHeatmapLayer({
       spanX: (ctx.fullW / ctx.scale) / stepM,
       spanY: (ctx.fullH / ctx.scale) / stepM,
     }
-    gl.render({ rssi: grid, nx, ny, ...span }, ctx.outW, ctx.outH, 1 / ctx.scale, ctx.blur, ctx.contours, {
-      anchors: ctx.anchors,
-      edgeFeather: buildEdgeFeather(ctx),
-    })
+    // 58-12: a band map grid is the packed band field (4 floats per cell).
+    if (ctx.bandMap) {
+      gl.renderBand({ band: grid, nx, ny, ...span }, ctx.outW, ctx.outH, ctx.blur, ctx.contours, {
+        rule: BAND_MAP_RULE,
+        bandRgb: BAND_MAP_RGB,
+        bandAlpha: BAND_MAP_ALPHA,
+        edgeFeather: buildEdgeFeather(ctx),
+      })
+    } else {
+      gl.render({ rssi: grid, nx, ny, ...span }, ctx.outW, ctx.outH, 1 / ctx.scale, ctx.blur, ctx.contours, {
+        anchors: ctx.anchors,
+        edgeFeather: buildEdgeFeather(ctx),
+      })
+    }
     // PIXI v8 CanvasSource caches its dimensions at create-time. When
     // heatmapGL mutates canvas.width/height in-place (full-res idle ↔
     // half-res drag), REBUILD the texture instead of source.resize():
@@ -640,7 +653,9 @@ export function attachHeatmapLayer({
   const presentField = (target, ctx, awaitingFine) => {
     // 41-4 software renderer: every ripple frame would re-run the colormap
     // passes on the CPU — paint directly instead.
-    if (useHeatmapStore.getState().isSoftwareRender) {
+    // 58-12: nor does the band map -- the ripple perturbs one dB grid, and a
+    // perturbed category boundary would only flicker.
+    if (useHeatmapStore.getState().isSoftwareRender || ctx.bandMap) {
       cancelAnim(false)
       paintCanvas(target.grid, target.nx, target.ny, target.stepM, ctx)
       return
@@ -1083,6 +1098,10 @@ export function attachHeatmapLayer({
             // Cull faraway APs to the noise floor during a live drag — lossless
             // within colormap resolution, skips their per-fragment work.
             cullFloorDbm: -95,
+            // 58-12: live band map drag classifies every frame; an RSSI drag
+            // paints RSSI only, so the interference loop is skipped.
+            bandSplit: hm.mode === 'band',
+            rssiOnly: hm.mode === 'rssi',
           }
 
       // Coarsen the sample grid while dragging (任務 1). 0.5 m → 1.0 m drops the
@@ -1118,6 +1137,7 @@ export function attachHeatmapLayer({
         blur:     isSoloAP ? Math.round(hm.blur * DRAG_OUT_SCALE) : 0,
         contours: isSoloAP ? hm.showContours : false,
         anchors:  modeCfg.anchors,
+        bandMap:  !!modeCfg.bandMap,
       }
 
       // JS engine: keep the old synchronous render — the compute runs on the
@@ -1205,14 +1225,15 @@ export function attachHeatmapLayer({
       for (const key of allRadioKeys(list)) liveApIds.add(key)
       for (const ap of list ?? []) liveApIds.add(ap.id)
     }
+    const modeCfg = getModeConfig(hm.mode)
     const baseOpts = {
       maxReflOrder: forceAggregated ? 0 : (hm.reflections ? 1 : 0),
       enableDiffraction: forceAggregated ? false : hm.diffraction,
       padding,
       liveApIds,
+      bandSplit: !!modeCfg.bandMap,   // 58-12
     }
-    const modeCfg = getModeConfig(hm.mode)
-    const ctx = { ...ctxBase, blur: hm.blur, contours: hm.showContours, anchors: modeCfg.anchors }
+    const ctx = { ...ctxBase, blur: hm.blur, contours: hm.showContours, anchors: modeCfg.anchors, bandMap: !!modeCfg.bandMap }
     const present = (field, awaitingFine) => {
       const activeField = field[modeCfg.field] ?? field.rssi
       // 57-17: hand the numbers behind this paint to the hover readout.
@@ -1220,7 +1241,16 @@ export function attachHeatmapLayer({
         floorId: ctxBase.floorId, nx: field.nx, ny: field.ny,
         stepM: field.gridStepM, originX: field.originX, originY: field.originY,
         rssi: field.rssi, sinr: field.sinr, snr: field.snr, cci: field.cci,
+        band: field.band ?? null,   // 58-12
       })
+      // 58-12: the legend's area shares -- the cells inside the plan and the
+      // scope mask, classified like the paint.
+      if (modeCfg.bandMap && field.band) {
+        // Its own store: the heatmap store triggers compute() (generation++),
+        // so writing there would cancel the stage that is still running.
+        const shares = bandMapShares(field, scenario.size.w, scenario.size.h, scenario.scopeMaskFn ?? null)
+        useBandMapStore.getState().setShares(shares && { ...shares, floorId: ctxBase.floorId })
+      }
       presentField({
         grid: activeField, nx: field.nx, ny: field.ny,
         stepM: field.gridStepM, originX: field.originX, originY: field.originY,
@@ -1268,8 +1298,10 @@ export function attachHeatmapLayer({
       // gridCacheEnabled:false on a non-final coarse stage — its per-AP grids
       // (custom-AP scenes) would evict the fine-quality cache entries that
       // make unchanged-AP recomputes cheap.
+      // 58-12: an RSSI coarse preview skips the interference loop (the fine
+      // stage that follows carries SINR / CCI for the hover).
       const coarse = await stage(coarseStep, fineNeeded
-        ? { ...baseOpts, maxReflOrder: 0, enableDiffraction: false, gridCacheEnabled: false }
+        ? { ...baseOpts, maxReflOrder: 0, enableDiffraction: false, gridCacheEnabled: false, rssiOnly: hm.mode === 'rssi' }
         : baseOpts, coarseScenario)
       if (coarse === null || isStale()) return
       present(coarse, fineNeeded)

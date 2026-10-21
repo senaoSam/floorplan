@@ -330,7 +330,13 @@ function AutoPlaceModal({ open, onClose }) {
   const previewBand = open && previewing ? result.band : null
   useEffect(() => {
     if (previewBand == null) return undefined
-    const { bandFilter: prevBand, lastSingleBand: prevLast } = useHeatmapStore.getState()
+    const { bandFilter: prevBand, lastSingleBand: prevLast, mode: prevMode } = useHeatmapStore.getState()
+    // 58-12: the band map takes no single band -- the preview shows RSSI on
+    // the plan band, and the band map comes back after.
+    if (prevMode === 'band') {
+      useHeatmapStore.setState({ mode: 'rssi', bandFilter: String(previewBand) })
+      return () => useHeatmapStore.setState({ mode: prevMode, bandFilter: prevBand, lastSingleBand: prevLast })
+    }
     useHeatmapStore.getState().setBandFilter(String(previewBand))
     return () => {
       useHeatmapStore.getState().setBandFilter(prevBand)

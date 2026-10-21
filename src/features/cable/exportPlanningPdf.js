@@ -295,9 +295,13 @@ export async function buildPlanningPdf({
   onProgress('產生 RF 涵蓋率...')
   // 58-7: same band as the heatmap and the planning panel.
   const bandFilter = useHeatmapStore.getState().bandFilter || 'all'
-  const bandNote = bandFilter === 'all'
+  // 58-12: on the band map the floor images show the band a phone joins,
+  // while the coverage numbers stay on the strongest radio.
+  const bandMapOn = useHeatmapStore.getState().mode === 'band'
+  const bandNote = (bandFilter === 'all'
     ? 'Strongest radio per point across 2.4 / 5 / 6 GHz. '
-    : `${bandFilter} GHz radios only. `
+    : `${bandFilter} GHz radios only. `)
+    + (bandMapOn ? 'Floor images show the band map: the band a newly joining phone would use at each point. ' : '')
   doc.addPage()
   doc.setFont(FONT, 'bold')
   doc.setFontSize(14)

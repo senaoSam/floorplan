@@ -27,7 +27,7 @@ import { ROAM_HYSTERESIS_DB, ROAM_CANDIDATE_WINDOW_DB } from '@/store/useClientV
 
 // Usable-link floor — below this effective RSSI we treat the AP as "can't
 // associate".
-const MIN_USABLE_RSSI_DBM = -85
+export const MIN_USABLE_RSSI_DBM = -85
 
 const dbToLin = (db) => Math.pow(10, db / 10)
 const linToDb = (lin) => 10 * Math.log10(Math.max(lin, 1e-30))
@@ -75,12 +75,12 @@ export function buildCandidates(scenario, rx, opts) {
 // 58-11: a 5 / 6 GHz radio counts as "available" (worth staying off 2.4 GHz
 // for) only at/above this -- AOSP's 5 GHz minimum usable RSSI. Below it the
 // radio is still associable down to MIN_USABLE_RSSI_DBM, but competes with 2.4.
-const BAND_AVAILABLE_RSSI_DBM = -77
+export const BAND_AVAILABLE_RSSI_DBM = -77
 // 58-11: wpa_supplicant-style band bias -- each band step up adds this much to
 // the score radios are ranked by (5 GHz +2, 6 GHz +4 over 2.4). Ranking only;
 // the displayed / coverage RSSI stays the real one.
-const BAND_STEP_BONUS_DB = 2
-const BAND_STEP = { 2.4: 0, 5: 1, 6: 2 }
+export const BAND_STEP_BONUS_DB = 2
+export const BAND_STEP = { 2.4: 0, 5: 1, 6: 2 }
 
 const bandScore = (c) => c.rssiDbm + BAND_STEP_BONUS_DB * (BAND_STEP[c.ap.frequency] ?? 0)
 const byScore = (a, b) => bandScore(b) - bandScore(a)

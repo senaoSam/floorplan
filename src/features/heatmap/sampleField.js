@@ -18,6 +18,10 @@ import { rssiFromAp, aggregateApContributions } from './propagation'
 // array so the colormap / blur stay numerically well-behaved.
 const CCI_MIN_DBM = -120
 
+// 58-12: band map packing (see sampleFieldGL / bandMap.js).
+const BAND_SLOTS = [2.4, 5, 6]
+const BAND_NO_SIGNAL_DBM = -150
+
 // 52-A2: hard ceiling on grid cells. Extent comes from imageSize/scale, so a
 // legitimately large site (a 2 km campus) at the default 0.5 m step asks for
 // tens of millions of cells and four Float32Arrays of them. Rather than
@@ -57,6 +61,10 @@ export function sampleField(scenario, gridStepM = 0.5, opts = {}) {
   // two radios of one AP are not two APs.
   const redundancyThresholdDbm = opts.redundancyThresholdDbm ?? null
   const redundancy = redundancyThresholdDbm != null ? new Uint8Array(nx * ny) : null
+  // 58-12: band map -- 4 floats per cell, each band's strongest radio
+  // (BAND_NO_SIGNAL_DBM where none); same packing as sampleFieldGL.
+  const bandSplit = !!opts.bandSplit
+  const band = bandSplit ? new Float32Array(nx * ny * 4) : null
 
   const mask = scenario.scopeMaskFn ?? (() => true)
 
@@ -81,6 +89,20 @@ export function sampleField(scenario, gridStepM = 0.5, opts = {}) {
         const { rssiDbm } = rssiFromAp(ap, rx, scenario.walls, scenario.corners, propOpts)
         perAp.push(rssiDbm)
       }
+      if (band) {
+        band[idx * 4] = band[idx * 4 + 1] = band[idx * 4 + 2] = BAND_NO_SIGNAL_DBM
+        band[idx * 4 + 3] = 0
+        let best = BAND_NO_SIGNAL_DBM
+        for (let k = 0; k < perAp.length; k++) {
+          const slot = BAND_SLOTS.indexOf(scenario.aps[k].frequency)
+          const v = perAp[k]
+          if (slot < 0 || !(v > BAND_NO_SIGNAL_DBM)) continue
+          if (v > band[idx * 4 + slot]) band[idx * 4 + slot] = v
+          if (v > best) best = v
+        }
+        rssi[idx] = best
+        continue
+      }
       if (perAp.length === 0) {
         rssi[idx] = -120
         sinr[idx] = -50
@@ -103,5 +125,6 @@ export function sampleField(scenario, gridStepM = 0.5, opts = {}) {
       }
     }
   }
+  if (band) return { rssi, sinr: null, snr: null, cci: null, band, nx, ny, gridStepM, originX, originY }
   return { rssi, sinr, snr, cci, redundancy, nx, ny, gridStepM, originX, originY }
 }
