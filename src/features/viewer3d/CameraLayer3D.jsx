@@ -51,12 +51,12 @@ function CameraBody({ camera, pxToM, dimOpacity, isActiveFloor, onHover }) {
   const tilt = cameraTiltRad(camera)
   const transparent = dimOpacity < 1
 
-  const selectedId = useEditorStore((s) => s.selectedId)
-  const selectedType = useEditorStore((s) => s.selectedType)
+  // Whether THIS camera is selected (see APLayer3D).
+  const selectedHere = useEditorStore((s) => s.selectedType === 'camera' && s.selectedId === camera.id)
   const setSelected = useEditorStore((s) => s.setSelected)
   const [hovered, setHovered] = useState(false)
 
-  const isSelected = isActiveFloor && selectedType === 'camera' && selectedId === camera.id
+  const isSelected = isActiveFloor && selectedHere
   const isHovered = isActiveFloor && hovered
   const emissive = isSelected ? SELECT_EMISSIVE : (isHovered ? HOVER_EMISSIVE : '#000000')
   const emissiveIntensity = isSelected ? 0.55 : (isHovered ? 0.3 : 0)

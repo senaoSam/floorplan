@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
+import { useThree } from '@react-three/fiber'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore, VIEW_MODE } from '@/store/useEditorStore'
 import { subscribeHeatmapFrame, getHeatmapFrame } from '@/render/heatmapFrameBus'
@@ -39,6 +40,8 @@ import { useFloorPlateFactor } from './floorPlate'
 // from 2D.
 
 export default function HeatmapPlane3D({ floorId, elevation }) {
+  // The canvas renders on demand (Viewer3D): a re-upload asks for its frame.
+  const invalidate = useThree((s) => s.invalidate)
   const floors = useFloorStore((s) => s.floors)
   const floor  = floors.find((f) => f.id === floorId) ?? null
   const isVisible = useEditorStore((s) => s.viewMode === VIEW_MODE.THREE_D)
@@ -80,7 +83,8 @@ export default function HeatmapPlane3D({ floorId, elevation }) {
     texture.offset.set(frame.padLpx / frame.fullW, padBpx / frame.fullH)
     texture.repeat.set(frame.imgW / frame.fullW, frame.imgH / frame.fullH)
     texture.needsUpdate = true
-  }, [texture, frame])
+    invalidate()
+  }, [texture, frame, invalidate])
 
   if (plateFactor == null) return null
   if (!frame || !texture || !floor?.scale) return null

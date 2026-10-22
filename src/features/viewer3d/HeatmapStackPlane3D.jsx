@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo } from 'react'
 import * as THREE from 'three'
+import { useThree } from '@react-three/fiber'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useEditorStore, VIEW_MODE } from '@/store/useEditorStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
@@ -12,6 +13,8 @@ import { useFloorPlateFactor } from './floorPlate'
 // No propagation compute here; the stack canvases are unpadded so the
 // texture maps the floor rect 1:1 (no UV crop needed).
 export default function HeatmapStackPlane3D({ floorId }) {
+  // The canvas renders on demand (Viewer3D): a re-upload asks for its frame.
+  const invalidate = useThree((s) => s.invalidate)
   const floor = useFloorStore((s) => s.floors.find((f) => f.id === floorId) ?? null)
   const isVisible = useEditorStore((s) => s.viewMode === VIEW_MODE.THREE_D)
   const stackOn = useEditorStore((s) => s.heatmap3DAllFloors)
@@ -32,8 +35,10 @@ export default function HeatmapStackPlane3D({ floorId }) {
 
   // Same-canvas repaints bump frame.rev — re-upload the pixels.
   useEffect(() => {
-    if (texture) texture.needsUpdate = true
-  }, [texture, frame])
+    if (!texture) return
+    texture.needsUpdate = true
+    invalidate()
+  }, [texture, frame, invalidate])
 
   if (!isVisible || !stackOn || !hmEnabled || plateFactor == null) return null
   if (!frame || !texture || !floor?.scale) return null

@@ -102,7 +102,10 @@ const ON_FLOOR_EPS_M = 0.02
 // black outline reads as a gap between surfaces instead of an edge.
 const EDGE_COLOR = '#94a3b8'
 
-function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true }) {
+// Memoized: a wall re-renders only when its own data, floor dimming or
+// interactivity changes -- not when another wall is edited (a 2D endpoint drag
+// writes the wall store every move while this tree stays mounted, hidden).
+const WallMesh = React.memo(function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true }) {
   const {
     startX, startY, endX, endY,
     topHeight = 3, bottomHeight = 0,
@@ -159,15 +162,23 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true })
   // ghost floors ignore pointer events so the user doesn't accidentally
   // select a dimmed wall from an upstairs/downstairs floor.
   //
-  // 53-G1: these four hooks must stay ABOVE the zero-length early return.
+  // 53-G1: these hooks must stay ABOVE the zero-length early return.
   // Endpoint snapping can make a wall's two endpoints exactly equal, and that
   // render would then run fewer hooks than the previous one — React throws and
   // the whole app blanks (Viewer3D stays mounted in 2D mode, so even pure 2D
   // editing crashes from the hidden 3D tree).
-  const selectedId   = useEditorStore((s) => s.selectedId)
-  const selectedType = useEditorStore((s) => s.selectedType)
+  //
+  // Whether THIS wall is selected, so a selection change re-renders only the
+  // walls it flips (not every wall on every floor).
+  const selectedHere = useEditorStore((s) => s.selectedType === 'wall' && s.selectedId === wall.id)
   const setSelected  = useEditorStore((s) => s.setSelected)
   const [hovered, setHovered] = useState(false)
+  // CAMERA mode passes selectable=false — walls are reference geometry there
+  // (only cameras are editable), so clicks fall through and hover stays off.
+  const canInteract = isActiveFloor && selectable
+  // Handlers come off with the active floor (below), so a wall that stops
+  // being interactive may never get its pointer-out -- drop the hover.
+  React.useEffect(() => { if (!canInteract) setHovered(false) }, [canInteract])
 
   // Fake-AO uniforms. One object per wall, mutated in place as the wall is
   // edited; the compiled shader holds references to these same objects (see
@@ -191,14 +202,13 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true })
   const isGlass = GLASS_MATERIAL_IDS.has(material?.id)
   const surface = isGlass ? null : getWallSurface(material?.id)
 
-  // CAMERA mode passes selectable=false — walls are reference geometry there
-  // (only cameras are editable), so clicks fall through and hover stays off.
-  const canInteract = isActiveFloor && selectable
-  const isSelected = canInteract && selectedType === 'wall' && selectedId === wall.id
+  const isSelected = canInteract && selectedHere
   const isHovered  = canInteract && hovered
   const emissive = isSelected ? SELECT_EMISSIVE : (isHovered ? HOVER_EMISSIVE : '#000000')
   const emissiveIntensity = isSelected ? 0.45 : (isHovered ? 0.25 : 0)
 
+  // CAMERA mode keeps the handlers (inert) so a click on a wall there still
+  // counts as a hit and keeps the selected camera.
   const onClick = (e) => {
     if (!canInteract) return
     e.stopPropagation()
@@ -219,9 +229,13 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true })
         // is the one thing that would give away that it isn't really glass.
         castShadow={!isGlass}
         receiveShadow
-        onClick={onClick}
-        onPointerOver={onPointerOver}
-        onPointerOut={onPointerOut}
+        // Only the active floor's walls carry handlers: r3f raycasts every
+        // object that has one on each pointer move, and walls of the other
+        // (dimmed) floors only ignored the events. Without them a click there
+        // now counts as empty space and clears the selection.
+        onClick={isActiveFloor ? onClick : undefined}
+        onPointerOver={isActiveFloor ? onPointerOver : undefined}
+        onPointerOut={isActiveFloor ? onPointerOut : undefined}
       >
         <primitive object={geometry} attach="geometry" />
         {isGlass ? (
@@ -248,6 +262,12 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true })
             roughness={surface.roughness}
             metalness={surface.metalness}
             side={THREE.DoubleSide}
+            // A transparent DoubleSide material is otherwise drawn twice (back
+            // faces, then front) and three marks it needsUpdate before each
+            // pass, re-resolving its program -- with dimmed ghost floors that
+            // was ~4000 program lookups and +2000 draw calls a frame (3 floors x
+            // ~1000 walls).
+            forceSinglePass
             transparent={transparent}
             opacity={dimOpacity}
             depthWrite={!transparent}
@@ -280,7 +300,7 @@ function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true })
       )}
     </group>
   )
-}
+})
 
 export default function WallLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true, selectable = true }) {
   const walls = useWallStore((s) => s.wallsByFloor[floorId] ?? EMPTY)

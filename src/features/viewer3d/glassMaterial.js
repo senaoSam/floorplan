@@ -58,6 +58,8 @@ export function glassMaterialProps(color, opacity = 1) {
     roughness: 0.05,
     metalness: 0,
     side: THREE.DoubleSide,
+    // One pass for both faces (see WallLayer3D's opaque wall material).
+    forceSinglePass: true,
     transparent: true,
     opacity,
     depthWrite: false,

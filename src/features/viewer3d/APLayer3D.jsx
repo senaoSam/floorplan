@@ -195,16 +195,19 @@ const HOVER_EMISSIVE  = '#ffffff'
 // picked" — motion is what separates it, since nothing else in the view moves.
 //
 // Driven by useFrame, which is gated by r3f's frameloop, so this animates only
-// while 3D is actually visible and does not resurrect the Phase 45 freeze.
+// while 3D is actually visible and does not resurrect the Phase 45 freeze. The
+// canvas renders on demand (Viewer3D), so the pulse asks for its next frame
+// while it is mounted (an AP is selected).
 const PULSE_PERIOD_S = 1.6
 const PULSE_MIN_SCALE = 1.0
 const PULSE_MAX_SCALE = 1.5
 
 function SelectionPulse({ radius }) {
   const ref = useRef(null)
-  useFrame(({ clock }) => {
+  useFrame(({ clock, invalidate }) => {
     const g = ref.current
     if (!g) return
+    invalidate()
     // 0..1 sawtooth: expand outward, fading as it goes, then restart.
     const t = (clock.elapsedTime % PULSE_PERIOD_S) / PULSE_PERIOD_S
     const s = PULSE_MIN_SCALE + (PULSE_MAX_SCALE - PULSE_MIN_SCALE) * t
@@ -260,11 +263,12 @@ const APMarker = React.memo(function APMarker({ ap, pxToM, dimOpacity, isActiveF
   const azimuthRad    = (ap.azimuth ?? 0) * Math.PI / 180
 
   // Selection / hover bookkeeping.
-  const selectedId   = useEditorStore((s) => s.selectedId)
-  const selectedType = useEditorStore((s) => s.selectedType)
+  // Whether THIS AP is selected: a selection change re-renders only the
+  // markers it flips (a selectedId subscription defeated the memo).
+  const selectedHere = useEditorStore((s) => s.selectedType === 'ap' && s.selectedId === ap.id)
   const setSelected  = useEditorStore((s) => s.setSelected)
   const [hovered, setHovered] = useState(false)
-  const isSelected = isActiveFloor && selectedType === 'ap' && selectedId === ap.id
+  const isSelected = isActiveFloor && selectedHere
   const isHovered  = isActiveFloor && hovered
 
   // When selected, swap the ring + body emissive to red accent; default still

@@ -9,7 +9,11 @@ import { enabledRadios, radioView, highestLiveBand, radioAllowed } from '@/utils
 import { getAPModelById } from '@/constants/apModels'
 import { useViewportStore } from '@/store/useViewportStore'
 import { getSceneRefs } from '@/render/sceneRegistry'
-import { SWITCH_KINDS, getSwitchKindColor } from '@/store/useCableStore'
+import { SWITCH_KINDS, getSwitchKindColor, useCableStore } from '@/store/useCableStore'
+import { useWallStore } from '@/store/useWallStore'
+import { useAPStore } from '@/store/useAPStore'
+import { useFloorHoleStore } from '@/store/useFloorHoleStore'
+import { useCameraStore } from '@/store/useCameraStore'
 import { cameraModelById } from '@/constants/cameraModels'
 import { deviceStatus, STATUS_COLOR, STATUS_LABEL } from '@/features/cameras/deviceStatus'
 import WallLayer3D from './WallLayer3D'
@@ -105,15 +109,18 @@ function FloorSlab({ w, h, opacity = 1, shadows = true }) {
 function FloorPlanImage({ url, w, h, opacity }) {
   // useLoader suspends until the texture is ready; wrap caller in Suspense.
   const texture = useLoader(THREE.TextureLoader, url)
+  const invalidate = useThree((s) => s.invalidate)
 
   // Avoid color-space washout on recent Three.js (r150+): mark the texture as
   // sRGB so the renderer does the linear→display conversion correctly.
+  // (A frame for the re-upload: the canvas renders on demand.)
   useEffect(() => {
     if (!texture) return
     if ('colorSpace' in texture) texture.colorSpace = THREE.SRGBColorSpace
     else texture.encoding = THREE.sRGBEncoding
     texture.needsUpdate = true
-  }, [texture])
+    invalidate()
+  }, [texture, invalidate])
 
   const transparent = opacity < 1
   return (
@@ -392,7 +399,9 @@ function FloorStack({ floor, elevation, isActive, onAPHover, onSwitchHover, onCa
 // the camera fully — keeping it hijacked per-frame breaks orbit/pan/zoom.
 function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart, initialTargetRef, holdTarget }) {
   const controlsRef = useRef()
-  const { camera, gl } = useThree()
+  // `invalidate`: the canvas renders on demand outside CAMERA mode, so every
+  // camera move this rig makes asks for its frame (see the Canvas frameloop).
+  const { camera, gl, invalidate } = useThree()
   // Keep the latest stop/start callbacks in refs so the listeners and useFrame
   // (registered with stable deps) always call the current handler.
   const onAutoRotateStopRef = useRef(onAutoRotateStop)
@@ -446,8 +455,14 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart
       onAutoRotateStopRef.current?.()
     }
     controls.addEventListener('start', yieldToUser)
-    return () => controls.removeEventListener('start', yieldToUser)
-  }, [camera])
+    // User orbit / pan / zoom: OrbitControls updates on the pointer / wheel
+    // event itself and reports it as 'change'.
+    controls.addEventListener('change', invalidate)
+    return () => {
+      controls.removeEventListener('start', yieldToUser)
+      controls.removeEventListener('change', invalidate)
+    }
+  }, [camera, invalidate])
 
   // Expose live camera + controls + a tween command so the parent can read
   // the current pose on demand AND drive an animated pose change without us
@@ -492,13 +507,19 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart
         tweenStartMs.current = performance.now()
         tweenDurMs.current = duration > 0 ? duration : 0
         tweening.current = true
+        invalidate()
       },
       // Manual turntable toggle (same idle spin the 2D→3D entry kicks off).
       // Turning it on starts the gentle orbit immediately; the OrbitControls
       // `start` listener still stops it the instant the user grabs the camera.
       setAutoRotate: (on) => {
         autoRotating.current = !!on
+        // Turning it off during the 自動旋轉 button's tween to the entry pose
+        // must also drop the spin queued for when that tween lands -- it used
+        // to start spinning anyway, with the button already off.
+        if (!on) wantAutoRotateAfterTween.current = false
         if (controlsRef.current) controlsRef.current.autoRotate = !!on
+        invalidate()
       },
       // Hard-park the camera at a pose and CANCEL any in-flight tween/spin.
       // The 2D→3D entry uses this so a leftover tween (e.g. a target-change
@@ -521,12 +542,13 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart
         desiredCam.current.set(camPos[0], camPos[1], camPos[2])
         desiredTarget.current.set(tgt[0], tgt[1], tgt[2])
         lastTarget.current = [tgt[0], tgt[1], tgt[2]]
+        invalidate()
       },
     }
     return () => {
       if (cameraStateRef.current?.camera === camera) cameraStateRef.current = null
     }
-  }, [cameraStateRef, camera])
+  }, [cameraStateRef, camera, invalidate])
 
   // Tween endpoints + active flag. We only drive the camera during a lift;
   // as soon as target/camera are close enough we hand control back so the
@@ -547,6 +569,8 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart
   // previous frame", so the first step of a lift uses a nominal 60fps delta
   // rather than the gap since some earlier, unrelated tween.
   const lastLerpMs    = useRef(0)
+  // Wall-clock timestamp of the previous spin frame (0 = spin not running).
+  const lastSpinMs    = useRef(0)
   // Idle auto-rotate: after the 2D→3D entry tween lands, the camera keeps
   // slowly orbiting the floor (showcase turntable) until the user touches the
   // controls. `wantAutoRotateAfterTween` is set by tweenTo when the caller
@@ -605,24 +629,43 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart
     desiredCam.current.copy(nextTarget).add(camOffset)
     lastLerpMs.current = 0
     tweening.current = true
-  }, [target, camera, holdTarget])
+    invalidate()
+  }, [target, camera, holdTarget, invalidate])
 
   // No `dt` parameter on purpose: r3f's delta is a constant 0 here (see the
   // default-lerp branch below), so taking it would only invite a future edit
   // to reintroduce the bug. Frame timing comes from performance.now().
+  // A tween, lift or idle spin asks for the next frame as long as it runs
+  // (the canvas otherwise renders on demand).
   useFrame(() => {
+    step()
+    if (tweening.current || autoRotating.current) invalidate()
+  })
+  const step = () => {
     const controls = controlsRef.current
     if (!controls) return
     if (!tweening.current) {
       // Not tweening. If an idle spin is active, keep ticking OrbitControls so
       // its autoRotate advances the azimuth each frame. Otherwise OrbitControls
       // owns the camera fully (user orbit/pan/zoom).
+      //
+      // The spin is timed (deltaTime in seconds): without it OrbitControls turns
+      // a fixed angle per frame, so a heavy scene drawn at 10-20 fps spun 3-6x
+      // slower than at 60. With it every frame rate turns at the 60 fps speed
+      // (1/60 s per frame gives exactly the old per-frame angle). Clamped so a
+      // stall or a hidden tab doesn't jump the view.
       if (autoRotating.current) {
+        const now = performance.now()
+        const dt = lastSpinMs.current > 0 ? Math.min((now - lastSpinMs.current) / 1000, 0.1) : 1 / 60
+        lastSpinMs.current = now
         controls.autoRotate = true
-        controls.update()
+        controls.update(dt)
+      } else {
+        lastSpinMs.current = 0
       }
       return
     }
+    lastSpinMs.current = 0
 
     if (tweenDurMs.current > 0) {
       // Fixed-duration tween: interpolate the camera offset in *spherical*
@@ -704,7 +747,7 @@ function CameraRig({ target, cameraStateRef, onAutoRotateStop, onAutoRotateStart
       controls.update()
       tweening.current = false
     }
-  })
+  }
 
   // Damping 在 OrbitControls 內部會在 sphericalDelta 累積之後 frame 慢慢套用
   // 殘留。使用者拖曳旋轉之後鬆手，殘留 ~200-350ms 才會衰減完；這期間如果滾
@@ -821,9 +864,22 @@ function buildReadoutContent(type, d) {
   return null
 }
 
-function DeviceHoverReadout({ hovered, pointer, container }) {
+function DeviceHoverReadout({ hovered, pointerRef, container }) {
   const elRef = useRef(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
+  // The cursor position lives here, not in Viewer3D: a pointer state there
+  // re-rendered the whole 3D tree (every WallMesh) on every mouse move, orbit
+  // drags included. Seeded from the last position Viewer3D saw.
+  const [pointer, setPointer] = useState(() => pointerRef.current)
+  useEffect(() => {
+    if (!container) return undefined
+    const onMove = (e) => {
+      const rect = container.getBoundingClientRect()
+      setPointer({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+    }
+    container.addEventListener('pointermove', onMove)
+    return () => container.removeEventListener('pointermove', onMove)
+  }, [container])
 
   // Re-measure when the tooltip content changes (different device hovered).
   useEffect(() => {
@@ -963,7 +1019,53 @@ function SceneEnvironment({ intensity = 1 }) {
   return null
 }
 
-// r3f's setFrameloop('always') only flips the store flag — the rAF loop stays
+// The shadow map is re-rendered only when something that casts or the light
+// changes, not every frame: with ~1000 walls a floor its depth pass redrew every
+// caster each frame (and those draws aren't even in renderer.info). Casters and
+// the light all come from these stores (walls + openings, APs, switches / trays
+// / risers, floors -- slabs, elevation, the light's centre -- floor holes,
+// cameras, and the editor's floor / layer visibility). `live`: CAMERA mode's
+// people and vehicles move every frame and cast, so the map updates every
+// frame there as before.
+//
+// A store write lands before the layers inside the canvas commit it (r3f's
+// reconciler commits from a later task), so a frame drawn in between would bake
+// the old casters and clear the flag. The map is therefore re-baked on the next
+// DIRTY_FRAMES drawn frames after each write, which covers that commit.
+const DIRTY_FRAMES = 3
+function StaticShadows({ live }) {
+  const gl = useThree((s) => s.gl)
+  const invalidate = useThree((s) => s.invalidate)
+  const pending = useRef(0)
+  useEffect(() => {
+    if (live) return undefined
+    gl.shadowMap.autoUpdate = false
+    gl.shadowMap.needsUpdate = true
+    const dirty = () => { pending.current = DIRTY_FRAMES; invalidate() }
+    const unsubs = [useWallStore, useAPStore, useCableStore, useFloorStore, useFloorHoleStore, useCameraStore, useEditorStore]
+      .map((store) => store.subscribe(dirty))
+    // A restored WebGL context comes back with an empty shadow map (three
+    // copies autoUpdate=false into the new one, so it would stay empty).
+    const canvas = gl.domElement
+    canvas.addEventListener('webglcontextrestored', dirty)
+    return () => {
+      for (const u of unsubs) u()
+      canvas.removeEventListener('webglcontextrestored', dirty)
+      pending.current = 0
+      gl.shadowMap.autoUpdate = true
+    }
+  }, [live, gl, invalidate])
+  // Runs before the scene is drawn each frame.
+  useFrame(() => {
+    if (pending.current <= 0) return
+    pending.current--
+    gl.shadowMap.needsUpdate = true
+    if (pending.current > 0) invalidate()
+  })
+  return null
+}
+
+// r3f's setFrameloop('demand' / 'always') only flips the store flag — the rAF loop stays
 // parked until the next invalidate(), and with the previous mode 'never' every
 // queued invalidate was dropped. Kick one on the hidden→visible edge so the
 // first 3D frame paints immediately after the switch.
@@ -1240,7 +1342,7 @@ function Viewer3D() {
   // prop only seeds the camera on first mount — which happens at app start,
   // before any floor is loaded, so the initial camera sits at a wrong,
   // too-close distance (e.g. dist ≈ 10 instead of ≈ 60). The first time we
-  // switch to 3D, r3f flips its frameloop demand→always and paints a frame
+  // switch to 3D, r3f flips its frameloop never→demand and paints a frame
   // before our entry effect runs, exposing that stale close-up as a "huge
   // top-down" flash. Fixing the camera here — keyed on the pose, not on the
   // switch — means it's already correct whenever that first frame paints,
@@ -1338,13 +1440,22 @@ function Viewer3D() {
   // container level so the tooltip lives outside the r3f canvas tree (avoids
   // drei dependency).
   const [hoveredDevice, setHoveredDevice] = useState(null)
-  const [pointer, setPointer] = useState({ x: 0, y: 0 })
+  // A ref, not state -- see DeviceHoverReadout. Kept by a native capture
+  // listener on the container: it runs before r3f's canvas listener, so a
+  // readout that a hover mounts during this very move already reads this
+  // move's position (React's onPointerMove would run after r3f's).
+  const pointerRef = useRef({ x: 0, y: 0 })
   const containerRef = useRef(null)
-  const handleContainerPointerMove = (e) => {
-    const rect = containerRef.current?.getBoundingClientRect()
-    if (!rect) return
-    setPointer({ x: e.clientX - rect.left, y: e.clientY - rect.top })
-  }
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return undefined
+    const onMove = (e) => {
+      const rect = el.getBoundingClientRect()
+      pointerRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    }
+    el.addEventListener('pointermove', onMove, true)
+    return () => el.removeEventListener('pointermove', onMove, true)
+  }, [])
   const handleAPHover = useCallback((ap) => {
     setHoveredDevice(ap ? { type: 'ap', data: ap } : null)
   }, [])
@@ -1387,7 +1498,6 @@ function Viewer3D() {
     <div
       className="viewer3d"
       ref={containerRef}
-      onPointerMove={handleContainerPointerMove}
       onPointerLeave={() => setHoveredDevice(null)}
     >
       {/* 3D controls, grouped into one dark-glass card in the top-right so
@@ -1541,7 +1651,7 @@ function Viewer3D() {
           the 3D marker is. The tooltip flips to the left/up side of the
           cursor when it would overflow the container. */}
       {hoveredDevice && (
-        <DeviceHoverReadout hovered={hoveredDevice} pointer={pointer} container={containerRef.current} />
+        <DeviceHoverReadout hovered={hoveredDevice} pointerRef={pointerRef} container={containerRef.current} />
       )}
 
       {/* 51-3: the canvas is transparent so the CSS gradient on .viewer3d
@@ -1552,7 +1662,12 @@ function Viewer3D() {
         camera={{ position: camPos, fov: 50, near: 0.1, far: 2000 }}
         style={{ width: '100%', height: '100%', background: 'transparent' }}
         gl={{ alpha: true }}
-        frameloop={isVisible ? 'always' : 'never'}
+        // On demand while visible: a frame is drawn when something changes
+        // (props, CameraRig moves, the AP pulse, texture updates) -- an idle
+        // view no longer redraws every frame (3 floors x ~1000 walls kept the
+        // main thread busy at ~9 fps). CAMERA mode stays 'always': its people,
+        // vehicles and flow crawl animate every frame.
+        frameloop={isVisible ? (inCameraMode ? 'always' : 'demand') : 'never'}
         onPointerMissed={() => clearSelected()}
       >
       <WakeOnVisible isVisible={isVisible} />
@@ -1576,6 +1691,7 @@ function Viewer3D() {
       <SceneEnvironment intensity={1.1} />
       <ambientLight intensity={0.12} />
       <KeyLight center={center} radius={shadowRadius} />
+      <StaticShadows live={inCameraMode} />
       <hemisphereLight args={['#e2e8f0', '#1e293b', 0.12]} />
 
       {floors.length === 0 && <EmptyScene />}
