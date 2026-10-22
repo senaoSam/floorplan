@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useEditorStore } from '@/store/useEditorStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import { useAPStore } from '@/store/useAPStore'
@@ -15,6 +15,7 @@ import { storeChannelNeighbors } from '@/features/heatmap/channelNeighbors'
 import { NumberInput } from '@/components/PanelRight/_shared/PanelControls'
 import Icon from '@/components/Icon/Icon'
 import { usePlanningDialogStore } from '@/store/usePlanningDialogStore'
+import { useRadioPreviewStore, withRadioPreview } from '@/store/useRadioPreviewStore'
 import { COVERAGE_THRESHOLD_DBM, COVERAGE_TARGET_PCT } from '@/constants/coverage'
 import './DevicePlanningPanel.sass'
 
@@ -48,6 +49,19 @@ function DevicePlanningPanel() {
   const aps        = apsByFloor[activeFloorId] ?? []
   const apsOnFloor = aps.length
 
+  // A planning dialog's preview (useRadioPreviewStore): the quality stats
+  // follow the previewed plan, like the heatmap -- read only for the stats
+  // (auto channel and the rest write the real APs).
+  const previewFloorId   = useRadioPreviewStore((s) => s.floorId)
+  const previewPlan      = useRadioPreviewStore((s) => s.plan)
+  const previewShowBefore = useRadioPreviewStore((s) => s.showBefore)
+  const qualityApsByFloor = useMemo(
+    () => withRadioPreview(apsByFloor, { floorId: previewFloorId, plan: previewPlan, showBefore: previewShowBefore }),
+    [apsByFloor, previewFloorId, previewPlan, previewShowBefore],
+  )
+  const qualityAps = qualityApsByFloor[activeFloorId] ?? []
+  const qualityPreviewed = qualityApsByFloor !== apsByFloor && previewFloorId === activeFloorId
+
   const walls  = useWallStore((s) => s.wallsByFloor[activeFloorId])
   const scopes = useScopeStore((s) => s.scopesByFloor[activeFloorId])
   // 57-17: quality samples the cross-floor scenario, so other floors' walls /
@@ -77,16 +91,16 @@ function DevicePlanningPanel() {
     qualityTimerRef.current = setTimeout(() => {
       // 57-17: building maps → same cross-floor scenario as the heatmap.
       setQuality(computePlanQualityStats({
-        floor, walls: walls ?? [], aps, scopes: scopes ?? [], thresholdDbm,
+        floor, walls: walls ?? [], aps: qualityAps, scopes: scopes ?? [], thresholdDbm,
         floors,
-        apsByFloor,
+        apsByFloor: qualityApsByFloor,
         wallsByFloor: useWallStore.getState().wallsByFloor,
         holesByFloor: useFloorHoleStore.getState().floorHolesByFloor,
         bandFilter,
       }))
     }, QUALITY_DEBOUNCE_MS)
     return () => { if (qualityTimerRef.current) clearTimeout(qualityTimerRef.current) }
-  }, [collapsed, floor, hasScale, walls, aps, scopes, thresholdDbm, floors, apsByFloor, wallsByAll, holesByFloor, bandFilter, minInterf, regulatoryDomain])
+  }, [collapsed, floor, hasScale, walls, qualityAps, scopes, thresholdDbm, floors, qualityApsByFloor, wallsByAll, holesByFloor, bandFilter, minInterf, regulatoryDomain])
 
   // 52-D2: this was the button that froze the UI with zero feedback — the
   // tester hit it, saw nothing move for seconds, and assumed a crash.
@@ -213,7 +227,7 @@ function DevicePlanningPanel() {
           {/* 規劃品質報表：涵蓋率 / 盲區 / 頻道衝突。以本樓層 scope 內
               （無 scope 則整張圖）為分母，RSSI ≥ 門檻算已涵蓋。 */}
           <section className="device-planning__section device-planning__quality">
-            <p className="device-planning__section-title">規劃品質</p>
+            <p className="device-planning__section-title">規劃品質{qualityPreviewed ? '（預覽：套用後）' : ''}</p>
 
             {!hasScale && (
               <p className="device-planning__empty">尚未設定比例尺，無法計算涵蓋率</p>

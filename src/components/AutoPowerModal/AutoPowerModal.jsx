@@ -445,6 +445,9 @@ function AutoPowerModal({ open, apIds, onClose }) {
         {result && result.txMap && (
           <section className="auto-power-modal__section">
             <p className="auto-power-modal__label">規劃結果（目標 RSSI {targetRssi} dBm / SINR {targetSinr} dB）</p>
+            {/* Design-time suggestion: the APs' own RRM (runtime power control)
+                tunes from here once deployed. */}
+            <p className="auto-power-modal__hint">這是設計階段的功率建議；設備上線後，RRM（自動功率調整）會以此為基準再微調。</p>
             {/* 58: one block per band -- each band is planned on its own. */}
             {Object.entries(result.scoresByBand ?? {}).sort(([a], [b]) => Number(a) - Number(b)).map(([band, score]) => (
               <div key={band} className="auto-power-modal__progress" style={{ marginTop: 8 }}>

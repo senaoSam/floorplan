@@ -6,6 +6,7 @@ import { useHoverStore } from '@/store/useHoverStore'
 import { useViewportStore } from '@/store/useViewportStore'
 import { useClientViewStore } from '@/store/useClientViewStore'
 import { useHeatmapStore } from '@/store/useHeatmapStore'
+import { useRadioPreviewStore } from '@/store/useRadioPreviewStore'
 import { computeFocusedDevices, FOCUS_HALO_COLOR, FOCUS_HALO_ALPHA, FOCUS_HALO_WIDTH } from '@/features/focus/focusedDevices'
 import { perfOn, probe, probeEvent } from '@/features/cable/perfProbe'
 import { getPatternById, DEFAULT_PATTERN_ID } from '@/constants/antennaPatterns'
@@ -587,9 +588,24 @@ export function attachAPsLayer({
   // renderers — a chunk of the "放下卡一下"); now it repaints just that one.
   let lastApById = new Map()
 
+  // A planning dialog's preview (useRadioPreviewStore): the markers and their
+  // labels show the plan's radios on its floor, as the heatmap does. Display
+  // only -- writes (drag commit etc.) use ids and positions, never these
+  // objects. Cached so a reconcile with the same inputs reuses the same
+  // objects (the per-AP identity diff below then redraws nothing).
+  let previewCache = { raw: null, plan: null, out: null }
+  const displayAps = (raw, floorId) => {
+    const st = useRadioPreviewStore.getState()
+    if (st.floorId !== floorId || !st.plan || st.showBefore) return raw
+    if (previewCache.raw !== raw || previewCache.plan !== st.plan) {
+      previewCache = { raw, plan: st.plan, out: st.plan(raw) }
+    }
+    return previewCache.out
+  }
+
   const reconcile = () => {
     const activeFloorId = useFloorStore.getState().activeFloorId
-    const aps = useAPStore.getState().apsByFloor[activeFloorId] ?? []
+    const aps = displayAps(useAPStore.getState().apsByFloor[activeFloorId] ?? [], activeFloorId)
     if (activeFloorId === lastFloorId && aps === lastAPs) {
       applyDragOverlay()
       return
@@ -811,6 +827,7 @@ export function attachAPsLayer({
   const unsubViewport = useViewportStore.subscribe(timed('viewport', applyInverseScale))
   const unsubClientView = useClientViewStore.subscribe(timed('clientView', onClientViewChange))
   const unsubHeatmap = useHeatmapStore.subscribe(timed('heatmap', onHeatmapChange))
+  const unsubRadioPreview = useRadioPreviewStore.subscribe(timed('radioPreview', reconcile))
   reconcile()
   recomputeFocus()
   applyInverseScale()
@@ -825,6 +842,7 @@ export function attachAPsLayer({
     unsubViewport()
     unsubClientView()
     unsubHeatmap()
+    unsubRadioPreview()
     for (const id of Array.from(containers.keys())) removeContainer(id)
   }
 }
