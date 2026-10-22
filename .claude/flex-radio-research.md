@@ -1,0 +1,71 @@
+# flexible-radio
+## gaps
+- Case (a), a radio whose band can change, cannot really be built without case (b). On the 9166, switching slot 2 off 6 GHz always gives two 5 GHz radios. A 'flex radio' feature that keeps 'one radio per band' covers almost no real product, so (a) and (b) have to be designed together.
+- Identity: radioKey = apId#band means a band switch changes the key (caches, txMap, Client View incumbent, preview maps all lose track), and two same-band radios collide. A stable per-radio slot id is missing.
+- AP model data has no notion of radio slots, allowed bands per slot, or radio modes (tri-band vs dual-5). Channel subsets per mode (5-lo 36-64 / 5-hi 100-165), stream split (8x8 into 2x 4x4) and TX limits per mode are also missing.
+- Auto channel has no per-radio channel restriction, and no rule that a device's two 5 GHz radios must be at least 100 MHz apart.
+- Plan-quality conflicts would flag a device against itself, because same-device pairs are not excluded explicitly.
+- Auto power has no macro/micro concept. Each 5 GHz radio is planned independently.
+- Redundant 2.4 only disables radios. There is no FRA-style 'convert to 5 GHz / monitor' outcome, and no monitor state at all: radios are only enabled or disabled.
+- UI (AP panel, batch panel, labels, 2D dots, 3D ring, Client View text 'AP-01 · 5 GHz') labels radios by band only. It cannot tell 5-lo from 5-hi.
+- Antenna is shared by the whole device. Dual-5 with two external antennas (Hamina 'x2 Antennas') is not modelled.
+- Industry facts still UNCERTAIN: how Cisco FRA (17.9+) decides 5 vs 6 GHz on the 9166 XOR radio; whether Hamina or Ekahau AI Pro let the user switch a flex radio 5<->6 and whether their auto-planners choose dual-5 today (Ekahau's 'uses dual-5 when possible' is a 2017 v9 statement); iBwave and Ruckus behaviour; the Meraki CW9166 default mode (dual-5 vs tri-band).
+## options
+- [XL] A. Stable radio slot id (general model): Each radio gets a `slot` id that never changes, and `band` becomes a mutable property. The key becomes apId#slot. The AP model lists its slots with allowed bands, plus channel subsets, max TX and streams per slot and band. Every by-band lookup (apRadio, patchRadio, panels, planners, 3D/2D keys) moves to by-slot, or to 'all radios of band X'.
+  + Clean. Covers 5<->6 flex, 2.4<->5 XOR, dual-5 and Aruba split-5. Keys stay stable when a band flips, so caches, preview and Client View hysteresis keep working.
+  - Touches every band-keyed site (apRadios, APPanel, BatchPanel, AutoPower/AutoPlace/Redundant24, autoPlacePlan, autoPowerPlan, channelNeighbors, apsLayer, APLayer3D, clientView) and every place that assumes one radio per band. Needs a full regression pass.
+- [L] B. Hybrid slot id that defaults to the band: Same as A, but the slot id of an ordinary radio is its band string ('2.4' / '5' / '6'), so every current AP keeps its key apId#5. Only a flex or second radio gets a new slot id (e.g. '5b' or 'x'). Helpers grow by-slot variants, and existing by-band call sites change only where a device can have two radios on one band.
+  + Existing keys and behaviour stay exactly the same for non-flex APs, so less regression risk. Can ship in steps.
+  - Two conventions live side by side (band-as-key vs slot-as-key). Any call site still doing apRadio(ap, 5) is a hidden bug for dual-5 devices. Needs a grep audit plus a self-pair guard in conflicts and the channel planner.
+- [M] C. Device-level 'radio mode' picked by the user (UI / spec layer on top of A or B): The AP model lists modes, e.g. 9166: Tri-band (2.4/5/6) and Dual-5 (2.4/5-lo/5-hi). The AP panel and batch panel get a mode dropdown, and radiosForModel(model, mode) builds the radios. This matches the Meraki RF-profile flex setting and the Cisco slot-2 band configuration. Planners treat the mode as fixed input.
+  + Matches how vendors expose it, keeps planners simple (no band search), and maps naturally to a BOM / config export.
+  - No automatic recommendation. The user has to know when dual-5 makes sense.
+- [M] D. Channel and power rules for dual-5 (needed with C): Restrict the channel candidates of each slot (5-lo 36-64, 5-hi 100-165, or the 100 MHz minimum gap), skip same-device pairs in detectChannelConflicts, and optionally add a macro/micro option (the micro radio's TX held to the minimum in auto power).
+  + Without it a dual-5 plan would produce wrong channels or self-conflicts. Each rule is small and checkable.
+  - Vendor rules differ (Cisco band-lock vs 100 MHz rule, Aruba split). The rule set has to come from model data, and macro/micro is a new planning concept.
+- [L] E. FRA-style auto suggestion: Extend redundant 2.4 (or add a sibling tool) so that for a redundant XOR radio it suggests 'turn into 5 GHz (dual-5)' or 'turn off / monitor' instead of only disabling. A 5 vs 6 choice for 9166-type slots could follow later. Shown through the existing before/after preview.
+  + Matches what Cisco RRM and the Ekahau auto-planner do ('uses dual 5 GHz when possible'). Reuses the redundant-2.4 COF-like logic and the preview store.
+  - Needs A or B plus C and D first. The decision criteria for 5 vs 6 are not publicly documented by Cisco (uncertain). There is no monitor state today, so 'monitor' would equal disabled in a pure planner.
+- [S] F. Data-only stopgap (no flex): Add separate fixed model entries such as 'Catalyst 9166 (dual-5)' with supportedBands [2.4, 5, 5]. That is impossible under the current key, so the only realistic stopgap is 'Catalyst 9166 tri-band' versus 'dual-band (6 off)' using enabled flags.
+  + Almost free.
+  - Does not deliver dual-5 at all, only the 6 GHz off case that a disabled radio already covers. Mostly useful to show why A or B is needed.
+## decisions
+- Scope: flex 5<->6 only (9166/9136/9178 class), also 2.4<->5 XOR (older Cisco 2800/3800, Aruba flex), and/or Aruba-style split-5 (8x8 into 2x 4x4)? Note that 5<->6 alone already implies dual-5 support.
+- Representation: full slot model (A) or hybrid band-default slot ids (B)? Trade-off: regression risk against long-term cleanliness.
+- Who picks the band or mode: only the user, through a device-level mode dropdown (C), or should an auto tool also suggest it (E, FRA-like)? If auto, which tool hosts it: redundant 2.4, auto power, or a new one?
+- Dual-5 channel rule: hard band-lock (5-lo 36-64 / 5-hi 100-165, as on Cisco 9166 / Meraki / Aruba AP-555) or the generic '>=100 MHz apart' rule (Cisco FRA white paper), or per-model data?
+- Model macro/micro (second 5 GHz radio held at minimum TX) or treat the two 5 GHz radios as independent macro cells?
+- Does a dual-5 split change capacity data (streams per radio halved, as on Aruba AP-555), and should per-mode TX limits differ? We would need vendor numbers per mode, and they are uncertain.
+- Is a 'monitor' radio state needed (Cisco FRA and Aruba split radio offer it), or is 'disabled' enough for a planner?
+- Naming and visuals for two same-band radios: 5G-lo/5G-hi, 5G #1/#2, or slot names? Also how to tell them apart in the 2D dots, info label, 3D ring arcs, Client View text ('AP-01 · 5 GHz (lo)') and the PDF.
+- Antennas: keep one shared antenna per device, or support per-radio antennas for external-antenna dual-5 (Hamina 'x2 Antennas')?
+- Which concrete AP models get flex data (our 9166 entry is fixed tri-band today, and Ruckus/Ubiquiti behaviour is unverified)? Does the product owner have vendor datasheets to fill per-mode TX, gain and streams?
+## recommendation
+Treat (a) and (b) as one feature. A band-switchable radio cannot be built on its own: switching a 9166's XOR radio off 6 GHz always gives two 5 GHz radios, and the `apId#band` identity (src/utils/apRadios.js:19) does not allow that. The suggested order for discussion is below.
+
+1. Agree the scope and channel rules from the decisions list, especially band-lock vs 100 MHz gap, and macro/micro yes or no.
+2. Go with option B: hybrid slot ids that default to the band, so every existing AP keeps its keys. Add a by-slot helper layer and audit every apRadio / patchRadio / radioKey(…, band) site found above.
+3. Add option C (device-level mode dropdown, per-model mode data) together with D's minimum: per-slot channel subsets in auto channel, same-device exclusion in the plan-quality conflicts, and distinct lo/hi labels in the 2D, 3D and panels.
+4. Leave option E (FRA-style 'convert redundant XOR radio to 5 GHz / off' suggestion through the existing preview) as a later step. Cisco's own 5 vs 6 decision logic is not publicly documented, and Hamina's and Ekahau AI Pro's current flex-radio behaviour could not be confirmed.
+
+Parts that need no change: the heatmap engines, GL geometry bakes (per device), band map (max per band) and redundancy counting (distinct devices). Effort: about L for steps 2-3, plus M for E later.
+## currentCode
+- The radio key is `${apId}#${band}`. Band is the radio's identity, so two radios on the same band get the same key, and changing a radio's band changes its key. [src/utils/apRadios.js:19]
+- The spec forbids both cases outright: radios are sorted by band with at most one per band, and 'not supporting dual-band switching radios' (不支援雙頻切換射頻). Same-device pairs never meet in conflict detection only because their bands differ. [.claude/radios-spec.md:21-24, 41]
+- The radio list is built from model.supportedBands (one makeRadio per band). On a model change, old settings are matched with prev.find(r => r.band === band). Models have no slot, flex or radio-mode concept. [src/utils/apRadios.js:47-73]
+- Per-band lookups return or patch the FIRST or ALL radios on a band: apRadio = find by band, patchRadio = map every radio with r.band === band, applyRadioResults and allRadioKeys use radioKey(ap.id, r.band). With two 5 GHz radios, a patch hits both and both get the same result. [src/utils/apRadios.js:93-155]
+- Every AP model's tables are keyed by band: maxTxPower, antennaGain and streamCount. Catalyst 9166 is modelled as fixed tri-band [2.4,5,6] with 4 streams per band. A dual-5 split (e.g. Aruba 8x8 into 2x 4x4) or different limits per mode cannot be expressed. [src/constants/apModels.js:21-31, 33-43]
+- The AP panel draws one section per band, with React key = band and title `${band}G 射頻`. Updates go through patchRadio(ap, band, ...) and the TX lookup goes by band. BatchPanel groups radios by band through apRadio(a, b). [src/components/PanelRight/APPanel.jsx:92-115, 386 ; src/components/PanelRight/BatchPanel.jsx:115-186]
+- Auto channel groups radios by `frequency`. Each band picks from candidatesForWidth(domain, band, width), which uses the domain's full band. There is no per-radio channel subset (no 36-64 / 100-165 lock) and no rule for a minimum gap between two radios of one device. Within a group, the pair weight comes from hearing, so two same-band radios on one device would look like very loud neighbours (accidental separation, but no 100 MHz rule). [src/utils/autoChannelPlan.js:179-215]
+- Plan-quality conflict detection pairs every entry on the floor, with no same-device exclusion. Two 5 GHz radios of one device on overlapping spectrum would be reported as a conflict between the device and itself (apA === apB). [src/features/heatmap/planQuality.js:74-90]
+- Auto power plans each band separately with only that band's radios, like per-band TPC. Two 5 GHz radios of one device would be planned as independent cells. There is no macro/micro relation, such as holding the micro cell at minimum power. [src/utils/autoPowerPlan.js:561-575 ; src/utils/autoPowerPlan.js:143-145]
+- The redundant-2.4 planner only DISABLES redundant 2.4 GHz radios on devices that also have a live 5/6 GHz radio. It never converts one to 5 GHz or monitor as FRA does. Apply is patchRadio(a, 2.4, {enabled:false}). [src/utils/redundant24Plan.js:44-53, 119 ; src/components/Redundant24Modal/Redundant24Modal.jsx:33]
+- Auto power's plannedFloorAps and onAfterPlan key results by radioKey(ap.id, r.band) and filter with deviceIdOf(k). A band switch inside a preview, or two 5 GHz radios, breaks this key mapping. [src/components/AutoPowerModal/AutoPowerModal.jsx:60-85]
+- Auto place reads and patches 'the radio of band X' (apRadio / patchRadio / radioKey(a.id, band)) to enable radios and set channels on existing devices. [src/utils/autoPlacePlan.js:179, 392-395, 630-660, 747-779, 814-832]
+- The 3D ring draws one arc per live band, with React key = band and color FREQ_COLOR[band]. Two 5 GHz radios would give duplicate React keys and two identical blue arcs. Dimming compares against `band !== viewBand`, so it cannot tell the two radios apart. [src/features/viewer3d/APLayer3D.jsx:243-246, 345-356]
+- The 2D band dots come from liveBands, one per radio, colored by band. The info label has one line per enabled radio using FREQ_LABEL_LONG[r.band]. Two 5 GHz radios would show as two identical blue dots and two '5G ...' lines with no 'lo/hi' or slot marker. [src/features/aps/apsLayer.js:374-380, 410-420]
+- Client View tracks the serving radio by radio key (servingApId = servingAp.id). Roaming hysteresis compares band score between incumbent and best. A band switch makes the incumbent key vanish, and two 5 GHz radios would share one key. Device lock and 'own device' filters use deviceId and are safe. [src/features/clientView/simulate.js:115-126, 139, 193, 248-260 ; src/features/clientView/association.js:102]
+- The band map packs one value per band per cell (2.4/5/6/unused) and picks a band per cell. Two 5 GHz radios would simply fold into the 5 GHz max, so this part is safe for same-band radios. The heatmap GL bakes geometry per device (deviceId), so it is safe too. [src/features/heatmap/bandMap.js:34-66 ; src/features/heatmap/sampleFieldGL.js:193-204, 260]
+- Redundancy / secondary coverage already counts distinct devices, not radios. That is correct for dual-5. [src/features/heatmap/sampleField.js:121]
+- Antenna settings (mode, azimuth, tilt, pattern) live on the device and are shared by every radio. Hamina's dual-5 'x2 Antennas' mode, with a separate mount, height, tilt and direction per antenna, cannot be expressed. [.claude/radios-spec.md:9-17]
+- task.md already lists flexible radios (Cisco 9166 5<->6, dual 5 GHz) as an unstarted follow-up candidate. [.claude/task.md:93]

@@ -48,6 +48,19 @@
 
 ## 還沒做的事
 
+### Phase 60 彈性射頻（5↔6、雙 5 GHz）— 2026-10-22 規格拍板，**下一個 session 開工**（一次做完 + MCP 驗證後再請使用者 review；同步改寫 `.claude/radios-spec.md`）
+調研：Cisco 9166/9136 類（XOR 射頻可切 5 或 6 GHz，或與固定 5 GHz 組成雙 5）。核心阻礙：射頻 key = `${apId}#${band}`（apRadios.js:19），頻段等於身分；`.claude/radios-spec.md`「每個頻段最多一個／不支援雙頻切換」須改寫。
+
+**已拍板（2026-10-22，四題皆採推薦）**
+- 範圍：先做 5↔6 + 雙 5 GHz；不做 2.4↔5 等其他組合。
+- 模式：使用者在 AP 面板／批次面板下拉選；規劃器（自動頻道/功率/放置）視為固定不改模式。自動建議（FRA 式）之後再議。
+- 雙 5 頻道：依機種資料；無資料時預設鎖段 5G 低 36–64、5G 高 100–165。
+- 雙 5 功率：兩個射頻各自獨立。
+
+**細節預設（2026-10-22 使用者確認不改）**：射頻 key 改 slot id（slot 預設等於頻段，舊資料 key 不變）；命名「5G 低／5G 高」；不做 monitor 狀態；天線整台共用；TX/串流數沿用現值至有 datasheet。
+
+**需改處**：同台互斥（衝突、次要覆蓋不自配）、自動頻道依 slot 頻道子集、2D/3D/面板/Client View 標籤區分兩個 5G。完整調研（業界事實、選項、逐檔行號）在 `.claude/flex-radio-research.md`，開工前先讀；檔案（apRadios、apModels、APPanel、BatchPanel、autoChannelPlan、planQuality、autoPowerPlan、AutoPowerModal、autoPlacePlan、APLayer3D、apsLayer、clientView/simulate）。
+
 ### Phase 59 熱圖效能／物理取捨（2026-10-16 立項，commit 171d6bb，**2026-10-19 使用者驗收 ok**）
 
 取捨順序（使用者拍板）：**效能 > 視覺 > 物理**；犧牲一軸約 1 分須換回另兩軸合計 ≥ 2 分。效能一律以 UHD 770 內顯為基準。合成場景：M 15 AP / 402 段、L 40 AP / 997 段、W 倉庫 60 AP / 280 段、XL 100 AP / 2422 段，每項 10 次。
@@ -1012,7 +1025,7 @@
   **UI**：`CableSummaryPanel` 底部「📄 匯出規劃報告 PDF」（此面板本就是全建築彙總，是唯一合理位置；PNG 匯出在樓層右鍵選單，兩者不衝突）。walls/scopes/regulatoryDomain 用 `getState()` 點擊時讀、**不訂閱**（否則每次改牆都重 render 這個面板）。
   對比圖：`.playwright-mcp/compare/51-B-PDF匯出鈕.png`（gitignore）。
 - [ ] **容量/airtime 規劃**：純覆蓋工具，缺高密度場域容量輸入（Ekahau Capacity Planner 對標）。
-- [ ] **A/B plan diff、漫遊重疊區**：原有 backlog，待拍板。
+- [ ] **A/B plan diff、漫遊重疊區**：原有 backlog，待拍板。A/B 於 2026-10-22 討論後**跳過**（主要用途是給客戶看多方案；規劃視窗的套用前/後已涵蓋「套用前先看」）。若重啟：推薦每層多個 AP-only 方案 + 切換 + 指標表，不做整層複製；最小版為唯讀候選快照。調研摘要原在 scratchpad（會消失），關鍵結論即本段。漫遊重疊區於 2026-10-22 討論後**不做**（57-31 曾做過次要覆蓋熱圖並移除；若重啟：推薦單頻段、以裝置計、不管 SSID，做次要覆蓋模式 + Cisco 式每台 AP 重疊比例 15–20%）。
 - [x] **spec.md 同步**（✅ 2026-08-10 使用者驗收 ok）：`.claude/spec.md` 全面重寫（171 → 約 300 行）。方法＝**逐條拿 spec 去對 `src/`**（subagent 全庫掃 + 人工覆核關鍵值），每條標 ✅ 已實作 / ⚠️ 部分 / ❌ 未實作；**未實作的保留不刪**（刪掉會被當成需求遺漏而重複提案）。
   **抓到 6 條與實作不符的舊承諾**：① **CAD 匯入未實作**（accept 只有 `.png,.jpg,.jpeg,.pdf`，無解析器依賴）② **去色/灰階未實作**（opacity/旋轉/裁切三項有）③ **滑鼠 vs 觸控板模式未實作**（viewport 只有單一固定 ZOOM_PER_NOTCH；`EDITOR_MODE.PAN` 是*工具*不是輸入模式）④ **自訂材質未實作**（materials.js 硬編碼 7 種；現有的是「選內建」+「單面牆 customDb 覆寫」兩件事，不是使用者自建材質庫）⑤ **Fill top & bottom 未實作**（只有兩個手動輸入框）⑥ **AI 偵測 scope zone / 電梯井未實作**（AI 只回 wall/door/window，完全不碰 useScopeStore；垂直貫穿物只有手動的中庭與豎井）。
   **另兩條語意需修正**：樓層對齊實作是**數值滑桿 + 疊圖目視**，不是舊 spec 寫的「用對齊點（樓梯/電梯）解算」；熱圖指標是 **4 種**（多 SINR）不是 3 種。自動比例尺**是**有（門寬回推）但標注已知弱點（門偵測率低 → 樣本不足時抗離群失效）。
