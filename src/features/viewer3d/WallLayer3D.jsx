@@ -4,7 +4,7 @@ import { useWallStore } from '@/store/useWallStore'
 import { useEditorStore } from '@/store/useEditorStore'
 import { DEFAULT_WALL_THICKNESS_M } from '@/constants/materials'
 import OpeningsDetail from './OpeningDetail3D'
-import { getWallSurface, wallTint, makeWallAOPatch } from './wallSurface'
+import { getWallSurface, wallTint, makeWallAOPatch, mergedWallAOPatch } from './wallSurface'
 import { glassMaterialProps } from './glassMaterial'
 
 // 53-G9: one frozen empty array for the `?? EMPTY` selectors below. A bare
@@ -105,7 +105,9 @@ const EDGE_COLOR = '#94a3b8'
 // Memoized: a wall re-renders only when its own data, floor dimming or
 // interactivity changes -- not when another wall is edited (a 2D endpoint drag
 // writes the wall store every move while this tree stays mounted, hidden).
-const WallMesh = React.memo(function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true }) {
+// `merged`: a non-active floor draws this wall's body and outline in its
+// MergedWalls batch -- here they are hidden (glass walls and openings stay).
+const WallMesh = React.memo(function WallMesh({ wall, pxToM, dimOpacity, isActiveFloor, selectable = true, merged = false }) {
   const {
     startX, startY, endX, endY,
     topHeight = 3, bottomHeight = 0,
@@ -201,6 +203,7 @@ const WallMesh = React.memo(function WallMesh({ wall, pxToM, dimOpacity, isActiv
   const hasOpenings = (wall.openings?.length ?? 0) > 0
   const isGlass = GLASS_MATERIAL_IDS.has(material?.id)
   const surface = isGlass ? null : getWallSurface(material?.id)
+  const inBatch = merged && !isGlass
 
   const isSelected = canInteract && selectedHere
   const isHovered  = canInteract && hovered
@@ -224,6 +227,7 @@ const WallMesh = React.memo(function WallMesh({ wall, pxToM, dimOpacity, isActiv
   return (
     <group position={center} rotation={[0, rotationY, 0]}>
       <mesh
+        visible={!inBatch}
         // Glass doesn't cast: three's shadow pass ignores the pane's alpha and
         // would throw the same opaque silhouette a concrete wall does, which
         // is the one thing that would give away that it isn't really glass.
@@ -281,7 +285,7 @@ const WallMesh = React.memo(function WallMesh({ wall, pxToM, dimOpacity, isActiv
           pane itself is nearly invisible, so without the frame the wall would
           vanish. Hence the stronger alpha there. */}
       {edges && (
-        <lineSegments raycast={() => null}>
+        <lineSegments visible={!inBatch} raycast={() => null}>
           <primitive object={edges} attach="geometry" />
           <lineBasicMaterial
             color={isSelected ? SELECT_EMISSIVE : EDGE_COLOR}
@@ -302,14 +306,174 @@ const WallMesh = React.memo(function WallMesh({ wall, pxToM, dimOpacity, isActiv
   )
 })
 
+// 59-6: the opaque walls of a non-active floor, drawn as one mesh per surface
+// (material + tint) and one outline instead of two objects each. With ~1000
+// walls a floor the per-object cost (draw calls, program / uniform switches,
+// culling) was most of a frame (3 floors: 69 -> 28 ms). These walls never
+// interact (no handlers off the active floor), so nothing per wall is lost:
+// same geometry (buildWallGeometry, uv in metres), same material props, the
+// same AO through per-vertex attributes (mergedWallAOPatch). Glass walls and
+// door / window detail stay per wall (their own transparency order). The
+// WallMesh components stay mounted with these parts hidden, so switching the
+// active floor flips visibility instead of remounting; rebuilding a floor's
+// batch costs ~27 ms per 1000 walls and only runs when its walls or the
+// active floor change -- never on the 2D->3D switch itself.
+const _p = new THREE.Vector3()
+const _n = new THREE.Vector3()
+const _q = new THREE.Quaternion()
+const _yAxis = new THREE.Vector3(0, 1, 0)
+
+function buildMergedWalls(walls, pxToM) {
+  const groups = new Map()   // surface key -> { tint, surface, parts: [] }
+  const edgeParts = []
+  for (const w of walls) {
+    const materialId = w.material?.id
+    if (GLASS_MATERIAL_IDS.has(materialId)) continue
+    const x1 = w.startX * pxToM, z1 = w.startY * pxToM
+    const x2 = w.endX * pxToM, z2 = w.endY * pxToM
+    const length = Math.hypot(x2 - x1, z2 - z1)
+    if (length === 0) continue
+    const top = w.topHeight ?? 3
+    const bottom = w.bottomHeight ?? 0
+    const height = Math.max(top - bottom, 0.01)
+    const geometry = buildWallGeometry(length, height, w.openings, bottom, w.thicknessM ?? DEFAULT_WALL_THICKNESS_M)
+    const pose = {
+      center: [(x1 + x2) / 2, bottom + height / 2, (z1 + z2) / 2],
+      rotationY: -Math.atan2(z2 - z1, x2 - x1),
+      halfH: height / 2,
+      contact: Math.abs(bottom) <= ON_FLOOR_EPS_M ? 1 : 0,
+    }
+    const color = w.material?.color ?? DEFAULT_WALL_COLOR
+    const key = `${materialId ?? ''}|${color}`
+    let g = groups.get(key)
+    if (!g) {
+      g = { key, tint: wallTint(color), surface: getWallSurface(materialId), parts: [] }
+      groups.set(key, g)
+    }
+    g.parts.push({ geometry, pose })
+    edgeParts.push({ geometry: new THREE.EdgesGeometry(geometry, 1), pose })
+  }
+
+  const bodies = []
+  for (const g of groups.values()) {
+    let n = 0
+    for (const { geometry } of g.parts) n += geometry.attributes.position.count
+    const pos = new Float32Array(n * 3)
+    const nor = new Float32Array(n * 3)
+    const uv = new Float32Array(n * 2)
+    const up = new Float32Array(n)
+    const contact = new Float32Array(n)
+    let o = 0
+    for (const { geometry, pose } of g.parts) {
+      const p = geometry.attributes.position
+      const nm = geometry.attributes.normal
+      const tex = geometry.attributes.uv
+      _q.setFromAxisAngle(_yAxis, pose.rotationY)
+      for (let i = 0; i < p.count; i++, o++) {
+        _p.fromBufferAttribute(p, i)
+        up[o] = _p.y + pose.halfH
+        contact[o] = pose.contact
+        _p.applyQuaternion(_q)
+        pos[o * 3] = _p.x + pose.center[0]
+        pos[o * 3 + 1] = _p.y + pose.center[1]
+        pos[o * 3 + 2] = _p.z + pose.center[2]
+        _n.fromBufferAttribute(nm, i).applyQuaternion(_q)
+        nor[o * 3] = _n.x
+        nor[o * 3 + 1] = _n.y
+        nor[o * 3 + 2] = _n.z
+        uv[o * 2] = tex.getX(i)
+        uv[o * 2 + 1] = tex.getY(i)
+      }
+      geometry.dispose()
+    }
+    const merged = new THREE.BufferGeometry()
+    merged.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+    merged.setAttribute('normal', new THREE.BufferAttribute(nor, 3))
+    merged.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
+    merged.setAttribute('aWallUp', new THREE.BufferAttribute(up, 1))
+    merged.setAttribute('aWallContact', new THREE.BufferAttribute(contact, 1))
+    merged.computeBoundingSphere()
+    bodies.push({ key: g.key, tint: g.tint, surface: g.surface, geometry: merged })
+  }
+
+  let edges = null
+  if (edgeParts.length) {
+    let n = 0
+    for (const { geometry } of edgeParts) n += geometry.attributes.position.count
+    const pos = new Float32Array(n * 3)
+    let o = 0
+    for (const { geometry, pose } of edgeParts) {
+      const p = geometry.attributes.position
+      _q.setFromAxisAngle(_yAxis, pose.rotationY)
+      for (let i = 0; i < p.count; i++, o++) {
+        _p.fromBufferAttribute(p, i).applyQuaternion(_q)
+        pos[o * 3] = _p.x + pose.center[0]
+        pos[o * 3 + 1] = _p.y + pose.center[1]
+        pos[o * 3 + 2] = _p.z + pose.center[2]
+      }
+      geometry.dispose()
+    }
+    edges = new THREE.BufferGeometry()
+    edges.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+    edges.computeBoundingSphere()
+  }
+
+  return {
+    bodies,
+    edges,
+    dispose() {
+      for (const b of bodies) b.geometry.dispose()
+      if (edges) edges.dispose()
+    },
+  }
+}
+
+function MergedWalls({ walls, pxToM, dimOpacity }) {
+  const batch = useMemo(() => buildMergedWalls(walls, pxToM), [walls, pxToM])
+  React.useEffect(() => () => batch.dispose(), [batch])
+  const transparent = dimOpacity < 1
+  return (
+    <>
+      {batch.bodies.map((b) => (
+        <mesh key={b.key} castShadow receiveShadow raycast={() => null}>
+          <primitive object={b.geometry} attach="geometry" />
+          {/* Same props as WallMesh's opaque material (never selected or
+              hovered here, so no emissive). */}
+          <meshStandardMaterial
+            color={b.tint}
+            map={b.surface.map}
+            bumpMap={b.surface.bumpMap}
+            bumpScale={b.surface.bumpScale}
+            roughness={b.surface.roughness}
+            metalness={b.surface.metalness}
+            side={THREE.DoubleSide}
+            forceSinglePass
+            transparent={transparent}
+            opacity={dimOpacity}
+            depthWrite={!transparent}
+            onBeforeCompile={mergedWallAOPatch}
+          />
+        </mesh>
+      ))}
+      {batch.edges && (
+        <lineSegments raycast={() => null}>
+          <primitive object={batch.edges} attach="geometry" />
+          <lineBasicMaterial color={EDGE_COLOR} transparent opacity={0.4 * dimOpacity} />
+        </lineSegments>
+      )}
+    </>
+  )
+}
+
 export default function WallLayer3D({ floorId, pxToM, dimOpacity = 1, isActiveFloor = true, selectable = true }) {
   const walls = useWallStore((s) => s.wallsByFloor[floorId] ?? EMPTY)
   if (!walls.length || !pxToM) return null
   return (
     <group>
       {walls.map((w) => (
-        <WallMesh key={w.id} wall={w} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActiveFloor} selectable={selectable} />
+        <WallMesh key={w.id} wall={w} pxToM={pxToM} dimOpacity={dimOpacity} isActiveFloor={isActiveFloor} selectable={selectable} merged={!isActiveFloor} />
       ))}
+      {!isActiveFloor && <MergedWalls walls={walls} pxToM={pxToM} dimOpacity={dimOpacity} />}
     </group>
   )
 }

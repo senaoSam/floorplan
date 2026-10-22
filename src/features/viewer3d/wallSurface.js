@@ -485,3 +485,30 @@ export function makeWallAOPatch(uniforms) {
       )
   }
 }
+
+// 59-6: the same fake AO for a batch of merged walls (WallLayer3D merges the
+// opaque walls of a non-active floor). Each wall's height above its own bottom
+// and its on-floor flag come per vertex (aWallUp = local y + half height,
+// aWallContact) instead of per-wall uniforms, so the result is the one above
+// to the bit. Module-level, so every batch shares one compiled program.
+export function mergedWallAOPatch(shader) {
+  shader.vertexShader = shader.vertexShader
+    .replace(
+      '#include <common>',
+      '#include <common>\nattribute float aWallUp;\nattribute float aWallContact;\nvarying float vWallUp;\nvarying float vWallContact;',
+    )
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWallUp = aWallUp;\nvWallContact = aWallContact;')
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying float vWallUp;\nvarying float vWallContact;')
+    .replace(
+      '#include <map_fragment>',
+      `#include <map_fragment>
+        {
+          float wallUp = vWallUp;
+          float contact = mix(${f3(AO_CONTACT_MIN)}, 1.0, smoothstep(0.0, ${f3(AO_CONTACT_M)}, wallUp));
+          contact = mix(1.0, contact, vWallContact);
+          float grad = mix(${f3(AO_GRADIENT_MIN)}, 1.0, smoothstep(0.0, ${f3(AO_GRADIENT_M)}, wallUp));
+          diffuseColor.rgb *= contact * grad;
+        }`,
+    )
+}
