@@ -4,7 +4,7 @@ import { createHeatmapGL } from '@/features/heatmap/heatmapGL'
 import { buildScenario } from '@/features/heatmap/buildScenario'
 import { sampleFieldGLAsync } from '@/features/heatmap/sampleFieldGL'
 import { sampleField } from '@/features/heatmap/sampleField'
-import { getModeConfig, BAND_MAP_RGB, BAND_MAP_ALPHA } from '@/features/heatmap/modes'
+import { getModeConfig, BAND_MAP_RGB, BAND_MAP_ALPHA, BAND_MAP_NONE_HATCH } from '@/features/heatmap/modes'
 import { BAND_MAP_RULE, bandMapShares } from '@/features/heatmap/bandMap'
 import { useBandMapStore } from '@/store/useBandMapStore'
 import {
@@ -608,6 +608,7 @@ export function attachHeatmapLayer({
         bandRgb: BAND_MAP_RGB,
         bandAlpha: BAND_MAP_ALPHA,
         edgeFeather: buildEdgeFeather(ctx),
+        noneHatch: { ...BAND_MAP_NONE_HATCH, sizeM: [ctx.fullW / ctx.scale, ctx.fullH / ctx.scale] },
       })
     } else {
       gl.render({ rssi: grid, nx, ny, ...span }, ctx.outW, ctx.outH, 1 / ctx.scale, ctx.blur, ctx.contours, {

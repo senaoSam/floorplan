@@ -303,6 +303,8 @@ uniform vec2  uTexel;
 uniform vec4  uRule;
 uniform vec3  uBandRgb[3];
 uniform vec2  uBandAlpha;       // (design target met, reachable below it)
+uniform vec2  uHatchSizeM;      // canvas size in plan metres; 0 = no hatch
+uniform vec4  uHatch;           // no service: (grey, alpha, period m, width share)
 uniform int   uContours;
 uniform vec4  uFeatherRect;
 uniform vec2  uFeatherWidth;
@@ -346,6 +348,16 @@ void main() {
   if (c >= 0) {
     rgb = uBandRgb[c];
     a = rb >= uRule.w ? uBandAlpha.x : uBandAlpha.y;
+  } else if (uHatchSizeM.x > 0.0) {
+    // No service: diagonal lines in plan metres, antialiased by fwidth (they
+    // fade to an even tint when zoomed out past a pixel per line).
+    vec2 pm = vUv * uHatchSizeM;
+    float s = (pm.x + pm.y) / uHatch.z;
+    float d = abs(fract(s) - 0.5);
+    float aa = fwidth(s);
+    float halfW = 0.5 * uHatch.w;
+    rgb = vec3(uHatch.x);
+    a = uHatch.y * (1.0 - smoothstep(0.5 - halfW - aa, 0.5 - halfW + aa, d));
   }
   // Band boundaries: a neighbour one pixel away in another class.
   if (uContours == 1) {
@@ -578,7 +590,7 @@ export function createHeatmapGL() {
   // 58-12: band map render. field.band = Float32Array, 4 per cell (2.4 / 5 /
   // 6 GHz RSSI, unused). cfg: { rule: { usableDbm, availableDbm, bonusDb,
   // goodDbm }, bandRgb: [[r,g,b] 0..255 x3], bandAlpha: [met, below],
-  // edgeFeather }.
+  // edgeFeather, noneHatch }.
   function ensureBandRes(w, h) {
     if (!bandRes) {
       bandRes = {
@@ -667,6 +679,12 @@ export function createHeatmapGL() {
     gl.uniform4f(gl.getUniformLocation(p, 'uRule'), rule.usableDbm, rule.availableDbm, rule.bonusDb, rule.goodDbm);
     gl.uniform3fv(gl.getUniformLocation(p, 'uBandRgb'), new Float32Array(cfg.bandRgb.flat().map((v) => v / 255)));
     gl.uniform2f(gl.getUniformLocation(p, 'uBandAlpha'), cfg.bandAlpha[0], cfg.bandAlpha[1]);
+    // No-service hatch: cfg.noneHatch = { sizeM: [w, h] canvas metres, rgb,
+    // alpha, periodM, widthFrac }; absent = no-service cells stay transparent.
+    const nh = cfg.noneHatch ?? null;
+    gl.uniform2f(gl.getUniformLocation(p, 'uHatchSizeM'), nh?.sizeM?.[0] ?? 0, nh?.sizeM?.[1] ?? 0);
+    gl.uniform4f(gl.getUniformLocation(p, 'uHatch'),
+      (nh?.rgb?.[0] ?? 0) / 255, nh?.alpha ?? 0, nh?.periodM ?? 1, nh?.widthFrac ?? 0);
     gl.uniform1i(gl.getUniformLocation(p, 'uContours'), showContours ? 1 : 0);
     const ef = cfg.edgeFeather ?? null;
     gl.uniform4f(gl.getUniformLocation(p, 'uFeatherRect'),

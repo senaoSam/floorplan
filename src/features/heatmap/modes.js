@@ -111,7 +111,7 @@ HEATMAP_MODE_CONFIG.band = {
   plain: '手機會連的頻段',
   unit: '',
   description: '新連線手機在每一點會選的頻段',
-  plainHelp: '每一點畫成手機在這裡會連的頻段（規則同 Client View：5 / 6 GHz 夠強就優先）。淡色：連得上但訊號未達設計目標。',
+  plainHelp: '每一點畫成手機在這裡會連的頻段（規則同 Client View：5 / 6 GHz 夠強就優先）。淡色：連得上但訊號未達設計目標。灰色斜線：無服務。',
   field: 'band',
   anchors: RSSI_ANCHORS,
   signBetter: 'high',
@@ -121,6 +121,10 @@ HEATMAP_MODE_CONFIG.band = {
 export const BAND_MAP_RGB = [[0xf3, 0x9c, 0x12], [0x4f, 0xc3, 0xf7], [0xa8, 0x55, 0xf7]]
 // Alpha of a band at / above the design target, and below it (reachable).
 export const BAND_MAP_ALPHA = [0.84, 0.35]
+// No service: grey diagonal hatch in plan metres (scales with the plan, lies
+// flat on the 3D floor). periodM = line spacing along the plan axes, widthFrac
+// = line width as a share of the period. The legend swatch uses the same.
+export const BAND_MAP_NONE_HATCH = { rgb: [0x9a, 0xa0, 0xa6], alpha: 0.55, periodM: 0.4, widthFrac: 0.22 }
 
 export const HEATMAP_MODE_LIST = Object.values(HEATMAP_MODE_CONFIG)
 

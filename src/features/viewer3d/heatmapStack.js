@@ -4,7 +4,7 @@ import { buildScenario } from '@/features/heatmap/buildScenario'
 import { buildCrossFloorData } from '@/features/heatmap/buildCrossFloor'
 import { sampleFieldGLAsync } from '@/features/heatmap/sampleFieldGL'
 import { sampleField } from '@/features/heatmap/sampleField'
-import { getModeConfig, BAND_MAP_RGB, BAND_MAP_ALPHA } from '@/features/heatmap/modes'
+import { getModeConfig, BAND_MAP_RGB, BAND_MAP_ALPHA, BAND_MAP_NONE_HATCH } from '@/features/heatmap/modes'
 import { BAND_MAP_RULE } from '@/features/heatmap/bandMap'
 import { shouldSimplifyScene } from '@/features/heatmap/largeScene'
 import { withOnlyBand, enabledRadios } from '@/utils/apRadios'
@@ -234,7 +234,8 @@ const ensureStackInner = async (fp) => {
     if (modeCfg.bandMap && field.band) {
       paintGL.renderBand({ band: field.band, nx: field.nx, ny: field.ny, ...span },
         outW, outH, hm.blur, hm.showContours,
-        { rule: BAND_MAP_RULE, bandRgb: BAND_MAP_RGB, bandAlpha: BAND_MAP_ALPHA })
+        { rule: BAND_MAP_RULE, bandRgb: BAND_MAP_RGB, bandAlpha: BAND_MAP_ALPHA,
+          noneHatch: { ...BAND_MAP_NONE_HATCH, sizeM: [outW / f.scale, outH / f.scale] } })
     } else {
       paintGL.render(
         { rssi: grid, nx: field.nx, ny: field.ny, ...span },

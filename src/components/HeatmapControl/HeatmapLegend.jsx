@@ -1,5 +1,5 @@
 import React from 'react'
-import { getModeConfig, BAND_MAP_ALPHA } from '@/features/heatmap/modes'
+import { getModeConfig, BAND_MAP_ALPHA, BAND_MAP_NONE_HATCH } from '@/features/heatmap/modes'
 import { useBandMapStore } from '@/store/useBandMapStore'
 import { useFloorStore } from '@/store/useFloorStore'
 import Icon from '@/components/Icon/Icon'
@@ -62,6 +62,13 @@ function rssiQualityLabel(v) {
 // 58-7: the band the field is drawn from (apsLayer FREQ_COLOR).
 const BAND_COLOR = { 2.4: '#f39c12', 5: '#4fc3f7', 6: '#a855f7' }
 
+// No-service swatch: the plan's grey diagonal hatch (BAND_MAP_NONE_HATCH).
+const NONE_HATCH_BG = (() => {
+  const { rgb, alpha } = BAND_MAP_NONE_HATCH
+  const c = `rgba(${rgb.join(', ')}, ${alpha})`
+  return `repeating-linear-gradient(135deg, ${c} 0 1.5px, transparent 1.5px 4px)`
+})()
+
 // 58-12: band map key -- one swatch per band (the paint's colour, faded shade
 // alongside) with its share of the plan, and no service. `hoverBand` is the
 // band under the pointer (null = no service, undefined = no hover).
@@ -87,7 +94,7 @@ function BandMapLegend({ cfg, hoverBand, bandCounts, multipath }) {
   // legend ~180 px tall, which pushed the hover readout above it over the plan
   // (it covered and blocked AP-01 on the demo).
   const notes = [
-    `左深右淡：深色訊號 ≥ ${BAND_MAP_RULE.goodDbm} dBm，淡色連得上但未達。百分比為平面圖（範圍內）面積。`,
+    `左深右淡：深色訊號 ≥ ${BAND_MAP_RULE.goodDbm} dBm，淡色連得上但未達。灰色斜線：無服務（各頻段都低於 ${BAND_MAP_RULE.usableDbm} dBm）。百分比為平面圖（範圍內）面積。`,
     `新連線手機的選頻，規則同 Client View；已連在 5 / 6 GHz 的手機會撐到 ${BAND_MAP_RULE.availableDbm - ROAM_HYSTERESIS_DB} dBm 才改連 2.4 GHz。`,
     ...(multipath ? ['訊號含反射 / 繞射；Client View 只算直射，頻段交界可能差幾 dB。'] : []),
   ]
@@ -108,7 +115,7 @@ function BandMapLegend({ cfg, hoverBand, bandCounts, multipath }) {
                   <span style={{ background: r.color, opacity: BAND_MAP_ALPHA[0] }} />
                   <span style={{ background: r.color, opacity: BAND_MAP_ALPHA[1] }} />
                 </>
-              ) : <span className="heatmap-legend__bandmap-none" />}
+              ) : <span className="heatmap-legend__bandmap-none" style={{ background: NONE_HATCH_BG }} />}
             </span>
             <span className="heatmap-legend__bandmap-label">{r.label}</span>
             <span className="heatmap-legend__bandmap-share">{r.absent ?? fmtShare(r.share)}</span>
